@@ -38,6 +38,76 @@ Two consequences worth handling deliberately in Phase 0:
 
 **Clients never authenticate at all.** Public form submission and client approval are session-less by design — see §Public access.
 
+### Auth metadata: `app_access` and `role`
+
+Every user — test and production — carries two claims in `raw_user_meta_data`, so a shared auth surface can gate which VizServe app they may enter and at what level:
+
+```sql
+update auth.users
+set raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb)
+    || '{"app_access": ["vizserve-pms"], "role": "team_leader"}'::jsonb
+where email = 'test.tl.vizbytes@example.com';
+```
+
+> **Note the `coalesce`.** In Postgres `NULL || '{...}'::jsonb` evaluates to `NULL`, so the statement silently wipes the column whenever it starts null — and the `UPDATE` still reports success. Quiet failure; keep the `coalesce`.
+
+#### The one rule that makes this safe
+
+**Nothing in the authorization path may read `user_metadata`. Ever.**
+
+This is not about the admin UI. `raw_user_meta_data` is writable by the user through **Supabase's own auth server**, not through this application:
+
+```bash
+# Any logged-in member, using their own access token from browser storage
+curl -X PUT 'https://<project>.supabase.co/auth/v1/user' \
+  -H "apikey: <public-anon-key>" \
+  -H "Authorization: Bearer <their-own-access-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"data": {"role": "admin", "app_access": ["vizserve-pms"]}}'
+```
+
+That endpoint is part of GoTrue and ships with Supabase Auth. It is not ours to remove, and it does not route through our code — so "we only expose the field to admins in our UI" is a client-side control over a server endpoint we do not own. The access token is sitting in the user's browser; the anon key is public by design.
+
+Supabase's documentation states the rule plainly: *do not use `user_metadata` in a security-sensitive context (such as in RLS policies or authorization logic), as this value is editable by the user without any checks.*
+
+**So the convention stays, and it is fine — because nothing trusts it.**
+
+| Layer | Reads | Spoofable? |
+|---|---|---|
+| **RLS policies** | `vizserve_pms_users.role` + `vizserve_pms_user_managed_departments` | **No.** The table is the source of truth |
+| **Server actions / route handlers** | the same helper (`P0-05`) | No |
+| **Middleware app gate** | `user_metadata.app_access` | Yes — see below |
+| **UI affordances** | session claims | Yes, and it does not matter |
+
+`user_metadata` is a **display and convenience layer**: it tells the shell which nav to render and which app to route to. It is never the answer to "may this person do this."
+
+#### What a spoofed claim actually buys an attacker
+
+Worth being precise rather than alarmist. If a member rewrites their own `role` to `admin`:
+
+- They see the admin navigation. Cosmetic.
+- Every query still returns only their own rows, because RLS reads the table. **No data leaks.**
+- Every server action re-checks via `P0-05`. **No writes succeed.**
+
+The damage is zero *only while that second column stays "No" all the way down*. The moment one convenient `if (session.user.user_metadata.role === 'admin')` appears in a server action — and in a year of maintenance, it will be tempting — it becomes a full privilege escalation with no audit trail. That single line is the whole risk.
+
+#### Two cheap defences
+
+1. **A lint rule or a grep in CI** that fails the build if `user_metadata` appears anywhere outside presentation code. This is the highest-value five minutes in Phase 0.
+2. **Optional belt-and-braces:** a trigger on `auth.users` that reverts changes to the `role` and `app_access` keys unless the writer is `service_role`. Stops the spoof at the source rather than relying on every future reader behaving.
+
+If either feels like too much friction later, the alternative is moving these two keys to `raw_app_meta_data`, which is service-role-only and not user-writable. Same JSON, same convention, no trust assumptions required.
+
+#### Keeping it in sync
+
+`user_metadata.role` mirrors `vizserve_pms_users.role`, so the two will drift. Add a trigger on `vizserve_pms_users` that updates `auth.users` whenever `role` changes, so a role is set in exactly one place. Two hand-maintained copies of the same fact is a bug waiting for a quiet afternoon.
+
+### A question this raises about Q11
+
+`app_access: ["vizserve-pms"]` only earns its keep if the auth surface is **shared** across several VizServe apps. But D9 put this on a **new, dedicated Supabase project**, where every user in the project is by definition a PMS user.
+
+Both can be true — the claim costs nothing and is good forward-planning if more apps land in this project, or if a shared identity provider arrives later. Worth being deliberate about which it is, though: if auth is genuinely meant to be shared with the SIS or a future app, that is a different architecture from D9 and should be decided on purpose rather than implied by a metadata key.
+
 ---
 
 ## Core tables
@@ -114,10 +184,11 @@ The many-to-many that makes a TL/manager's scope work. Amier, ~26:00: *"checkbox
 | id | uuid pk | |
 | form_id | uuid fk | |
 | label | text | |
-| field_key | text | stable key used for task column mapping |
+| field_key | text | stable key used for task column mapping. **Immutable once the form has a submission** — labels stay editable, the key does not follow them |
 | field_type | enum | `text` \| `textarea` \| `date` \| `select` \| `multiselect` \| `file` \| `email` \| `number` |
 | options | jsonb | for select types |
 | is_required | bool | **default true** — see §Completeness |
+| is_active | bool | soft-archive. **A field with data is never hard-deleted** — forms are dynamic (D20) and historical `field_values` are keyed to it. See `R5` |
 | sort_order | int | |
 
 ### `vizserve_pms_requests`

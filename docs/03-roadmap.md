@@ -113,7 +113,7 @@ Form builder, public form URLs, server-side completeness validation, request rec
 
 **Contract:** the runtime zod schema generated from `form_fields`. It is shared by the public form renderer and the server-side validator — which is how the completeness rule gets enforced on both sides without being written twice.
 
-**Joint with Amier:** P1-16, the two real forms.
+**P1-16 seeds two placeholder forms** through the builder. Forms are dynamic (D20) — the field list is configuration, not a spec to agree up front.
 
 **Exit criteria**
 
@@ -121,7 +121,8 @@ Form builder, public form URLs, server-side completeness validation, request rec
 - [ ] A client with no account can submit from a browser with no session.
 - [ ] A submission missing a required field is **rejected server-side**, proven by a direct API call that bypasses the UI.
 - [ ] A submitted request appears in the correct TL's queue and nowhere else.
-- [ ] Collateral Request and User Support forms exist with Amier-approved field lists.
+- [ ] Two placeholder forms exist, built through the builder, each routing to a department.
+- [ ] A field can be renamed without breaking existing requests, and a field with data cannot be hard-deleted.
 - [ ] Rate limiting demonstrably blocks a submission flood.
 
 ---

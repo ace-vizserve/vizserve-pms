@@ -31,6 +31,24 @@ Source: SIS `package.json` + `.claude/rules/tech-stack.md`.
 
 ---
 
+## As built — deviations from the table above
+
+Recorded 29 Jul 2026, when the app was scaffolded. Each is a deliberate departure, not drift.
+
+| Item | Deviation | Why |
+|---|---|---|
+| **Toasts** | `sonner` directly, **not** `sileo` aliased via a tsconfig shim | The alias is an SIS-local arrangement. Reinstating it is a one-line path mapping if pattern-parity matters more than directness |
+| **Supabase CLI** | Run via `npx --yes supabase@latest`, not a pinned devDependency | The installed binary was a OneDrive Files-On-Demand stub (`EFTYPE`) and could not be fixed by reinstalling while the repo sits in OneDrive |
+| **Added** | `tw-animate-css`, `shadcn` | Required by `app/globals.css`'s imports; without them the build fails outright |
+| **`lib/dates.ts`** | Written from scratch here, not carried over from SIS | Only what Phase 1 needs. Business-day arithmetic and work-date normalisation are still owed for Phases 4–5 — the concern flagged below is real and unaddressed |
+| **`<DataTable>`** | Not yet extracted; two list views are hand-rolled | Extracting from one consumer guesses at the abstraction. See `Q17` — planned for `P2-10` |
+| **`apiFetch`** | Not yet used | Every read so far is a React Server Component talking to Supabase directly. The pattern lands when the first client-side fetch does |
+| **Rate limiting** | Postgres tables, not Redis/Upstash | No new vendor, no key to rotate, nothing extra to be down. Volume is tens of submissions per day |
+
+**One addition to the stack rules, learned the hard way:** GRANTs and RLS are two independent gates and both must be written. See `R14` in `10-open-questions.md`.
+
+---
+
 ## What this changes in the phase docs
 
 Good news mostly — several things I listed as work are already solved in SIS.

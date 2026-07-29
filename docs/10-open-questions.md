@@ -4,7 +4,11 @@
 
 **Q12 and Q13 are answered. Q14 is partly answered** — the URL is settled for development, the Vercel plan and git repo are not.
 
-**Still needed before coding: email addresses and the member roster (Q13), and the GitHub repo (Q14).** **Q9 blocks Phase 1** and is the highest-leverage answer in this document. The rest affect later phases.
+**Q9 is answered — forms are dynamic, so nothing blocks Phase 1.**
+
+**Q15–Q18 were raised during the build** (29 Jul 2026) and are listed below the later-phase questions. Q18 blocks Phase 2 as specified.
+
+**Still needed before coding: email addresses and the member roster (Q13).** The GitHub repo half of Q14 is done; the Vercel plan is not. The rest affect later phases.
 
 ---
 
@@ -96,19 +100,19 @@ Overall Team Manager: **Joel Castro**.
 
 So the question is not cosmetic: **whose Vercel account, and will it be Pro?** Pro is $20/seat/month — which is worth setting against the ClickUp bill this project is meant to eliminate. Not a Phase 0 blocker for building, but decide it before Phase 4.
 
-**Still needed:** which GitHub org and repo name. The working folder is not a git repository yet.
+**The repo half is now done:** `github.com/ace-vizserve/vizserve-pms`, `main`, initialised. **Still needed:** the Vercel account and whether it is Pro. Note the same plan question applies to **Supabase** and is not asked anywhere in this document — free tier pauses a project after 7 days idle and caps Storage at 1 GB, which a collateral-heavy Phase 1 will reach.
 
 ---
 
-### Q9 — Field lists for the two live forms `blocks P1-16`
+### Q9 — Field lists for the two live forms → **FORMS ARE DYNAMIC; PLACEHOLDERS FOR NOW** ✅
 
-**The plain version of the question:** *what, exactly, must a client fill in before VizServe will accept a request?*
+The question was *what, exactly, must a client fill in before VizServe will accept a request?* — and the answer is that it is not a question the build has to settle. **VizServe builds the forms in the app and shares them by public URL, so the field list is configuration, not schema.** Phase 1 seeds two placeholders derived from the flow; staff edit them in the builder as real requirements emerge. `P1-16` stops being a joint decision item and becomes seed data proving the builder works.
 
-That is a business decision, not a technical one, and it is the single highest-leverage answer in this whole document — because the "no incomplete requests" rule (the commercial heart of the build, per `01-updated-workflow.md` §4) is only ever as strong as this list. Ms. Apple's purchasing example from the call — a task she could not start because quantity was never specified — is exactly a missing field.
+**What this does not do is remove the underlying risk — it relocates it.** The "no incomplete requests" rule (the commercial heart of the build, per `01-updated-workflow.md` §4) is still only ever as strong as the field list. It is now a *configuration quality* problem rather than a spec problem, which means nobody is blocked, but also that nobody is forced to think about it. Ms. Apple's purchasing example — a task she could not start because quantity was never specified — is still exactly a missing field. **Do a deliberate review of required fields before the first real client URL goes out**, or the rule ships switched off.
 
-Draft lists are in `05-phase-1-forms.md`. What is needed back is: **strike anything unnecessary, add anything missing, confirm which are required, and say which department owns each form** — `forms.department_id` decides which Team Leader the request lands on, and it is currently unset for both. Every field marked required is a request that will be *refused* if the client leaves it blank — so the list is a promise about what the team will and will not chase.
+**And it raises `R5` from hypothetical to near-certain.** Forms that are *designed* to evolve will have fields edited and deleted while historical requests hold `field_values` keyed to them. The mitigations — immutable `field_key`, soft-archive instead of delete — are a `P1-01` migration decision. Detail in `05-phase-1-forms.md`.
 
-One field to consider especially: **"Approved by (client-side)"** on the Collateral form. One text box, and it makes the client's own internal sign-off a precondition of submitting rather than something VizServe absorbs later. It is the cheapest possible implementation of the argument Amier spent ten minutes on.
+One placeholder field to keep through every revision: **"Approved by (client-side)"** on the Collateral form. One text box, and it makes the client's own internal sign-off a precondition of submitting rather than something VizServe absorbs later — the cheapest possible implementation of the argument Amier spent ten minutes on.
 
 ---
 
@@ -164,6 +168,52 @@ The platform can enforce completeness, but it cannot make a client accept a new 
 
 ---
 
+## Raised during the build (29 Jul 2026)
+
+Questions the implementation surfaced that the specification did not anticipate. Full context in `13-implementation-status.md`.
+
+### Q15 — Which primary colour wins? `blocks nothing, affects every screen`
+
+`DESIGN.md` has been replaced three times (ClickUp → Pinterest → Shadcn Fintech). The current `app/globals.css` sets `--primary` to a near-black `oklch(0.205 0 0)`, following the fintech template. **D11's `#4359A5` is therefore not used anywhere in the running app.**
+
+Both are internally consistent. What is not consistent is having a settled brand decision that the code ignores. Either:
+
+- **keep the near-black CTA** and amend D11 to say the brand blue is for marks and accents only, or
+- **set `--primary: #4359A5`** and accept a more branded, less template-like UI.
+
+The measured-contrast work in `12-ui-and-notifications.md` assumes the second. Pick one and make the other document agree.
+
+---
+
+### Q16 — How do unauthenticated clients upload files? `blocks P1-09`
+
+The last functional gap in Phase 1. A client has no session, so:
+
+- **Proxying through a server action fails** — Vercel caps a serverless request body at ~4.5 MB, and collateral design files exceed that routinely.
+- **A short-TTL signed upload URL**, issued by our server after checking MIME and declared size, is the workable shape. The file goes browser → Storage directly; our server never holds it.
+
+Also needs deciding: bucket layout, retention, and the size cap. Supabase Storage's free tier is 1 GB, which a collateral-heavy month will reach — this pairs with the unanswered Supabase plan question in Q14.
+
+---
+
+### Q17 — When does the shared `<DataTable>` get extracted? `affects P2-10`
+
+`11-stack-conventions.md` says all filterable lists use a shared `<DataTable>` shell and not to hand-roll tables. Two hand-rolled tables now exist (forms, requests), because extracting the abstraction from a single consumer guesses at it.
+
+**Recommendation:** extract at `P2-10`, the third list view, informed by three real sets of requirements rather than one. Recorded so it is a decision rather than drift.
+
+---
+
+### Q18 — Phase 2 creates tasks in a table Phase 3 creates `blocks P2-07`
+
+`P2-07`'s approval transaction inserts a `vizserve_pms_tasks` row and Phase 2's exit criteria require it — but `vizserve_pms_tasks` and `vizserve_pms_lists` are `P3-02` and `P3-01`. **Phase 2 cannot pass its own exit criteria as written.**
+
+`forms.default_list_id` was omitted from the Phase 1 migration for the same reason: it is an FK to a table that does not exist yet.
+
+**Recommendation:** pull the `lists` and `tasks` migrations forward into Phase 2 — Ace's track, small — leaving the status machine, views and QA screens in Phase 3. The alternative, dropping list selection from Phases 1–2, is worse: the form's default list is what makes task creation automatic.
+
+---
+
 ## Risk register
 
 | ID | Risk | Impact | Mitigation | Phase |
@@ -172,7 +222,7 @@ The platform can enforce completeness, but it cannot make a client accept a new 
 | **R2** | Approval token leaked, guessed, replayed, or reused across tasks | Unauthorised approval of client work | ≥256-bit random, store hash only, bind to task + email, expiry, single-use, rate limit, log IP/UA | P4-01, P4-13 |
 | **R3** | DTR rules as stated are uncorrectable and backdatable | Payroll disputes, no trust in the record | Q4 constraints; corrections via approval forms | P5-02 |
 | **R4** | `WAITING_FOR_INFO` used to hide SLA breaches | Turnaround metrics become meaningless | Note required on entry, duration logged and reported separately | P3-11, P6-04 |
-| **R5** | Editing a live form's fields orphans `field_values` on existing requests | Silent data loss on historical requests | Block deleting fields that have data; form versioning if it becomes a real problem | P1 |
+| **R5** | Editing a live form's fields orphans `field_values` on existing requests | Silent data loss on historical requests | **Raised by D20** — dynamic forms make this near-certain, not hypothetical. Immutable `field_key`, soft-archive via `form_fields.is_active`, never hard-delete a field with data | P1-01 |
 | **R6** | Auto-complete disputed by a client who never saw the email | Relationship damage, exactly the opposite of the intent | Deadline stated in the email body, two reminders, deliverability verified, distinct `COMPLETED_NO_RESPONSE` state | P4-08, P4-09, P4-14 |
 | **R7** | Scope creep — "sabay-sabay" (57:32) | Six half-built modules, nothing usable, team demoralised | Strict phase gating; cut scope *inside* a phase, never start the next in parallel | All |
 | **R8** | Two developers already loaded with GHL, SIS, HFSE delivery | Phases stretch indefinitely and the ClickUp bill keeps arriving through Phase 6 | Amier to state explicitly what GHL/SIS work is being deprioritised. **This has not been said out loud.** Also: find out when the ClickUp renewal lands | All |
@@ -181,6 +231,8 @@ The platform can enforce completeness, but it cannot make a client accept a new 
 | **R13** | **No dates means no early warning.** With time-boxing dropped, nothing forces a stalled phase to declare itself | A phase drifts for months while feeling productive | Exit criteria are binary and must be reviewed at a regular checkpoint. Criteria nobody looks at are decoration | All |
 | **R9** | Non-atomic approval leaves half-created state | Trust collapses; team reverts to ClickUp | Single Postgres function for the approval transaction | P2-07 |
 | **R10** | Email deliverability to M365 tenants | The whole client approval gate silently fails | SPF/DKIM/DMARC in Phase 0, tested against the client's real domain | P0-11, P4-14 |
+| **R14** | **GRANTs and RLS are two separate gates, and only one was written.** Supabase's default privileges did not apply to these migrations, so every table was unreachable by every role — the app was broken for all signed-in users, not just tooling | Total outage, and the error (`permission denied`) reads like an RLS problem, sending you to the wrong layer | Fixed in `20260729110000_p0_06_grants.sql`, which grants explicitly and sets `ALTER DEFAULT PRIVILEGES` so later migrations inherit it. **Diagnostic: a failing policy returns zero rows; a missing grant says `permission denied`** | P0-06 |
+| **R15** | Exit criteria are met in behaviour but unproven by test. Six of eleven across Phases 0–1 are unmet only because nothing asserts them | A later feature silently breaks scoping and nothing catches it — the exact failure `P0-12` exists to prevent | Write the `P0-12` suite before Phase 2 starts, not after | P0-12 |
 
 ---
 

@@ -1,0 +1,187 @@
+import type { Metadata } from "next";
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { ArrowLeft, Paperclip } from "lucide-react";
+
+import { requireRole } from "@/lib/auth/authorization";
+import { createClient } from "@/utils/supabase/server";
+import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
+import { RequestStatusBadge } from "@/components/status-badge";
+
+export const metadata: Metadata = { title: "Request" };
+
+/**
+ * P1-14 — request detail, READ ONLY.
+ *
+ * Approve / return / reject arrive in Phase 2 along with the capacity panel.
+ * Deliberately not stubbed here: a disabled Approve button invites someone to
+ * wire it up without the atomic task-creation transaction behind it (R9).
+ */
+
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[9rem_1fr] gap-3 border-b py-2.5 last:border-0">
+      <dt className="text-xs text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 text-sm break-words">{children}</dd>
+    </div>
+  );
+}
+
+export default async function RequestDetailPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  await requireRole("team_leader");
+  const supabase = await createClient();
+
+  // Out of scope returns no row under RLS, which surfaces as 404 rather than a
+  // "forbidden" that would confirm the reference number exists.
+  const { data: request } = await supabase
+    .from("vizserve_pms_requests")
+    .select(
+      "id, reference_no, title, description, requester_name, requester_email, requester_org, target_date, approved_target_date, field_values, status, decision_reason, submitted_at, sla_started_at, form_id",
+    )
+    .eq("id", id)
+    .maybeSingle();
+
+  if (!request) notFound();
+
+  const { data: form } = await supabase
+    .from("vizserve_pms_forms")
+    .select("id, name, sla_days")
+    .eq("id", request.form_id)
+    .maybeSingle();
+
+  // Includes archived fields: a historical answer must keep rendering with its
+  // label even after the field is retired from the live form (D20/R5).
+  const { data: fields } = await supabase
+    .from("vizserve_pms_form_fields")
+    .select("field_key, label, field_type, is_active")
+    .eq("form_id", request.form_id)
+    .order("sort_order");
+
+  const { data: attachments } = await supabase
+    .from("vizserve_pms_request_attachments")
+    .select("id, filename, size_bytes, field_key")
+    .eq("request_id", id);
+
+  const values = (request.field_values ?? {}) as Record<string, unknown>;
+
+  function renderValue(raw: unknown): string {
+    if (raw === null || raw === undefined || raw === "") return "—";
+    if (Array.isArray(raw)) return raw.length > 0 ? raw.join(", ") : "—";
+    return String(raw);
+  }
+
+  const negotiated =
+    request.approved_target_date && request.approved_target_date !== request.target_date;
+
+  return (
+    <div className="mx-auto max-w-3xl space-y-6">
+      <div>
+        <Link
+          href="/requests"
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+        >
+          <ArrowLeft className="size-3.5" />
+          Requests
+        </Link>
+
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <h1 className="text-xl font-semibold tracking-tight">{request.reference_no}</h1>
+          <RequestStatusBadge status={request.status} />
+        </div>
+        <p className="mt-1 text-sm text-muted-foreground">{request.title}</p>
+      </div>
+
+      {request.decision_reason ? (
+        <div className="rounded-lg border border-info/30 bg-info-subtle p-4">
+          <p className="text-xs font-medium text-info">Decision reason</p>
+          <p className="mt-1 text-sm text-info">{request.decision_reason}</p>
+        </div>
+      ) : null}
+
+      <section className="rounded-lg border bg-card p-5 shadow-ring">
+        <h2 className="mb-3 text-sm font-semibold">Requester</h2>
+        <dl>
+          <Row label="Name">{request.requester_name}</Row>
+          {/* Bound at submission and not editable by staff — it is the identity
+              used at the Phase 4 client approval gate. */}
+          <Row label="Email">
+            <a href={`mailto:${request.requester_email}`} className="hover:underline">
+              {request.requester_email}
+            </a>
+          </Row>
+          <Row label="Organisation">{request.requester_org}</Row>
+          <Row label="Submitted">{formatDateTime(request.submitted_at)}</Row>
+        </dl>
+      </section>
+
+      <section className="rounded-lg border bg-card p-5 shadow-ring">
+        <h2 className="mb-3 text-sm font-semibold">Request</h2>
+        <dl>
+          <Row label="Form">{form?.name ?? "—"}</Row>
+          <Row label="Description">
+            <p className="whitespace-pre-wrap">{request.description}</p>
+          </Row>
+          <Row label="Target date">
+            {formatDate(request.target_date)}
+            {isOverdue(request.target_date) && request.status === "PENDING_REVIEW" ? (
+              <span className="ml-2 text-xs font-medium text-destructive">Overdue</span>
+            ) : null}
+          </Row>
+          {/* Both dates are kept on purpose: the gap between what the client
+              asked for and what was agreed is the metric that proves Gate 1 is
+              negotiating rather than rubber-stamping. */}
+          {negotiated ? (
+            <Row label="Agreed date">
+              {formatDate(request.approved_target_date)}
+              <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
+            </Row>
+          ) : null}
+        </dl>
+      </section>
+
+      {fields && fields.length > 0 ? (
+        <section className="rounded-lg border bg-card p-5 shadow-ring">
+          <h2 className="mb-3 text-sm font-semibold">Submitted details</h2>
+          <dl>
+            {fields.map((field) => (
+              <Row key={field.field_key} label={field.label}>
+                {renderValue(values[field.field_key])}
+                {!field.is_active ? (
+                  <span className="ml-2 text-2xs text-muted-foreground">(archived field)</span>
+                ) : null}
+              </Row>
+            ))}
+          </dl>
+        </section>
+      ) : null}
+
+      <section className="rounded-lg border bg-card p-5 shadow-ring">
+        <h2 className="mb-3 text-sm font-semibold">Attachments</h2>
+        {attachments && attachments.length > 0 ? (
+          <ul className="space-y-2">
+            {attachments.map((file) => (
+              <li key={file.id} className="flex items-center gap-2 text-sm">
+                <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                <span className="truncate">{file.filename}</span>
+                <span className="text-2xs text-muted-foreground">
+                  {Math.round(file.size_bytes / 1024)} KB
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-muted-foreground">None.</p>
+        )}
+      </section>
+
+      <p className="text-xs text-muted-foreground">
+        Approve, return and reject arrive in Phase 2, together with the assignee capacity panel.
+      </p>
+    </div>
+  );
+}

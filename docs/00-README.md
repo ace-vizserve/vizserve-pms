@@ -27,6 +27,9 @@
 | 10 | `10-open-questions.md` | Decisions Amier still owes the team, and flagged risks | **Amier first** |
 | 11 | `11-stack-conventions.md` | Stack inherited from the SIS build, and what it changes in the backlog | Ace, Kurt |
 | 12 | `12-ui-and-notifications.md` | Brand palette with measured contrast, what `DESIGN.md` is for, notification policy | **Kurt first** |
+| 13 | `13-implementation-status.md` | **What is actually built** vs specified, decisions taken during the build, known traps | **Everyone, first** |
+
+> **The app exists now.** Scaffolded 29 Jul 2026; Phase 0 and most of Phase 1 are implemented. Documents 01–12 remain the *specification*; document 13 is the *state*. Where they disagree, 13 describes reality and the gap is a bug in one of them.
 
 ---
 
@@ -54,6 +57,9 @@ These came from the user (VizBytes) and are treated as settled:
 | D15 | **Roles are inclusive**: `admin` ⊇ `manager` ⊇ `team_leader` ⊇ `member`. Managed-departments decides who leads what — required because Amier is admin *and* a TL, and Joel is manager *and* a TL | Derived from D14 |
 | D16 | Client-facing email sends from **vizserve.com** | User, 29 Jul |
 | D17 | `vizserve-pms.vercel.app` for development. A real domain (e.g. `pms.vizserve.com`) is needed before Phase 4 ships client approval links | User, 29 Jul |
+| D18 | Every user carries `{"app_access": ["vizserve-pms"], "role": …}` in **`raw_user_meta_data`**, for display and app routing only. Because that field is user-writable via Supabase's auth endpoint, **nothing in the authorization path reads it** — RLS and server actions read `vizserve_pms_users.role`. Enforced by a CI grep. See `02-data-model.md` §Auth metadata | User, 29 Jul |
+| D19 | Repo: `vizserve-pms`, already initialised at `github.com/ace-vizserve/vizserve-pms`. Docs live in `docs/` | User, 29 Jul |
+| D20 | **Forms are dynamic.** VizServe builds them in the app and shares them by public URL — the field list is *configuration*, not schema, and no field list is agreed up front. Phase 1 seeds placeholders derived from the flow. Consequence: `field_key` is immutable and fields are soft-archived, never hard-deleted (`R5`) | User, 29 Jul (answers Q9) |
 
 ### A note on "starting with the approval module"
 

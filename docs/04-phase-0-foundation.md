@@ -33,37 +33,17 @@
 | P0-09 | `vizserve_pms_audit_logs` table + write helper | One function, called from every mutation. Wire it now or it never gets wired | Ace |
 | P0-10 | `vizserve_pms_notifications` table + inbox list | Table, insert helper, and a plain list view. Include the per-type `send_email` flag (D12). Unread badge deferred — Amier 21:20 | Ace |
 | P0-11 | Transactional email setup | `resend` (already in the SIS stack), sending from **vizserve.com**. Add SPF/DKIM/DMARC records for it. **Must land in Phase 0** — Phase 4 is entirely email-dependent and deliverability problems surface late | Kurt |
-| P0-12 | Seed + scope test suite | Vitest 4, SIS test layout. Seed the confirmed roster below, plus tests asserting each role sees exactly the right row set | Ace |
+| P0-12 | Seed + scope test suite | Vitest 4, SIS test layout. **Seed test accounts only** (below) — no real users until go-live. Plus tests asserting each role sees exactly the right row set | Ace |
 
-### Confirmed seed roster
+### Seeding
 
-| Department | Team Leader |
-|---|---|
-| VizBytes | Amier Ordonez |
-| VizAssists | Joel Castro |
-| VizBooks | Joel Castro |
-| VizMedia | John Lloyd Tulang |
+**Departments are real from day one; users are not.** The four departments — VizBytes, VizAssists, VizBooks, VizMedia — seed as production data. Everyone who logs in during the build is a test account.
 
-Overall Team Manager: **Joel Castro**. Roles are inclusive (`admin` ⊇ `manager` ⊇ `team_leader` ⊇ `member`) — see `02-data-model.md`, so Amier can be `admin` *and* VizBytes' approver.
+Roles are inclusive (`admin` ⊇ `manager` ⊇ `team_leader` ⊇ `member`) — see `02-data-model.md` — so one role plus a managed-departments set covers every real arrangement, including an admin who is also a department's approver.
 
-#### Real accounts
+#### Test accounts — the only accounts Phase 0 seeds
 
-| User | Email | Role | Primary dept | Managed departments |
-|---|---|---|---|---|
-| Amier Ordonez | `amier.ordonez@vizserve.com` | `admin` | VizBytes | VizBytes |
-| Joel Castro | `joel.castro@vizserve.com` | `manager` | — | VizAssists, VizBooks |
-| John Lloyd Tulang | `johnlloyd.tulang@vizserve.com` | `team_leader` | VizMedia | VizMedia |
-| Ace Guevarra | `ace.guevarra@vizserve.com` | `member` | VizBytes | — |
-| Kurt Steven Arciga | `kurtsteven.arciga@vizserve.com` | `member` | VizBytes | — |
-| Raiza Mondina | `raiza.mondina@vizserve.com` | `member` | VizBytes | — |
-
-**Still needed:** members for VizAssists, VizBooks and VizMedia. Until those exist the Phase 2 capacity panel has nobody to show for three of the four departments, and Gate 1 cannot be demoed outside VizBytes.
-
-> Note: Ace and Kurt are `member` in the production roster but need `admin` to build. Give them admin in dev and staging only — or have them use `test.admin@example.com` below — so production permissions reflect their actual job, not their build access.
-
----
-
-#### Test accounts (development and staging only)
+Development runs on test accounts alone. **No real person is created, and no real address is stored, until production onboarding** (below). This removes a whole class of accident: nobody gets an unexpected email from a half-built system, and the developers' build permissions never have to be reconciled with their real job permissions.
 
 **Two safety rules before the addresses.** Both matter more than they look, because this system's whole purpose in Phase 4 is sending real email to real clients.
 
@@ -93,7 +73,37 @@ Overall Team Manager: **Joel Castro**. Roles are inclusive (`admin` ⊇ `manager
 
 **Why a client address with no account.** The Phase 4 approval flow is session-less by design. `test.client@example.com` exists only as a `requester_email` value on seeded requests — if it ever gets a `vizserve_pms_users` row, the test is no longer testing the thing that ships.
 
+**Every seeded account — test and production — also gets `app_access` and `role` in `raw_user_meta_data`:**
+
+```sql
+update auth.users
+set raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb)
+    || '{"app_access": ["vizserve-pms"], "role": "team_leader"}'::jsonb
+where email = 'test.tl.vizbytes@example.com';
+```
+
+**These claims are for display and routing only.** `user_metadata` is user-writable through Supabase's own auth endpoint, so nothing in the authorization path may read it — RLS and every server action read `vizserve_pms_users.role` instead. Full reasoning and the two cheap defences are in `02-data-model.md` §Auth metadata.
+
 **Tear-down.** Every test account is prefixed `test.` and on `@example.com`. Both make them trivially selectable for deletion, and a production smoke check should assert that **zero** `@example.com` rows exist. Add that assertion in `P0-12` — it costs one line and it is the thing that stops test data quietly reaching production.
+
+---
+
+#### Production onboarding — NOT Phase 0
+
+Real accounts get created at go-live, not during the build. Recorded here so the data is not lost.
+
+| User | Email | Role | Primary dept | Managed departments |
+|---|---|---|---|---|
+| Amier Ordonez | `amier.ordonez@vizserve.com` | `admin` | VizBytes | VizBytes |
+| Joel Castro | `joel.castro@vizserve.com` | `manager` | — | VizAssists, VizBooks |
+| John Lloyd Tulang | `johnlloyd.tulang@vizserve.com` | `team_leader` | VizMedia | VizMedia |
+| Ace Guevarra | `ace.guevarra@vizserve.com` | `member` | VizBytes | — |
+| Kurt Steven Arciga | `kurtsteven.arciga@vizserve.com` | `member` | VizBytes | — |
+| Raiza Mondina | `raiza.mondina@vizserve.com` | `member` | VizBytes | — |
+
+**Still needed before go-live:** members for VizAssists, VizBooks and VizMedia. Not a blocker now — the test accounts cover all four departments — but Gate 1 cannot go live outside VizBytes without real people to assign work to.
+
+Note that Ace and Kurt are `member` in production. Their build access lives entirely in `test.admin@example.com`, so production permissions reflect their actual job.
 
 ### One useful consequence of the email domain
 
@@ -120,6 +130,8 @@ Minimum assertions:
 - An admin → sees all.
 - Every one of the above run **against the API with that user's token**, not against a mocked helper.
 - **A production smoke check asserting zero `@example.com` rows exist.** One line; stops test data quietly reaching production.
+- **A test that a member who rewrites their own `user_metadata.role` to `admin` still sees only their own rows.** Do it for real — call `updateUser({data:{role:'admin'}})` with a member's token, then re-run the scope assertions. This is the single highest-value security test in Phase 0.
+- **A CI grep that fails the build if `user_metadata` is referenced outside presentation code.** Five minutes, and it is what keeps the test above true a year from now.
 
 ---
 
