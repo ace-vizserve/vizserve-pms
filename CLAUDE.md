@@ -90,7 +90,7 @@ Three structural points that are easy to get wrong:
 | [11-stack-conventions.md](docs/11-stack-conventions.md) | The stack, inherited from the HFSE SIS build |
 | [12-ui-and-notifications.md](docs/12-ui-and-notifications.md) | Brand palette with measured contrast; email-vs-inbox policy |
 
-**`DESIGN.md` has been replaced three times** (ClickUp → Pinterest → Shadcn Fintech) and may change again. It is a *style reference*, not the design system of record. Re-read it before applying it, and never assume the version you remember. Its current palette conflicts with D11 — see `Q15` in [10-open-questions.md](docs/10-open-questions.md).
+**`DESIGN.md` has been replaced three times** (ClickUp → Pinterest → Shadcn Fintech) and may change again. It is a *style reference*, not the design system of record. Re-read it before applying it, and never assume the version you remember. Its palette does **not** apply: `Q15` was answered on 30 Jul 2026 in favour of D11, so `--primary` is the brand blue `#4359A5`, not the template's near-black. See `Q15` in [10-open-questions.md](docs/10-open-questions.md) for the full token table.
 
 ## Non-negotiable conventions
 

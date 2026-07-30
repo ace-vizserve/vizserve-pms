@@ -172,16 +172,25 @@ The platform can enforce completeness, but it cannot make a client accept a new 
 
 Questions the implementation surfaced that the specification did not anticipate. Full context in `13-implementation-status.md`.
 
-### Q15 — Which primary colour wins? `blocks nothing, affects every screen`
+### Q15 — Which primary colour wins? → **THE BRAND BLUE** ✅
 
-`DESIGN.md` has been replaced three times (ClickUp → Pinterest → Shadcn Fintech). The current `app/globals.css` sets `--primary` to a near-black `oklch(0.205 0 0)`, following the fintech template. **D11's `#4359A5` is therefore not used anywhere in the running app.**
+`DESIGN.md` had been replaced three times (ClickUp → Pinterest → Shadcn Fintech), and `app/globals.css` followed the fintech template with a near-black `--primary`, so D11's `#4359A5` was not used anywhere in the running app.
 
-Both are internally consistent. What is not consistent is having a settled brand decision that the code ignores. Either:
+**Answered by the user, 30 Jul 2026:** set `--primary: #4359A5`. D11 stands as written and the measured-contrast work in `12-ui-and-notifications.md` now describes the running app rather than an intention.
 
-- **keep the near-black CTA** and amend D11 to say the brand blue is for marks and accents only, or
-- **set `--primary: #4359A5`** and accept a more branded, less template-like UI.
+What changed in `globals.css`:
 
-The measured-contrast work in `12-ui-and-notifications.md` assumes the second. Pick one and make the other document agree.
+| Token | Light | Dark |
+|---|---|---|
+| `--primary` / `--sidebar-primary` | `#4359A5` on white text | `#8FA3E0` on `#1A2340` |
+| `--accent` / `--sidebar-accent` | `#EEF1F9`, brand text at 5.79:1 | `#262E4A`, `#C9D4F2` at 9.02:1 |
+| `--ring` | `#4359A5` | `#6B7FC4` |
+
+`#4359A5` is too dark to carry on a dark surface, so the dark theme lightens primary to the same value `--brand` uses and flips its foreground dark — white on `#8FA3E0` would be ~2.2:1.
+
+**Deliberately left neutral:** `--foreground`, `--muted-foreground`, `--border`. Those are body copy and structure, not identity. Tinting them puts a blue cast on every table row, which reads as a display fault rather than as branding.
+
+`--brand-surface` remains separate from `--primary`: it is the one blue that must *not* flip with the theme, because it backs the white-only logo asset.
 
 ---
 

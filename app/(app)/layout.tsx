@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
@@ -31,11 +32,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:gap-4">
           <MobileNav items={items} />
 
-          <Link href="/dashboard" className="flex items-center gap-2">
-            <span className="flex size-7 items-center justify-center rounded-sm bg-primary text-xs font-semibold text-primary-foreground">
-              V
+          {/* The real mark on a brand tile, matching /login and /. The asset is
+              white-only, hence the tile. */}
+          <Link href="/dashboard" className="flex shrink-0 items-center gap-2">
+            <span className="flex size-8 items-center justify-center rounded-sm bg-brand-surface p-1">
+              <Image
+                src="/assets/VizServeWhite.png"
+                alt="VizServe"
+                width={960}
+                height={882}
+                sizes="32px"
+                priority
+                className="h-full w-auto"
+              />
             </span>
-            <span className="text-sm font-semibold tracking-tight">VizServe PMS</span>
+            <span className="text-sm font-semibold tracking-tight">PMS</span>
           </Link>
 
           <div className="ml-auto">

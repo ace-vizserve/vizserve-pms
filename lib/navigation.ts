@@ -97,7 +97,13 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Users",
     href: "/admin/users",
     minRole: "admin",
-    enabled: true,
+    // P0-04 is unbuilt and this route does not exist. It was the one item in
+    // this list marked enabled without a page behind it, so admins got a 404
+    // from the nav. The data layer is ready — admin RLS already covers all
+    // operations on vizserve_pms_users and vizserve_pms_user_managed_departments
+    // — so only the screen is owed.
+    enabled: false,
+    phase: "P0-04",
     icon: "users",
   },
 ];

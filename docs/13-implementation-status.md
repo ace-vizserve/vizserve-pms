@@ -23,7 +23,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | P0-01 | Repo + environments | ✅ Next 16.2, React 19, TS 5, Tailwind v4, shadcn, Supabase CLI |
 | P0-02 | Base schema | ✅ departments, users, managed departments, role enum, seed |
 | P0-03 | Auth | ✅ Entra SSO + email/password, callback, sign-out. ⚠️ **identity linking unverified** — see below |
-| P0-04 | User management screens | ❌ Not built. `/admin/users` is in the nav and **404s** |
+| P0-04 | User management screens | ❌ Not built. Nav item is **disabled** (badge `P0-04`) so it no longer 404s. DB side is ready — only the screen is owed |
 | P0-05 | Authorization layer | ✅ `lib/auth/authorization.ts` + SQL counterparts |
 | P0-06 | RLS policies | ✅ …plus a follow-up grants migration, see *The grants incident* |
 | P0-07 | App shell + role nav | ✅ Unbuilt modules render disabled with their phase |
@@ -108,7 +108,7 @@ Fixed by `20260729110000_p0_06_grants.sql`, which grants explicitly and sets `AL
 
 ## Known gaps and traps
 
-- **`/admin/users` 404s** — it is in the nav (`P0-04` unbuilt).
+- **There is no `/admin/users` page** (`P0-04` unbuilt). It used to 404 from the nav; the nav item is now disabled with a `P0-04` badge, matching every other unbuilt module. **The database side is already done** — `"users writable by admin"` and `"managed departments writable by admin"` cover all operations, and the `auth.users` trigger creates profile rows on first sign-in, so people appear once they log in. Building the screen needs no migration. Email invites are the one part that is blocked: they depend on `P0-11`, and there is no `RESEND_API_KEY`.
 - **Nothing sends email.** `resend` is installed and unused.
 - **Entra SSO is untested.** The code path exists; no Entra tenant has been pointed at it, and identity linking (one human, one profile) is a **project setting**, not something a migration can enforce. Verify before calling `P0-03` done.
 - **`lib/database.types.ts` is hand-written**, not generated. Regenerate with `npm run db:types` once Docker is available, and treat the generated file as authoritative from then on.
