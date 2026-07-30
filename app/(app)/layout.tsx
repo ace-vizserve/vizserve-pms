@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { visibleNavItems } from "@/lib/navigation";
 import { createClient } from "@/utils/supabase/server";
+import { MobileNav } from "@/components/app-shell/mobile-nav";
 import { SidebarNav } from "@/components/app-shell/sidebar-nav";
 import { UserMenu } from "@/components/app-shell/user-menu";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -27,7 +28,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <TooltipProvider>
       <div className="flex min-h-svh flex-col">
-        <header className="sticky top-0 z-40 flex h-14 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+        <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:gap-4">
+          <MobileNav items={items} />
+
           <Link href="/dashboard" className="flex items-center gap-2">
             <span className="flex size-7 items-center justify-center rounded-sm bg-primary text-xs font-semibold text-primary-foreground">
               V
