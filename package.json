@@ -14,6 +14,7 @@
     "verify": "npm run check:metadata && npm run typecheck && npm run lint && npm run test",
     "test": "vitest run",
     "test:watch": "vitest",
+    "email:test": "vitest run tests/email",
     "db:start": "npx --yes supabase@latest start",
     "db:stop": "npx --yes supabase@latest stop",
     "db:reset": "npx --yes supabase@latest db reset",
