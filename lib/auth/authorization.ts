@@ -4,7 +4,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/utils/supabase/server";
-import type { VizservePmsUserRole } from "@/lib/database.types";
+import { ROLE_ORDER, roleAtLeast, type Role } from "@/lib/auth/roles";
 
 /**
  * P0-05 — the single server-side authorization layer.
@@ -26,20 +26,15 @@ import type { VizservePmsUserRole } from "@/lib/database.types";
  * privilege escalation with no audit trail.
  */
 
-/** Ascending authority. Mirrors the Postgres enum declaration order exactly. */
-export const ROLE_ORDER = ["member", "team_leader", "manager", "admin"] as const;
-
-export type Role = VizservePmsUserRole;
-
 /**
- * Roles are INCLUSIVE: admin ⊇ manager ⊇ team_leader ⊇ member (D15).
- * Always `>=`, never `===`. Amier is an admin who is also a TL; an equality
- * check would lock him out of his own approval queue.
+ * The hierarchy itself lives in `lib/auth/roles.ts`, which has no `server-only`
+ * import — a role selector and a zod schema need the ordering on the client, and
+ * a second copy of the list is how the TS `>=` and the Postgres `>=` drift apart.
+ *
+ * Re-exported here so that call sites keep importing every authorization concern
+ * from one module.
  */
-export function roleAtLeast(role: Role | null | undefined, required: Role): boolean {
-  if (!role) return false;
-  return ROLE_ORDER.indexOf(role) >= ROLE_ORDER.indexOf(required);
-}
+export { ROLE_ORDER, roleAtLeast, type Role };
 
 export type AuthContext = {
   userId: string;
