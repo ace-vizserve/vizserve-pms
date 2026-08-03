@@ -23,25 +23,44 @@ const SLUG_B = `p109-b-${Math.random().toString(36).slice(2, 10)}`;
 
 let formA = "";
 let formB = "";
-let migrationApplied = false;
 
-async function detectMigration(): Promise<boolean> {
-  const { error } = await adminClient()
-    .from("vizserve_pms_pending_attachments")
-    .select("id")
-    .limit(1);
+/**
+ * Detected at MODULE LOAD, with a top-level await, not in `beforeAll`.
+ *
+ * `it.skipIf(...)` is evaluated when vitest collects the file, which happens
+ * before any hook runs — so a flag set in `beforeAll` is still `false` at the
+ * moment every skip decision is made, and the whole suite silently skips even
+ * once the migration is applied. That is the exact failure this guard was
+ * supposed to prevent, arrived at from the other direction.
+ */
+const migrationApplied = dbTestsEnabled
+  ? !(await adminClient().from("vizserve_pms_pending_attachments").select("id").limit(1)).error
+  : false;
 
-  return !error;
+if (dbTestsEnabled && !migrationApplied) {
+  console.warn(
+    "\n  attachments.test.ts — SKIPPED. supabase/migrations/20260803100000_p1_09_attachments.sql" +
+      " has not been applied to this project. Apply it, then re-run.\n",
+  );
 }
 
-async function makeForm(slug: string, requiresAttachment: boolean) {
+/**
+ * Distinct `reference_prefix` per form — and not merely as tidiness.
+ *
+ * Giving both fixtures the same prefix is what surfaced the P1-10 collision:
+ * reference_no is globally unique but the counter runs per form, so two forms
+ * sharing a prefix both generate TSA-2026-0001 and the second submission dies
+ * with a raw 23505 out of a SECURITY DEFINER function — a 500 for a member of
+ * the public. Fixed in 20260803120000; `unique-references.test.ts` guards it.
+ */
+async function makeForm(slug: string, prefix: string, requiresAttachment: boolean) {
   const { data, error } = await adminClient()
     .from("vizserve_pms_forms")
     .insert({
       name: `P1-09 fixture ${slug}`,
       slug,
       department_id: DEPARTMENTS.VizBytes,
-      reference_prefix: "TSA",
+      reference_prefix: prefix,
       is_public: true,
       is_active: true,
       requires_attachment: requiresAttachment,
@@ -81,18 +100,13 @@ async function mintReceipt(formId: string, fieldKey: string | null = null) {
 
 describe.skipIf(!dbTestsEnabled)("P1-09 attachments", () => {
   beforeAll(async () => {
-    migrationApplied = await detectMigration();
+    if (!migrationApplied) return;
 
-    if (!migrationApplied) {
-      console.warn(
-        "\n  attachments.test.ts — SKIPPED. supabase/migrations/20260803100000_p1_09_attachments.sql" +
-          " has not been applied to this project. Apply it, then re-run.\n",
-      );
-      return;
-    }
-
-    formA = await makeForm(SLUG_A, false);
-    formB = await makeForm(SLUG_B, true);
+    // Unique prefixes now, and unique per RUN — the constraint is global, so a
+    // fixed literal would collide with a previous run that failed before cleanup.
+    const tag = Math.random().toString(36).slice(2, 5).toUpperCase();
+    formA = await makeForm(SLUG_A, `A${tag}`, false);
+    formB = await makeForm(SLUG_B, `B${tag}`, true);
   });
 
   afterAll(async () => {

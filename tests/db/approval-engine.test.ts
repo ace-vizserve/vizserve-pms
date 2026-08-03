@@ -18,13 +18,23 @@ if (!dbTestsEnabled) console.warn(`\n  approval-engine.test.ts — ${skipReason}
 const SLUG = `p2-fixture-${Math.random().toString(36).slice(2, 10)}`;
 
 let formId = "";
-let migrationApplied = false;
 let picId = "";
 let qaId = "";
 
-async function detectMigration(): Promise<boolean> {
-  const { error } = await adminClient().from("vizserve_pms_approvals").select("id").limit(1);
-  return !error;
+/**
+ * Detected at MODULE LOAD, not in `beforeAll` — `it.skipIf(...)` is evaluated
+ * during collection, before any hook runs, so a flag set in a hook is still
+ * false at every skip decision.
+ */
+const migrationApplied = dbTestsEnabled
+  ? !(await adminClient().from("vizserve_pms_approvals").select("id").limit(1)).error
+  : false;
+
+if (dbTestsEnabled && !migrationApplied) {
+  console.warn(
+    "\n  approval-engine.test.ts — SKIPPED. supabase/migrations/20260803110000_p2_00_approval_engine.sql" +
+      " has not been applied to this project. Apply it, then re-run.\n",
+  );
 }
 
 /** A fresh PENDING_REVIEW request, submitted the way a client would. */
@@ -50,15 +60,7 @@ async function submitRequest(targetDate = "2026-12-01"): Promise<string> {
 
 describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
   beforeAll(async () => {
-    migrationApplied = await detectMigration();
-
-    if (!migrationApplied) {
-      console.warn(
-        "\n  approval-engine.test.ts — SKIPPED. supabase/migrations/20260803110000_p2_00_approval_engine.sql" +
-          " has not been applied to this project. Apply it, then re-run.\n",
-      );
-      return;
-    }
+    if (!migrationApplied) return;
 
     const admin = adminClient();
 
@@ -68,7 +70,9 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         name: "P2 fixture form",
         slug: SLUG,
         department_id: DEPARTMENTS.VizBytes,
-        reference_prefix: "TSP",
+        // Unique per run: reference_prefix is globally unique (P1-10), so a
+        // fixed literal collides with any earlier run that failed before cleanup.
+        reference_prefix: `P${Math.random().toString(36).slice(2, 5).toUpperCase()}`,
         is_public: true,
         is_active: true,
       })
@@ -320,17 +324,46 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         .from("vizserve_pms_audit_logs")
         .select("action, before, after")
         .eq("entity_id", requestId)
-        .eq("action", "approved")
+        .eq("action", "edited")
         .single();
 
       const before = audit!.before as Record<string, unknown>;
       const after = audit!.after as Record<string, unknown>;
 
       expect(before.title).toBe("Poster for the open day");
+      expect(before.target_date).toBe("2026-12-01");
       expect(after.title).toBe("Poster for the open day (A3)");
-      expect(after.original_target_date).toBe("2026-12-01");
       expect(after.approved_target_date).toBe("2026-12-15");
     });
+
+    it.skipIf(!migrationApplied)(
+      "writes exactly one 'approved' row, and no 'edited' row when nothing changed",
+      async () => {
+        // The engine logs the decision and Gate 1 used to log a second row with
+        // the same action, so "the audit entry for this approval" returned two.
+        // A trail where every approval also logs an edit is a trail in which a
+        // real edit is invisible.
+        const requestId = await submitRequest();
+        const { client } = await signIn("tlVizBytes");
+
+        await client.rpc("vizserve_pms_approve_request", {
+          p_request_id: requestId,
+          p_assignee_id: picId,
+          p_qa_assignee_id: null,
+          p_approved_target_date: null,
+          p_title: null,
+          p_description: null,
+        });
+
+        const { data: rows } = await adminClient()
+          .from("vizserve_pms_audit_logs")
+          .select("action")
+          .eq("entity_id", requestId);
+
+        const actions = (rows ?? []).map((row) => row.action).sort();
+        expect(actions).toEqual(["approved", "submitted"]);
+      },
+    );
 
     // -----------------------------------------------------------------------
     // Atomicity — "a forced failure mid-transaction leaves no partial state"

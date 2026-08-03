@@ -38,6 +38,34 @@ function isUniqueViolation(error: { code?: string } | null) {
   return error?.code === "23505";
 }
 
+/**
+ * Which unique constraint fired.
+ *
+ * Forms now have two: the slug and the reference prefix. Mapping every 23505 to
+ * "that URL slug is taken" was fine when there was one, and became a confusing
+ * lie the moment the prefix gained an index — the user would be told to change a
+ * field that was not the problem.
+ *
+ * The prefix constraint matters more than it looks: it is what stops two forms
+ * generating the same COL-2026-0001, which surfaced as a raw 500 on the PUBLIC
+ * form rather than an error anyone here would see.
+ */
+function uniqueFieldError(
+  error: { message?: string; details?: string } | null,
+): { field: "slug" | "reference_prefix"; message: string; error: string } {
+  const haystack = `${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
+
+  if (haystack.includes("reference_prefix")) {
+    return {
+      field: "reference_prefix",
+      message: "Already used by another form.",
+      error: "That reference prefix belongs to another form.",
+    };
+  }
+
+  return { field: "slug", message: "Already in use.", error: "That URL slug is taken." };
+}
+
 async function assertCanEditForm(formId: string) {
   const context = await requireRole("team_leader");
   const supabase = await createClient();
@@ -80,7 +108,8 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
 
   if (error) {
     if (isUniqueViolation(error)) {
-      return { ok: false, error: "That URL slug is taken.", fieldErrors: { slug: ["Already in use."] } };
+      const clash = uniqueFieldError(error);
+      return { ok: false, error: clash.error, fieldErrors: { [clash.field]: [clash.message] } };
     }
     return { ok: false, error: error.message };
   }
@@ -113,7 +142,8 @@ export async function updateFormSettings(
 
   if (error) {
     if (isUniqueViolation(error)) {
-      return { ok: false, error: "That URL slug is taken.", fieldErrors: { slug: ["Already in use."] } };
+      const clash = uniqueFieldError(error);
+      return { ok: false, error: clash.error, fieldErrors: { [clash.field]: [clash.message] } };
     }
     return { ok: false, error: error.message };
   }

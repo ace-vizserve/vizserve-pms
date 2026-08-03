@@ -121,10 +121,16 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
 
   // The database trigger on auth.users creates the profile row, so this is the
   // one operation that genuinely needs the admin API.
+  //
+  // NO `user_metadata` HERE. It would be a write of a display name rather than a
+  // read for authorization, so it is not the danger D18 is about — but the upsert
+  // below already sets `full_name` on the profile, which is the source of truth,
+  // making the metadata copy redundant. Given the choice between a redundant
+  // write and an allowlist entry, take the one that keeps `npm run check:metadata`
+  // absolute. A rule with no exceptions is the only kind that stays enforced.
   const { data: created, error: authError } = await admin.auth.admin.createUser({
     email: values.email,
     email_confirm: true,
-    user_metadata: { full_name: values.full_name },
   });
 
   if (authError || !created.user) {

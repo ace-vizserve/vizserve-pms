@@ -25,6 +25,7 @@ import {
 if (!dbTestsEnabled) console.warn(`\n  submission.test.ts — ${skipReason}\n`);
 
 const SLUG = `p012-fixture-${Math.random().toString(36).slice(2, 10)}`;
+const PREFIX = `T${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 
 let formId: string;
 
@@ -39,7 +40,9 @@ describe.skipIf(!dbTestsEnabled)("P1 public submission", () => {
         slug: SLUG,
         description: "Created by the test suite. Safe to delete.",
         department_id: DEPARTMENTS.VizBytes,
-        reference_prefix: "TST",
+        // Unique per run: reference_prefix is globally unique (P1-10), so a
+        // fixed literal collides with any earlier run that failed before cleanup.
+        reference_prefix: PREFIX,
         is_public: true,
         is_active: true,
         sla_days: 3,
@@ -219,7 +222,9 @@ describe.skipIf(!dbTestsEnabled)("P1 public submission", () => {
       const result = data as { ok: boolean; request_id: string; reference_no: string };
 
       expect(result.ok).toBe(true);
-      expect(result.reference_no).toMatch(/^TST-\d{4}-\d{4}$/);
+      // Escaped for the template literal: `\d` inside a backtick string is just
+      // "d", which happily matches nothing and quietly passes on the wrong shape.
+      expect(result.reference_no).toMatch(new RegExp(`^${PREFIX}-\\d{4}-\\d{4}$`));
 
       const { data: request } = await adminClient()
         .from("vizserve_pms_requests")
