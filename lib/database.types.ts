@@ -500,6 +500,7 @@ export type Database = {
           id: string;
           request_id: string | null;
           department_id: string;
+          list_id: string | null;
           title: string;
           description: string;
           status: VizservePmsTaskStatus;
@@ -513,18 +514,25 @@ export type Database = {
           created_at: string;
           updated_at: string;
         };
-        // Phase 2 creates tasks only inside the approval transaction. Phase 3
-        // adds manual creation (P3-12) and widens this.
+        // Tasks are born from an approval (P2-07) or from
+        // vizserve_pms_create_task (P3-12). Never from a plain insert.
         Insert: never;
+        /**
+         * NOTE the absence of `status`. The column-level UPDATE grant is revoked
+         * from `authenticated` (P3 migration), so status changes only through
+         * `vizserve_pms_transition_task` — which is what makes "every transition
+         * is legal and every transition writes history" true rather than hoped
+         * for. RLS cannot express a per-column rule; column privileges can.
+         */
         Update: Partial<{
           title: string;
           description: string;
-          status: VizservePmsTaskStatus;
           assignee_id: string | null;
           qa_assignee_id: string | null;
           due_date: string | null;
           resolution: string | null;
           output_link: string | null;
+          list_id: string | null;
         }>;
         Relationships: [
           {
@@ -540,6 +548,86 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      // -----------------------------------------------------------------
+      // P3 — lists, status history, and the transition table.
+      // -----------------------------------------------------------------
+      vizserve_pms_lists: {
+        Row: {
+          id: string;
+          department_id: string;
+          name: string;
+          description: string;
+          is_active: boolean;
+          sort_order: number;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          department_id: string;
+          name: string;
+          description?: string;
+          is_active?: boolean;
+          sort_order?: number;
+          created_by?: string | null;
+        };
+        Update: Partial<{
+          name: string;
+          description: string;
+          is_active: boolean;
+          sort_order: number;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_lists_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      /**
+       * Not the audit log. That answers "who changed what"; this answers "how
+       * long was it in each state", which is the only way WAITING_FOR_INFO
+       * duration is derivable (P3-11, risk R4).
+       */
+      vizserve_pms_task_status_history: {
+        Row: {
+          id: string;
+          task_id: string;
+          from_status: VizservePmsTaskStatus | null;
+          to_status: VizservePmsTaskStatus;
+          actor_id: string | null;
+          comment: string | null;
+          is_override: boolean;
+          created_at: string;
+        };
+        // Written only by the transition functions, so a step cannot be hidden.
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_task_status_history_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      /** The legal-transition table as data. Mirrored in lib/schemas/tasks.ts. */
+      vizserve_pms_task_transitions: {
+        Row: {
+          from_status: VizservePmsTaskStatus;
+          to_status: VizservePmsTaskStatus;
+          actor: string;
+          required_field: string | null;
+        };
+        // Changing the state machine is a migration, not a row edit.
+        Insert: never;
+        Update: never;
+        Relationships: [];
       };
       // -----------------------------------------------------------------
       // P1-09 — attachments.
@@ -746,6 +834,35 @@ export type Database = {
           p_reason: string;
         };
         Returns: Json;
+      };
+      /** The ONLY way a task changes status. See the Update type above. */
+      vizserve_pms_transition_task: {
+        Args: {
+          p_task_id: string;
+          p_to_status: VizservePmsTaskStatus;
+          p_comment?: string | null;
+        };
+        Returns: Json;
+      };
+      vizserve_pms_force_task_status: {
+        Args: { p_task_id: string; p_to_status: VizservePmsTaskStatus; p_reason: string };
+        Returns: Json;
+      };
+      vizserve_pms_create_task: {
+        Args: {
+          p_department_id: string;
+          p_title: string;
+          p_description?: string;
+          p_assignee_id?: string | null;
+          p_qa_assignee_id?: string | null;
+          p_due_date?: string | null;
+          p_list_id?: string | null;
+        };
+        Returns: Json;
+      };
+      vizserve_pms_task_waiting_duration: {
+        Args: { p_task_id: string };
+        Returns: string;
       };
     };
     Enums: {

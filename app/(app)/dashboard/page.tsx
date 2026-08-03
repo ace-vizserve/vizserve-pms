@@ -73,7 +73,7 @@ export default async function DashboardPage() {
   const isApprover = roleAtLeast(context.role, "team_leader");
   const firstName = context.fullName.trim().split(" ")[0] || "there";
 
-  const [pending, unread] = await Promise.all([
+  const [pending, unread, myTasks, myQa] = await Promise.all([
     isApprover
       ? supabase
           .from("vizserve_pms_requests")
@@ -84,6 +84,19 @@ export default async function DashboardPage() {
       .from("vizserve_pms_notifications")
       .select("id", { count: "exact", head: true })
       .is("read_at", null),
+    // P3-14 — the member's own live work. "Not finished" rather than a list of
+    // active statuses, so a status added later is counted without anyone
+    // remembering to come back here.
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("assignee_id", context.userId)
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("qa_assignee_id", context.userId)
+      .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
   ]);
 
   return (
@@ -119,9 +132,27 @@ export default async function DashboardPage() {
           </Card>
         ) : null}
 
-        <Card title="My tickets" description="Tasks where you are PIC or QA" phase="Phase 3">
-          <Metric value={null} label="open" />
+        <Card title="My tasks" description="Work assigned to you, still open">
+          <Metric value={myTasks.count ?? 0} label="open" />
+          <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
+            <Link href="/tasks?view=mine">
+              Open my tasks <ArrowRight className="size-3.5" />
+            </Link>
+          </Button>
         </Card>
+
+        {/* Only shown when there is actually something to review. A permanent
+            zero teaches people to stop looking at the card. */}
+        {(myQa.count ?? 0) > 0 ? (
+          <Card title="Waiting on my QA" description="Work that needs your review">
+            <Metric value={myQa.count ?? 0} label="to review" />
+            <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
+              <Link href="/tasks?view=qa">
+                Open QA queue <ArrowRight className="size-3.5" />
+              </Link>
+            </Button>
+          </Card>
+        ) : null}
 
         <Card title="Inbox" description="Notifications about your work">
           <Metric value={unread.count ?? 0} label="unread" />

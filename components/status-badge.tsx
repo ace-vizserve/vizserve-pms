@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
-import type { VizservePmsRequestStatus } from "@/lib/database.types";
+import type { VizservePmsRequestStatus, VizservePmsTaskStatus } from "@/lib/database.types";
+import { TASK_STATUS_LABELS } from "@/lib/schemas/tasks";
 
 /**
  * Status pills for the canonical status sets (docs/01-updated-workflow.md §3).
@@ -63,4 +64,56 @@ export const REQUEST_STATUS_OPTIONS = (
  */
 export function isRequestStatus(value: string | undefined): value is VizservePmsRequestStatus {
   return typeof value === "string" && value in REQUEST_STATUS;
+}
+
+/**
+ * Task statuses (P3).
+ *
+ * Labels come from `lib/schemas/tasks.ts` rather than being restated here — that
+ * module is the contract both tracks import, and a second copy of
+ * "COMPLETED_NO_RESPONSE reads as Completed (no response)" is a second place for
+ * it to drift.
+ *
+ * The two terminal states are styled DIFFERENTLY on purpose. `COMPLETED` means
+ * the client approved; `COMPLETED_NO_RESPONSE` means the clock ran out and
+ * nobody looked. Phase 6 reports the split, and a queue that renders them
+ * identically hides the thing worth reporting.
+ */
+const TASK_STATUS_CLASSES: Record<VizservePmsTaskStatus, string> = {
+  OPEN: "bg-muted text-muted-foreground",
+  ONGOING: "bg-info-subtle text-info",
+  WAITING_FOR_INFO: "bg-warning-subtle text-warning",
+  FOR_QA: "bg-secondary/25 text-foreground",
+  QA_IN_PROGRESS: "bg-secondary/25 text-foreground",
+  FOR_CLIENT_APPROVAL: "bg-warning-subtle text-warning",
+  COMPLETED: "bg-success-subtle text-success",
+  COMPLETED_NO_RESPONSE: "bg-muted text-muted-foreground",
+};
+
+export function TaskStatusBadge({
+  status,
+  className,
+}: {
+  status: VizservePmsTaskStatus;
+  className?: string;
+}) {
+  return (
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-2xs font-medium whitespace-nowrap",
+        TASK_STATUS_CLASSES[status] ?? "bg-muted text-muted-foreground",
+        className,
+      )}
+    >
+      {TASK_STATUS_LABELS[status] ?? status}
+    </span>
+  );
+}
+
+export const TASK_STATUS_OPTIONS = (
+  Object.keys(TASK_STATUS_CLASSES) as VizservePmsTaskStatus[]
+).map((value) => ({ value, label: TASK_STATUS_LABELS[value] }));
+
+export function isTaskStatus(value: string | undefined): value is VizservePmsTaskStatus {
+  return typeof value === "string" && value in TASK_STATUS_CLASSES;
 }

@@ -58,8 +58,7 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Tasks",
     href: "/tasks",
     minRole: "member",
-    enabled: false,
-    phase: "Phase 3",
+    enabled: true,
     icon: "tasks",
   },
   {
