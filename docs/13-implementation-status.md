@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 3 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 4 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -13,9 +13,25 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **0 — Foundation** | Done, bar two things only a human can do: a real Entra sign-in, and a test email confirmed in an inbox |
 | **1 — Forms** | **Done.** All exit criteria asserted and green |
 | **2 — Approval Engine + Gate 1** | **Done.** All exit criteria asserted and green |
-| **3–6** | Not started |
+| **3 — Tasks + QA (Gate 2)** | **Done.** All exit criteria asserted and green |
+| **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
+| **5–6** | Not started |
 
-`npm run verify` is green: **158 tests, 0 failures**, of which 72 run against a live database as genuinely signed-in users.
+`npm run verify` is green: **235 tests, 0 failures**, of which 150 run against a live database as genuinely signed-in users.
+
+---
+
+## ⚠️ Outstanding — to follow
+
+Three things nobody can assert for you. None blocks Phase 5.
+
+| What | Why it matters | How |
+|---|---|---|
+| **Resend is not configured** | `RESEND_API_KEY` and `EMAIL_FROM` are absent from `.env`, so the whole system runs in **dry-run**: it renders every email, logs the subject, and sends nothing. Every notification, every Gate 1 decision email, and the entire Gate 3 client flow are silent. | Add both to `.env.local`. The sending domain needs SPF/DKIM/DMARC before P4-14 can pass. |
+| **P4-14 deliverability unverified** | Phase 4 rests entirely on one email reaching one client's inbox. If it lands in spam, a ticket auto-completes three days later with nobody having looked — and the roadmap flags this as the one item where a late failure has no workaround. | `EMAIL_TEST_RECIPIENT=you@… npm run email:test`, then check Outlook/M365, Gmail **and the client's real domain**. |
+| **Entra SSO never exercised** | The code path exists; no tenant has been pointed at it. Identity linking — one human, one profile — is a **project setting**, not something a migration can enforce. | Point a tenant at `/login`, sign in once, confirm it resolves to the same profile as the password path. |
+
+The deliverability test is opt-in (it only runs with `EMAIL_TEST_RECIPIENT` set), so it does not fail `npm run verify` — and it refuses to report success in dry-run rather than claiming a send that never happened.
 
 ### Applying migrations
 
@@ -117,6 +133,64 @@ Every db suite **detects whether its migration has been applied** and skips with
 
 ---
 
+## Phase 3
+
+| ID | Item | State |
+|----|------|-------|
+| P3-01 | Lists + CRUD | ✅ Department-scoped. Also resolves `Q18` and unblocks `P2-06` |
+| P3-02 | tasks + status history migration | ✅ |
+| P3-03 | Task list view | ✅ URL filters, plus Mine and Waiting-on-my-QA views |
+| P3-04 | Board view | ✅ `/tasks/board`. **No drag-and-drop** — see decision 14 |
+| P3-05 | Task detail | ✅ Also serves as the QA screen (`P3-08`) |
+| P3-06 | Status machine | ✅ `status` is not an updatable column — see decision 13 |
+| P3-07 | Resolution gate | ✅ Enforced in the transition function; no path skips it |
+| P3-09/10 | QA pass + reject | ✅ Reject requires a comment; it reaches the PIC |
+| P3-11 | `WAITING_FOR_INFO` | ✅ Duration derived from history, never stored (`R4`) |
+| P3-12 | Manual task creation | ✅ |
+| P3-13 | Task attachments | ✅ No receipt handshake — see decision 15 |
+| P3-14 | My tasks + dashboard card | ✅ |
+| P3-15 | Scope tests | ✅ 41 tests green |
+
+### Exit criteria — all green
+
+- [x] Every legal transition works; every illegal one is rejected server-side
+- [x] A direct API call cannot reach `FOR_QA` with an empty resolution
+- [x] QA rejection returns to `ONGOING` with the comment visible to the PIC
+- [x] Task list columns reflect the originating form's fields
+- [x] Tasks can be created manually, without a request
+- [x] `WAITING_FOR_INFO` duration is queryable per task
+
+---
+
+## Phase 4
+
+| ID | Item | State |
+|----|------|-------|
+| P4-01 | Token + decisions migration | ✅ Hash-only storage, bound email, expiry, `consumed_at` |
+| P4-02 | Token issuance | ✅ Hangs off the `QA_IN_PROGRESS → FOR_CLIENT_APPROVAL` transition |
+| P4-03 | Approval email | ✅ Deadline stated prominently, per Amier 54:00 |
+| P4-04 | Public approval page | ✅ `/approve/[token]`, no session. Original specs shown alongside the output |
+| P4-05/06/07 | Decision handler + paths | ✅ |
+| P4-08 | Reminder emails | ✅ Two, sent before anything auto-completes, in the same cron pass |
+| P4-09 | Auto-complete job | ✅ Hourly. `COMPLETED_NO_RESPONSE`, never `COMPLETED` |
+| P4-10 | Feedback request | ✅ On every completion, including auto-completed ones |
+| P4-11 | Feedback storage | ✅ One per task, readable by the department's lead |
+| P4-12 | Archive + final audit | ✅ Every decision writes an audit row with before/after |
+| P4-13 | Security tests | ✅ 31 tests green |
+| P4-14 | Deliverability check | ❌ **Outstanding** — see the table at the top |
+
+### Exit criteria
+
+- [x] A client receives an email, clicks, and approves without logging in *(verified end to end in dry-run; the send itself waits on Resend)*
+- [x] Security tests green — cross-task reuse, replay, expiry, forged tokens, purpose confusion
+- [x] Reject returns the task to `ONGOING` with the comment reaching the PIC
+- [x] Reminders fire before auto-complete; auto-complete fires on schedule; the deadline is in the email body
+- [x] `COMPLETED` and `COMPLETED_NO_RESPONSE` are distinguishable
+- [x] Feedback goes out on every completion and results are queryable
+- [ ] **Deliverability verified against the client's real mail domain**
+
+---
+
 ## Decisions taken during the build
 
 Recorded here because they are not in the phase docs and would otherwise look arbitrary.
@@ -133,6 +207,14 @@ Recorded here because they are not in the phase docs and would otherwise look ar
 10. **`image/svg+xml` is not in the upload allowlist.** An SVG is a script container; one served inline from the storage origin is stored XSS against that origin.
 11. **The tasks table is created in Phase 2, not Phase 3.** `P2-07` has nothing to approve into otherwise. Phase 2 only ever creates rows in `OPEN`; Phase 3 owns the transition machine and the screens.
 12. **`lib/auth/roles.ts` split out of `authorization.ts`.** The latter is `server-only`, but a role selector and a zod schema need the ordering on the client, and a second hand-written copy of the list is how the TS `>=` and the Postgres `>=` drift into disagreeing.
+
+---
+
+13. **`vizserve_pms_tasks.status` is not an updatable column.** RLS lets the PIC update their own task and cannot express "but not that column"; column privileges can. The table-level UPDATE grant is revoked and replaced with per-column grants that omit `status`, so the only path is `vizserve_pms_transition_task`. Without it the whole state machine is one `PATCH` away from irrelevant.
+14. **The board has no drag-and-drop.** A card dragged between columns *is* a status transition, and half of them need a comment or a resolution first — so a drag would either pop a modal, which is worse than a button, or fail silently against the state machine, which is worse still.
+15. **Task attachments use no receipt handshake, unlike request attachments.** The public form needs one because a session-less caller must be *told* which file their earlier upload produced, and anything it is told can be forged. A staff upload is authenticated and the upload *is* the commit — there is no gap for a forged path to live in.
+16. **Q6 answered: business days.** On calendar days a ticket sent Friday 5pm closes Monday 5pm, having given the client roughly one working day. The database computes the deadline the cron enforces; `lib/dates.ts` mirrors it for display and a test asserts the holiday lists agree.
+17. **Q7 answered: accept the forwarding limit, plus a typed name.** Email forwarding defeats email-based identity and no amount of code changes that. A one-time code was rejected — it adds friction to the exact step the gate exists to make frictionless, and should wait for a dispute that actually happens.
 
 ---
 

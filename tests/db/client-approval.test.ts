@@ -521,6 +521,32 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
     });
 
     it.skipIf(!migrationApplied)(
+      "but the SERVICE ROLE can run every function it owns",
+      async () => {
+        // The other half of the previous two assertions, and the one that was
+        // missing. `revoke all ... from public` correctly stops `authenticated`
+        // minting a token — and also removes the implicit grant the service role
+        // was standing on, because Postgres grants EXECUTE to PUBLIC by default
+        // and the P0-06 grants migration set ALTER DEFAULT PRIVILEGES for tables
+        // and sequences but not functions.
+        //
+        // The result was a gate that failed closed: nobody could mint a token,
+        // including the cron. `permission denied for function` is a missing
+        // GRANT, never a failed policy — the same diagnostic as the original
+        // grants incident, in a corner nobody had swept.
+        const admin = adminClient();
+
+        for (const [fn, args] of [
+          ["vizserve_pms_auto_complete_approvals", {}],
+          ["vizserve_pms_claim_approval_reminders", { p_max: 1 }],
+        ] as const) {
+          const { error } = await admin.rpc(fn, args as never);
+          expect(error, `service_role must be able to call ${fn}`).toBeNull();
+        }
+      },
+    );
+
+    it.skipIf(!migrationApplied)(
       "sees only render-safe fields on the approval page",
       async () => {
         const { token } = await taskAwaitingApproval();
