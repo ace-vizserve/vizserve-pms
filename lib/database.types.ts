@@ -445,6 +445,70 @@ export type Database = {
           },
         ];
       };
+      // -----------------------------------------------------------------
+      // P1-09 — attachments.
+      // -----------------------------------------------------------------
+      /** Singleton. Upload ceilings, editable without a deploy. */
+      vizserve_pms_attachment_rules: {
+        Row: {
+          id: boolean;
+          max_bytes: number;
+          max_files_per_form: number;
+          allowed_mime_types: string[];
+        };
+        Insert: {
+          id?: boolean;
+          max_bytes?: number;
+          max_files_per_form?: number;
+          allowed_mime_types?: string[];
+        };
+        Update: Partial<{
+          max_bytes: number;
+          max_files_per_form: number;
+          allowed_mime_types: string[];
+        }>;
+        Relationships: [];
+      };
+      /**
+       * The upload receipt. A row here means the server measured these exact
+       * bytes — it is the only thing `vizserve_pms_submit_request` believes
+       * about a file. Service-role only; no policy, so no rows for anyone else.
+       */
+      vizserve_pms_pending_attachments: {
+        Row: {
+          id: string;
+          form_id: string;
+          field_key: string | null;
+          storage_path: string;
+          filename: string;
+          mime_type: string;
+          size_bytes: number;
+          uploaded_by: string | null;
+          ip: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          form_id: string;
+          field_key?: string | null;
+          storage_path: string;
+          filename: string;
+          mime_type: string;
+          size_bytes: number;
+          uploaded_by?: string | null;
+          ip?: string | null;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_pending_attachments_form_id_fkey";
+            columns: ["form_id"];
+            referencedRelation: "vizserve_pms_forms";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       /** Singleton — tunable at runtime so a flood can be throttled without a deploy. */
       vizserve_pms_public_submission_limits: {
         Row: {
@@ -525,6 +589,14 @@ export type Database = {
       vizserve_pms_next_reference_no: {
         Args: { p_form_id: string };
         Returns: string;
+      };
+      vizserve_pms_redeem_attachments: {
+        Args: { p_request_id: string; p_form_id: string; p_attachments: Json };
+        Returns: number;
+      };
+      vizserve_pms_expire_pending_attachments: {
+        Args: { p_older_than?: string };
+        Returns: { storage_path: string }[];
       };
     };
     Enums: {

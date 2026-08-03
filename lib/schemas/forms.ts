@@ -42,12 +42,28 @@ export const publicFormFieldSchema = z.object({
 
 export type PublicFormField = z.infer<typeof publicFormFieldSchema>;
 
+/**
+ * Upload limits, sent to the renderer so the picker can say "up to 10 MB each"
+ * before someone waits for a 40 MB file to be rejected. Display only — the
+ * server re-reads these against the actual bytes (P1-09).
+ */
+export const attachmentRulesSchema = z.object({
+  max_bytes: z.number().int().positive().default(10 * 1024 * 1024),
+  max_files: z.number().int().positive().default(10),
+  allowed_mime_types: z.array(z.string()).default([]),
+});
+
+export type AttachmentRules = z.infer<typeof attachmentRulesSchema>;
+
 export const publicFormSchema = z.object({
   id: z.uuid(),
   name: z.string(),
   slug: z.string(),
   description: z.string().default(""),
   requires_attachment: z.boolean(),
+  // Nullable so a form read before the P1-09 migration still parses rather than
+  // rendering a not-found page.
+  attachment_rules: attachmentRulesSchema.nullish(),
   fields: z.array(publicFormFieldSchema),
 });
 
@@ -68,9 +84,22 @@ export const requestCoreSchema = z.object({
   target_date: z.string().min(1, "A target date is required."),
 });
 
+/**
+ * A file the server has already accepted (P1-09).
+ *
+ * `id` is the whole security story. It is a receipt for an upload the server
+ * measured itself, and it is the ONLY field `vizserve_pms_submit_request`
+ * believes — filename, type and size are read back from the database, not from
+ * this object.
+ *
+ * The rest of the fields are here so the picker can render "brief.pdf · 2.4 MB"
+ * without a second round trip. Treat them as display data. An earlier version of
+ * this schema carried a client-supplied `storage_path` and no id, which let a
+ * submission attach any object in the bucket, including another request's.
+ */
 export const attachmentRefSchema = z.object({
+  id: z.uuid(),
   field_key: z.string().nullable().optional(),
-  storage_path: z.string().min(1),
   filename: z.string().min(1),
   mime_type: z.string().min(1),
   size_bytes: z.number().int().positive(),
@@ -122,7 +151,7 @@ export function buildFieldSchema(field: PublicFormField): z.ZodTypeAny {
     }
 
     case "file":
-      // Files are uploaded before submit and referenced by storage path, so the
+      // Files are uploaded before submit and referenced by receipt id, so the
       // form value is the reference, not the blob.
       return optionalise(z.array(attachmentRefSchema).min(required ? 1 : 0, requiredMessage));
 

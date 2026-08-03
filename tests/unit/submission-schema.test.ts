@@ -147,7 +147,7 @@ describe("generated per-field validation", () => {
     expect(schema.safeParse({ ...core, field_values: { quantity: "twelve" } }).success).toBe(false);
   });
 
-  it("requires at least one file reference on a required file field", () => {
+  it("requires at least one file receipt on a required file field", () => {
     const schema = buildSubmissionSchema(
       form([field({ field_key: "brief", field_type: "file" })]),
     );
@@ -159,8 +159,8 @@ describe("generated per-field validation", () => {
         field_values: {
           brief: [
             {
+              id: "d1000000-0000-4000-8000-000000000001",
               field_key: "brief",
-              storage_path: "requests/x/brief.pdf",
               filename: "brief.pdf",
               mime_type: "application/pdf",
               size_bytes: 1024,
@@ -169,6 +169,32 @@ describe("generated per-field validation", () => {
         },
       }).success,
     ).toBe(true);
+  });
+
+  it("rejects a file reference with no receipt id", () => {
+    // The id is the whole security story (P1-09): it names an upload the server
+    // measured itself. An earlier shape carried a client-supplied storage_path
+    // and no id, which let a submission attach any object in the bucket —
+    // including another request's.
+    const schema = buildSubmissionSchema(
+      form([field({ field_key: "brief", field_type: "file" })]),
+    );
+
+    expect(
+      schema.safeParse({
+        ...core,
+        field_values: {
+          brief: [
+            {
+              field_key: "brief",
+              filename: "brief.pdf",
+              mime_type: "application/pdf",
+              size_bytes: 1024,
+            },
+          ],
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("regenerates from the form, so a newly required field starts failing", () => {

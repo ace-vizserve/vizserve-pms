@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, Paperclip } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { RequestStatusBadge } from "@/components/status-badge";
+
+import { AttachmentList } from "./attachment-list";
 
 export const metadata: Metadata = { title: "Request" };
 
@@ -64,8 +66,9 @@ export default async function RequestDetailPage({
 
   const { data: attachments } = await supabase
     .from("vizserve_pms_request_attachments")
-    .select("id, filename, size_bytes, field_key")
-    .eq("request_id", id);
+    .select("id, filename, mime_type, size_bytes, field_key")
+    .eq("request_id", id)
+    .order("created_at");
 
   const values = (request.field_values ?? {}) as Record<string, unknown>;
 
@@ -162,21 +165,10 @@ export default async function RequestDetailPage({
 
       <section className="rounded-lg border bg-card p-5 shadow-ring">
         <h2 className="mb-3 text-sm font-semibold">Attachments</h2>
-        {attachments && attachments.length > 0 ? (
-          <ul className="space-y-2">
-            {attachments.map((file) => (
-              <li key={file.id} className="flex items-center gap-2 text-sm">
-                <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
-                <span className="truncate">{file.filename}</span>
-                <span className="text-2xs text-muted-foreground">
-                  {Math.round(file.size_bytes / 1024)} KB
-                </span>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-muted-foreground">None.</p>
-        )}
+        {/* Signed on click, not on render — a URL minted here would sit in the
+            page source and in the browser history whether or not anyone opened
+            the file. */}
+        <AttachmentList attachments={attachments ?? []} />
       </section>
 
       <p className="text-xs text-muted-foreground">

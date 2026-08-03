@@ -16,8 +16,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { buildSubmissionSchema, type PublicForm, type PublicFormField } from "@/lib/schemas/forms";
-import { submitPublicRequest } from "./actions";
+import { FileField } from "@/components/file-field";
+import {
+  buildSubmissionSchema,
+  type AttachmentRef,
+  type PublicForm,
+  type PublicFormField,
+} from "@/lib/schemas/forms";
+import { submitPublicRequest, uploadPublicAttachment } from "./actions";
 
 function FieldShell({
   field,
@@ -73,6 +79,12 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
   const [submitted, setSubmitted] = useState<{ reference_no: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
+  const rules = form.attachment_rules;
+  const maxBytes = rules?.max_bytes;
+  // A filter on the file dialog, not a control. The server checks the actual
+  // bytes; this only spares the client picking something that cannot work.
+  const accept = rules?.allowed_mime_types.length ? rules.allowed_mime_types.join(",") : undefined;
+
   const {
     register,
     control,
@@ -89,7 +101,10 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
       description: "",
       target_date: "",
       field_values: Object.fromEntries(
-        form.fields.map((field) => [field.field_key, field.field_type === "multiselect" ? [] : ""]),
+        form.fields.map((field) => [
+          field.field_key,
+          field.field_type === "multiselect" || field.field_type === "file" ? [] : "",
+        ]),
       ),
     },
   });
@@ -97,10 +112,18 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null);
 
+    // Files are already uploaded and live under their own field keys; the
+    // submission carries the receipts. Flattened here rather than kept in
+    // field_values, because the database stores files in request_attachments and
+    // field_values holds answers.
+    const attachments = form.fields
+      .filter((field) => field.field_type === "file")
+      .flatMap((field) => (values.field_values[field.field_key] as AttachmentRef[] | undefined) ?? []);
+
     const result = await submitPublicRequest({
       slug: form.slug,
       payload: values,
-      attachments: [],
+      attachments,
       honeypot: (document.getElementById("company_website") as HTMLInputElement | null)?.value ?? "",
     });
 
@@ -303,9 +326,22 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
           if (field.field_type === "file") {
             return (
               <FieldShell key={field.id} field={field} error={error}>
-                <div className="rounded-md border border-dashed p-3 text-sm text-muted-foreground">
-                  File upload is not wired yet (P1-09).
-                </div>
+                <Controller
+                  control={control}
+                  name={name as never}
+                  render={({ field: controlled }) => (
+                    <FileField
+                      id={field.field_key}
+                      formId={form.id}
+                      fieldKey={field.field_key}
+                      value={(controlled.value as AttachmentRef[] | undefined) ?? []}
+                      onChange={controlled.onChange}
+                      upload={uploadPublicAttachment}
+                      accept={accept}
+                      maxBytes={maxBytes}
+                    />
+                  )}
+                />
               </FieldShell>
             );
           }

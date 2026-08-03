@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 
 import { createClient } from "@/utils/supabase/server";
+import { uploadPendingAttachment, type UploadResult } from "@/lib/attachments-server";
 import {
   attachmentRefSchema,
   submissionResultSchema,
@@ -64,4 +65,32 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
 
   const result = submissionResultSchema.safeParse(data);
   return result.success ? result.data : { ok: false, error: "validation_failed" };
+}
+
+/**
+ * P1-09 — one file, uploaded before the form is submitted.
+ *
+ * Public and unauthenticated, like the form it serves. Everything that makes
+ * that safe — the size ceiling, the MIME allowlist, the magic-number check, the
+ * per-IP throttle — lives in `uploadPendingAttachment`, because this is the last
+ * point at which the real bytes exist.
+ *
+ * Takes FormData rather than a plain object: a File does not survive being
+ * spread into one.
+ */
+export async function uploadPublicAttachment(formData: FormData): Promise<UploadResult> {
+  const formId = formData.get("form_id");
+  const fieldKey = formData.get("field_key");
+  const file = formData.get("file");
+
+  if (typeof formId !== "string" || !(file instanceof File)) {
+    return { ok: false, error: "Nothing was uploaded." };
+  }
+
+  return uploadPendingAttachment({
+    formId,
+    fieldKey: typeof fieldKey === "string" && fieldKey !== "" ? fieldKey : null,
+    file,
+    uploadedBy: null,
+  });
 }

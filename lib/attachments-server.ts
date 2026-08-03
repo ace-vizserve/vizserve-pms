@@ -1,0 +1,200 @@
+import "server-only";
+
+import { headers } from "next/headers";
+
+import { safeStorageName, sniffMatchesDeclaredType } from "@/lib/attachments";
+import { createAdminClient } from "@/utils/supabase/admin";
+
+/**
+ * P1-09 — the upload half of the two-step handshake.
+ *
+ * Step 1 of the design in 20260803100000_p1_09_attachments.sql: this is the only
+ * code that ever sees the real bytes, so it is the only code that can honestly
+ * measure them. It writes a receipt; the submission redeems the receipt and
+ * believes nothing the payload says about the file.
+ *
+ * Runs with the SERVICE ROLE, because `anon` holds no storage privilege — the
+ * public form is session-less by design. Everything below is therefore checked
+ * here or it is not checked at all.
+ */
+
+export const ATTACHMENT_BUCKET = "request-attachments";
+
+export type UploadResult =
+  | {
+      ok: true;
+      attachment: {
+        id: string;
+        filename: string;
+        mime_type: string;
+        size_bytes: number;
+      };
+    }
+  | { ok: false; error: string };
+
+export type AttachmentRules = {
+  max_bytes: number;
+  max_files_per_form: number;
+  allowed_mime_types: string[];
+};
+
+export async function readAttachmentRules(): Promise<AttachmentRules> {
+  const { data } = await createAdminClient()
+    .from("vizserve_pms_attachment_rules")
+    .select("max_bytes, max_files_per_form, allowed_mime_types")
+    .eq("id", true)
+    .maybeSingle();
+
+  // Defaults matching the migration, so a missing row degrades to restrictive
+  // rather than to unlimited.
+  return (
+    data ?? {
+      max_bytes: 10 * 1024 * 1024,
+      max_files_per_form: 10,
+      allowed_mime_types: ["image/png", "image/jpeg", "application/pdf"],
+    }
+  );
+}
+
+function clientIp(headerList: Headers): string | null {
+  const forwarded = headerList.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0]!.trim();
+  return headerList.get("x-real-ip");
+}
+
+/**
+ * The per-IP ceiling on uploads.
+ *
+ * Separate from the submission rate limit and necessarily so: uploading is what
+ * costs storage, and a bot that never submits never touches the submission
+ * limiter at all. Counted over the pending table, which is exactly the set of
+ * files someone has parked without committing to.
+ */
+const UPLOADS_PER_IP_PER_HOUR = 30;
+
+export async function uploadPendingAttachment(input: {
+  formId: string;
+  fieldKey: string | null;
+  file: File;
+  /** Set for staff uploads; null for the public form, which has no session. */
+  uploadedBy?: string | null;
+}): Promise<UploadResult> {
+  const { formId, fieldKey, file } = input;
+  const admin = createAdminClient();
+  const rules = await readAttachmentRules();
+
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "That file is empty." };
+  }
+
+  // Size first — it is the cheapest check and the one that stops the rest of
+  // this function reading 400 MB into memory to reject it.
+  if (file.size > rules.max_bytes) {
+    return {
+      ok: false,
+      error: `That file is larger than the ${Math.round(rules.max_bytes / 1024 / 1024)} MB limit.`,
+    };
+  }
+
+  const declaredMime = (file.type || "application/octet-stream").toLowerCase();
+
+  if (!rules.allowed_mime_types.includes(declaredMime)) {
+    return { ok: false, error: `${declaredMime} files are not accepted.` };
+  }
+
+  // The form must exist and be open. Without this, a receipt could be minted
+  // against a draft or deleted form and redeemed later.
+  const { data: form } = await admin
+    .from("vizserve_pms_forms")
+    .select("id, is_active, is_public")
+    .eq("id", formId)
+    .maybeSingle();
+
+  if (!form?.is_active || !form.is_public) {
+    return { ok: false, error: "This form is no longer accepting submissions." };
+  }
+
+  const headerList = await headers();
+  const ip = clientIp(headerList);
+
+  if (ip) {
+    const { count } = await admin
+      .from("vizserve_pms_pending_attachments")
+      .select("id", { count: "exact", head: true })
+      .eq("ip", ip)
+      .gte("created_at", new Date(Date.now() - 3_600_000).toISOString());
+
+    if ((count ?? 0) >= UPLOADS_PER_IP_PER_HOUR) {
+      return { ok: false, error: "Too many uploads from here in the last hour." };
+    }
+  }
+
+  // Read only the head. Enough for every signature in the table, and it avoids
+  // pulling the whole file into memory twice.
+  const buffer = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  const sniff = sniffMatchesDeclaredType(buffer, declaredMime);
+
+  if (!sniff.ok) {
+    return { ok: false, error: sniff.reason };
+  }
+
+  // A UUID directory, not a UUID filename: the original name survives for the
+  // download, and two clients sending "brief.pdf" cannot collide.
+  const storagePath = `pending/${formId}/${crypto.randomUUID()}/${safeStorageName(file.name)}`;
+
+  const { error: uploadError } = await admin.storage
+    .from(ATTACHMENT_BUCKET)
+    .upload(storagePath, file, {
+      contentType: declaredMime,
+      // Never overwrite. A collision here would mean the UUID repeated, which
+      // is worth failing loudly over rather than silently replacing a file.
+      upsert: false,
+    });
+
+  if (uploadError) {
+    return { ok: false, error: "The upload did not complete. Please try again." };
+  }
+
+  const { data: pending, error: receiptError } = await admin
+    .from("vizserve_pms_pending_attachments")
+    .insert({
+      form_id: formId,
+      field_key: fieldKey,
+      storage_path: storagePath,
+      // file.size, not a client-supplied number.
+      filename: file.name.slice(0, 200),
+      mime_type: declaredMime,
+      size_bytes: file.size,
+      uploaded_by: input.uploadedBy ?? null,
+      ip,
+    })
+    .select("id, filename, mime_type, size_bytes")
+    .single();
+
+  if (receiptError || !pending) {
+    // No receipt means the object is unreachable — nothing can redeem it. Remove
+    // it now rather than leaving the sweeper to find it in a day.
+    await admin.storage.from(ATTACHMENT_BUCKET).remove([storagePath]);
+    return { ok: false, error: "The upload could not be recorded. Please try again." };
+  }
+
+  return { ok: true, attachment: pending };
+}
+
+/**
+ * A short-lived signed URL for a stored attachment.
+ *
+ * The bucket is private and `authenticated` holds no storage policy, so this is
+ * the only way staff reach a file — and the scope check happens at the call
+ * site, before this is reached.
+ */
+export async function signAttachmentUrl(
+  storagePath: string,
+  expiresInSeconds = 60,
+): Promise<string | null> {
+  const { data } = await createAdminClient()
+    .storage.from(ATTACHMENT_BUCKET)
+    .createSignedUrl(storagePath, expiresInSeconds);
+
+  return data?.signedUrl ?? null;
+}
