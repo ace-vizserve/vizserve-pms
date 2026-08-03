@@ -8,6 +8,10 @@
     {
       "path": "/api/cron/sweep-attachments",
       "schedule": "0 3 * * *"
+    },
+    {
+      "path": "/api/cron/client-approvals",
+      "schedule": "0 * * * *"
     }
   ]
 }

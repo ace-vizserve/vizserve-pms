@@ -31,6 +31,17 @@ export type VizservePmsFieldType =
 export type VizservePmsApprovalDecision = "approved" | "returned" | "rejected";
 
 /**
+ * A client's answer at Gate 3.
+ *
+ * AUTO_COMPLETED is deliberately in the same enum and deliberately never called
+ * "approved". "The client approved" and "nobody answered and the clock ran out"
+ * are different facts, and if a dispute happens the record has to show which.
+ */
+export type VizservePmsClientDecision = "APPROVED" | "REVISION_REQUESTED" | "AUTO_COMPLETED";
+
+export type VizservePmsTokenPurpose = "approval" | "feedback";
+
+/**
  * The canonical task status set (docs/01 §3), in the corrected order.
  *
  * COMPLETED is terminal and comes AFTER the client signs off — the Miro board
@@ -252,6 +263,9 @@ export type Database = {
           is_active: boolean;
           requires_attachment: boolean;
           sla_days: number;
+          /** Business days the client gets at Gate 3 before auto-completion. */
+          client_approval_days: number;
+          default_list_id: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -281,6 +295,8 @@ export type Database = {
           is_active: boolean;
           requires_attachment: boolean;
           sla_days: number;
+          client_approval_days: number;
+          default_list_id: string | null;
         }>;
         Relationships: [
           {
@@ -655,6 +671,91 @@ export type Database = {
           },
         ];
       };
+      // -----------------------------------------------------------------
+      // P4 — Gate 3.
+      // -----------------------------------------------------------------
+      /**
+       * Only the HASH is stored. The raw token exists exactly once, in the
+       * email that was sent — a dump of this table yields nothing replayable.
+       * `token_hash` is deliberately absent from Row: nothing in the app has
+       * any reason to read it.
+       */
+      vizserve_pms_approval_tokens: {
+        Row: {
+          id: string;
+          task_id: string;
+          purpose: "approval" | "feedback";
+          requester_email: string;
+          expires_at: string;
+          auto_complete_at: string | null;
+          consumed_at: string | null;
+          reminded_at: string | null;
+          reminder_count: number;
+          created_at: string;
+        };
+        // Issued and consumed by functions only.
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_approval_tokens_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      vizserve_pms_client_decisions: {
+        Row: {
+          id: string;
+          task_id: string;
+          token_id: string | null;
+          decision: VizservePmsClientDecision;
+          comment: string | null;
+          approver_name: string | null;
+          ip: string | null;
+          user_agent: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_client_decisions_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      vizserve_pms_feedback: {
+        Row: {
+          id: string;
+          task_id: string;
+          request_id: string | null;
+          token_id: string | null;
+          rating: number;
+          comment: string | null;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_feedback_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      /** Mirrored in lib/dates.ts PH_HOLIDAYS; a test asserts they agree. */
+      vizserve_pms_holidays: {
+        Row: { holiday_date: string; name: string; created_at: string };
+        Insert: { holiday_date: string; name: string };
+        Update: Partial<{ name: string }>;
+        Relationships: [];
+      };
       /** The legal-transition table as data. Mirrored in lib/schemas/tasks.ts. */
       vizserve_pms_task_transitions: {
         Row: {
@@ -903,6 +1004,50 @@ export type Database = {
         Args: { p_task_id: string };
         Returns: string;
       };
+      vizserve_pms_add_business_days: {
+        Args: { p_from: string; p_days: number };
+        Returns: string;
+      };
+      /** Returns the RAW token once. Service role only — never to a browser. */
+      vizserve_pms_issue_approval_token: {
+        Args: { p_task_id: string; p_purpose?: VizservePmsTokenPurpose };
+        Returns: Json;
+      };
+      vizserve_pms_get_approval_page: {
+        Args: { p_token: string };
+        Returns: Json;
+      };
+      vizserve_pms_record_client_decision: {
+        Args: {
+          p_token: string;
+          p_decision: VizservePmsClientDecision;
+          p_comment?: string | null;
+          p_approver_name?: string | null;
+          p_ip?: string | null;
+          p_user_agent?: string | null;
+        };
+        Returns: Json;
+      };
+      vizserve_pms_auto_complete_approvals: {
+        Args: Record<PropertyKey, never>;
+        Returns: { task_id: string; reference_no: string | null; requester_email: string | null }[];
+      };
+      vizserve_pms_claim_approval_reminders: {
+        Args: { p_max?: number };
+        Returns: {
+          task_id: string;
+          reference_no: string | null;
+          requester_email: string | null;
+          requester_name: string | null;
+          title: string;
+          auto_complete_at: string;
+          reminder_number: number;
+        }[];
+      };
+      vizserve_pms_submit_feedback: {
+        Args: { p_token: string; p_rating: number; p_comment?: string | null };
+        Returns: Json;
+      };
     };
     Enums: {
       vizserve_pms_user_role: VizservePmsUserRole;
@@ -911,6 +1056,8 @@ export type Database = {
       vizserve_pms_request_status: VizservePmsRequestStatus;
       vizserve_pms_approval_decision: VizservePmsApprovalDecision;
       vizserve_pms_task_status: VizservePmsTaskStatus;
+      vizserve_pms_client_decision: VizservePmsClientDecision;
+      vizserve_pms_token_purpose: VizservePmsTokenPurpose;
     };
     CompositeTypes: Record<never, never>;
   };

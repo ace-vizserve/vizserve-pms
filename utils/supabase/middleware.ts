@@ -3,12 +3,23 @@ import { NextResponse, type NextRequest } from "next/server";
 
 import type { Database } from "@/lib/database.types";
 
-/** Paths reachable with no session at all. */
+/**
+ * Paths reachable with no session at all.
+ *
+ * Every one of these is a deliberate hole, and each authenticates by some other
+ * means — a token in the URL, or a bearer secret. Adding one is a decision.
+ */
 const PUBLIC_PREFIXES = [
   "/login",
   "/auth",
   "/f/", // public client forms (P1-06) — no login, by design
-  "/approve/", // client approval page (Phase 4) — token-authenticated, no session
+  "/approve/", // client approval page (P4-04) — token-authenticated
+  "/feedback/", // client feedback page (P4-10) — same token machinery
+  // Cron routes carry `Authorization: Bearer $CRON_SECRET` and no cookie.
+  // Without this they redirect to /login, and Vercel's scheduler would follow
+  // the 307 and report a cheerful 200 — so the jobs would silently never run.
+  // Each route re-checks the secret itself and 404s without it.
+  "/api/cron/",
 ];
 
 function isPublicPath(pathname: string) {

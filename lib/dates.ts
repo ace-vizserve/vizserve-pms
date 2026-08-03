@@ -124,3 +124,95 @@ export function addDays(value: string, days: number): string | null {
   date.setUTCDate(date.getUTCDate() + days);
   return date.toISOString().slice(0, 10);
 }
+
+// ---------------------------------------------------------------------------
+// Business days (Phase 4, Q6)
+// ---------------------------------------------------------------------------
+
+/**
+ * Philippine regular holidays, as a mirror of `vizserve_pms_holidays`.
+ *
+ * The DATABASE IS THE AUTHORITY — `vizserve_pms_add_business_days` computes the
+ * deadline that actually governs auto-completion, and it reads the table. This
+ * copy exists so a screen can say "closes on Thursday" without a round trip.
+ *
+ * Movable holidays (Eid, and any special non-working days) are proclaimed
+ * annually and are not derivable, which is why this is a list rather than an
+ * algorithm. When a new year is proclaimed, both this and the table need it —
+ * `tests/db/client-approval.test.ts` asserts they agree, so forgetting one
+ * fails a test rather than quietly closing tickets a day early.
+ */
+export const PH_HOLIDAYS: readonly string[] = [
+  "2026-01-01",
+  "2026-04-02",
+  "2026-04-03",
+  "2026-04-09",
+  "2026-05-01",
+  "2026-06-12",
+  "2026-08-31",
+  "2026-11-30",
+  "2026-12-25",
+  "2026-12-30",
+];
+
+const HOLIDAY_SET = new Set(PH_HOLIDAYS);
+
+/** Is this a working day in Manila? Weekends and regular holidays are not. */
+export function isBusinessDay(value: string): boolean {
+  const date = parseDateOnly(value);
+  if (!date) return false;
+
+  const day = date.getUTCDay();
+  if (day === 0 || day === 6) return false;
+
+  return !HOLIDAY_SET.has(value);
+}
+
+/**
+ * Adds business days to a `YYYY-MM-DD`, skipping weekends and holidays.
+ *
+ * Q6, decided the way docs/08 recommends. A ticket sent Friday 5pm
+ * auto-completes Monday 5pm on calendar days, having given the client roughly
+ * one working day — which is the version of this feature that produces the
+ * angry phone call.
+ *
+ * Bounded rather than `while (true)`: a corrupted holiday table should not spin
+ * a request handler forever. Six weeks of consecutive holidays does not happen,
+ * so hitting the cap means something is wrong and returning null says so.
+ */
+export function addBusinessDays(value: string, days: number): string | null {
+  let cursor = value;
+  let added = 0;
+  let guard = 0;
+
+  while (added < days) {
+    if (guard++ > 400) return null;
+
+    const next = addDays(cursor, 1);
+    if (!next) return null;
+    cursor = next;
+
+    if (isBusinessDay(cursor)) added += 1;
+  }
+
+  return cursor;
+}
+
+/**
+ * "in 2 days", "tomorrow", "today", "3 days ago".
+ *
+ * For the approval email and the client page, where an absolute date alone
+ * ("closes 7 Aug") makes a reader work out whether that is soon.
+ */
+export function relativeDays(target: string | null | undefined): string {
+  if (!target) return "—";
+
+  const days = daysBetween(todayInAppZone(), target);
+  if (days === null) return "—";
+
+  if (days === 0) return "today";
+  if (days === 1) return "tomorrow";
+  if (days === -1) return "yesterday";
+  if (days > 1) return `in ${days} days`;
+  return `${Math.abs(days)} days ago`;
+}

@@ -86,3 +86,138 @@ export function sendRequestRejectedEmail(input: DecisionEmailInput): Promise<Sen
 function firstName(fullName: string): string {
   return fullName.trim().split(/\s+/)[0] || "there";
 }
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Gate 3
+// ---------------------------------------------------------------------------
+
+type ApprovalEmailInput = {
+  to: string;
+  requesterName: string;
+  referenceNo: string;
+  title: string;
+  resolution: string;
+  outputLink: string | null;
+  attachmentCount: number;
+  /** Human date the request closes itself, e.g. "7 Aug 2026". */
+  deadline: string;
+  token: string;
+};
+
+/**
+ * P4-03 — the email the whole build rests on.
+ *
+ * If this lands in spam, Phase 4 does not work: the client never sees it, three
+ * days pass, and a ticket closes itself with nobody having looked. That is why
+ * P4-14 deliverability testing starts at the beginning of this phase rather than
+ * the end, and why the plain-text part in the shared layout is not decoration.
+ *
+ * THE DEADLINE IS IN THE BODY, PROMINENTLY — Amier at 54:00, and the first of
+ * the three mitigations in docs/08 for the auto-complete rule. Not a footer. A
+ * client who is told plainly has no grounds to be surprised; one who has to find
+ * it in small print does.
+ */
+export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<SendOutcome> {
+  const outputs: string[] = [];
+  if (input.outputLink) outputs.push(input.outputLink);
+  if (input.attachmentCount > 0) {
+    outputs.push(
+      `${input.attachmentCount} file${input.attachmentCount === 1 ? "" : "s"} on the approval page`,
+    );
+  }
+
+  return sendEmail({
+    to: input.to,
+    subject: `${input.referenceNo} — ready for your approval`,
+    body: {
+      preheader: `${input.title} — please review by ${input.deadline}.`,
+      heading: "Your request is ready for approval",
+      paragraphs: [
+        `Hi ${firstName(input.requesterName)},`,
+        `"${input.title}" is done and waiting for you to look at it. The page below shows what was produced alongside what you originally asked for, so you can check it against your own brief.`,
+      ],
+      facts: [
+        { label: "Reference", value: input.referenceNo },
+        { label: "Please respond by", value: input.deadline },
+        ...(outputs.length > 0 ? [{ label: "Output", value: outputs.join(" · ") }] : []),
+      ],
+      quote: input.resolution ? { label: "What was done", text: input.resolution } : undefined,
+      button: { label: "Review and approve", path: `/approve/${input.token}` },
+      // Stated a second time, in the sentence right under the button, because
+      // this is the line a dispute turns on.
+      footnote: `If we do not hear from you by ${input.deadline}, this request will be closed as completed without a response. You can approve or ask for changes any time before then.`,
+    },
+  });
+}
+
+/**
+ * P4-08 — the reminders. NOT OPTIONAL.
+ *
+ * "A single email that lands in spam should not silently close a ticket."
+ * Two of them, restating the deadline, before anything closes itself.
+ */
+export function sendApprovalReminderEmail(
+  input: Omit<ApprovalEmailInput, "resolution" | "outputLink" | "attachmentCount"> & {
+    reminderNumber: number;
+  },
+): Promise<SendOutcome> {
+  const last = input.reminderNumber >= 2;
+
+  return sendEmail({
+    to: input.to,
+    subject: last
+      ? `${input.referenceNo} — closing soon, last reminder`
+      : `${input.referenceNo} — still waiting for your approval`,
+    body: {
+      preheader: `${input.title} — closes ${input.deadline}.`,
+      heading: last ? "Last reminder before this closes" : "Still waiting for your approval",
+      paragraphs: [
+        `Hi ${firstName(input.requesterName)},`,
+        `We sent "${input.title}" for your approval and have not heard back yet.`,
+        last
+          ? "This is the last reminder we will send. If we do not hear from you, it will be closed as completed."
+          : "If it is fine as it is, one click approves it. If something needs changing, tell us on the same page.",
+      ],
+      facts: [
+        { label: "Reference", value: input.referenceNo },
+        { label: "Closes on", value: input.deadline },
+      ],
+      button: { label: "Review and approve", path: `/approve/${input.token}` },
+      footnote: `If we do not hear from you by ${input.deadline}, this request will be closed as completed without a response.`,
+    },
+  });
+}
+
+/**
+ * P4-10 — the feedback request.
+ *
+ * Sent on EVERY completion, including an auto-completed one. A client who never
+ * answered is exactly the client worth hearing from — silence is data, and this
+ * is the cheapest way to find out whether it meant "fine" or "I never saw it".
+ */
+export function sendFeedbackRequestEmail(input: {
+  to: string;
+  requesterName: string;
+  referenceNo: string;
+  title: string;
+  token: string;
+  autoCompleted: boolean;
+}): Promise<SendOutcome> {
+  return sendEmail({
+    to: input.to,
+    subject: `${input.referenceNo} — how did we do?`,
+    body: {
+      preheader: "One question, takes a few seconds.",
+      heading: "How did we do?",
+      paragraphs: [
+        `Hi ${firstName(input.requesterName)},`,
+        input.autoCompleted
+          ? `"${input.title}" was closed as completed after the approval window passed. If that was not what you expected, please say so below — it is the fastest way to reach us.`
+          : `"${input.title}" is complete. If you have a moment, tell us how it went.`,
+      ],
+      facts: [{ label: "Reference", value: input.referenceNo }],
+      button: { label: "Leave feedback", path: `/feedback/${input.token}` },
+      footnote: "One rating and an optional comment. Nothing else.",
+    },
+  });
+}

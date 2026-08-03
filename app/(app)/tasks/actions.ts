@@ -9,6 +9,7 @@ import {
   signAttachmentUrl,
   uploadTaskAttachment,
 } from "@/lib/attachments-server";
+import { issueAndSendApproval } from "@/lib/client-approval-server";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
 import {
   createTaskSchema,
@@ -85,13 +86,37 @@ export async function transitionTask(
 
   if (error) return { ok: false, error: readableError(error) };
 
+  const status = (data as { status: string }).status;
+
+  // P4-02 — Gate 3 opens here. Passing QA is what sends the client their link,
+  // so token issuance hangs off the transition rather than off a button
+  // somebody has to remember to press.
+  //
+  // Awaited, unlike the notification drain: if the email fails the QA reviewer
+  // should be told now, while they are looking at the screen, rather than three
+  // days later when the task auto-completes without the client ever hearing.
+  if (status === "FOR_CLIENT_APPROVAL") {
+    const issued = await issueAndSendApproval(taskId);
+
+    if (!issued.ok) {
+      // The task HAS moved — the transition committed. Say so plainly rather
+      // than implying nothing happened.
+      refresh(taskId);
+      return {
+        ok: false,
+        error:
+          "QA passed, but the client could not be emailed. The task is waiting for client approval with no link sent — tell a team leader.",
+      };
+    }
+  }
+
   // FOR_QA and a QA send-back both write notification rows inside the
   // transaction. Draining is outside it — an email failure must not undo a
   // status change somebody has already been told about on screen.
   dispatchPendingEmailsInBackground();
 
   refresh(taskId);
-  return { ok: true, data: { status: (data as { status: string }).status } };
+  return { ok: true, data: { status } };
 }
 
 /**
