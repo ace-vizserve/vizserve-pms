@@ -10,23 +10,18 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 
 | Phase | State |
 |---|---|
-| **0 — Foundation** | Code complete. Two exit criteria need a human: a real Entra sign-in, and a test email confirmed in an inbox |
-| **1 — Forms** | Code complete, including attachments. **Migration pending application** |
-| **2 — Approval Engine + Gate 1** | Code complete. **Migration pending application** |
+| **0 — Foundation** | Done, bar two things only a human can do: a real Entra sign-in, and a test email confirmed in an inbox |
+| **1 — Forms** | **Done.** All exit criteria asserted and green |
+| **2 — Approval Engine + Gate 1** | **Done.** All exit criteria asserted and green |
 | **3–6** | Not started |
 
-### ⚠️ Two migrations are written but not applied
+`npm run verify` is green: **158 tests, 0 failures**, of which 72 run against a live database as genuinely signed-in users.
 
-```
-supabase/migrations/20260803100000_p1_09_attachments.sql
-supabase/migrations/20260803110000_p2_00_approval_engine.sql
-```
+### Applying migrations
 
-The Supabase CLI is not linked to this project and no database password is available in the environment, so `npm run db:push` cannot run. Apply them **in that order** through the dashboard SQL editor, the same way `seed-dev.sql` is applied.
+The Supabase CLI is not linked to this project and no database password is in the environment, so `npm run db:push` does not work here. Migrations are applied by pasting them into the dashboard SQL editor, in filename order, the same way `seed-dev.sql` is.
 
-Until then, 31 tests **skip with a printed reason** rather than failing — `tests/db/attachments.test.ts` and `tests/db/approval-engine.test.ts` both detect the missing tables and say so. A skipped security suite reporting green is the failure mode that matters here, so they announce themselves.
-
-**Phases 3–6 all extend `vizserve_pms_tasks`, which the Phase 2 migration creates.** Apply and verify before building on it.
+Every db suite **detects whether its migration has been applied** and skips with a printed reason rather than failing — a wall of red from an unapplied migration teaches you to ignore red. The detection is a top-level `await`, not a `beforeAll`: `it.skipIf(...)` is evaluated when vitest collects the file, so a flag set in a hook is still `false` at every skip decision, and the whole suite skips silently even once the migration is in. That went wrong once already.
 
 ---
 
@@ -71,7 +66,7 @@ Until then, 31 tests **skip with a printed reason** rather than failing — `tes
 | P1-06 | Public form page | ✅ `/f/[slug]`, no session |
 | P1-07 | Submission endpoint | ✅ `SECURITY DEFINER`, server-side validation, structured field errors |
 | P1-08 | Requester identity capture | ✅ Email mandatory, not staff-editable |
-| P1-09 | Attachment upload | ✅ Two-step receipt handshake — see below. ⚠️ **migration pending** |
+| P1-09 | Attachment upload | ✅ Two-step receipt handshake — see below |
 | P1-10 | Reference numbers | ✅ `COL-2026-0142`, gapless per form per year |
 | P1-11 | SLA timer | ✅ `sla_started_at` set on submission. Nothing consumes it yet |
 | P1-12 | TL notification | ✅ Notification row **and** email, now that P0-11 is wired |
@@ -87,6 +82,7 @@ Until then, 31 tests **skip with a printed reason** rather than failing — `tes
 - [x] A complete submission creates a request, gets a reference number, starts the SLA timer
 - [x] The request appears in exactly one TL queue — asserted at the API layer
 - [ ] Two placeholder forms exist *(one seeded; the builder path is still unproven)*
+- [x] Two forms cannot mint the same reference number — `P1-10` collision, found and fixed
 - [x] Rate limiting demonstrably blocks a flood — asserted for both the IP and email ceilings
 - [x] A field can be renamed without breaking existing requests; a field with data cannot be hard-deleted
 
@@ -107,17 +103,17 @@ Until then, 31 tests **skip with a printed reason** rather than failing — `tes
 | P2-10 | Pending approvals queue | ✅ `/requests?status=PENDING_REVIEW`, sorted by target date, overdue distinct |
 | P2-11 | Dashboard shortcut | ✅ Already linked there |
 | P2-12 | Notifications | ✅ PIC on assignment, QA at assignment time, requester emailed on any decision |
-| P2-13 | Authorization tests | ✅ Written, skipping until the migration is applied |
+| P2-13 | Authorization tests | ✅ Green |
 
-### Exit criteria — all written, all pending the migration
+### Exit criteria — all green
 
-- [ ] The engine is generic — a throwaway second request type routes through it without engine changes
-- [ ] The capacity panel shows live per-assignee load on the review screen
-- [ ] Approving with an adjusted date stores both dates and creates a task due on the adjusted one
-- [ ] Return and reject refuse to submit without a reason; the reason reaches the requester
-- [ ] Approval is atomic — a forced mid-transaction failure leaves no partial state
-- [ ] PIC and QA are both set and both notified
-- [ ] Cross-department authorization tests green
+- [x] The engine is generic — a throwaway `rehearsal_widget` routes through it end to end, gets audited, and inherits the reason rule and department scope, with no engine change
+- [x] The capacity panel shows live per-assignee load on the review screen
+- [x] Approving with an adjusted date stores both dates and creates a task due on the adjusted one
+- [x] Return and reject refuse to submit without a reason; the reason reaches the requester
+- [x] Approval is atomic — asserted by forcing a failure at the LAST check, after the engine has written an approval row and the status update would have run
+- [x] PIC and QA are both set and both notified
+- [x] Cross-department authorization tests green
 
 ---
 
@@ -154,7 +150,6 @@ Fixed by `20260729110000_p0_06_grants.sql`, which grants explicitly and sets `AL
 
 ## Known gaps and traps
 
-- **Two migrations are unapplied.** See the top of this document. Everything else here assumes they land.
 - **Entra SSO is untested.** The code path exists; no Entra tenant has been pointed at it, and identity linking is a **project setting**, not something a migration can enforce.
 - **Nobody has confirmed an email arriving.** `EMAIL_TEST_RECIPIENT=you@… npm run email:test` sends one through the real template. P4-14 repeats it against a client-domain address early in Phase 4 — that is the one item where a late failure has no workaround.
 - **`lib/database.types.ts` is hand-written**, not generated. It has now drifted-and-been-corrected twice (the P1-15 tables, then the P1-09 and P2 tables), each time caught by `tsc` rather than at runtime. Regenerate with `npm run db:types` once Docker is available and treat the generated file as authoritative.
@@ -169,6 +164,18 @@ Fixed by `20260729110000_p0_06_grants.sql`, which grants explicitly and sets `AL
 
 ## Recommended next step
 
-**Apply the two pending migrations, then run `npm run test`.**
+**Phase 3 — Tasks and Internal QA.** The largest phase in the set, with a
+pre-planned split: 3a is lists, the task list and detail views, the status
+machine, the resolution gate and manual tasks; 3b is the QA screens, QA
+pass/reject, the board view and `WAITING_FOR_INFO` reporting.
 
-Phase 2's seven exit criteria are all written as assertions and none of them have been allowed to run. Phase 3 extends `vizserve_pms_tasks`, which those migrations create — so any error in them propagates into every later migration, and the further the build goes the more expensive that is to unpick.
+3a alone is a usable increment. A half-finished Phase 3 is not, and it is the
+worst place in the plan to stall, since Phase 4 depends on it entirely.
+
+Two things still need a human and neither blocks Phase 3:
+
+- **Point an Entra tenant at the login and sign in once.** Identity linking is a
+  project setting, not something a migration can enforce.
+- **`EMAIL_TEST_RECIPIENT=you@… npm run email:test`**, then check it landed in an
+  inbox rather than spam. P4-14 repeats this against a client-domain address —
+  deliverability is the one item where a late failure has no workaround.
