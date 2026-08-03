@@ -9,6 +9,7 @@ import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { RequestStatusBadge } from "@/components/status-badge";
 
 import { AttachmentList } from "./attachment-list";
+import { ReviewPanel } from "./review-panel";
 
 export const metadata: Metadata = { title: "Request" };
 
@@ -35,7 +36,7 @@ export default async function RequestDetailPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  await requireRole("team_leader");
+  const context = await requireRole("team_leader");
   const supabase = await createClient();
 
   // Out of scope returns no row under RLS, which surfaces as 404 rather than a
@@ -52,9 +53,41 @@ export default async function RequestDetailPage({
 
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, name, sla_days")
+    .select("id, name, sla_days, department_id")
     .eq("id", request.form_id)
     .maybeSingle();
+
+  // Gate 1 is offered only while there is a decision left to make. A disabled
+  // Approve on an already-decided request invites someone to wire around it.
+  const awaitingDecision = request.status === "PENDING_REVIEW";
+
+  // Loaded only when the panel will render — the capacity query is a scan over
+  // the department's open tasks and there is no reason to pay for it on a
+  // request that was decided last week.
+  const [candidates, capacity, decisions] = awaitingDecision
+    ? await Promise.all([
+        supabase
+          .from("vizserve_pms_users")
+          .select("id, full_name, role")
+          .eq("primary_department_id", form?.department_id ?? "")
+          .eq("is_active", true)
+          .order("full_name"),
+        supabase.rpc("vizserve_pms_department_capacity", {
+          p_department_id: form?.department_id ?? "",
+          p_target_date: request.target_date,
+        }),
+        Promise.resolve({ data: null }),
+      ])
+    : [
+        { data: null },
+        { data: null },
+        await supabase
+          .from("vizserve_pms_approvals")
+          .select("decision, reason, created_at, approver_id")
+          .eq("entity_type", "request")
+          .eq("entity_id", id)
+          .order("created_at", { ascending: false }),
+      ];
 
   // Includes archived fields: a historical answer must keep rendering with its
   // label even after the field is retired from the live form (D20/R5).
@@ -171,9 +204,36 @@ export default async function RequestDetailPage({
         <AttachmentList attachments={attachments ?? []} />
       </section>
 
-      <p className="text-xs text-muted-foreground">
-        Approve, return and reject arrive in Phase 2, together with the assignee capacity panel.
-      </p>
+      {awaitingDecision ? (
+        <ReviewPanel
+          requestId={request.id}
+          requestTitle={request.title}
+          requestDescription={request.description}
+          targetDate={request.target_date}
+          candidates={candidates.data ?? []}
+          capacity={capacity.data ?? []}
+          currentUserId={context.userId}
+          currentUserName={context.fullName}
+        />
+      ) : decisions?.data && decisions.data.length > 0 ? (
+        <section className="rounded-lg border bg-card p-5 shadow-ring">
+          <h2 className="mb-3 text-sm font-semibold">Decision</h2>
+          {decisions.data.map((decision) => (
+            <div key={decision.created_at} className="space-y-1">
+              <p className="text-sm">
+                {/* Never colour alone — the word carries the state. */}
+                <span className="font-medium capitalize">{decision.decision}</span>
+                <span className="text-muted-foreground"> · {formatDateTime(decision.created_at)}</span>
+              </p>
+              {decision.reason ? (
+                <p className="whitespace-pre-wrap rounded-sm bg-muted/50 px-3 py-2 text-sm">
+                  {decision.reason}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </section>
+      ) : null}
     </div>
   );
 }

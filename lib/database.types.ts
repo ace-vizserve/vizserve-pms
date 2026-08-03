@@ -28,6 +28,26 @@ export type VizservePmsFieldType =
   | "email"
   | "number";
 
+export type VizservePmsApprovalDecision = "approved" | "returned" | "rejected";
+
+/**
+ * The canonical task status set (docs/01 §3), in the corrected order.
+ *
+ * COMPLETED is terminal and comes AFTER the client signs off — the Miro board
+ * had Testing/QA → Completed → Submit for Final Approval, and Amier corrected
+ * himself live. COMPLETED_NO_RESPONSE is deliberately distinct: "the client
+ * approved" and "the clock ran out" are different facts.
+ */
+export type VizservePmsTaskStatus =
+  | "OPEN"
+  | "ONGOING"
+  | "WAITING_FOR_INFO"
+  | "FOR_QA"
+  | "QA_IN_PROGRESS"
+  | "FOR_CLIENT_APPROVAL"
+  | "COMPLETED"
+  | "COMPLETED_NO_RESPONSE";
+
 export type VizservePmsRequestStatus =
   | "DRAFT"
   | "SUBMITTED"
@@ -446,6 +466,82 @@ export type Database = {
         ];
       };
       // -----------------------------------------------------------------
+      // P2-00 — the generic approval engine.
+      //
+      // entity_type is a plain discriminator with no FK on purpose: Phase 5
+      // adds 'leave_request' and 'dtr_correction' without touching this table.
+      // -----------------------------------------------------------------
+      vizserve_pms_approvals: {
+        Row: {
+          id: string;
+          entity_type: string;
+          entity_id: string;
+          department_id: string | null;
+          approver_id: string;
+          decision: VizservePmsApprovalDecision;
+          reason: string | null;
+          created_at: string;
+        };
+        // No insert or update from the app: rows arrive only through
+        // vizserve_pms_record_decision, so a decision cannot be forged.
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_approvals_approver_id_fkey";
+            columns: ["approver_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      vizserve_pms_tasks: {
+        Row: {
+          id: string;
+          request_id: string | null;
+          department_id: string;
+          title: string;
+          description: string;
+          status: VizservePmsTaskStatus;
+          assignee_id: string | null;
+          qa_assignee_id: string | null;
+          due_date: string | null;
+          field_values: Json;
+          resolution: string | null;
+          output_link: string | null;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        // Phase 2 creates tasks only inside the approval transaction. Phase 3
+        // adds manual creation (P3-12) and widens this.
+        Insert: never;
+        Update: Partial<{
+          title: string;
+          description: string;
+          status: VizservePmsTaskStatus;
+          assignee_id: string | null;
+          qa_assignee_id: string | null;
+          due_date: string | null;
+          resolution: string | null;
+          output_link: string | null;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_tasks_request_id_fkey";
+            columns: ["request_id"];
+            referencedRelation: "vizserve_pms_requests";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_tasks_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      // -----------------------------------------------------------------
       // P1-09 — attachments.
       // -----------------------------------------------------------------
       /** Singleton. Upload ceilings, editable without a deploy. */
@@ -598,12 +694,67 @@ export type Database = {
         Args: { p_older_than?: string };
         Returns: { storage_path: string }[];
       };
+      vizserve_pms_can_approve: {
+        Args: { p_department_id: string };
+        Returns: boolean;
+      };
+      vizserve_pms_record_decision: {
+        Args: {
+          p_entity_type: string;
+          p_entity_id: string;
+          p_department_id: string | null;
+          p_decision: VizservePmsApprovalDecision;
+          p_reason?: string | null;
+        };
+        Returns: string;
+      };
+      vizserve_pms_approvable_department_ids: {
+        Args: Record<PropertyKey, never>;
+        Returns: string[];
+      };
+      vizserve_pms_manages_department_for: {
+        Args: { p_user_id: string; p_department_id: string };
+        Returns: boolean;
+      };
+      vizserve_pms_department_capacity: {
+        Args: { p_department_id: string; p_target_date?: string | null };
+        Returns: {
+          user_id: string;
+          full_name: string;
+          role: VizservePmsUserRole;
+          open_count: number;
+          due_before: number;
+          overdue_count: number;
+          next_due_dates: string[];
+        }[];
+      };
+      vizserve_pms_approve_request: {
+        Args: {
+          p_request_id: string;
+          p_assignee_id: string;
+          p_qa_assignee_id: string | null;
+          p_approved_target_date?: string | null;
+          p_title?: string | null;
+          p_description?: string | null;
+        };
+        Returns: Json;
+      };
+      vizserve_pms_decide_request: {
+        Args: {
+          p_request_id: string;
+          p_decision: VizservePmsApprovalDecision;
+          p_reason: string;
+        };
+        Returns: Json;
+      };
     };
     Enums: {
       vizserve_pms_user_role: VizservePmsUserRole;
       vizserve_pms_notification_type: VizservePmsNotificationType;
       vizserve_pms_field_type: VizservePmsFieldType;
       vizserve_pms_request_status: VizservePmsRequestStatus;
+      vizserve_pms_approval_decision: VizservePmsApprovalDecision;
+      vizserve_pms_task_status: VizservePmsTaskStatus;
     };
     CompositeTypes: Record<never, never>;
   };
