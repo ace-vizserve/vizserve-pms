@@ -4,6 +4,11 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireAuthContextOrThrow, requireRole } from "@/lib/auth/authorization";
+import {
+  removeStoredAttachments,
+  signAttachmentUrl,
+  uploadTaskAttachment,
+} from "@/lib/attachments-server";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
 import {
   createTaskSchema,
@@ -280,6 +285,116 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
   refresh();
 
   return { ok: true, data: { taskId: (data as { task_id: string }).task_id } };
+}
+
+// ---------------------------------------------------------------------------
+// P3-13 — task attachments
+// ---------------------------------------------------------------------------
+
+/**
+ * Uploads the PIC's output against a task.
+ *
+ * The order here is the point, and it is the same order as the request
+ * attachment download: ESTABLISH SCOPE FIRST, through the user's own client so
+ * RLS decides, and only then hand the bytes to the service-role uploader. Doing
+ * it the other way round means a scope bug has already written a file.
+ */
+export async function uploadTaskOutput(
+  formData: FormData,
+): Promise<ActionResult<{ id: string; filename: string }>> {
+  const context = await requireAuthContextOrThrow();
+
+  const taskId = formData.get("task_id");
+  const file = formData.get("file");
+
+  if (typeof taskId !== "string" || !(file instanceof File)) {
+    return { ok: false, error: "Nothing was uploaded." };
+  }
+
+  const supabase = await createClient();
+
+  // Zero rows here means out of scope OR nonexistent, and the caller learns the
+  // same thing either way — which is correct.
+  const { data: task } = await supabase
+    .from("vizserve_pms_tasks")
+    .select("id, status")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) return { ok: false, error: "That task is not available." };
+
+  if (task.status === "COMPLETED" || task.status === "COMPLETED_NO_RESPONSE") {
+    return { ok: false, error: "That task is finished — its files are now a record." };
+  }
+
+  const result = await uploadTaskAttachment({
+    taskId,
+    file,
+    uploadedBy: context.userId,
+  });
+
+  if (!result.ok) return result;
+
+  revalidatePath(`/tasks/${taskId}`);
+  return {
+    ok: true,
+    data: { id: result.attachment.id, filename: result.attachment.filename },
+  };
+}
+
+/**
+ * A signed URL for a task attachment.
+ *
+ * Same shape as the request-attachment download: read through RLS, then sign.
+ * Sixty seconds — long enough to click, short enough that a URL pasted into a
+ * chat is dead before anyone opens it.
+ */
+export async function getTaskAttachmentUrl(
+  attachmentId: string,
+): Promise<ActionResult<{ url: string }>> {
+  await requireAuthContextOrThrow();
+  const supabase = await createClient();
+
+  const { data: attachment } = await supabase
+    .from("vizserve_pms_task_attachments")
+    .select("storage_path")
+    .eq("id", attachmentId)
+    .maybeSingle();
+
+  if (!attachment) return { ok: false, error: "That file is not available." };
+
+  const url = await signAttachmentUrl(attachment.storage_path, 60);
+  if (!url) return { ok: false, error: "That file could not be opened." };
+
+  return { ok: true, data: { url } };
+}
+
+export async function removeTaskAttachment(
+  attachmentId: string,
+  taskId: string,
+): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+  const supabase = await createClient();
+
+  // The delete policy decides whether this is allowed: your own upload, or
+  // anything if you lead the department. A row that does not match simply is
+  // not deleted, so the storage object is only removed once the row has gone.
+  const { data: deleted, error } = await supabase
+    .from("vizserve_pms_task_attachments")
+    .delete()
+    .eq("id", attachmentId)
+    .select("storage_path");
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  if (!deleted || deleted.length === 0) {
+    return { ok: false, error: "That file is not yours to remove." };
+  }
+
+  await removeStoredAttachments(deleted.map((row) => row.storage_path));
+
+  revalidatePath(`/tasks/${taskId}`);
+  return { ok: true, data: undefined };
 }
 
 // ---------------------------------------------------------------------------

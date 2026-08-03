@@ -182,6 +182,94 @@ export async function uploadPendingAttachment(input: {
 }
 
 /**
+ * P3-13 — a staff upload against a task.
+ *
+ * Deliberately NOT the two-step receipt handshake the public form uses. That
+ * exists because a session-less caller has to be told which file their earlier
+ * upload produced, and anything they are told can be forged. Here the caller is
+ * authenticated, the task is known, and the upload IS the commit — there is no
+ * gap for a fabricated path to live in, so a pending row would be ceremony
+ * rather than security.
+ *
+ * What does carry over is the part that matters: the size, the type and the
+ * magic number are all read from the real File. Nothing the browser claimed is
+ * believed.
+ *
+ * THE CALLER MUST HAVE ESTABLISHED SCOPE ALREADY. This runs as service role and
+ * checks only that the task is open — see `uploadTaskOutput` in the tasks
+ * actions, which reads the task through the user's own client first.
+ */
+export async function uploadTaskAttachment(input: {
+  taskId: string;
+  file: File;
+  uploadedBy: string;
+  kind?: "output" | "reference";
+}): Promise<
+  | { ok: true; attachment: { id: string; filename: string; mime_type: string; size_bytes: number } }
+  | { ok: false; error: string }
+> {
+  const { taskId, file, uploadedBy } = input;
+  const admin = createAdminClient();
+  const rules = await readAttachmentRules();
+
+  if (!(file instanceof File) || file.size === 0) {
+    return { ok: false, error: "That file is empty." };
+  }
+
+  if (file.size > rules.max_bytes) {
+    return {
+      ok: false,
+      error: `That file is larger than the ${Math.round(rules.max_bytes / 1024 / 1024)} MB limit.`,
+    };
+  }
+
+  const declaredMime = (file.type || "application/octet-stream").toLowerCase();
+
+  if (!rules.allowed_mime_types.includes(declaredMime)) {
+    return { ok: false, error: `${declaredMime} files are not accepted.` };
+  }
+
+  const buffer = new Uint8Array(await file.slice(0, 64).arrayBuffer());
+  const sniff = sniffMatchesDeclaredType(buffer, declaredMime);
+
+  if (!sniff.ok) return { ok: false, error: sniff.reason };
+
+  const storagePath = `tasks/${taskId}/${crypto.randomUUID()}/${safeStorageName(file.name)}`;
+
+  const { error: uploadError } = await admin.storage
+    .from(ATTACHMENT_BUCKET)
+    .upload(storagePath, file, { contentType: declaredMime, upsert: false });
+
+  if (uploadError) {
+    return { ok: false, error: "The upload did not complete. Please try again." };
+  }
+
+  const { data: row, error: rowError } = await admin
+    .from("vizserve_pms_task_attachments")
+    .insert({
+      task_id: taskId,
+      storage_path: storagePath,
+      filename: file.name.slice(0, 200),
+      mime_type: declaredMime,
+      // The real byte count, not a number the client sent.
+      size_bytes: file.size,
+      kind: input.kind ?? "output",
+      uploaded_by: uploadedBy,
+    })
+    .select("id, filename, mime_type, size_bytes")
+    .single();
+
+  if (rowError || !row) {
+    // An object with no row is unreachable. Remove it now rather than leaving it
+    // to accumulate silently — nothing sweeps this prefix.
+    await admin.storage.from(ATTACHMENT_BUCKET).remove([storagePath]);
+    return { ok: false, error: "The upload could not be recorded. Please try again." };
+  }
+
+  return { ok: true, attachment: row };
+}
+
+/**
  * A short-lived signed URL for a stored attachment.
  *
  * The bucket is private and `authenticated` holds no storage policy, so this is
@@ -197,4 +285,23 @@ export async function signAttachmentUrl(
     .createSignedUrl(storagePath, expiresInSeconds);
 
   return data?.signedUrl ?? null;
+}
+
+/**
+ * Deletes stored objects.
+ *
+ * Always called AFTER the owning database row has gone, so a failure here leaves
+ * an orphaned object rather than a row pointing at nothing. Of the two, only the
+ * second is a bug anyone sees.
+ */
+export async function removeStoredAttachments(paths: string[]): Promise<void> {
+  if (paths.length === 0) return;
+
+  const { error } = await createAdminClient()
+    .storage.from(ATTACHMENT_BUCKET)
+    .remove(paths);
+
+  if (error) {
+    console.error(`[attachments] ${paths.length} objects left behind: ${error.message}`);
+  }
 }

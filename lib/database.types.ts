@@ -616,6 +616,45 @@ export type Database = {
           },
         ];
       };
+      /**
+       * P3-13 — the PIC's output files.
+       *
+       * No pending/receipt row, unlike request attachments: a staff upload is
+       * authenticated and the upload IS the commit, so there is no gap for a
+       * forged path to live in. The server still measures the real bytes.
+       */
+      vizserve_pms_task_attachments: {
+        Row: {
+          id: string;
+          task_id: string;
+          storage_path: string;
+          filename: string;
+          mime_type: string;
+          size_bytes: number;
+          kind: "output" | "reference";
+          uploaded_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          task_id: string;
+          storage_path: string;
+          filename: string;
+          mime_type: string;
+          size_bytes: number;
+          kind?: "output" | "reference";
+          uploaded_by?: string | null;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_task_attachments_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       /** The legal-transition table as data. Mirrored in lib/schemas/tasks.ts. */
       vizserve_pms_task_transitions: {
         Row: {

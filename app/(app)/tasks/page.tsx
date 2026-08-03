@@ -75,7 +75,15 @@ export default async function TasksPage({
             stages — the server refuses any step that is not one of them.
           </p>
         </div>
-        <NewTaskButton />
+        <div className="flex items-center gap-2">
+          <Link
+            href="/tasks/board"
+            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            Board view
+          </Link>
+          <NewTaskButton />
+        </div>
       </div>
 
       <TaskFilters lists={lists ?? []} />

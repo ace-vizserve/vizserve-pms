@@ -10,6 +10,7 @@ import { TASK_STATUS_LABELS, isTerminal } from "@/lib/schemas/tasks";
 import { TaskStatusBadge } from "@/components/status-badge";
 import { createClient } from "@/utils/supabase/server";
 
+import { TaskOutputs } from "./task-outputs";
 import { TaskWorkflow } from "./task-workflow";
 
 export const metadata: Metadata = { title: "Task" };
@@ -39,8 +40,13 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   if (!task) notFound();
 
-  const [{ data: history }, { data: people }, { data: lists }, { data: request }] =
-    await Promise.all([
+  const [
+    { data: history },
+    { data: people },
+    { data: lists },
+    { data: request },
+    { data: outputs },
+  ] = await Promise.all([
       supabase
         .from("vizserve_pms_task_status_history")
         .select("id, from_status, to_status, actor_id, comment, is_override, created_at")
@@ -64,6 +70,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             .eq("id", task.request_id)
             .maybeSingle()
         : Promise.resolve({ data: null }),
+      supabase
+        .from("vizserve_pms_task_attachments")
+        .select("id, filename, mime_type, size_bytes, uploaded_by")
+        .eq("task_id", id)
+        .order("created_at"),
     ]);
 
   // The originating form's fields, including archived ones — a historical answer
@@ -195,6 +206,17 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           (person) => person.primary_department_id === task.department_id,
         )}
         viewer={viewer}
+      />
+
+      <TaskOutputs
+        taskId={task.id}
+        attachments={outputs ?? []}
+        // Uploading is doing the work. A department lead can too, because they
+        // are frequently the QA and sometimes the person picking up the pieces.
+        canUpload={
+          (viewer.isPic || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)
+        }
+        uploaderNames={nameOf}
       />
 
       <section className="rounded-lg border bg-card p-5 shadow-ring">
