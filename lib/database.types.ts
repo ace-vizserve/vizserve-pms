@@ -390,6 +390,79 @@ export type Database = {
           },
         ];
       };
+      // -----------------------------------------------------------------
+      // P1-10 / P1-15 — operational tables.
+      //
+      // Not application data: the counter behind reference numbers, and the
+      // Postgres-backed rate limiter. Admin-only under RLS, and typed here
+      // because the P0-12 suite asserts against all three.
+      // -----------------------------------------------------------------
+      vizserve_pms_reference_counters: {
+        Row: {
+          form_id: string;
+          year: number;
+          last_value: number;
+        };
+        Insert: {
+          form_id: string;
+          year: number;
+          last_value?: number;
+        };
+        Update: Partial<{ last_value: number }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_reference_counters_form_id_fkey";
+            columns: ["form_id"];
+            referencedRelation: "vizserve_pms_forms";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      vizserve_pms_public_submission_log: {
+        Row: {
+          id: string;
+          form_id: string | null;
+          ip: string | null;
+          email: string | null;
+          accepted: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          form_id?: string | null;
+          ip?: string | null;
+          email?: string | null;
+          accepted?: boolean;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_public_submission_log_form_id_fkey";
+            columns: ["form_id"];
+            referencedRelation: "vizserve_pms_forms";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      /** Singleton — tunable at runtime so a flood can be throttled without a deploy. */
+      vizserve_pms_public_submission_limits: {
+        Row: {
+          id: boolean;
+          per_ip_per_hour: number;
+          per_email_per_hour: number;
+        };
+        Insert: {
+          id?: boolean;
+          per_ip_per_hour?: number;
+          per_email_per_hour?: number;
+        };
+        Update: Partial<{
+          per_ip_per_hour: number;
+          per_email_per_hour: number;
+        }>;
+        Relationships: [];
+      };
     };
     Views: Record<never, never>;
     Functions: {
