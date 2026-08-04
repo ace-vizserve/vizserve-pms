@@ -140,9 +140,10 @@ describe.skipIf(!dbTestsEnabled)("app access gate", () => {
         const admin = adminClient();
         const { userId } = await signIn("tlVizBytes");
 
-        // Touch the row so the sync trigger fires.
-        await admin.from("vizserve_pms_users").update({ full_name: "TL VizBytes" }).eq("id", userId);
-
+        // Read WITHOUT touching the row first. The mirror must already be
+        // correct for every existing user, not only for one just edited — that
+        // is what the backfill in 20260804130000 is for, and the first attempt
+        // at it silently did nothing.
         const { data } = await admin.auth.admin.getUserById(userId);
 
         // app_metadata is service-role-writable only, so a claim found here was
