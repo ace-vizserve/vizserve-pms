@@ -5,6 +5,8 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 
 import { requireRole, roleAtLeast } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
+import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
+import { PageShell } from "@/components/page-shell";
 import { FormSettings } from "../form-settings";
 import { FieldBuilder, type FieldRow } from "./field-builder";
 
@@ -72,7 +74,11 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   }));
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageShell className="mx-auto w-full max-w-3xl">
+      {/* Names this page in the shell breadcrumb. Without it the crumb is the
+          raw UUID from the URL. */}
+      <BreadcrumbLabel value={form.name} />
+
       <div>
         <Link
           href="/forms"
@@ -117,7 +123,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Settings</h2>
-        <div className="rounded-lg border bg-card p-6 shadow-ring">
+        <div className="rounded-xl bg-card p-6 ring-1 ring-foreground/10">
           <FormSettings
             departments={departments ?? []}
             lists={lists ?? []}
@@ -139,6 +145,6 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
           />
         </div>
       </section>
-    </div>
+    </PageShell>
   );
 }

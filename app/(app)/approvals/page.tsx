@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Inbox } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import { createClient } from "@/utils/supabase/server";
+import { DataTable, type Column } from "@/components/data-table";
+import { EmptyState } from "@/components/empty-state";
+import { PageShell } from "@/components/page-shell";
+import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
 import { NewRequestDialog } from "./new-request-dialog";
-import { InternalStatusBadge, requestDetail, TypeBadge } from "./request-summary";
+import { requestDetail } from "./request-summary";
 
 export const metadata: Metadata = { title: "Approvals" };
 
@@ -21,36 +26,52 @@ export const metadata: Metadata = { title: "Approvals" };
  * departments'; splitting them here is a partition of rows we already hold, not
  * a second round trip — and it means the two lists cannot disagree about a row
  * that changed between them.
+ *
+ * No <h1>. The breadcrumb is the page label; the two sections keep their own
+ * <h2> because "pending your approval" and "mine" are genuinely different lists
+ * and nothing else on the screen distinguishes them.
  */
 type Row = InternalRequestRow & { vizserve_pms_users: { full_name: string } | null };
 
-function RequestRow({ request, showWho }: { request: Row; showWho: boolean }) {
-  return (
-    <tr className="border-t align-top hover:bg-muted/30">
-      <td className="px-4 py-3">
-        <Link href={`/approvals/${request.id}`} className="font-medium hover:underline">
-          {requestDetail(request)}
-        </Link>
-        <div className="mt-1 flex flex-wrap items-center gap-1.5">
-          <TypeBadge type={request.request_type} />
-          {showWho ? (
-            <span className="text-2xs text-muted-foreground">
-              {request.vizserve_pms_users?.full_name ?? "—"}
-            </span>
-          ) : null}
-        </div>
-      </td>
-      <td className="max-w-xs px-4 py-3">
-        <p className="truncate text-muted-foreground">{request.reason}</p>
-      </td>
-      <td className="px-4 py-3 whitespace-nowrap text-muted-foreground">
-        {formatDate(request.created_at)}
-      </td>
-      <td className="px-4 py-3">
-        <InternalStatusBadge status={request.status} />
-      </td>
-    </tr>
-  );
+function columnsFor(showWho: boolean): Column<Row>[] {
+  return [
+    {
+      key: "request",
+      header: "Request",
+      cell: (request) => (
+        <>
+          <Link href={`/approvals/${request.id}`} className="font-medium hover:underline">
+            {requestDetail(request)}
+          </Link>
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <InternalTypeBadge type={request.request_type} />
+            {showWho ? (
+              <span className="text-2xs text-muted-foreground">
+                {request.vizserve_pms_users?.full_name ?? "—"}
+              </span>
+            ) : null}
+          </div>
+        </>
+      ),
+    },
+    {
+      key: "reason",
+      header: "Reason",
+      className: "hidden sm:table-cell max-w-xs",
+      cell: (request) => <p className="truncate text-muted-foreground">{request.reason}</p>,
+    },
+    {
+      key: "submitted",
+      header: "Submitted",
+      className: "hidden md:table-cell whitespace-nowrap text-muted-foreground",
+      cell: (request) => formatDate(request.created_at),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (request) => <InternalStatusBadge status={request.status} />,
+    },
+  ];
 }
 
 function Section({
@@ -64,7 +85,7 @@ function Section({
   description: string;
   rows: Row[];
   showWho: boolean;
-  empty: string;
+  empty: React.ReactNode;
 }) {
   return (
     <section className="space-y-3">
@@ -73,37 +94,12 @@ function Section({
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
 
-      {rows.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-8 text-center">
-          <p className="text-xs text-muted-foreground">{empty}</p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                  Request
-                </th>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                  Reason
-                </th>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                  Submitted
-                </th>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                  Status
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((request) => (
-                <RequestRow key={request.id} request={request} showWho={showWho} />
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <DataTable
+        columns={columnsFor(showWho)}
+        rows={rows}
+        getRowKey={(request) => request.id}
+        empty={empty}
+      />
     </section>
   );
 }
@@ -128,27 +124,25 @@ export default async function ApprovalsPage() {
   );
 
   return (
-    <div className="mx-auto max-w-5xl space-y-8">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Approvals</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Leave, time corrections and reimbursements. Leave balances are counted by HR — this is
-            the record, not an entitlement check.
-          </p>
-        </div>
+    <PageShell className="gap-8">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Leave, time corrections and reimbursements. Leave balances are counted by HR — this is the
+          record, not an entitlement check.
+        </p>
         <NewRequestDialog />
       </div>
 
       {/* Approver queue first when there is one: it is the thing with somebody
-          else waiting on the other end. */}
+          else waiting on the other end. Rendered only when non-empty, so it
+          needs no empty state of its own. */}
       {pendingOnMe.length > 0 ? (
         <Section
           title="Pending your approval"
           description="Requests from the departments you lead."
           rows={pendingOnMe}
           showWho
-          empty=""
+          empty={null}
         />
       ) : null}
 
@@ -157,8 +151,14 @@ export default async function ApprovalsPage() {
         description="Everything you have submitted."
         rows={mine}
         showWho={false}
-        empty="You have not submitted any requests yet."
+        empty={
+          <EmptyState
+            icon={<Inbox />}
+            title="You have not submitted any requests"
+            description="Leave, a missed time in or out, and reimbursements all start here. Your department lead decides them — you cannot decide your own."
+          />
+        }
       />
-    </div>
+    </PageShell>
   );
 }

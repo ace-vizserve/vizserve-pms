@@ -79,7 +79,7 @@ export function PunchPanel({
   const worked = workedMinutes(timeIn, timeOut);
 
   return (
-    <div className={compact ? "" : "rounded-lg border bg-card p-5 shadow-ring"}>
+    <div className={compact ? "" : "rounded-xl bg-card p-5 ring-1 ring-foreground/10"}>
       {!compact ? (
         <div className="mb-4">
           <h2 className="text-sm font-semibold">Today</h2>

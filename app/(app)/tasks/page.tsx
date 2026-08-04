@@ -1,16 +1,33 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { LayoutGrid, ListChecks } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
+import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
 import { TaskStatusBadge, isTaskStatus } from "@/components/status-badge";
+import { DataTable, type Column } from "@/components/data-table";
+import { EmptyState } from "@/components/empty-state";
+import { PageShell } from "@/components/page-shell";
+import { Button } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/server";
 
 import { TaskFilters } from "./filters";
 import { NewTaskButton } from "./new-task-button";
 
 export const metadata: Metadata = { title: "Tasks" };
+
+type TaskRow = {
+  id: string;
+  title: string;
+  status: VizservePmsTaskStatus;
+  due_date: string | null;
+  assignee_id: string | null;
+  qa_assignee_id: string | null;
+  list_id: string | null;
+  request_id: string | null;
+};
 
 /**
  * P3-03 / P3-14 — the task list.
@@ -23,6 +40,10 @@ export const metadata: Metadata = { title: "Tasks" };
  *
  * The `mine` view is the one exception, and it is not a scope filter: it narrows
  * within what you can already see, to the work that is yours to move.
+ *
+ * No <h1>. The shell breadcrumb is the page label, and the view tabs already say
+ * which slice of the list you are looking at — a heading that repeated "Waiting
+ * on my QA" would be a second, staler copy of the same fact.
  */
 export default async function TasksPage({
   searchParams,
@@ -62,99 +83,114 @@ export default async function TasksPage({
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
   const listName = new Map((lists ?? []).map((list) => [list.id, list.name]));
 
-  const heading =
-    view === "mine" ? "My tasks" : view === "qa" ? "Waiting on my QA" : "Tasks";
+  const rows = (tasks ?? []) as TaskRow[];
+  const isFiltered = Boolean(params.status || params.list) || view !== "all";
+
+  const columns: Column<TaskRow>[] = [
+    {
+      key: "task",
+      header: "Task",
+      className: "max-w-sm",
+      cell: (task) => (
+        <>
+          <Link href={`/tasks/${task.id}`} className="font-medium hover:underline">
+            {task.title}
+          </Link>
+          <div className="mt-0.5 flex flex-wrap gap-x-2 text-2xs text-muted-foreground">
+            {task.list_id ? <span>{listName.get(task.list_id)}</span> : null}
+            {/* Where it came from. A manual task has no request and saying so is
+                more useful than an empty column. */}
+            <span>{task.request_id ? "From a request" : "Added by hand"}</span>
+          </div>
+        </>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (task) => <TaskStatusBadge status={task.status} />,
+    },
+    {
+      key: "pic",
+      header: "PIC",
+      className: "hidden md:table-cell text-muted-foreground",
+      cell: (task) => (task.assignee_id ? nameOf.get(task.assignee_id) ?? "—" : "Unassigned"),
+    },
+    {
+      key: "qa",
+      header: "QA",
+      className: "hidden lg:table-cell text-muted-foreground",
+      cell: (task) => (task.qa_assignee_id ? nameOf.get(task.qa_assignee_id) ?? "—" : "—"),
+    },
+    {
+      key: "due",
+      header: "Due",
+      className: "hidden sm:table-cell whitespace-nowrap",
+      cell: (task) => {
+        // Overdue only matters on work that is still live. A completed task
+        // delivered late is history, not an alarm.
+        const late = isOverdue(task.due_date) && !isTerminal(task.status);
+
+        return (
+          <>
+            <span className={late ? "font-medium text-destructive" : "text-muted-foreground"}>
+              {formatDate(task.due_date)}
+            </span>
+            {/* Never colour alone. */}
+            {late ? <span className="ml-1 text-2xs text-destructive">overdue</span> : null}
+          </>
+        );
+      },
+    },
+  ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">{heading}</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Work created from an approved request, or added by hand. A task moves through set
-            stages — the server refuses any step that is not one of them.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/tasks/board"
-            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-          >
-            Board view
-          </Link>
-          <NewTaskButton />
-        </div>
+    <PageShell>
+      <div className="flex flex-wrap items-center justify-end gap-2">
+        <Button variant="outline" size="sm" render={<Link href="/tasks/board" />}>
+          <LayoutGrid />
+          Board view
+        </Button>
+        <NewTaskButton />
       </div>
 
       <TaskFilters lists={lists ?? []} />
 
-      {!tasks || tasks.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-10 text-center">
-          <p className="text-sm font-medium">Nothing here</p>
-          <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
-            {view === "qa"
-              ? "No work is waiting on your review."
-              : view === "mine"
-                ? "You have no tasks assigned to you."
-                : "Tasks appear once a Team Leader approves a request, or when one is added by hand."}
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2.5 text-left font-medium">Task</th>
-                <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                <th className="px-4 py-2.5 text-left font-medium">PIC</th>
-                <th className="px-4 py-2.5 text-left font-medium">QA</th>
-                <th className="px-4 py-2.5 text-left font-medium">Due</th>
-              </tr>
-            </thead>
-            <tbody>
-              {tasks.map((task) => {
-                // Overdue only matters on work that is still live. A completed
-                // task delivered late is history, not an alarm.
-                const late = isOverdue(task.due_date) && !isTerminal(task.status);
-
-                return (
-                  <tr key={task.id} className="border-t align-top hover:bg-muted/30">
-                    <td className="px-4 py-3">
-                      <Link href={`/tasks/${task.id}`} className="font-medium hover:underline">
-                        {task.title}
-                      </Link>
-                      <div className="mt-0.5 flex flex-wrap gap-x-2 text-2xs text-muted-foreground">
-                        {task.list_id ? <span>{listName.get(task.list_id)}</span> : null}
-                        {/* Where it came from. A manual task has no request and
-                            saying so is more useful than an empty column. */}
-                        <span>{task.request_id ? "From a request" : "Added by hand"}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <TaskStatusBadge status={task.status} />
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {task.assignee_id ? nameOf.get(task.assignee_id) ?? "—" : "Unassigned"}
-                    </td>
-                    <td className="px-4 py-3 text-muted-foreground">
-                      {task.qa_assignee_id ? nameOf.get(task.qa_assignee_id) ?? "—" : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span className={late ? "font-medium text-destructive" : "text-muted-foreground"}>
-                        {formatDate(task.due_date)}
-                      </span>
-                      {late ? (
-                        // Never colour alone.
-                        <span className="ml-1 text-2xs text-destructive">overdue</span>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(task) => task.id}
+        empty={
+          /* Two messages, because the two ways of arriving here need different
+             next steps: a filter that is too narrow needs loosening, an empty
+             list needs explaining. */
+          isFiltered ? (
+            <EmptyState
+              icon={<ListChecks />}
+              title={
+                view === "qa"
+                  ? "Nothing waiting on your review"
+                  : view === "mine"
+                    ? "No tasks assigned to you"
+                    : "No tasks match these filters"
+              }
+              description={
+                view === "qa"
+                  ? "No work is sitting in QA with you as the reviewer. Switch to All to see the rest of the list."
+                  : view === "mine"
+                    ? "Nothing is currently yours to move. Switch to All to see the rest of your department's work."
+                    : "Clear the status or list filter to see the rest of the list."
+              }
+            />
+          ) : (
+            <EmptyState
+              icon={<ListChecks />}
+              title="Nothing here yet"
+              description="Tasks appear once a Team Leader approves a request, or when one is added by hand. Each moves through set stages — the server refuses any step that is not one of them."
+            />
+          )
+        }
+      />
+    </PageShell>
   );
 }

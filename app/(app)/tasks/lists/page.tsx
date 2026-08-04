@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
+import { PageShell } from "@/components/page-shell";
 
 import { ListManager } from "./list-manager";
 
@@ -59,7 +60,7 @@ export default async function ListsPage() {
   }
 
   return (
-    <div className="mx-auto max-w-4xl space-y-6">
+    <PageShell className="mx-auto w-full max-w-4xl">
       <div>
         <Link
           href="/tasks"
@@ -68,8 +69,8 @@ export default async function ListsPage() {
           <ArrowLeft className="size-3.5" />
           Tasks
         </Link>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight">Lists</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
+        {/* No <h1> — the breadcrumb reads "Tasks / Lists". */}
+        <p className="mt-2 text-xs text-muted-foreground">
           How a department groups its work — one per helpdesk area or project. A form can point at
           a list so approved requests land there automatically.
         </p>
@@ -80,6 +81,6 @@ export default async function ListsPage() {
         departments={allowed}
         openCounts={Object.fromEntries(openByList)}
       />
-    </div>
+    </PageShell>
   );
 }

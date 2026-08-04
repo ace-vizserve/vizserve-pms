@@ -61,7 +61,7 @@ export default async function NoAccessPage({
           <BrandLockup subtitle="Project Management System" />
         </div>
 
-        <div className="rounded-xl border bg-card p-6 text-center sm:p-8">
+        <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-6 text-center sm:p-8">
           <h1 className="text-lg font-semibold tracking-tight">{message.heading}</h1>
           <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">{message.body}</p>
 

@@ -2,9 +2,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { revalidatePath } from "next/cache";
 
+import { Bell } from "lucide-react";
+
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { formatDateTime } from "@/lib/dates";
+import { EmptyState } from "@/components/empty-state";
+import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Inbox" };
@@ -47,14 +51,11 @@ export default async function InboxPage() {
   }
 
   return (
-    <div className="mx-auto max-w-3xl space-y-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Inbox</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Requests awaiting you, and changes on work you are part of.
-          </p>
-        </div>
+    <PageShell className="mx-auto w-full max-w-3xl">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-xs text-muted-foreground">
+          {unreadCount > 0 ? `${unreadCount} unread` : "All read"}
+        </p>
         {unreadCount > 0 ? (
           <form action={markAllRead}>
             <Button type="submit" variant="outline" size="sm">
@@ -65,15 +66,15 @@ export default async function InboxPage() {
       </div>
 
       {!notifications || notifications.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-10 text-center">
-          <p className="text-sm font-medium">Nothing yet</p>
-          <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
-            You will be notified here when a request needs your approval, or when work you are
-            assigned to moves.
-          </p>
+        <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
+          <EmptyState
+            icon={<Bell />}
+            title="Nothing yet"
+            description="You will be notified here when a request needs your approval, or when work you are assigned to moves."
+          />
         </div>
       ) : (
-        <ul className="divide-y overflow-hidden rounded-lg border bg-card">
+        <ul className="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
           {notifications.map((item) => {
             const content = (
               <div className="flex items-start gap-3 p-4">
@@ -119,6 +120,6 @@ export default async function InboxPage() {
           })}
         </ul>
       )}
-    </div>
+    </PageShell>
   );
 }

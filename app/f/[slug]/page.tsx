@@ -45,7 +45,7 @@ export default async function PublicFormPage({ params }: { params: Promise<{ slu
           <BrandLockup subtitle="Request form" />
         </div>
 
-        <div className="rounded-xl border bg-card p-6 sm:p-8">
+        <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-6 sm:p-8">
           <h1 className="text-xl font-semibold tracking-tight">{form.name}</h1>
           {form.description ? (
             <p className="mt-2 text-sm text-muted-foreground">{form.description}</p>

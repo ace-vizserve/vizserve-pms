@@ -6,6 +6,7 @@ import { AlertTriangle } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -129,15 +130,15 @@ export function ReviewPanel({
   }
 
   return (
-    <section className="rounded-lg border bg-card shadow-ring">
-      <div className="border-b px-5 py-3">
-        <h2 className="text-sm font-semibold">Your decision</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">
+    <Card>
+      <CardHeader className="border-b">
+        <CardTitle>Your decision</CardTitle>
+        <CardDescription className="text-xs">
           Check the load before you commit someone to a date.
-        </p>
-      </div>
+        </CardDescription>
+      </CardHeader>
 
-      <div className="grid gap-6 p-5 lg:grid-cols-[1fr_20rem]">
+      <CardContent className="grid gap-6 lg:grid-cols-[1fr_20rem]">
         {/* ---------------------------------------------------------------- */}
         {/* The decision                                                      */}
         {/* ---------------------------------------------------------------- */}
@@ -428,7 +429,7 @@ export function ReviewPanel({
             </p>
           ) : null}
         </aside>
-      </div>
-    </section>
+      </CardContent>
+    </Card>
   );
 }

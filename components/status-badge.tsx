@@ -1,6 +1,21 @@
 import { cn } from "@/lib/utils";
-import type { VizservePmsRequestStatus, VizservePmsTaskStatus } from "@/lib/database.types";
+import type {
+  VizservePmsInternalRequestStatus,
+  VizservePmsInternalRequestType,
+  VizservePmsRequestStatus,
+  VizservePmsTaskStatus,
+} from "@/lib/database.types";
+import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
 import { TASK_STATUS_LABELS } from "@/lib/schemas/tasks";
+
+/**
+ * Every pill in the app is this shape. It lived in three places before —
+ * `app/(app)/approvals/request-summary.tsx` had a second, near-identical copy
+ * that had already drifted to `font-semibold` — which is exactly how two badges
+ * for the same idea end up different heights on the same screen.
+ */
+const PILL =
+  "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-2xs font-medium whitespace-nowrap";
 
 /**
  * Status pills for the canonical status sets (docs/01-updated-workflow.md §3).
@@ -41,7 +56,7 @@ export function RequestStatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-2xs font-medium whitespace-nowrap",
+        PILL,
         config.className,
         className,
       )}
@@ -105,7 +120,7 @@ export function TaskStatusBadge({
   return (
     <span
       className={cn(
-        "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-2xs font-medium whitespace-nowrap",
+        PILL,
         TASK_STATUS_CLASSES[status] ?? "bg-muted text-muted-foreground",
         className,
       )}
@@ -121,4 +136,51 @@ export const TASK_STATUS_OPTIONS = (
 
 export function isTaskStatus(value: string | undefined): value is VizservePmsTaskStatus {
   return typeof value === "string" && value in TASK_STATUS_CLASSES;
+}
+
+/**
+ * Internal requests (P5) — leave, time corrections, reimbursements.
+ *
+ * A separate set from `REQUEST_STATUS` even though the three values overlap,
+ * because the wording differs on purpose: a client request sits in "Awaiting
+ * review" at a Team Leader's gate, while your own leave request reads "Pending"
+ * to you. Merging them would force one label onto both screens.
+ */
+const INTERNAL_STATUS: Record<
+  VizservePmsInternalRequestStatus,
+  { label: string; className: string }
+> = {
+  PENDING_REVIEW: { label: "Pending", className: "bg-warning-subtle text-warning" },
+  APPROVED: { label: "Approved", className: "bg-success-subtle text-success" },
+  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive" },
+};
+
+export function InternalStatusBadge({
+  status,
+  className,
+}: {
+  status: VizservePmsInternalRequestStatus;
+  className?: string;
+}) {
+  const config = INTERNAL_STATUS[status] ?? {
+    label: status,
+    className: "bg-muted text-muted-foreground",
+  };
+
+  return <span className={cn(PILL, config.className, className)}>{config.label}</span>;
+}
+
+/** Which kind of internal request it is. Neutral — the status carries the state. */
+export function InternalTypeBadge({
+  type,
+  className,
+}: {
+  type: VizservePmsInternalRequestType;
+  className?: string;
+}) {
+  return (
+    <span className={cn(PILL, "bg-muted text-muted-foreground", className)}>
+      {INTERNAL_REQUEST_LABELS[type]}
+    </span>
+  );
 }

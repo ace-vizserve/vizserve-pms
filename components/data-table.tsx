@@ -1,5 +1,13 @@
 import { cn } from "@/lib/utils";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableFooter,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 
 /**
  * The list shell every table in the app sits in.
@@ -49,6 +57,7 @@ export function DataTable<T>({
   rows,
   getRowKey,
   empty,
+  footer,
   onRowHref,
   className,
 }: {
@@ -56,6 +65,13 @@ export function DataTable<T>({
   rows: T[];
   getRowKey: (row: T, index: number) => string;
   empty?: React.ReactNode;
+  /**
+   * A totals row, as `<tr>` content. Inside the table rather than under it
+   * because a total that sits outside the element it totals is a number a
+   * screen reader reads with no relationship to the figures above it.
+   * Hidden when there are no rows — a total of nothing is noise.
+   */
+  footer?: React.ReactNode;
   /** When set, the whole row becomes a link target for pointer users. */
   onRowHref?: (row: T) => string | undefined;
   className?: string;
@@ -102,6 +118,8 @@ export function DataTable<T>({
             ))
           )}
         </TableBody>
+
+        {footer && rows.length > 0 ? <TableFooter>{footer}</TableFooter> : null}
       </Table>
     </DataTableShell>
   );

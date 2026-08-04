@@ -6,6 +6,8 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { DataTable, type Column } from "@/components/data-table";
+import { EmptyState } from "@/components/empty-state";
 import { ROLE_LABELS } from "@/lib/schemas/users";
 
 import { sendPasswordReset } from "./actions";
@@ -70,6 +72,94 @@ export function UsersTable({
     });
   }
 
+  const columns: Column<EditableUser>[] = [
+    {
+      key: "name",
+      header: "Name",
+      cell: (user) => (
+        <>
+          <div className="font-medium">
+            {user.full_name || <span className="text-muted-foreground">Unnamed</span>}
+            {user.id === currentUserId ? (
+              <span className="ml-2 text-2xs text-muted-foreground">you</span>
+            ) : null}
+          </div>
+          <div className="text-xs text-muted-foreground">{user.email}</div>
+        </>
+      ),
+    },
+    {
+      key: "role",
+      header: "Role",
+      cell: (user) => ROLE_LABELS[user.role].label,
+    },
+    {
+      key: "belongs",
+      header: "Belongs to",
+      className: "hidden md:table-cell text-muted-foreground",
+      cell: (user) =>
+        user.primary_department_id ? departmentName.get(user.primary_department_id) : "—",
+    },
+    {
+      key: "leads",
+      header: "Leads",
+      className: "hidden lg:table-cell",
+      cell: (user) =>
+        user.managed_department_ids.length === 0 ? (
+          <span className="text-muted-foreground">—</span>
+        ) : (
+          <div className="flex flex-wrap gap-1">
+            {user.managed_department_ids.map((id) => (
+              <span
+                key={id}
+                className="rounded-full bg-accent px-2 py-0.5 text-2xs font-medium text-accent-foreground"
+              >
+                {departmentName.get(id) ?? "Unknown"}
+              </span>
+            ))}
+          </div>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (user) =>
+        /* State is never conveyed by colour alone — the label carries it. */
+        user.is_active ? (
+          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">
+            Active
+          </span>
+        ) : (
+          <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
+            Deactivated
+          </span>
+        ),
+    },
+    {
+      key: "actions",
+      header: <span className="sr-only">Actions</span>,
+      align: "end",
+      cell: (user) => (
+        <div className="flex justify-end gap-1">
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            disabled={resetting || !user.is_active}
+            onClick={() => resetPassword(user)}
+            title="Send a password reset link"
+          >
+            <KeyRound />
+            <span className="sr-only">Send password reset to {user.email}</span>
+          </Button>
+          <Button variant="ghost" size="icon-sm" onClick={() => openEdit(user)}>
+            <Pencil />
+            <span className="sr-only">Edit {user.full_name || user.email}</span>
+          </Button>
+        </div>
+      ),
+    },
+  ];
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
@@ -89,105 +179,22 @@ export function UsersTable({
         </Button>
       </div>
 
-      {/* Six columns will not fit a phone. Scrolling the table inside its own
-          border keeps the page from scrolling sideways, which is the thing that
-          actually breaks a layout. */}
-      <div className="overflow-x-auto rounded-lg border">
-        <table className="w-full min-w-3xl text-sm">
-          <thead className="bg-muted/50 text-xs text-muted-foreground">
-            <tr>
-              <th className="px-4 py-2.5 text-left font-medium">Name</th>
-              <th className="px-4 py-2.5 text-left font-medium">Role</th>
-              <th className="px-4 py-2.5 text-left font-medium">Belongs to</th>
-              <th className="px-4 py-2.5 text-left font-medium">Leads</th>
-              <th className="px-4 py-2.5 text-left font-medium">Status</th>
-              <th className="px-4 py-2.5 text-right font-medium">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {filtered.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="px-4 py-10 text-center text-xs text-muted-foreground">
-                  No users match “{query}”.
-                </td>
-              </tr>
-            ) : (
-              filtered.map((user) => (
-                <tr key={user.id} className="border-t">
-                  <td className="px-4 py-3">
-                    <div className="font-medium">
-                      {user.full_name || <span className="text-muted-foreground">Unnamed</span>}
-                      {user.id === currentUserId ? (
-                        <span className="ml-2 text-2xs text-muted-foreground">you</span>
-                      ) : null}
-                    </div>
-                    <div className="text-xs text-muted-foreground">{user.email}</div>
-                  </td>
-
-                  <td className="px-4 py-3">{ROLE_LABELS[user.role].label}</td>
-
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {user.primary_department_id
-                      ? departmentName.get(user.primary_department_id)
-                      : "—"}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    {user.managed_department_ids.length === 0 ? (
-                      <span className="text-muted-foreground">—</span>
-                    ) : (
-                      <div className="flex flex-wrap gap-1">
-                        {user.managed_department_ids.map((id) => (
-                          <span
-                            key={id}
-                            className="rounded-full bg-accent px-2 py-0.5 text-2xs font-medium text-accent-foreground"
-                          >
-                            {departmentName.get(id) ?? "Unknown"}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    {/* State is never conveyed by colour alone — the label carries it. */}
-                    {user.is_active ? (
-                      <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">
-                        Active
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-                        Deactivated
-                      </span>
-                    )}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <div className="flex justify-end gap-1">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        disabled={resetting || !user.is_active}
-                        onClick={() => resetPassword(user)}
-                        title="Send a password reset link"
-                      >
-                        <KeyRound />
-                        <span className="sr-only">Send password reset to {user.email}</span>
-                      </Button>
-                      <Button variant="ghost" size="sm" onClick={() => openEdit(user)}>
-                        <Pencil />
-                        <span className="sr-only">Edit {user.full_name || user.email}</span>
-                      </Button>
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+      {/* Six columns will not fit a phone. `DataTable` scrolls inside its own
+          ring, and the two least-load-bearing columns collapse below `lg` — the
+          page itself never scrolls sideways, which is the thing that actually
+          breaks a layout. */}
+      <DataTable
+        columns={columns}
+        rows={filtered}
+        getRowKey={(user) => user.id}
+        empty={
+          <EmptyState
+            icon={<Search />}
+            title="No users match that search"
+            description={`Nothing matches “${query}”. Try a surname, an email domain, or a role name like “Team leader”.`}
+          />
+        }
+      />
 
       <UserEditor
         departments={departments}

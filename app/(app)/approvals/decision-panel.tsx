@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { decideInternalRequest } from "./actions";
@@ -53,42 +54,46 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
   }
 
   return (
-    <div className="rounded-lg border bg-card p-5 shadow-ring">
-      <h2 className="text-sm font-semibold">Your decision</h2>
+    <Card>
+      <CardHeader>
+        <CardTitle>Your decision</CardTitle>
+      </CardHeader>
 
-      <div className="mt-4 space-y-2">
-        <Label htmlFor="decision-reason">
-          Reason <span className="text-muted-foreground">(required to reject)</span>
-        </Label>
-        <Textarea
-          id="decision-reason"
-          rows={3}
-          value={reason}
-          onChange={(event) => setReason(event.target.value)}
-          placeholder="Why you are approving or rejecting."
-          aria-invalid={Boolean(error)}
-          aria-describedby={error ? "decision-error" : undefined}
-        />
-        {error ? (
-          <p id="decision-error" role="alert" className="text-xs text-destructive">
-            {error}
-          </p>
-        ) : null}
-      </div>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="decision-reason">
+            Reason <span className="text-muted-foreground">(required to reject)</span>
+          </Label>
+          <Textarea
+            id="decision-reason"
+            rows={3}
+            value={reason}
+            onChange={(event) => setReason(event.target.value)}
+            placeholder="Why you are approving or rejecting."
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? "decision-error" : undefined}
+          />
+          {error ? (
+            <p id="decision-error" role="alert" className="text-xs text-destructive">
+              {error}
+            </p>
+          ) : null}
+        </div>
 
-      <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-        <Button className="flex-1" loading={pending} onClick={() => decide("approved")}>
-          Approve
-        </Button>
-        <Button
-          variant="outline"
-          className="flex-1"
-          loading={pending}
-          onClick={() => decide("rejected")}
-        >
-          Reject
-        </Button>
-      </div>
-    </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <Button className="flex-1" loading={pending} onClick={() => decide("approved")}>
+            Approve
+          </Button>
+          <Button
+            variant="outline"
+            className="flex-1"
+            loading={pending}
+            onClick={() => decide("rejected")}
+          >
+            Reject
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
   );
 }

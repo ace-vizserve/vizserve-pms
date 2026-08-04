@@ -8,6 +8,8 @@ import { createClient } from "@/utils/supabase/server";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { RequestStatusBadge } from "@/components/status-badge";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
+import { PageShell } from "@/components/page-shell";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 import { AttachmentList } from "./attachment-list";
 import { ReviewPanel } from "./review-panel";
@@ -124,7 +126,7 @@ export default async function RequestDetailPage({
     request.approved_target_date && request.approved_target_date !== request.target_date;
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageShell className="mx-auto w-full max-w-3xl">
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={request.reference_no} />
@@ -152,70 +154,86 @@ export default async function RequestDetailPage({
         </div>
       ) : null}
 
-      <section className="rounded-lg border bg-card p-5 shadow-ring">
-        <h2 className="mb-3 text-sm font-semibold">Requester</h2>
-        <dl>
-          <Row label="Name">{request.requester_name}</Row>
-          {/* Bound at submission and not editable by staff — it is the identity
-              used at the Phase 4 client approval gate. */}
-          <Row label="Email">
-            <a href={`mailto:${request.requester_email}`} className="hover:underline">
-              {request.requester_email}
-            </a>
-          </Row>
-          <Row label="Organisation">{request.requester_org}</Row>
-          <Row label="Submitted">{formatDateTime(request.submitted_at)}</Row>
-        </dl>
-      </section>
-
-      <section className="rounded-lg border bg-card p-5 shadow-ring">
-        <h2 className="mb-3 text-sm font-semibold">Request</h2>
-        <dl>
-          <Row label="Form">{form?.name ?? "—"}</Row>
-          <Row label="Description">
-            <p className="whitespace-pre-wrap">{request.description}</p>
-          </Row>
-          <Row label="Target date">
-            {formatDate(request.target_date)}
-            {isOverdue(request.target_date) && request.status === "PENDING_REVIEW" ? (
-              <span className="ml-2 text-xs font-medium text-destructive">Overdue</span>
-            ) : null}
-          </Row>
-          {/* Both dates are kept on purpose: the gap between what the client
-              asked for and what was agreed is the metric that proves Gate 1 is
-              negotiating rather than rubber-stamping. */}
-          {negotiated ? (
-            <Row label="Agreed date">
-              {formatDate(request.approved_target_date)}
-              <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
+      <Card>
+        <CardHeader>
+          <CardTitle>Requester</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl>
+            <Row label="Name">{request.requester_name}</Row>
+            {/* Bound at submission and not editable by staff — it is the identity
+                used at the Phase 4 client approval gate. */}
+            <Row label="Email">
+              <a href={`mailto:${request.requester_email}`} className="hover:underline">
+                {request.requester_email}
+              </a>
             </Row>
-          ) : null}
-        </dl>
-      </section>
+            <Row label="Organisation">{request.requester_org}</Row>
+            <Row label="Submitted">{formatDateTime(request.submitted_at)}</Row>
+          </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Request</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl>
+            <Row label="Form">{form?.name ?? "—"}</Row>
+            <Row label="Description">
+              <p className="whitespace-pre-wrap">{request.description}</p>
+            </Row>
+            <Row label="Target date">
+              {formatDate(request.target_date)}
+              {isOverdue(request.target_date) && request.status === "PENDING_REVIEW" ? (
+                <span className="ml-2 text-xs font-medium text-destructive">Overdue</span>
+              ) : null}
+            </Row>
+            {/* Both dates are kept on purpose: the gap between what the client
+                asked for and what was agreed is the metric that proves Gate 1 is
+                negotiating rather than rubber-stamping. */}
+            {negotiated ? (
+              <Row label="Agreed date">
+                {formatDate(request.approved_target_date)}
+                <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
+              </Row>
+            ) : null}
+          </dl>
+        </CardContent>
+      </Card>
 
       {fields && fields.length > 0 ? (
-        <section className="rounded-lg border bg-card p-5 shadow-ring">
-          <h2 className="mb-3 text-sm font-semibold">Submitted details</h2>
-          <dl>
-            {fields.map((field) => (
-              <Row key={field.field_key} label={field.label}>
-                {renderValue(values[field.field_key])}
-                {!field.is_active ? (
-                  <span className="ml-2 text-2xs text-muted-foreground">(archived field)</span>
-                ) : null}
-              </Row>
-            ))}
-          </dl>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Submitted details</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl>
+              {fields.map((field) => (
+                <Row key={field.field_key} label={field.label}>
+                  {renderValue(values[field.field_key])}
+                  {!field.is_active ? (
+                    <span className="ml-2 text-2xs text-muted-foreground">(archived field)</span>
+                  ) : null}
+                </Row>
+              ))}
+            </dl>
+          </CardContent>
+        </Card>
       ) : null}
 
-      <section className="rounded-lg border bg-card p-5 shadow-ring">
-        <h2 className="mb-3 text-sm font-semibold">Attachments</h2>
-        {/* Signed on click, not on render — a URL minted here would sit in the
-            page source and in the browser history whether or not anyone opened
-            the file. */}
-        <AttachmentList attachments={attachments ?? []} />
-      </section>
+      <Card>
+        <CardHeader>
+          <CardTitle>Attachments</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {/* Signed on click, not on render — a URL minted here would sit in the
+              page source and in the browser history whether or not anyone opened
+              the file. */}
+          <AttachmentList attachments={attachments ?? []} />
+        </CardContent>
+      </Card>
 
       {awaitingDecision ? (
         <ReviewPanel
@@ -231,24 +249,31 @@ export default async function RequestDetailPage({
           defaultListId={form?.default_list_id ?? null}
         />
       ) : decisions?.data && decisions.data.length > 0 ? (
-        <section className="rounded-lg border bg-card p-5 shadow-ring">
-          <h2 className="mb-3 text-sm font-semibold">Decision</h2>
-          {decisions.data.map((decision) => (
-            <div key={decision.created_at} className="space-y-1">
-              <p className="text-sm">
-                {/* Never colour alone — the word carries the state. */}
-                <span className="font-medium capitalize">{decision.decision}</span>
-                <span className="text-muted-foreground"> · {formatDateTime(decision.created_at)}</span>
-              </p>
-              {decision.reason ? (
-                <p className="whitespace-pre-wrap rounded-sm bg-muted/50 px-3 py-2 text-sm">
-                  {decision.reason}
+        <Card>
+          <CardHeader>
+            <CardTitle>Decision</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {decisions.data.map((decision) => (
+              <div key={decision.created_at} className="space-y-1">
+                <p className="text-sm">
+                  {/* Never colour alone — the word carries the state. */}
+                  <span className="font-medium capitalize">{decision.decision}</span>
+                  <span className="text-muted-foreground">
+                    {" · "}
+                    {formatDateTime(decision.created_at)}
+                  </span>
                 </p>
-              ) : null}
-            </div>
-          ))}
-        </section>
+                {decision.reason ? (
+                  <p className="whitespace-pre-wrap rounded-sm bg-muted/50 px-3 py-2 text-sm">
+                    {decision.reason}
+                  </p>
+                ) : null}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       ) : null}
-    </div>
+    </PageShell>
   );
 }

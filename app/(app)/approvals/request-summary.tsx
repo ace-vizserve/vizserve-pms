@@ -1,10 +1,13 @@
 import { formatDate, formatDateTime } from "@/lib/dates";
 import type { InternalRequestRow } from "@/lib/database.types";
-import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
 
 /**
  * The one-line "what is being asked for", shared by the list and the detail
  * page so the two cannot describe the same request differently.
+ *
+ * The status and type pills that used to live here have moved to
+ * `components/status-badge.tsx`. They were a second badge system for the same
+ * idea, already drifted a font weight away from the first.
  */
 export function requestDetail(request: InternalRequestRow): string {
   switch (request.request_type) {
@@ -22,34 +25,4 @@ export function requestDetail(request: InternalRequestRow): string {
     default:
       return `${formatDate(request.work_date)} at ${formatDateTime(request.correction_at).split(", ")[1] ?? "—"}`;
   }
-}
-
-const STATUS_STYLES: Record<string, string> = {
-  PENDING_REVIEW: "bg-warning-subtle text-warning",
-  APPROVED: "bg-success-subtle text-success",
-  REJECTED: "bg-destructive/10 text-destructive",
-};
-
-/**
- * Status pill. Carries its label always — state is never conveyed by colour
- * alone, so this stays readable in greyscale and in a printed queue.
- */
-export function InternalStatusBadge({ status }: { status: string }) {
-  return (
-    <span
-      className={`inline-flex shrink-0 rounded-full px-2 py-0.5 text-2xs font-semibold ${
-        STATUS_STYLES[status] ?? "bg-muted text-muted-foreground"
-      }`}
-    >
-      {status === "PENDING_REVIEW" ? "Pending" : status === "APPROVED" ? "Approved" : "Rejected"}
-    </span>
-  );
-}
-
-export function TypeBadge({ type }: { type: InternalRequestRow["request_type"] }) {
-  return (
-    <span className="inline-flex shrink-0 rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-      {INTERNAL_REQUEST_LABELS[type]}
-    </span>
-  );
 }

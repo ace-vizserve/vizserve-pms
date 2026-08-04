@@ -8,6 +8,9 @@ import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { TASK_STATUS_LABELS, isTerminal } from "@/lib/schemas/tasks";
 import { TaskStatusBadge } from "@/components/status-badge";
+import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
+import { PageShell } from "@/components/page-shell";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/utils/supabase/server";
 
 import { TaskOutputs } from "./task-outputs";
@@ -101,7 +104,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const late = isOverdue(task.due_date) && !isTerminal(task.status);
 
   return (
-    <div className="mx-auto max-w-4xl space-y-5">
+    <PageShell className="mx-auto w-full max-w-4xl">
+      {/* Names this page in the shell breadcrumb. Without it the crumb is the
+          raw UUID from the URL. */}
+      <BreadcrumbLabel value={task.title} />
+
       <Link
         href="/tasks"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
@@ -144,50 +151,58 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       </div>
 
       {task.description ? (
-        <section className="rounded-lg border bg-card p-5 shadow-ring">
-          <h2 className="mb-2 text-sm font-semibold">Brief</h2>
-          <p className="whitespace-pre-wrap text-sm">{task.description}</p>
-        </section>
+        <Card>
+          <CardHeader>
+            <CardTitle>Brief</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="whitespace-pre-wrap text-sm">{task.description}</p>
+          </CardContent>
+        </Card>
       ) : null}
 
       {/* What the client actually asked for. The QA reviewer checks the output
           against this, so it sits above the resolution rather than behind a tab. */}
       {fields && fields.length > 0 ? (
-        <section className="rounded-lg border bg-card p-5 shadow-ring">
-          <h2 className="mb-3 text-sm font-semibold">From the request</h2>
-          <dl className="text-sm">
-            {fields.map((field) => {
-              const raw = values[field.field_key];
-              const rendered =
-                raw === null || raw === undefined || raw === ""
-                  ? "—"
-                  : Array.isArray(raw)
-                    ? raw.join(", ")
-                    : String(raw);
+        <Card>
+          <CardHeader>
+            <CardTitle>From the request</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <dl className="text-sm">
+              {fields.map((field) => {
+                const raw = values[field.field_key];
+                const rendered =
+                  raw === null || raw === undefined || raw === ""
+                    ? "—"
+                    : Array.isArray(raw)
+                      ? raw.join(", ")
+                      : String(raw);
 
-              return (
-                <div
-                  key={field.field_key}
-                  className="grid gap-1 border-b py-2 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3"
-                >
-                  <dt className="text-xs text-muted-foreground">
-                    {field.label}
-                    {!field.is_active ? (
-                      <span className="ml-1 text-2xs">(archived)</span>
-                    ) : null}
-                  </dt>
-                  <dd className="min-w-0 break-words">{rendered}</dd>
+                return (
+                  <div
+                    key={field.field_key}
+                    className="grid gap-1 border-b py-2 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3"
+                  >
+                    <dt className="text-xs text-muted-foreground">
+                      {field.label}
+                      {!field.is_active ? (
+                        <span className="ml-1 text-2xs">(archived)</span>
+                      ) : null}
+                    </dt>
+                    <dd className="min-w-0 break-words">{rendered}</dd>
+                  </div>
+                );
+              })}
+              {request?.target_date ? (
+                <div className="grid gap-1 border-t py-2 sm:grid-cols-[10rem_1fr] sm:gap-3">
+                  <dt className="text-xs text-muted-foreground">Client asked for</dt>
+                  <dd>{formatDate(request.target_date)}</dd>
                 </div>
-              );
-            })}
-            {request?.target_date ? (
-              <div className="grid gap-1 border-t py-2 sm:grid-cols-[10rem_1fr] sm:gap-3">
-                <dt className="text-xs text-muted-foreground">Client asked for</dt>
-                <dd>{formatDate(request.target_date)}</dd>
-              </div>
-            ) : null}
-          </dl>
-        </section>
+              ) : null}
+            </dl>
+          </CardContent>
+        </Card>
       ) : null}
 
       <TaskWorkflow
@@ -219,43 +234,47 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
         uploaderNames={nameOf}
       />
 
-      <section className="rounded-lg border bg-card p-5 shadow-ring">
-        <h2 className="mb-3 text-sm font-semibold">History</h2>
-        {!history || history.length === 0 ? (
-          <p className="text-xs text-muted-foreground">Nothing recorded yet.</p>
-        ) : (
-          <ol className="space-y-3">
-            {history.map((entry) => (
-              <li key={entry.id} className="border-l-2 pl-3 text-sm">
-                <div className="flex flex-wrap items-baseline gap-x-2">
-                  <span className="font-medium">
-                    {entry.from_status
-                      ? `${TASK_STATUS_LABELS[entry.from_status]} → ${TASK_STATUS_LABELS[entry.to_status]}`
-                      : `Created as ${TASK_STATUS_LABELS[entry.to_status]}`}
-                  </span>
-                  {/* An override that reads like an ordinary step is an override
-                      that destroys the trail it appears in. */}
-                  {entry.is_override ? (
-                    <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-2xs font-medium text-warning">
-                      Forced
+      <Card>
+        <CardHeader>
+          <CardTitle>History</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {!history || history.length === 0 ? (
+            <p className="text-xs text-muted-foreground">Nothing recorded yet.</p>
+          ) : (
+            <ol className="space-y-3">
+              {history.map((entry) => (
+                <li key={entry.id} className="border-l-2 pl-3 text-sm">
+                  <div className="flex flex-wrap items-baseline gap-x-2">
+                    <span className="font-medium">
+                      {entry.from_status
+                        ? `${TASK_STATUS_LABELS[entry.from_status]} → ${TASK_STATUS_LABELS[entry.to_status]}`
+                        : `Created as ${TASK_STATUS_LABELS[entry.to_status]}`}
                     </span>
+                    {/* An override that reads like an ordinary step is an
+                        override that destroys the trail it appears in. */}
+                    {entry.is_override ? (
+                      <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-2xs font-medium text-warning">
+                        Forced
+                      </span>
+                    ) : null}
+                    <span className="text-xs text-muted-foreground">
+                      {entry.actor_id ? nameOf.get(entry.actor_id) ?? "Someone" : "System"}
+                      {" · "}
+                      {formatDateTime(entry.created_at)}
+                    </span>
+                  </div>
+                  {entry.comment ? (
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
+                      {entry.comment}
+                    </p>
                   ) : null}
-                  <span className="text-xs text-muted-foreground">
-                    {entry.actor_id ? nameOf.get(entry.actor_id) ?? "Someone" : "System"}
-                    {" · "}
-                    {formatDateTime(entry.created_at)}
-                  </span>
-                </div>
-                {entry.comment ? (
-                  <p className="mt-1 whitespace-pre-wrap text-sm text-muted-foreground">
-                    {entry.comment}
-                  </p>
-                ) : null}
-              </li>
-            ))}
-          </ol>
-        )}
-      </section>
-    </div>
+                </li>
+              ))}
+            </ol>
+          )}
+        </CardContent>
+      </Card>
+    </PageShell>
   );
 }

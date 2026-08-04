@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { Clock } from "lucide-react";
 
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import {
@@ -11,6 +12,10 @@ import {
 } from "@/lib/dates";
 import { loadPunchState } from "@/lib/dtr-server";
 import { createClient } from "@/utils/supabase/server";
+import { DataTable, type Column } from "@/components/data-table";
+import { EmptyState } from "@/components/empty-state";
+import { PageShell } from "@/components/page-shell";
+import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { DtrToolbar } from "./dtr-toolbar";
 import { PunchPanel } from "./punch-panel";
 
@@ -93,16 +98,63 @@ export default async function DtrPage({
     0,
   );
 
-  return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">DTR</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Your daily time record. Times are captured by the server — the earliest time-in and the
-          latest time-out for each day are what stand.
-        </p>
-      </div>
+  const columns: Column<Entry>[] = [
+    {
+      key: "date",
+      header: "Date",
+      className: "whitespace-nowrap",
+      cell: (entry) => (
+        <>
+          {formatDate(entry.work_date)}
+          {/* Provenance in words. A corrected time is a different fact from a
+              punched one, and this is the row someone points at in a payroll
+              dispute. */}
+          {entry.corrected_at ? (
+            <p className="mt-0.5 text-2xs font-medium text-info">Corrected</p>
+          ) : null}
+        </>
+      ),
+    },
+    // Only when the list spans more than one person. A column of your own name
+    // repeated forty times is a column carrying no information.
+    ...(showPerson
+      ? [
+          {
+            key: "person",
+            header: "Person",
+            cell: (entry: Entry) => entry.vizserve_pms_users?.full_name ?? "—",
+          },
+        ]
+      : []),
+    {
+      key: "in",
+      header: "Time in",
+      className: "tabular-nums whitespace-nowrap",
+      cell: (entry) => formatAppTime(entry.time_in),
+    },
+    {
+      key: "out",
+      header: "Time out",
+      className: "tabular-nums whitespace-nowrap",
+      cell: (entry) => (
+        <>
+          {formatAppTime(entry.time_out)}
+          {Boolean(entry.time_in) && !entry.time_out ? (
+            <p className="mt-0.5 text-2xs font-medium text-warning">Still open</p>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: "worked",
+      header: "Worked",
+      className: "tabular-nums whitespace-nowrap",
+      cell: (entry) => formatDuration(workedMinutes(entry.time_in, entry.time_out)),
+    },
+  ];
 
+  return (
+    <PageShell>
       <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_1fr] lg:items-start">
         <PunchPanel initial={punchState} />
 
@@ -115,94 +167,38 @@ export default async function DtrPage({
             canExport={isLead}
           />
 
-          {entries.length === 0 ? (
-            <div className="rounded-lg border border-dashed p-10 text-center">
-              <p className="text-sm font-medium">No entries in this range</p>
-              <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-                Days with no punch have no row at all. If a day is missing that should not be, raise
-                a No Time-In request from Approvals.
-              </p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border">
-              <table className="w-full text-sm">
-                <thead className="bg-muted/50 text-xs text-muted-foreground">
-                  <tr>
-                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                      Date
-                    </th>
-                    {showPerson ? (
-                      <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                        Person
-                      </th>
-                    ) : null}
-                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                      Time in
-                    </th>
-                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                      Time out
-                    </th>
-                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
-                      Worked
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {entries.map((entry) => {
-                    const minutes = workedMinutes(entry.time_in, entry.time_out);
-                    const open = Boolean(entry.time_in) && !entry.time_out;
+          <DataTable
+            columns={columns}
+            rows={entries}
+            getRowKey={(entry) => entry.id}
+            empty={
+              <EmptyState
+                icon={<Clock />}
+                title="No entries in this range"
+                description="Days with no punch have no row at all. Widen the date range first; if a day is genuinely missing that should not be, raise a No Time-In request from Approvals."
+              />
+            }
+            footer={
+              <TableRow className="hover:bg-transparent">
+                <TableHead scope="row" colSpan={columns.length - 1}>
+                  Total in range
+                </TableHead>
+                <TableCell className="font-semibold tabular-nums">
+                  {formatDuration(totalMinutes)}
+                </TableCell>
+              </TableRow>
+            }
+          />
 
-                    return (
-                      <tr key={entry.id} className="border-t align-top hover:bg-muted/30">
-                        <td className="px-4 py-3 whitespace-nowrap">
-                          {formatDate(entry.work_date)}
-                          {/* Provenance in words. A corrected time is a
-                              different fact from a punched one, and this is the
-                              row someone points at in a payroll dispute. */}
-                          {entry.corrected_at ? (
-                            <p className="mt-0.5 text-2xs font-medium text-info">Corrected</p>
-                          ) : null}
-                        </td>
-                        {showPerson ? (
-                          <td className="px-4 py-3">
-                            {entry.vizserve_pms_users?.full_name ?? "—"}
-                          </td>
-                        ) : null}
-                        <td className="px-4 py-3 tabular-nums whitespace-nowrap">
-                          {formatAppTime(entry.time_in)}
-                        </td>
-                        <td className="px-4 py-3 tabular-nums whitespace-nowrap">
-                          {formatAppTime(entry.time_out)}
-                          {open ? (
-                            <p className="mt-0.5 text-2xs font-medium text-warning">Still open</p>
-                          ) : null}
-                        </td>
-                        <td className="px-4 py-3 tabular-nums whitespace-nowrap">
-                          {formatDuration(minutes)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-                <tfoot className="border-t bg-muted/30 text-xs">
-                  <tr>
-                    <th
-                      scope="row"
-                      colSpan={showPerson ? 4 : 3}
-                      className="px-4 py-2.5 text-left font-medium"
-                    >
-                      Total in range
-                    </th>
-                    <td className="px-4 py-2.5 font-semibold tabular-nums">
-                      {formatDuration(totalMinutes)}
-                    </td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-          )}
+          {/* Kept from the old page heading. It is not decoration: it is why two
+              punches on one day collapse into one row, which is the first thing
+              anyone asks about their own record. */}
+          <p className="text-xs text-muted-foreground">
+            Times are captured by the server — the earliest time-in and the latest time-out for each
+            day are what stand.
+          </p>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

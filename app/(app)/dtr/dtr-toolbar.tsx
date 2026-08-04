@@ -77,7 +77,7 @@ export function DtrToolbar({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-ring sm:flex-row sm:items-end">
+    <div className="flex flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10 sm:flex-row sm:items-end">
       <div className="grid flex-1 gap-3 sm:grid-cols-3">
         <div className="space-y-1.5">
           <Label htmlFor="dtr-from">From</Label>

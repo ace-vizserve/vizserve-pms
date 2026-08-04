@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
+import { PageShell } from "@/components/page-shell";
 
 import { UsersTable } from "./users-table";
 import type { EditableUser } from "./user-editor";
@@ -51,20 +52,20 @@ export default async function UsersPage() {
   }));
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Users</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Roles are inclusive — an admin can do everything a manager can, and so on down. What a
-          person can <em>reach</em> is decided by the departments they lead, not by the role alone.
-        </p>
-      </div>
+    <PageShell>
+      {/* No <h1> — the breadcrumb says "Admin / Users". This paragraph stays
+          because it is the one thing the screen cannot show: the role ladder is
+          inclusive, so the column reading "Manager" is a floor, not a set. */}
+      <p className="text-xs text-muted-foreground">
+        Roles are inclusive — an admin can do everything a manager can, and so on down. What a
+        person can <em>reach</em> is decided by the departments they lead, not by the role alone.
+      </p>
 
       <UsersTable
         users={rows}
         departments={departments ?? []}
         currentUserId={context.userId}
       />
-    </div>
+    </PageShell>
   );
 }

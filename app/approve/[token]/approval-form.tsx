@@ -61,7 +61,7 @@ export function ApprovalForm({
 
   if (done) {
     return (
-      <div className="rounded-xl border bg-card p-8 text-center">
+      <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-8 text-center">
         <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded-full bg-success-subtle text-success">
           <Check className="size-5" />
         </div>
@@ -78,7 +78,7 @@ export function ApprovalForm({
   }
 
   return (
-    <div className="rounded-xl border bg-card p-6 sm:p-8">
+    <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-6 sm:p-8">
       {mode === "idle" ? (
         <>
           <h2 className="text-sm font-semibold">Is this what you needed?</h2>

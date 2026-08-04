@@ -49,7 +49,7 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
 
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 rounded-lg border bg-card p-1">
+      <div className="flex gap-1 rounded-xl bg-card p-1 ring-1 ring-foreground/10">
         {tabs.map((tab) => (
           <button
             key={tab.value}
@@ -67,7 +67,7 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
         ))}
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card p-3">
+      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
         <div className="space-y-1.5">
           <Label htmlFor="status" className="text-xs text-muted-foreground">
             Status

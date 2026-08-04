@@ -8,8 +8,12 @@ import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
 import { createClient } from "@/utils/supabase/server";
+import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
+import { PageShell } from "@/components/page-shell";
+import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
+import { Card, CardContent } from "@/components/ui/card";
 import { DecisionPanel } from "../decision-panel";
-import { InternalStatusBadge, requestDetail, TypeBadge } from "../request-summary";
+import { requestDetail } from "../request-summary";
 
 export const metadata: Metadata = { title: "Request" };
 
@@ -54,7 +58,12 @@ export default async function InternalRequestPage({ params }: { params: Promise<
     !isOwn && request.status === "PENDING_REVIEW" && roleAtLeast(context.role, "team_leader");
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageShell className="mx-auto w-full max-w-3xl">
+      {/* Names this page in the shell breadcrumb. Without it the crumb is the
+          raw UUID from the URL. An internal request has no reference number, so
+          its type is the most identifying thing it has. */}
+      <BreadcrumbLabel value={INTERNAL_REQUEST_LABELS[request.request_type]} />
+
       <Link
         href="/approvals"
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
@@ -71,60 +80,62 @@ export default async function InternalRequestPage({ params }: { params: Promise<
           <p className="mt-1 text-sm text-muted-foreground">{requestDetail(request)}</p>
         </div>
         <div className="flex items-center gap-2">
-          <TypeBadge type={request.request_type} />
+          <InternalTypeBadge type={request.request_type} />
           <InternalStatusBadge status={request.status} />
         </div>
       </div>
 
-      <div className="rounded-lg border bg-card p-5 shadow-ring">
-        <dl className="grid gap-4 sm:grid-cols-2">
-          <Field label="Requested by" value={request.vizserve_pms_users?.full_name ?? "—"} />
-          <Field label="Submitted" value={formatDateTime(request.created_at)} />
+      <Card>
+        <CardContent>
+          <dl className="grid gap-4 sm:grid-cols-2">
+            <Field label="Requested by" value={request.vizserve_pms_users?.full_name ?? "—"} />
+            <Field label="Submitted" value={formatDateTime(request.created_at)} />
 
-          {request.request_type === "LEAVE" ? (
-            <>
-              <Field label="First day" value={formatDate(request.start_date)} />
-              <Field label="Last day" value={formatDate(request.end_date)} />
-            </>
-          ) : null}
+            {request.request_type === "LEAVE" ? (
+              <>
+                <Field label="First day" value={formatDate(request.start_date)} />
+                <Field label="Last day" value={formatDate(request.end_date)} />
+              </>
+            ) : null}
 
-          {request.request_type === "NO_TIME_IN" || request.request_type === "NO_TIME_OUT" ? (
-            <>
-              <Field label="Day being corrected" value={formatDate(request.work_date)} />
-              <Field
-                label={
-                  request.request_type === "NO_TIME_IN"
-                    ? "Should have started"
-                    : "Should have finished"
-                }
-                value={formatDateTime(request.correction_at)}
-              />
-            </>
-          ) : null}
+            {request.request_type === "NO_TIME_IN" || request.request_type === "NO_TIME_OUT" ? (
+              <>
+                <Field label="Day being corrected" value={formatDate(request.work_date)} />
+                <Field
+                  label={
+                    request.request_type === "NO_TIME_IN"
+                      ? "Should have started"
+                      : "Should have finished"
+                  }
+                  value={formatDateTime(request.correction_at)}
+                />
+              </>
+            ) : null}
 
-          {request.request_type === "REIMBURSEMENT" ? (
-            <Field label="Amount" value={requestDetail(request)} />
-          ) : null}
-        </dl>
+            {request.request_type === "REIMBURSEMENT" ? (
+              <Field label="Amount" value={requestDetail(request)} />
+            ) : null}
+          </dl>
 
-        <div className="mt-5 border-t pt-4">
-          <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Reason</dt>
-          <dd className="mt-1 text-sm whitespace-pre-wrap">{request.reason}</dd>
-        </div>
-
-        {request.status !== "PENDING_REVIEW" ? (
           <div className="mt-5 border-t pt-4">
-            <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
-              Decision {request.reviewed_at ? `· ${formatDateTime(request.reviewed_at)}` : ""}
-            </dt>
-            <dd className="mt-1 text-sm whitespace-pre-wrap">
-              {request.decision_reason || (
-                <span className="text-muted-foreground">No reason given.</span>
-              )}
-            </dd>
+            <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Reason</dt>
+            <dd className="mt-1 text-sm whitespace-pre-wrap">{request.reason}</dd>
           </div>
-        ) : null}
-      </div>
+
+          {request.status !== "PENDING_REVIEW" ? (
+            <div className="mt-5 border-t pt-4">
+              <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+                Decision {request.reviewed_at ? `· ${formatDateTime(request.reviewed_at)}` : ""}
+              </dt>
+              <dd className="mt-1 text-sm whitespace-pre-wrap">
+                {request.decision_reason || (
+                  <span className="text-muted-foreground">No reason given.</span>
+                )}
+              </dd>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
 
       {/* P5-09, stated on the screen where it matters. Someone deciding a
           correction should know the approval itself rewrites the record — that
@@ -146,6 +157,6 @@ export default async function InternalRequestPage({ params }: { params: Promise<
           Waiting on your department lead. You cannot decide your own request.
         </p>
       ) : null}
-    </div>
+    </PageShell>
   );
 }

@@ -38,7 +38,7 @@ export function RequestFilters({ forms }: { forms: { id: string; name: string }[
   const hasFilters = ["status", "form", "from", "to"].some((k) => params.get(k));
 
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card p-3">
+    <div className="flex flex-wrap items-end gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
       <div className="space-y-1.5">
         <Label htmlFor="status" className="text-xs text-muted-foreground">
           Status

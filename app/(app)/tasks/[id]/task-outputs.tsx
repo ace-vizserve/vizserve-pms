@@ -6,6 +6,14 @@ import { Download, Loader2, Paperclip, Upload, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import { formatBytes } from "@/lib/attachments";
 
 import { getTaskAttachmentUrl, removeTaskAttachment, uploadTaskOutput } from "../actions";
@@ -98,17 +106,15 @@ export function TaskOutputs({
   }
 
   return (
-    <section className="rounded-lg border bg-card p-5 shadow-ring">
-      <div className="mb-3 flex items-baseline justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">Output files</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            What you produced. The QA reviewer opens these, and the client sees them at approval.
-          </p>
-        </div>
+    <Card>
+      <CardHeader>
+        <CardTitle>Output files</CardTitle>
+        <CardDescription className="text-xs">
+          What you produced. The QA reviewer opens these, and the client sees them at approval.
+        </CardDescription>
 
         {canUpload ? (
-          <>
+          <CardAction>
             <input
               ref={inputRef}
               type="file"
@@ -127,64 +133,66 @@ export function TaskOutputs({
               {pending ? <Loader2 className="animate-spin" /> : <Upload />}
               {pending ? "Uploading…" : "Upload"}
             </Button>
-          </>
+          </CardAction>
         ) : null}
-      </div>
+      </CardHeader>
 
-      {attachments.length === 0 ? (
-        <p className="text-xs text-muted-foreground">
-          {canUpload ? "Nothing uploaded yet." : "None."}
-        </p>
-      ) : (
-        <ul className="space-y-1">
-          {attachments.map((attachment) => (
-            <li
-              key={attachment.id}
-              className="flex items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted/50"
-            >
-              <button
-                type="button"
-                onClick={() => open(attachment)}
-                disabled={opening !== null}
-                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+      <CardContent>
+        {attachments.length === 0 ? (
+          <p className="text-xs text-muted-foreground">
+            {canUpload ? "Nothing uploaded yet." : "None."}
+          </p>
+        ) : (
+          <ul className="space-y-1">
+            {attachments.map((attachment) => (
+              <li
+                key={attachment.id}
+                className="flex items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted/50"
               >
-                {opening === attachment.id ? (
-                  <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
-                ) : (
-                  <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
-                )}
-                <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
-                <span className="shrink-0 text-2xs text-muted-foreground">
-                  {formatBytes(attachment.size_bytes)}
-                  {attachment.uploaded_by
-                    ? ` · ${uploaderNames.get(attachment.uploaded_by) ?? "someone"}`
-                    : null}
-                </span>
-                <Download className="size-3.5 shrink-0 text-muted-foreground" />
-              </button>
-
-              {canUpload ? (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="size-6 shrink-0 p-0"
-                  disabled={pending}
-                  onClick={() => remove(attachment)}
+                <button
+                  type="button"
+                  onClick={() => open(attachment)}
+                  disabled={opening !== null}
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left"
                 >
-                  <X className="size-3.5" />
-                  <span className="sr-only">Remove {attachment.filename}</span>
-                </Button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      )}
+                  {opening === attachment.id ? (
+                    <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
+                  ) : (
+                    <Paperclip className="size-3.5 shrink-0 text-muted-foreground" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate">{attachment.filename}</span>
+                  <span className="shrink-0 text-2xs text-muted-foreground">
+                    {formatBytes(attachment.size_bytes)}
+                    {attachment.uploaded_by
+                      ? ` · ${uploaderNames.get(attachment.uploaded_by) ?? "someone"}`
+                      : null}
+                  </span>
+                  <Download className="size-3.5 shrink-0 text-muted-foreground" />
+                </button>
 
-      {error ? (
-        <p className="mt-2 text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </section>
+                {canUpload ? (
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    className="shrink-0"
+                    disabled={pending}
+                    onClick={() => remove(attachment)}
+                  >
+                    <X />
+                    <span className="sr-only">Remove {attachment.filename}</span>
+                  </Button>
+                ) : null}
+              </li>
+            ))}
+          </ul>
+        )}
+
+        {error ? (
+          <p className="mt-2 text-sm text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </CardContent>
+    </Card>
   );
 }

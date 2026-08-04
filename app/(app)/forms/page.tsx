@@ -1,12 +1,25 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Plus } from "lucide-react";
+import { FileText, Plus } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
+import { DataTable, type Column } from "@/components/data-table";
+import { EmptyState } from "@/components/empty-state";
+import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Forms" };
+
+type FormRow = {
+  id: string;
+  name: string;
+  slug: string;
+  is_public: boolean;
+  is_active: boolean;
+  reference_prefix: string;
+  department_id: string | null;
+};
 
 /**
  * P1-05 — forms list.
@@ -15,6 +28,8 @@ export const metadata: Metadata = { title: "Forms" };
  * who leads VizMedia sees VizMedia's forms and nothing else, and the same query
  * run by an admin returns everything. That is deliberate — the filter lives in
  * one place (the policy) rather than being restated at every call site.
+ *
+ * No <h1>. The shell breadcrumb is the page label.
  */
 export default async function FormsPage() {
   await requireRole("team_leader");
@@ -30,90 +45,94 @@ export default async function FormsPage() {
     .select("id, name");
 
   const departmentName = new Map((departments ?? []).map((d) => [d.id, d.name]));
+  const rows = (forms ?? []) as FormRow[];
+
+  const columns: Column<FormRow>[] = [
+    {
+      key: "form",
+      header: "Form",
+      cell: (form) => (
+        <>
+          <Link href={`/forms/${form.id}`} className="font-medium hover:underline">
+            {form.name}
+          </Link>
+          <span className="ml-2 text-xs text-muted-foreground">{form.reference_prefix}</span>
+        </>
+      ),
+    },
+    {
+      key: "department",
+      header: "Department",
+      className: "hidden sm:table-cell text-muted-foreground",
+      cell: (form) =>
+        form.department_id ? (
+          departmentName.get(form.department_id)
+        ) : (
+          // A form with no department has nowhere to route a submission, which
+          // is a fault rather than a blank.
+          <span className="text-warning">Not routed</span>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (form) =>
+        /* Status is never colour alone — the label carries it. */
+        form.is_active ? (
+          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">
+            Live
+          </span>
+        ) : (
+          <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
+            Draft
+          </span>
+        ),
+    },
+    {
+      key: "url",
+      header: "Public URL",
+      className: "hidden md:table-cell",
+      cell: (form) =>
+        form.is_active && form.is_public ? (
+          <Link
+            href={`/f/${form.slug}`}
+            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+          >
+            /f/{form.slug}
+          </Link>
+        ) : (
+          <span className="text-xs text-muted-foreground">—</span>
+        ),
+    },
+  ];
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Forms</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Client-facing request forms. Publishing one gives it a public URL that needs no login.
-          </p>
-        </div>
+    <PageShell>
+      <div className="flex items-center justify-end">
         <Button size="sm" render={<Link href="/forms/new" />}>
-            <Plus />
-            New form
-          </Button>
+          <Plus />
+          New form
+        </Button>
       </div>
 
-      {!forms || forms.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-10 text-center">
-          <p className="text-sm font-medium">No forms yet</p>
-          <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
-            A form defines what a client must tell you before the team will accept the work. Every
-            required field is a question you will never have to chase.
-          </p>
-          <Button size="sm" className="mt-4" render={<Link href="/forms/new" />}>Create the first form</Button>
-        </div>
-      ) : (
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2.5 text-left font-medium">Form</th>
-                <th className="px-4 py-2.5 text-left font-medium">Department</th>
-                <th className="px-4 py-2.5 text-left font-medium">Status</th>
-                <th className="px-4 py-2.5 text-left font-medium">Public URL</th>
-              </tr>
-            </thead>
-            <tbody>
-              {forms.map((form) => (
-                <tr key={form.id} className="border-t">
-                  <td className="px-4 py-3">
-                    <Link href={`/forms/${form.id}`} className="font-medium hover:underline">
-                      {form.name}
-                    </Link>
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      {form.reference_prefix}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-muted-foreground">
-                    {form.department_id ? (
-                      departmentName.get(form.department_id)
-                    ) : (
-                      <span className="text-warning">Not routed</span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {/* Status is never colour alone — the label carries it. */}
-                    {form.is_active ? (
-                      <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">
-                        Live
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-                        Draft
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3">
-                    {form.is_active && form.is_public ? (
-                      <Link
-                        href={`/f/${form.slug}`}
-                        className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-                      >
-                        /f/{form.slug}
-                      </Link>
-                    ) : (
-                      <span className="text-xs text-muted-foreground">—</span>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </div>
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(form) => form.id}
+        /* This list has no filters, so there is only one way to be empty. */
+        empty={
+          <EmptyState
+            icon={<FileText />}
+            title="No forms yet"
+            description="A form defines what a client must tell you before the team will accept the work. Every required field is a question you will never have to chase."
+            action={
+              <Button size="sm" variant="outline" render={<Link href="/forms/new" />}>
+                Create the first form
+              </Button>
+            }
+          />
+        }
+      />
+    </PageShell>
   );
 }

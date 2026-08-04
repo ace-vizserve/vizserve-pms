@@ -4,6 +4,7 @@ import { ArrowLeft } from "lucide-react";
 
 import { requireRole, roleAtLeast } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
+import { PageShell } from "@/components/page-shell";
 import { FormSettings } from "../form-settings";
 
 export const metadata: Metadata = { title: "New form" };
@@ -30,7 +31,7 @@ export default async function NewFormPage() {
     .order("name");
 
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <PageShell className="mx-auto w-full max-w-3xl">
       <div>
         <Link
           href="/forms"
@@ -39,15 +40,16 @@ export default async function NewFormPage() {
           <ArrowLeft className="size-3.5" />
           Forms
         </Link>
-        <h1 className="mt-2 text-xl font-semibold tracking-tight">New form</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
+        {/* No <h1> — the breadcrumb reads "Forms / New". This line survives
+            because it says what happens next, which the crumb cannot. */}
+        <p className="mt-2 text-xs text-muted-foreground">
           Set it up here, then add the fields. It stays a draft until you publish it.
         </p>
       </div>
 
-      <div className="rounded-lg border bg-card p-6 shadow-ring">
+      <div className="rounded-xl bg-card p-6 ring-1 ring-foreground/10">
         <FormSettings departments={departments ?? []} lists={lists ?? []} />
       </div>
-    </div>
+    </PageShell>
   );
 }

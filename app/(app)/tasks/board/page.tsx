@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { List } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { formatDate, isOverdue } from "@/lib/dates";
 import { TASK_STATUS_LABELS, TASK_STATUSES, isTerminal } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
+import { PageShell } from "@/components/page-shell";
+import { Button } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Board" };
 
@@ -58,21 +61,18 @@ export default async function TaskBoardPage({
   }
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-xl font-semibold tracking-tight">Board</h1>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Live work by stage. Open a card to move it — the steps available depend on where it is
-            and whether you are the PIC or the reviewer.
-          </p>
-        </div>
-        <Link
-          href="/tasks"
-          className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-        >
+    <PageShell>
+      {/* No <h1> — the breadcrumb reads "Tasks / Board". The sentence stays: it
+          is why there is no dragging, which is the first thing anyone tries. */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs text-muted-foreground">
+          Live work by stage. Open a card to move it — the steps available depend on where it is and
+          whether you are the PIC or the reviewer.
+        </p>
+        <Button variant="outline" size="sm" render={<Link href="/tasks" />}>
+          <List />
           List view
-        </Link>
+        </Button>
       </div>
 
       <div className="overflow-x-auto pb-2">
@@ -81,7 +81,7 @@ export default async function TaskBoardPage({
             const column = byStatus.get(status) ?? [];
 
             return (
-              <div key={status} className="w-64 shrink-0 rounded-lg border bg-muted/30">
+              <div key={status} className="w-64 shrink-0 rounded-xl bg-muted/30 ring-1 ring-foreground/10">
                 <div className="flex items-baseline justify-between gap-2 border-b px-3 py-2">
                   <h2 className="text-xs font-semibold">{TASK_STATUS_LABELS[status]}</h2>
                   <span className="text-2xs tabular-nums text-muted-foreground">
@@ -100,7 +100,7 @@ export default async function TaskBoardPage({
                         <Link
                           key={task.id}
                           href={`/tasks/${task.id}`}
-                          className="block rounded-md border bg-background p-2.5 text-sm shadow-ring transition-colors hover:border-primary/40"
+                          className="block rounded-lg bg-background p-2.5 text-sm ring-1 ring-foreground/10 transition-shadow hover:ring-primary/40"
                         >
                           <span className="line-clamp-2 font-medium">{task.title}</span>
                           <span className="mt-1.5 flex items-center justify-between gap-2 text-2xs text-muted-foreground">
@@ -127,6 +127,6 @@ export default async function TaskBoardPage({
           })}
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

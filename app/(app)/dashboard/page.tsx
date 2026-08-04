@@ -1,12 +1,15 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Bell, ClipboardCheck, ListChecks, ShieldCheck } from "lucide-react";
 
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { loadPunchState } from "@/lib/dtr-server";
+import { PageShell } from "@/components/page-shell";
+import { StatTile } from "@/components/stat-tile";
 import { PunchPanel } from "../dtr/punch-panel";
 import { createClient } from "@/utils/supabase/server";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -21,54 +24,11 @@ export const metadata: Metadata = { title: "Dashboard" };
  * The counts that CAN be real are real: both read through RLS, so each person's
  * numbers are their own scope by construction rather than by a filter someone
  * has to remember to write.
+ *
+ * The page-local `Card`/`Metric` this used to carry are gone: the counts are
+ * `StatTile`s and the punch shortcut is a `Card`. A dashboard growing its own
+ * private card component is how the app ended up with six of them.
  */
-
-function Card({
-  title,
-  description,
-  children,
-  phase,
-}: {
-  title: string;
-  description: string;
-  children?: React.ReactNode;
-  phase?: string;
-}) {
-  return (
-    <div className="rounded-lg border bg-card p-5 shadow-ring">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        </div>
-        {phase ? (
-          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-            {phase}
-          </span>
-        ) : null}
-      </div>
-      {children ? <div className="mt-4">{children}</div> : null}
-    </div>
-  );
-}
-
-function Metric({ value, label }: { value: number | null; label: string }) {
-  return (
-    <div className="flex items-baseline gap-2">
-      <span
-        className={
-          value === null
-            ? "text-2xl font-semibold tabular-nums text-muted-foreground/40"
-            : "text-2xl font-semibold tabular-nums"
-        }
-      >
-        {value === null ? "—" : value}
-      </span>
-      <span className="text-xs text-muted-foreground">{label}</span>
-    </div>
-  );
-}
-
 export default async function DashboardPage() {
   const context = await requireAuthContext();
   const supabase = await createClient();
@@ -102,8 +62,12 @@ export default async function DashboardPage() {
       .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
   ]);
 
+  const showQa = (myQa.count ?? 0) > 0;
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
+    <PageShell>
+      {/* The one heading in the app that is not the breadcrumb. It is a greeting,
+          not a page label — the crumb already says "Dashboard". */}
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Hello, {firstName}</h1>
         <p className="mt-1 text-xs text-muted-foreground">
@@ -113,48 +77,67 @@ export default async function DashboardPage() {
         </p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card title="Time in / out" description="Punch without leaving the dashboard">
-          <PunchPanel initial={punchState} compact />
-          <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/dtr" />}>
-              Open my DTR <ArrowRight className="size-3.5" />
-            </Button>
-        </Card>
-
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         {isApprover ? (
-          <Card title="Pending approvals" description="Requests awaiting your decision">
-            <Metric value={pending.count ?? 0} label="waiting" />
-            <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/requests?status=PENDING_REVIEW" />}>
-                Open queue <ArrowRight className="size-3.5" />
-              </Button>
-          </Card>
+          <StatTile
+            label="Pending approvals"
+            value={pending.count ?? 0}
+            hint="Requests awaiting your decision"
+            icon={<ClipboardCheck />}
+            tone="warning"
+            href="/requests?status=PENDING_REVIEW"
+            linkLabel="Open queue"
+          />
         ) : null}
 
-        <Card title="My tasks" description="Work assigned to you, still open">
-          <Metric value={myTasks.count ?? 0} label="open" />
-          <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/tasks?view=mine" />}>
-              Open my tasks <ArrowRight className="size-3.5" />
-            </Button>
-        </Card>
+        <StatTile
+          label="My tasks"
+          value={myTasks.count ?? 0}
+          hint="Assigned to you, still open"
+          icon={<ListChecks />}
+          tone="info"
+          href="/tasks?view=mine"
+          linkLabel="Open my tasks"
+        />
 
         {/* Only shown when there is actually something to review. A permanent
-            zero teaches people to stop looking at the card. */}
-        {(myQa.count ?? 0) > 0 ? (
-          <Card title="Waiting on my QA" description="Work that needs your review">
-            <Metric value={myQa.count ?? 0} label="to review" />
-            <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/tasks?view=qa" />}>
-                Open QA queue <ArrowRight className="size-3.5" />
-              </Button>
-          </Card>
+            zero teaches people to stop looking at the tile. */}
+        {showQa ? (
+          <StatTile
+            label="Waiting on my QA"
+            value={myQa.count ?? 0}
+            hint="Work that needs your review"
+            icon={<ShieldCheck />}
+            tone="info"
+            href="/tasks?view=qa"
+            linkLabel="Open QA queue"
+          />
         ) : null}
 
-        <Card title="Inbox" description="Notifications about your work">
-          <Metric value={unread.count ?? 0} label="unread" />
-          <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/inbox" />}>
-              Open inbox <ArrowRight className="size-3.5" />
-            </Button>
-        </Card>
+        <StatTile
+          label="Inbox"
+          value={unread.count ?? 0}
+          hint="Unread notifications about your work"
+          icon={<Bell />}
+          href="/inbox"
+          linkLabel="Open inbox"
+        />
       </div>
-    </div>
+
+      <Card className="max-w-md">
+        <CardHeader>
+          <CardTitle>Time in / out</CardTitle>
+          <CardDescription className="text-xs">
+            Punch without leaving the dashboard.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <PunchPanel initial={punchState} compact />
+          <Button variant="ghost" size="sm" className="-ml-2" render={<Link href="/dtr" />}>
+            Open my DTR <ArrowRight className="size-3.5" />
+          </Button>
+        </CardContent>
+      </Card>
+    </PageShell>
   );
 }
