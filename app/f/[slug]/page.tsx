@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { createClient } from "@/utils/supabase/server";
 import { publicFormSchema } from "@/lib/schemas/forms";
 import { PublicFormRenderer } from "./public-form";
+import { BrandLockup } from "@/components/brand-lockup";
 
 /**
  * P1-06 — the public form. NO SESSION, by design (Amier, 50:30).
@@ -40,11 +41,8 @@ export default async function PublicFormPage({ params }: { params: Promise<{ slu
   return (
     <main className="min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-2xl">
-        <div className="mb-6 flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
-            V
-          </span>
-          <span className="text-sm font-semibold tracking-tight">VizServe</span>
+        <div className="mb-6">
+          <BrandLockup subtitle="Request form" />
         </div>
 
         <div className="rounded-xl border bg-card p-6 sm:p-8">

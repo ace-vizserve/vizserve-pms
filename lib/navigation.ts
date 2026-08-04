@@ -96,6 +96,9 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Users",
     href: "/admin/users",
     minRole: "admin",
+    // Re-enabled on merge. This was correctly disabled on main because the
+    // route 404ed — P0-04 has since been built, so the screen it was waiting
+    // for now exists.
     enabled: true,
     icon: "users",
   },

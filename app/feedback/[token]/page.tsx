@@ -4,6 +4,7 @@ import { approvalPageResultSchema } from "@/lib/schemas/client-approval";
 import { createClient } from "@/utils/supabase/server";
 
 import { FeedbackForm } from "./feedback-form";
+import { BrandLockup } from "@/components/brand-lockup";
 
 export const metadata: Metadata = {
   title: "How did we do?",
@@ -37,11 +38,8 @@ export default async function FeedbackPage({
   return (
     <main className="min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-lg">
-        <div className="mb-6 flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
-            V
-          </span>
-          <span className="text-sm font-semibold tracking-tight">VizServe</span>
+        <div className="mb-6">
+          <BrandLockup subtitle="Feedback" />
         </div>
 
         {!page ? (

@@ -83,8 +83,13 @@ const TASK_STATUS_CLASSES: Record<VizservePmsTaskStatus, string> = {
   OPEN: "bg-muted text-muted-foreground",
   ONGOING: "bg-info-subtle text-info",
   WAITING_FOR_INFO: "bg-warning-subtle text-warning",
-  FOR_QA: "bg-secondary/25 text-foreground",
-  QA_IN_PROGRESS: "bg-secondary/25 text-foreground",
+  // The two QA states use the brand tint (`--accent` / `--accent-foreground`),
+  // not `--secondary`. Secondary is a near-white neutral, so a 25% wash of it
+  // was an invisible pill on a white card — the label carried the state and the
+  // fill did nothing. `--accent` is #EEF1F9 with brand text at 5.79:1, and it
+  // flips correctly in dark mode.
+  FOR_QA: "bg-accent text-accent-foreground",
+  QA_IN_PROGRESS: "bg-accent text-accent-foreground",
   FOR_CLIENT_APPROVAL: "bg-warning-subtle text-warning",
   COMPLETED: "bg-success-subtle text-success",
   COMPLETED_NO_RESPONSE: "bg-muted text-muted-foreground",

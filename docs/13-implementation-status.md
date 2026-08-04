@@ -236,6 +236,7 @@ Fixed by `20260729110000_p0_06_grants.sql`, which grants explicitly and sets `AL
 - **Nobody has confirmed an email arriving.** `EMAIL_TEST_RECIPIENT=you@… npm run email:test` sends one through the real template. P4-14 repeats it against a client-domain address early in Phase 4 — that is the one item where a late failure has no workaround.
 - **`lib/database.types.ts` is hand-written**, not generated. It has now drifted-and-been-corrected twice (the P1-15 tables, then the P1-09 and P2 tables), each time caught by `tsc` rather than at runtime. Regenerate with `npm run db:types` once Docker is available and treat the generated file as authoritative.
 - **`npm run seed` creates 15 accounts, not 16.** Earlier docs said 16. The scope suite checks for the accounts it needs **by name** rather than by count, so adding one does not fail a test for no reason.
+- **Nothing sends email yet.** `resend` is wired but `RESEND_API_KEY` is unset, so the whole system runs in dry-run. See *Outstanding* at the top.
 - **Port 3000 is the HFSE SIS app** on this machine. Use `PORT=3177`. A smoke test against 3000 hits SIS, whose login page also says "Welcome back".
 - **OneDrive corrupts `node_modules`** — it produced a stub `supabase.exe` and a truncated file inside `next` that failed the build.
 - **`supabase/{client,server,middleware}.ts`** are orphaned boilerplate. Nothing imports them. The real clients are in `utils/supabase/`.

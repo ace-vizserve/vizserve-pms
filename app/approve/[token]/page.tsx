@@ -5,6 +5,7 @@ import { approvalPageResultSchema, type ApprovalPage } from "@/lib/schemas/clien
 import { createClient } from "@/utils/supabase/server";
 
 import { ApprovalForm } from "./approval-form";
+import { BrandLockup } from "@/components/brand-lockup";
 
 export const metadata: Metadata = {
   title: "Approve your request",
@@ -42,11 +43,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-2xl">
-        <div className="mb-6 flex items-center gap-2">
-          <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-xs font-semibold text-primary-foreground">
-            V
-          </span>
-          <span className="text-sm font-semibold tracking-tight">VizServe</span>
+        <div className="mb-6">
+          <BrandLockup subtitle="Request approval" />
         </div>
         {children}
       </div>
@@ -189,7 +187,7 @@ export default async function ClientApprovalPage({
                   return (
                     <div
                       key={field.field_key}
-                      className="grid grid-cols-[10rem_1fr] gap-3 border-b py-2 last:border-0"
+                      className="grid gap-1 border-b py-2 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3"
                     >
                       <dt className="text-xs text-muted-foreground">{field.label}</dt>
                       <dd className="min-w-0 break-words">

@@ -43,7 +43,13 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: false,
-    include: ["tests/**/*.test.ts"],
+    // Co-located tests are picked up too, not just `tests/`.
+    //
+    // `utils/supabase/middleware.test.ts` sat outside the original pattern and
+    // therefore never ran — a security test for the auth gate's allow-list,
+    // silently collecting zero cases. A test that does not run is worse than no
+    // test, because the suite reports green either way.
+    include: ["tests/**/*.test.ts", "{app,lib,components,utils,hooks}/**/*.test.ts"],
     setupFiles: ["tests/setup.ts"],
     // The db suite signs in over the network, several times, per file.
     testTimeout: 30_000,

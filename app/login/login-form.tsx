@@ -20,8 +20,12 @@ function FieldError({ id, message }: { id: string; message?: string }) {
 function SubmitButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" className="w-full" loading={pending}>
-      {pending ? "Signing in" : "Sign in"}
+    <Button
+      type="submit"
+      className="h-11 w-full bg-brand text-base text-brand-foreground hover:bg-brand/90 active:bg-brand/80"
+      loading={pending}
+    >
+      {pending ? "Signing in" : "Sign In"}
     </Button>
   );
 }
@@ -29,7 +33,7 @@ function SubmitButton() {
 function SsoButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant="outline" className="w-full" loading={pending}>
+    <Button type="submit" variant="outline" className="h-11 w-full bg-background" loading={pending}>
       {pending ? null : (
         <svg viewBox="0 0 23 23" aria-hidden className="size-4">
           <path fill="#f35325" d="M1 1h10v10H1z" />
@@ -68,13 +72,17 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
         <input type="hidden" name="next" value={next} />
 
         <div className="space-y-2">
-          <Label htmlFor="email">Email</Label>
+          <Label htmlFor="email">Email address</Label>
+          {/* bg-background, not the Input default of transparent: the panel
+              behind this form is muted, and a transparent field would dissolve
+              into it. */}
           <Input
             id="email"
             name="email"
             type="email"
             autoComplete="email"
-            placeholder="you@vizserve.com"
+            placeholder="name@vizserve.com"
+            className="h-11 bg-background"
             aria-invalid={Boolean(emailError)}
             aria-describedby={emailError ? "email-error" : undefined}
           />
@@ -82,8 +90,18 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
         </div>
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label htmlFor="password">Password</Label>
+          <Label htmlFor="password">Password</Label>
+          <Input
+            id="password"
+            name="password"
+            type="password"
+            autoComplete="current-password"
+            className="h-11 bg-background"
+            aria-invalid={Boolean(passwordError)}
+            aria-describedby={passwordError ? "password-error" : undefined}
+          />
+          <FieldError id="password-error" message={passwordError} />
+          <div className="flex justify-end">
             <a
               href="/forgot-password"
               className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
@@ -91,15 +109,6 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
               Forgot password?
             </a>
           </div>
-          <Input
-            id="password"
-            name="password"
-            type="password"
-            autoComplete="current-password"
-            aria-invalid={Boolean(passwordError)}
-            aria-describedby={passwordError ? "password-error" : undefined}
-          />
-          <FieldError id="password-error" message={passwordError} />
         </div>
 
         {state.error ? (

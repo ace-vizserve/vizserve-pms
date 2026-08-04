@@ -4,10 +4,11 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Database } from "@/lib/database.types";
 
 /**
- * Paths reachable with no session at all.
+ * Paths reachable with no session at all, matched as prefixes.
  *
- * Every one of these is a deliberate hole, and each authenticates by some other
- * means — a token in the URL, or a bearer secret. Adding one is a decision.
+ * Every one is a deliberate hole in the only thing standing between the internet
+ * and the authenticated area, and each authenticates by some other means — a
+ * token in the URL, or a bearer secret. Adding one is a decision.
  */
 const PUBLIC_PREFIXES = [
   "/login",
@@ -22,7 +23,21 @@ const PUBLIC_PREFIXES = [
   "/api/cron/",
 ];
 
-function isPublicPath(pathname: string) {
+/**
+ * Public paths matched EXACTLY.
+ *
+ * "/" cannot go in PUBLIC_PREFIXES: the check below is a `startsWith`, and
+ * every path starts with "/", so adding it there would make the entire
+ * authenticated app anonymously reachable. Anything rooted at "/" belongs
+ * here instead.
+ */
+const PUBLIC_EXACT = new Set([
+  "/", // marketing landing page
+]);
+
+export function isPublicPath(pathname: string) {
+  if (PUBLIC_EXACT.has(pathname)) return true;
+
   return PUBLIC_PREFIXES.some(
     (prefix) => pathname === prefix.replace(/\/$/, "") || pathname.startsWith(prefix),
   );

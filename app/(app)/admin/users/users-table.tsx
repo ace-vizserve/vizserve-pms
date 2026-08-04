@@ -72,8 +72,8 @@ export function UsersTable({
 
   return (
     <>
-      <div className="flex items-center gap-3">
-        <div className="relative flex-1 max-w-xs">
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-0 flex-1 sm:max-w-xs">
           <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={query}
@@ -83,14 +83,17 @@ export function UsersTable({
             aria-label="Search users"
           />
         </div>
-        <Button size="sm" className="ml-auto" onClick={openCreate}>
+        <Button size="sm" className="shrink-0 sm:ml-auto" onClick={openCreate}>
           <Plus />
           Add user
         </Button>
       </div>
 
-      <div className="overflow-hidden rounded-lg border">
-        <table className="w-full text-sm">
+      {/* Six columns will not fit a phone. Scrolling the table inside its own
+          border keeps the page from scrolling sideways, which is the thing that
+          actually breaks a layout. */}
+      <div className="overflow-x-auto rounded-lg border">
+        <table className="w-full min-w-3xl text-sm">
           <thead className="bg-muted/50 text-xs text-muted-foreground">
             <tr>
               <th className="px-4 py-2.5 text-left font-medium">Name</th>
@@ -139,7 +142,7 @@ export function UsersTable({
                         {user.managed_department_ids.map((id) => (
                           <span
                             key={id}
-                            className="rounded-full bg-secondary/20 px-2 py-0.5 text-2xs font-medium text-foreground"
+                            className="rounded-full bg-accent px-2 py-0.5 text-2xs font-medium text-accent-foreground"
                           >
                             {departmentName.get(id) ?? "Unknown"}
                           </span>

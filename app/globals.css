@@ -10,6 +10,25 @@
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
+  /* Marketing headings only (docs/12 §2 floats Plus Jakarta Sans for headings).
+     Scoped to `/` — the app keeps Geist throughout, so this cannot drift the
+     product UI while Q15 is open. */
+  --font-display: var(--font-plus-jakarta), var(--font-geist-sans);
+
+  /* --- D11 brand, marketing surface ------------------------------------
+     Kept as hex, deliberately: docs/12-ui-and-notifications.md measures
+     contrast against these exact values (primary on white = 6.54:1), and an
+     oklch round-trip would silently drift the audited ratios.
+
+     These are additive tokens, not a repaint. Q15 — whether the *app's*
+     --primary becomes #4359A5 or stays near-black — is still open, and the
+     brand blue belongs on a public marketing page under either answer. */
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --color-brand-tint: var(--brand-tint);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-surface: var(--brand-surface);
+  --color-brand-surface-foreground: var(--brand-surface-foreground);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -92,18 +111,31 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  /* --- Q15, answered: the brand blue wins -------------------------------
+     D11's #4359A5 is now the app's primary, not just the marketing surface.
+     Primary buttons, active nav, links and focus rings all follow it, which is
+     what docs/12 assumed all along.
+
+     What deliberately stays neutral: --foreground, --muted-foreground and
+     --border. Those are body copy and structure, not identity — tinting them
+     would put a blue cast on every table row and read as a rendering fault,
+     not as branding. The near-black here is typography, not the black that
+     was objected to. */
+  --primary: #4359a5;
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
+  /* Hover and active surfaces — a brand tint rather than grey, so a selected
+     nav row reads as chosen rather than merely shaded. Brand text on it is
+     5.79:1. */
+  --accent: #eef1f9;
+  --accent-foreground: #4359a5;
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: #4359a5;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -124,14 +156,38 @@
   --info: oklch(0.52 0.13 255);
   --info-subtle: oklch(0.96 0.03 255);
 
+  /* --- D11 brand ---------------------------------------------------------
+     #4359A5 is the workhorse: it carries white text at 6.54:1 both ways.
+     #5BC0DE is a SURFACE colour only — 2.09:1 against white in both
+     directions. It takes --brand-ink on top (7.79:1), never white, and is
+     never used for text. */
+  --brand: #4359a5;
+  --brand-foreground: #ffffff;
+  --brand-tint: #5bc0de;
+  --brand-ink: #202020;
+
+  /* A brand-blue *surface* that does not flip with the theme.
+     VizServeWhite.png is a white-only asset, so any panel carrying it must
+     stay dark enough for white in both themes — --brand lightens in dark mode
+     (to stay readable as text) and would drop white to ~2.2:1. This one holds
+     at #4359A5, where white is 6.54:1. */
+  --brand-surface: #4359a5;
+  --brand-surface-foreground: #ffffff;
+
+  /* Brand wash for full-bleed panels (the sign-in hero). Every stop is at or
+     darker than --brand-surface, so white stays at 6.54:1 or better across the
+     whole sweep — the lightest point is what sets the floor, and that point is
+     #4359A5. */
+  --brand-gradient: linear-gradient(135deg, #1c2547 0%, #4359a5 55%, #2b3a6e 100%);
+
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-primary: #4359a5;
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eef1f9;
+  --sidebar-accent-foreground: #4359a5;
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: #4359a5;
 }
 
 .dark {
@@ -141,18 +197,21 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  /* Q15 in dark: #4359A5 is too dark to sit on a dark surface, so primary
+     lightens to the same value --brand uses. Its foreground goes dark rather
+     than white (6.31:1). */
+  --primary: #8fa3e0;
+  --primary-foreground: #1a2340;
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
+  --accent: #262e4a;
+  --accent-foreground: #c9d4f2;
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: #6b7fc4;
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -166,14 +225,26 @@
   --info: oklch(0.72 0.12 255);
   --info-subtle: oklch(0.29 0.05 255);
 
+  /* #4359A5 is too dark to read on a dark surface, so the brand lightens
+     rather than inverts — same hue, 6.6:1 on --brand-ink. The tint is already
+     light enough to keep working as a fill. */
+  --brand: #8fa3e0;
+  --brand-foreground: #1a2340;
+  --brand-tint: #5bc0de;
+  --brand-ink: #202020;
+
+  /* Deliberately NOT lightened — see the note in :root. */
+  --brand-surface: #4359a5;
+  --brand-surface-foreground: #ffffff;
+
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.985 0 0);
-  --sidebar-primary-foreground: oklch(0.205 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #8fa3e0;
+  --sidebar-primary-foreground: #1a2340;
+  --sidebar-accent: #262e4a;
+  --sidebar-accent-foreground: #c9d4f2;
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: #6b7fc4;
 }
 
 @layer base {

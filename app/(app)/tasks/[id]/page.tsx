@@ -168,7 +168,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               return (
                 <div
                   key={field.field_key}
-                  className="grid grid-cols-[10rem_1fr] gap-3 border-b py-2 last:border-0"
+                  className="grid gap-1 border-b py-2 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3"
                 >
                   <dt className="text-xs text-muted-foreground">
                     {field.label}
@@ -181,7 +181,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               );
             })}
             {request?.target_date ? (
-              <div className="grid grid-cols-[10rem_1fr] gap-3 border-t py-2">
+              <div className="grid gap-1 border-t py-2 sm:grid-cols-[10rem_1fr] sm:gap-3">
                 <dt className="text-xs text-muted-foreground">Client asked for</dt>
                 <dd>{formatDate(request.target_date)}</dd>
               </div>
