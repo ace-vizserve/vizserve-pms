@@ -1,20 +1,23 @@
-import Image from "next/image";
-import Link from "next/link";
-
 import { requireAuthContext } from "@/lib/auth/authorization";
-import { visibleNavItems } from "@/lib/navigation";
+import { groupedNavItems } from "@/lib/navigation";
 import { createClient } from "@/utils/supabase/server";
-import { MobileNav } from "@/components/app-shell/mobile-nav";
-import { SidebarNav } from "@/components/app-shell/sidebar-nav";
-import { UserMenu } from "@/components/app-shell/user-menu";
+import { AppSidebar } from "@/components/app-shell/app-sidebar";
+import {
+  BreadcrumbLabelProvider,
+  DynamicBreadcrumb,
+} from "@/components/app-shell/dynamic-breadcrumb";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Separator } from "@/components/ui/separator";
+import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContext();
-  const items = visibleNavItems(context.role);
+  const sections = groupedNavItems(context.role);
 
-  // Names of the departments this person leads — shown in the user menu so the
-  // scope that governs every list they see is not invisible.
+  // The departments this person leads. Shown in the user menu because it is the
+  // thing that decides the contents of every list they open, and is otherwise
+  // invisible.
   let departmentNames: string[] = [];
   if (context.managedDepartmentIds.length > 0) {
     const supabase = await createClient();
@@ -28,45 +31,40 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   return (
     <TooltipProvider>
-      <div className="flex min-h-svh flex-col">
-        <header className="sticky top-0 z-40 flex h-14 items-center gap-2 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:gap-4">
-          <MobileNav items={items} />
+      <BreadcrumbLabelProvider>
+        <SidebarProvider>
+          <AppSidebar
+            sections={sections}
+            user={{
+              fullName: context.fullName,
+              email: context.email,
+              role: context.role,
+              departments: departmentNames,
+            }}
+          />
 
-          {/* The real mark on a brand tile, matching /login and /. The asset is
-              white-only, hence the tile. */}
-          <Link href="/dashboard" className="flex shrink-0 items-center gap-2">
-            <span className="flex size-8 items-center justify-center rounded-sm bg-brand-surface p-1">
-              <Image
-                src="/assets/VizServeWhite.png"
-                alt="VizServe"
-                width={960}
-                height={882}
-                sizes="32px"
-                priority
-                className="h-full w-auto"
-              />
-            </span>
-            <span className="text-sm font-semibold tracking-tight">PMS</span>
-          </Link>
+          <SidebarInset>
+            {/*
+              h-16 and borderless, matching the template. The header's height is
+              what supplies the top gap for every page, which is why PageShell
+              carries `pt-0`.
+            */}
+            <header className="flex h-16 shrink-0 items-center gap-2">
+              <div className="flex items-center gap-2 px-4">
+                <SidebarTrigger className="-ml-1" />
+                <Separator orientation="vertical" className="mr-2 data-vertical:h-4 data-vertical:self-auto" />
+                <DynamicBreadcrumb />
+              </div>
 
-          <div className="ml-auto">
-            <UserMenu
-              fullName={context.fullName}
-              email={context.email}
-              role={context.role}
-              departments={departmentNames}
-            />
-          </div>
-        </header>
+              <div className="ml-auto flex items-center gap-2 pr-4">
+                <ThemeToggle />
+              </div>
+            </header>
 
-        <div className="flex flex-1">
-          <aside className="hidden w-56 shrink-0 border-r bg-sidebar p-3 md:block">
-            <SidebarNav items={items} />
-          </aside>
-
-          <main className="min-w-0 flex-1 p-4 md:p-6">{children}</main>
-        </div>
-      </div>
+            <main className="flex flex-1 flex-col">{children}</main>
+          </SidebarInset>
+        </SidebarProvider>
+      </BreadcrumbLabelProvider>
     </TooltipProvider>
   );
 }

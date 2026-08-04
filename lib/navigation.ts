@@ -112,3 +112,38 @@ const ROLE_ORDER: Role[] = ["member", "team_leader", "manager", "admin"];
 export function visibleNavItems(role: Role): NavItem[] {
   return NAV_ITEMS.filter((item) => ROLE_ORDER.indexOf(role) >= ROLE_ORDER.indexOf(item.minRole));
 }
+
+/**
+ * Sidebar grouping.
+ *
+ * Kept as a separate map rather than a `group` field on each item, so the
+ * grouping is readable in one place and reordering a section does not mean
+ * editing nine scattered literals.
+ *
+ * The order below is the order of the day: what is on your plate, then the
+ * things you file, then the things you administer. `Admin` is pinned to the
+ * bottom of the sidebar rather than sitting in the flow.
+ */
+export type NavGroup = { label: string; hrefs: string[]; pinBottom?: boolean };
+
+export const NAV_GROUPS: NavGroup[] = [
+  { label: "Work", hrefs: ["/dashboard", "/requests", "/tasks", "/inbox"] },
+  { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
+  { label: "Manage", hrefs: ["/forms"] },
+  { label: "Admin", hrefs: ["/admin/users"], pinBottom: true },
+];
+
+/**
+ * The role's visible items, bucketed into groups. Empty groups are dropped, so
+ * a member never sees a "Manage" heading with nothing under it.
+ */
+export function groupedNavItems(role: Role): { group: NavGroup; items: NavItem[] }[] {
+  const visible = visibleNavItems(role);
+
+  return NAV_GROUPS.map((group) => ({
+    group,
+    items: group.hrefs
+      .map((href) => visible.find((item) => item.href === href))
+      .filter((item): item is NavItem => Boolean(item)),
+  })).filter(({ items }) => items.length > 0);
+}

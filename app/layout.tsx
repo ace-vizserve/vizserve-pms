@@ -2,6 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import NextTopLoader from "nextjs-toploader";
 import { Toaster } from "sonner";
+
+import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
 // DESIGN.md: font.family.primary=Geist, font.family.stack="Geist, Geist Fallback".
@@ -45,9 +47,11 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="flex min-h-full flex-col">
-        <NextTopLoader color="#4359A5" height={2} showSpinner={false} />
-        {children}
-        <Toaster position="top-right" richColors closeButton />
+        <ThemeProvider>
+          <NextTopLoader color="#4359A5" height={2} showSpinner={false} />
+          {children}
+          <Toaster position="top-right" richColors closeButton />
+        </ThemeProvider>
       </body>
     </html>
   );
