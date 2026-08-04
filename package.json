@@ -20,7 +20,8 @@
     "db:reset": "npx --yes supabase@latest db reset",
     "db:push": "npx --yes supabase@latest db push",
     "db:diff": "npx --yes supabase@latest db diff",
-    "db:types": "npx --yes supabase@latest gen types typescript --local > lib/database.types.ts"
+    "db:types": "npx --yes supabase@latest gen types typescript --local > lib/database.types.ts",
+    "smoke:approval-link": "node scripts/approval-link.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
