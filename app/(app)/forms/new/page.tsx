@@ -21,6 +21,14 @@ export default async function NewFormPage() {
   }
   const { data: departments } = await query.order("name");
 
+  // P2-06 — a brand-new form can point at an existing list straight away.
+  const { data: lists } = await supabase
+    .from("vizserve_pms_lists")
+    .select("id, name, department_id")
+    .eq("is_active", true)
+    .order("sort_order")
+    .order("name");
+
   return (
     <div className="mx-auto max-w-3xl space-y-6">
       <div>
@@ -38,7 +46,7 @@ export default async function NewFormPage() {
       </div>
 
       <div className="rounded-lg border bg-card p-6 shadow-ring">
-        <FormSettings departments={departments ?? []} />
+        <FormSettings departments={departments ?? []} lists={lists ?? []} />
       </div>
     </div>
   );

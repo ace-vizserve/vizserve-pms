@@ -292,6 +292,8 @@ export type Database = {
           is_active?: boolean;
           requires_attachment?: boolean;
           sla_days?: number;
+          client_approval_days?: number;
+          default_list_id?: string | null;
           created_by?: string | null;
           created_at?: string;
           updated_at?: string;
@@ -979,6 +981,7 @@ export type Database = {
           p_approved_target_date?: string | null;
           p_title?: string | null;
           p_description?: string | null;
+          p_list_id?: string | null;
         };
         Returns: Json;
       };

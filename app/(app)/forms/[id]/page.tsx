@@ -21,7 +21,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, reference_prefix, is_public, is_active, requires_attachment, sla_days",
+      "id, name, slug, description, department_id, reference_prefix, is_public, is_active, requires_attachment, sla_days, default_list_id, client_approval_days",
     )
     .eq("id", id)
     .maybeSingle();
@@ -33,6 +33,14 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
     .select("id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order")
     .eq("form_id", id)
     .order("sort_order");
+
+  // P2-06 — scoped by RLS to the departments this person leads.
+  const { data: lists } = await supabase
+    .from("vizserve_pms_lists")
+    .select("id, name, department_id")
+    .eq("is_active", true)
+    .order("sort_order")
+    .order("name");
 
   const { count: submissionCount } = await supabase
     .from("vizserve_pms_requests")
@@ -112,6 +120,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
         <div className="rounded-lg border bg-card p-6 shadow-ring">
           <FormSettings
             departments={departments ?? []}
+            lists={lists ?? []}
             formId={form.id}
             hasSubmissions={Boolean(submissionCount && submissionCount > 0)}
             initial={{
@@ -124,6 +133,8 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
               is_active: form.is_active,
               requires_attachment: form.requires_attachment,
               sla_days: form.sla_days,
+              default_list_id: form.default_list_id,
+              client_approval_days: form.client_approval_days,
             }}
           />
         </div>

@@ -113,7 +113,7 @@ Every db suite **detects whether its migration has been applied** and skips with
 | P2-02 | Capacity panel | ✅ Query + UI. Leads with "due before this date", not raw open count |
 | P2-03 | Edit-before-approve | ✅ Date, title and description, all audited with before/after |
 | P2-04/05 | PIC + QA selectors | ✅ QA defaults to the approving TL, overridable |
-| P2-06 | Target list selection | ❌ **Deferred to Phase 3**, which creates `vizserve_pms_lists` (`P3-01`). Resolves `Q18` |
+| P2-06 | Target list selection | ✅ Landed once `vizserve_pms_lists` existed. Resolves `Q18` |
 | P2-07 | Approve action | ✅ One plpgsql function, one transaction |
 | P2-08/09 | Return + reject | ✅ Reason enforced in engine, in a table constraint, and in the zod contract |
 | P2-10 | Pending approvals queue | ✅ `/requests?status=PENDING_REVIEW`, sorted by target date, overdue distinct |
@@ -137,7 +137,7 @@ Every db suite **detects whether its migration has been applied** and skips with
 
 | ID | Item | State |
 |----|------|-------|
-| P3-01 | Lists + CRUD | ✅ Department-scoped. Also resolves `Q18` and unblocks `P2-06` |
+| P3-01 | Lists + CRUD | ✅ Department-scoped, managed at `/tasks/lists`. Resolves `Q18`, unblocks `P2-06` |
 | P3-02 | tasks + status history migration | ✅ |
 | P3-03 | Task list view | ✅ URL filters, plus Mine and Waiting-on-my-QA views |
 | P3-04 | Board view | ✅ `/tasks/board`. **No drag-and-drop** — see decision 14 |

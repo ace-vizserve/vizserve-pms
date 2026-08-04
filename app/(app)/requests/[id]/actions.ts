@@ -92,6 +92,7 @@ export async function decideOnRequest(
       p_approved_target_date: payload.approved_target_date,
       p_title: payload.title,
       p_description: payload.description,
+      p_list_id: payload.list_id,
     });
 
     if (error) return { ok: false, error: readableError(error) };

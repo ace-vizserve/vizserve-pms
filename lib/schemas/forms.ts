@@ -222,6 +222,20 @@ export const formSettingsSchema = z.object({
   is_active: z.boolean().default(false),
   requires_attachment: z.boolean().default(false),
   sla_days: z.coerce.number().int().min(1, "At least one day.").max(365),
+  /**
+   * Where approved requests from this form land (P2-06 / Q18).
+   *
+   * Null is a real answer — a department that has not organised itself into
+   * lists yet should not be forced to invent one.
+   */
+  default_list_id: z.uuid().nullable().default(null),
+  /** Business days the client gets at Gate 3 before auto-completion (Q6). */
+  client_approval_days: z.coerce
+    .number()
+    .int()
+    .min(1, "At least one working day.")
+    .max(30)
+    .default(3),
 });
 
 export type FormSettingsInput = z.infer<typeof formSettingsSchema>;

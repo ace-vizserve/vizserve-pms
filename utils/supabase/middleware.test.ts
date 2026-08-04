@@ -29,6 +29,7 @@ describe("isPublicPath", () => {
   it.each([
     "/login",
     "/auth/callback",
+    "/forgot-password",
     "/f/intake-form",
     "/approve/some-token",
     // P4-10. A client has no account by design, so if this stops being public

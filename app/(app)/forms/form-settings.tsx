@@ -22,14 +22,20 @@ import { formSettingsSchema, type FormSettingsInput } from "@/lib/schemas/forms"
 import { createForm, updateFormSettings } from "./actions";
 
 type Department = { id: string; name: string };
+type List = { id: string; name: string; department_id: string };
+
+const NO_LIST = "__none__";
 
 export function FormSettings({
   departments,
+  lists = [],
   formId,
   initial,
   hasSubmissions = false,
 }: {
   departments: Department[];
+  /** P2-06 — where approved requests from this form land. */
+  lists?: List[];
   formId?: string;
   initial?: Partial<FormSettingsInput>;
   hasSubmissions?: boolean;
@@ -60,11 +66,17 @@ export function FormSettings({
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
       sla_days: initial?.sla_days ?? 5,
+      default_list_id: initial?.default_list_id ?? null,
+      client_approval_days: initial?.client_approval_days ?? 3,
     },
   });
 
   const isActive = watch("is_active");
   const departmentId = watch("department_id");
+
+  // A list belongs to one department, so offering another department's would be
+  // offering a guaranteed rejection from the database.
+  const departmentLists = lists.filter((list) => list.department_id === departmentId);
 
   const onSubmit = handleSubmit((values) => {
     setFormError(null);
@@ -176,6 +188,58 @@ export function FormSettings({
           />
           {errors.sla_days ? (
             <p className="text-xs text-destructive">{errors.sla_days.message}</p>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-2">
+          <Label htmlFor="default_list">Default list</Label>
+          <Select
+            value={watch("default_list_id") ?? NO_LIST}
+            onValueChange={(value) =>
+              setValue("default_list_id", value === NO_LIST ? null : value)
+            }
+            disabled={departmentLists.length === 0}
+          >
+            <SelectTrigger id="default_list">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={NO_LIST}>No list</SelectItem>
+              {departmentLists.map((list) => (
+                <SelectItem key={list.id} value={list.id}>
+                  {list.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {/* P2-06. Pre-fills the review screen; the TL can still override it
+              per request. */}
+          <p className="text-xs text-muted-foreground">
+            {departmentLists.length === 0
+              ? "This department has no lists yet."
+              : "Where approved requests land. The reviewer can change it."}
+          </p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="client_approval_days">Client approval window</Label>
+          <Input
+            id="client_approval_days"
+            type="number"
+            min={1}
+            max={30}
+            aria-invalid={Boolean(errors.client_approval_days)}
+            {...register("client_approval_days")}
+          />
+          {/* Q6 — BUSINESS days. On calendar days, work sent Friday afternoon
+              closes itself on Monday having given the client one working day. */}
+          <p className="text-xs text-muted-foreground">
+            Working days a client gets before the request auto-completes.
+          </p>
+          {errors.client_approval_days ? (
+            <p className="text-xs text-destructive">{errors.client_approval_days.message}</p>
           ) : null}
         </div>
       </div>

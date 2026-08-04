@@ -53,7 +53,7 @@ export default async function RequestDetailPage({
 
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, name, sla_days, department_id")
+    .select("id, name, sla_days, department_id, default_list_id")
     .eq("id", request.form_id)
     .maybeSingle();
 
@@ -64,7 +64,7 @@ export default async function RequestDetailPage({
   // Loaded only when the panel will render — the capacity query is a scan over
   // the department's open tasks and there is no reason to pay for it on a
   // request that was decided last week.
-  const [candidates, capacity, decisions] = awaitingDecision
+  const [candidates, capacity, decisions, lists] = awaitingDecision
     ? await Promise.all([
         supabase
           .from("vizserve_pms_users")
@@ -77,6 +77,13 @@ export default async function RequestDetailPage({
           p_target_date: request.target_date,
         }),
         Promise.resolve({ data: null }),
+        supabase
+          .from("vizserve_pms_lists")
+          .select("id, name")
+          .eq("department_id", form?.department_id ?? "")
+          .eq("is_active", true)
+          .order("sort_order")
+          .order("name"),
       ])
     : [
         { data: null },
@@ -87,6 +94,7 @@ export default async function RequestDetailPage({
           .eq("entity_type", "request")
           .eq("entity_id", id)
           .order("created_at", { ascending: false }),
+        { data: null },
       ];
 
   // Includes archived fields: a historical answer must keep rendering with its
@@ -214,6 +222,8 @@ export default async function RequestDetailPage({
           capacity={capacity.data ?? []}
           currentUserId={context.userId}
           currentUserName={context.fullName}
+          lists={lists?.data ?? []}
+          defaultListId={form?.default_list_id ?? null}
         />
       ) : decisions?.data && decisions.data.length > 0 ? (
         <section className="rounded-lg border bg-card p-5 shadow-ring">

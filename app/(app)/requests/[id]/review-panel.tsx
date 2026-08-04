@@ -37,8 +37,10 @@ import { decideOnRequest } from "./actions";
  */
 
 type Person = { id: string; full_name: string; role: string };
+type List = { id: string; name: string };
 
 const NO_QA = "__none__";
+const NO_LIST = "__none__";
 
 export function ReviewPanel({
   requestId,
@@ -49,6 +51,8 @@ export function ReviewPanel({
   capacity,
   currentUserId,
   currentUserName,
+  lists,
+  defaultListId,
 }: {
   requestId: string;
   requestTitle: string;
@@ -59,6 +63,9 @@ export function ReviewPanel({
   capacity: CapacityRow[];
   currentUserId: string;
   currentUserName: string;
+  /** P2-06. Empty when the department has not organised itself into lists. */
+  lists: List[];
+  defaultListId: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -69,6 +76,8 @@ export function ReviewPanel({
   // no second pair of eyes, which is the failure this gate exists to prevent.
   const [qaAssigneeId, setQaAssigneeId] = useState<string>(currentUserId);
   const [approvedDate, setApprovedDate] = useState<string>(targetDate ?? "");
+  // P2-06 — seeded from the form's default, overridable here.
+  const [listId, setListId] = useState<string>(defaultListId ?? NO_LIST);
   const [title, setTitle] = useState(requestTitle);
   const [description, setDescription] = useState(requestDescription);
 
@@ -108,6 +117,7 @@ export function ReviewPanel({
       assignee_id: assigneeId || undefined,
       qa_assignee_id: qaAssigneeId === NO_QA ? null : qaAssigneeId,
       approved_target_date: approvedDate || null,
+      list_id: listId === NO_LIST ? null : listId,
       // Only send an edit if it is one. Null means unchanged.
       title: title.trim() !== requestTitle ? title.trim() : null,
       description: description.trim() !== requestDescription ? description.trim() : null,
@@ -202,6 +212,30 @@ export function ReviewPanel({
               )}
             </p>
           </div>
+
+          {lists.length > 0 ? (
+            <div className="space-y-2">
+              <Label htmlFor="list">List</Label>
+              <Select value={listId} onValueChange={setListId}>
+                <SelectTrigger id="list" className="w-64">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={NO_LIST}>No list</SelectItem>
+                  {lists.map((list) => (
+                    <SelectItem key={list.id} value={list.id}>
+                      {list.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {defaultListId
+                  ? "Pre-filled from the form's default."
+                  : "This form has no default list."}
+              </p>
+            </div>
+          ) : null}
 
           <details className="rounded-md border px-3 py-2">
             <summary className="cursor-pointer text-xs text-muted-foreground">

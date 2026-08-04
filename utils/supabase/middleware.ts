@@ -13,6 +13,8 @@ import type { Database } from "@/lib/database.types";
 const PUBLIC_PREFIXES = [
   "/login",
   "/auth",
+  // Reset is for people who cannot sign in; behind the gate it is useless.
+  "/forgot-password",
   "/f/", // public client forms (P1-06) — no login, by design
   "/approve/", // client approval page (P4-04) — token-authenticated
   "/feedback/", // client feedback page (P4-10) — same token machinery

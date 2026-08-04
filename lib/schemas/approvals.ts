@@ -57,6 +57,12 @@ export const approveDecisionSchema = z.object({
   /** Typo corrections made while approving. Null means unchanged. */
   title: z.string().trim().min(1).max(300).nullable().default(null),
   description: z.string().trim().min(1).nullable().default(null),
+  /**
+   * P2-06. Null means "use the form's default" — NOT "no list". Clearing is not
+   * something the review screen offers, and treating an absent value as a
+   * deletion is how a form's default silently stops applying.
+   */
+  list_id: z.uuid().nullable().default(null),
 });
 
 export const returnDecisionSchema = z.object({
