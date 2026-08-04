@@ -1,0 +1,21 @@
+Task Name,Start Date,Due Date,Status,Assignee,Description
+Touch base with Stakeholders,2026-07-28,2026-07-28,Complete,Amier,Requirements call. Six modules, three approval gates, four roles.
+Kickoff Meeting,2026-07-29,2026-07-29,Complete,Amier,Scope agreed. Phases strictly ordered rather than all at once.
+Create Project Timeline,2026-07-29,2026-07-29,Complete,Ace,Roadmap, phase docs and the D1-D20 decision register.
+Workflow & Data Model Design,2026-07-29,2026-07-30,Complete,Ace,Canonical status enums, request lifecycle, RLS strategy.
+Database Setup and Configuration,2026-07-29,2026-07-31,Complete,Ace,Supabase project, table prefix rule, RLS and GRANTs on every table.
+Authentication & User Management,2026-07-30,2026-08-03,Complete,Kurt,Entra SSO plus email/password, four inclusive roles, admin screens, app-access gate.
+Client Request Forms Module,2026-07-31,2026-08-04,Complete,Kurt,Form builder, public form with no login, server-side validation, attachments, reference numbers.
+Approval Engine & Team Leader Review,2026-08-03,2026-08-04,Complete,Ace,Generic approval engine, capacity panel, approve/return/reject, atomic task creation.
+Task Management & QA Module,2026-08-03,2026-08-04,Complete,Ace,Lists, board and list views, status machine, resolution gate, QA hand-off.
+Client Approval & Feedback Module,2026-08-04,2026-08-04,Complete,Ace,Signed-token approval page, auto-complete, reminders, feedback.
+UI/UX Design & Branding,2026-08-04,2026-08-04,Complete,Kurt,Brand palette, mobile responsive pass, client-facing pages.
+Email & Domain Configuration,2026-08-05,2026-08-07,Blocked,Amier,BLOCKER. Resend account, sending domain, SPF/DKIM/DMARC, deliverability to Outlook and Gmail. External DNS wait.
+Testing and Bug Fixing,2026-08-05,2026-08-14,To Do,Ace + Kurt,Browser smoke test, Entra verification, placeholder forms through the builder, fixes.
+DTR Module,2026-08-17,2026-08-28,To Do,Ace,Punch in/out rules, DTR list view, payroll export.
+Internal Approvals Module,2026-08-31,2026-09-11,To Do,Ace + Kurt,Leave, no time-in, no time-out, reimbursement. Reuses the existing approval engine.
+Timesheet & Reporting Module,2026-09-14,2026-09-25,To Do,Ace + Kurt,Time logged against tasks, turnaround and feedback reporting, dashboards.
+ClickUp Data Migration,2026-09-28,2026-10-02,To Do,Ace + Kurt,Export, map and import live ClickUp data.
+Web Hosting & DNS Configuration,2026-10-05,2026-10-07,To Do,Ace,Vercel production, domain, cron schedules.
+Deployment of Live Environment,2026-10-08,2026-10-09,To Do,Ace,Production deploy, real accounts, first live client request.
+Parallel Run & Cutover,2026-10-12,2026-10-23,To Do,Amier,Both systems for two weeks, then cancel the ClickUp subscription.
