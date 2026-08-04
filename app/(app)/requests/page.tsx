@@ -1,23 +1,41 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Inbox } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { formatDate, isOverdue } from "@/lib/dates";
 import { isRequestStatus, RequestStatusBadge } from "@/components/status-badge";
+import { DataTable, type Column } from "@/components/data-table";
+import { EmptyState } from "@/components/empty-state";
+import { PageShell } from "@/components/page-shell";
 import { RequestFilters } from "./filters";
 
 export const metadata: Metadata = { title: "Requests" };
 
+type RequestRow = {
+  id: string;
+  reference_no: string;
+  title: string;
+  requester_name: string;
+  requester_org: string;
+  target_date: string | null;
+  status: "DRAFT" | "SUBMITTED" | "PENDING_REVIEW" | "APPROVED" | "RETURNED" | "REJECTED";
+  submitted_at: string;
+  form_id: string;
+};
+
 /**
- * P1-13 — the Team Leader's queue. Phase 2 turns this into Gate 1.
+ * P1-13 — the Team Leader's queue, and Gate 1's front door.
  *
  * Department scoping is RLS's job, not this query's. That is what makes the
  * Phase 1 exit criterion — "a request appears in the correct TL's queue and
  * nowhere else" — assertable at the API layer rather than by clicking around.
  *
- * Sorted by target date ascending: the queue is a to-do list, so the thing due
- * soonest is the thing to look at, not the thing submitted most recently.
+ * Sorted by target date ascending: a queue is a to-do list, so the thing due
+ * soonest leads, not the thing submitted most recently.
+ *
+ * No <h1>. The shell breadcrumb is the page label.
  */
 export default async function RequestsPage({
   searchParams,
@@ -39,102 +57,104 @@ export default async function RequestsPage({
   if (isRequestStatus(params.status)) query = query.eq("status", params.status);
   if (params.form) query = query.eq("form_id", params.form);
   if (params.from) query = query.gte("submitted_at", params.from);
-  // Inclusive of the end date: a user picking "to 3 Aug" means through 3 Aug,
-  // not up to its first second.
+  // Inclusive of the end date: "to 3 Aug" means through 3 Aug, not up to its
+  // first second.
   if (params.to) query = query.lt("submitted_at", `${params.to}T23:59:59.999Z`);
 
   const { data: requests } = await query;
 
-  const { data: forms } = await supabase
-    .from("vizserve_pms_forms")
-    .select("id, name")
-    .order("name");
+  const { data: forms } = await supabase.from("vizserve_pms_forms").select("id, name").order("name");
+  const formName = new Map((forms ?? []).map((form) => [form.id, form.name]));
 
-  const formName = new Map((forms ?? []).map((f) => [f.id, f.name]));
+  const rows = (requests ?? []) as RequestRow[];
+  const isFiltered = Boolean(params.status || params.form || params.from || params.to);
+
+  const columns: Column<RequestRow>[] = [
+    {
+      key: "reference",
+      header: "Reference",
+      className: "whitespace-nowrap",
+      cell: (request) => (
+        <>
+          <Link href={`/requests/${request.id}`} className="font-medium hover:underline">
+            {request.reference_no}
+          </Link>
+          <p className="text-xs text-muted-foreground">
+            {formName.get(request.form_id) ?? "—"}
+          </p>
+        </>
+      ),
+    },
+    {
+      key: "title",
+      header: "Request",
+      className: "max-w-xs",
+      cell: (request) => <p className="truncate">{request.title}</p>,
+    },
+    {
+      key: "requester",
+      header: "Requester",
+      className: "hidden md:table-cell",
+      cell: (request) => (
+        <>
+          <p className="truncate">{request.requester_name}</p>
+          <p className="text-xs text-muted-foreground">{request.requester_org}</p>
+        </>
+      ),
+    },
+    {
+      key: "target",
+      header: "Target date",
+      className: "hidden sm:table-cell whitespace-nowrap",
+      cell: (request) => (
+        <>
+          {formatDate(request.target_date)}
+          {/* Overdue is said in words as well as colour — a red date alone is
+              invisible to a meaningful share of people, and to anyone reading
+              a printed or screenshotted queue. */}
+          {isOverdue(request.target_date) && request.status === "PENDING_REVIEW" ? (
+            <p className="text-xs font-medium text-destructive">Overdue</p>
+          ) : null}
+        </>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      cell: (request) => <RequestStatusBadge status={request.status} />,
+    },
+  ];
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5">
-      <div>
-        <h1 className="text-xl font-semibold tracking-tight">Requests</h1>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Client submissions routed to the departments you lead.
-        </p>
-      </div>
-
+    <PageShell>
       <RequestFilters forms={forms ?? []} />
 
-      {!requests || requests.length === 0 ? (
-        <div className="rounded-lg border border-dashed p-10 text-center">
-          <p className="text-sm font-medium">Nothing here</p>
-          <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
-            Requests appear when a client submits one of your published forms. If you are expecting
-            one, check the form is published and routed to your department.
-          </p>
-        </div>
-      ) : (
-        <div className="overflow-x-auto rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/50 text-xs text-muted-foreground">
-              <tr>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">Reference</th>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">Request</th>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">Requester</th>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">Target date</th>
-                <th scope="col" className="px-4 py-2.5 text-left font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {requests.map((request) => {
-                const overdue =
-                  isOverdue(request.target_date) && request.status === "PENDING_REVIEW";
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(request) => request.id}
+        empty={
+          isFiltered ? (
+            <EmptyState
+              icon={<Inbox />}
+              title="No requests match these filters"
+              description="Widen the date range or clear the status filter to see the rest of the queue."
+            />
+          ) : (
+            <EmptyState
+              icon={<Inbox />}
+              title="Nothing here yet"
+              description="Requests appear when a client submits one of your published forms. If you are expecting one, check the form is published and routed to your department."
+            />
+          )
+        }
+      />
 
-                return (
-                  <tr key={request.id} className="border-t align-top hover:bg-muted/30">
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      <Link
-                        href={`/requests/${request.id}`}
-                        className="font-medium hover:underline"
-                      >
-                        {request.reference_no}
-                      </Link>
-                      <p className="mt-0.5 text-2xs text-muted-foreground">
-                        {formName.get(request.form_id) ?? "—"}
-                      </p>
-                    </td>
-                    <td className="max-w-xs px-4 py-3">
-                      <p className="truncate">{request.title}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <p className="truncate">{request.requester_name}</p>
-                      <p className="mt-0.5 text-2xs text-muted-foreground">
-                        {request.requester_org}
-                      </p>
-                    </td>
-                    <td className="px-4 py-3 whitespace-nowrap">
-                      {formatDate(request.target_date)}
-                      {/* Overdue is stated in words as well as colour — a red
-                          date alone is invisible to a meaningful share of
-                          people and to anyone printing the queue. */}
-                      {overdue ? (
-                        <p className="mt-0.5 text-2xs font-medium text-destructive">Overdue</p>
-                      ) : null}
-                    </td>
-                    <td className="px-4 py-3">
-                      <RequestStatusBadge status={request.status} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {requests && requests.length >= 200 ? (
+      {rows.length >= 200 ? (
         <p className="text-xs text-muted-foreground">
           Showing the first 200. Narrow the filters to see more.
         </p>
       ) : null}
-    </div>
+    </PageShell>
   );
 }

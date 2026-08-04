@@ -7,6 +7,7 @@ import { requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { RequestStatusBadge } from "@/components/status-badge";
+import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 
 import { AttachmentList } from "./attachment-list";
 import { ReviewPanel } from "./review-panel";
@@ -124,6 +125,10 @@ export default async function RequestDetailPage({
 
   return (
     <div className="mx-auto max-w-3xl space-y-6">
+      {/* Names this page in the shell breadcrumb. Without it the crumb is the
+          raw UUID from the URL. */}
+      <BreadcrumbLabel value={request.reference_no} />
+
       <div>
         <Link
           href="/requests"
