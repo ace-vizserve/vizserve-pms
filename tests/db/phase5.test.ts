@@ -478,19 +478,24 @@ describe.skipIf(!run)("P5-09 — approval writes the correction into the DTR", (
     const member = await signIn("member2VizBytes");
     await clearDtr(member.userId);
 
+    // Yesterday, not today. The correction time below is 23:00, and submission
+    // refuses a time that has not happened yet — so on `today` this test only
+    // passed when the suite happened to run after 23:00 Manila, and failed
+    // every other hour of the day. Dating it to yesterday keeps 23:00 firmly in
+    // the past while still inverting the shift, which is the rule under test.
     await adminClient()
       .from("vizserve_pms_dtr_entries")
       .insert({
         user_id: member.userId,
-        work_date: today,
-        time_in: `${today}T00:00:00Z`,
-        time_out: `${today}T02:00:00Z`, // 10:00 Manila
+        work_date: yesterday,
+        time_in: `${yesterday}T00:00:00Z`,
+        time_out: `${yesterday}T02:00:00Z`, // 10:00 Manila
       });
 
     const id = await submit(member.client, {
       p_request_type: "NO_TIME_IN",
       p_reason: "Time-in after the recorded time-out.",
-      p_work_date: today,
+      p_work_date: yesterday,
       p_correction_time: "23:00",
     });
 
