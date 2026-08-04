@@ -21,12 +21,10 @@ export function MobileNav({ items }: { items: NavItem[] }) {
 
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" className="-ml-2 md:hidden">
+      <SheetTrigger render={<Button variant="ghost" size="icon" className="-ml-2 md:hidden" />}>
           <Menu className="size-5" />
           <span className="sr-only">Open navigation</span>
-        </Button>
-      </SheetTrigger>
+        </SheetTrigger>
 
       <SheetContent side="left" className="w-64 bg-sidebar p-3 pt-12">
         <SheetTitle className="sr-only">Navigation</SheetTitle>

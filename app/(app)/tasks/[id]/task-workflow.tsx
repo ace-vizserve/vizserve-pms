@@ -203,7 +203,7 @@ export function TaskWorkflow({
       {lists.length > 0 ? (
         <div className="space-y-2">
           <Label htmlFor="list">List</Label>
-          <Select value={listId} onValueChange={setListId} disabled={!canEdit || pending}>
+          <Select value={listId} onValueChange={(v) => v !== null && (v)} disabled={!canEdit || pending}>
             <SelectTrigger id="list" className="w-64">
               <SelectValue />
             </SelectTrigger>

@@ -57,12 +57,10 @@ export function NewTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button size="sm">
+      <DialogTrigger render={<Button size="sm" />}>
           <Plus />
           New task
-        </Button>
-      </DialogTrigger>
+        </DialogTrigger>
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
         {/* Unmounted while closed, so the fields are seeded on open rather than
             synced by an effect — the same reason as the user editor. */}
@@ -180,7 +178,10 @@ function TaskForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="department">Department</Label>
-            <Select value={departmentId} onValueChange={changeDepartment}>
+            <Select
+              value={departmentId}
+              onValueChange={(value) => value !== null && changeDepartment(value)}
+            >
               <SelectTrigger id="department">
                 <SelectValue />
               </SelectTrigger>
@@ -208,7 +209,7 @@ function TaskForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="assignee">Person in charge</Label>
-            <Select value={assigneeId} onValueChange={setAssigneeId}>
+            <Select value={assigneeId} onValueChange={(v) => v !== null && (v)}>
               <SelectTrigger id="assignee">
                 <SelectValue />
               </SelectTrigger>
@@ -228,7 +229,7 @@ function TaskForm({
 
           <div className="space-y-2">
             <Label htmlFor="qa">QA reviewer</Label>
-            <Select value={qaAssigneeId} onValueChange={setQaAssigneeId}>
+            <Select value={qaAssigneeId} onValueChange={(v) => v !== null && (v)}>
               <SelectTrigger id="qa">
                 <SelectValue />
               </SelectTrigger>
@@ -247,7 +248,7 @@ function TaskForm({
         {departmentLists.length > 0 ? (
           <div className="space-y-2">
             <Label htmlFor="list">List</Label>
-            <Select value={listId} onValueChange={setListId}>
+            <Select value={listId} onValueChange={(v) => v !== null && (v)}>
               <SelectTrigger id="list">
                 <SelectValue />
               </SelectTrigger>

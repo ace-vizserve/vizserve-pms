@@ -104,7 +104,10 @@ export function DtrToolbar({
         {people.length > 0 ? (
           <div className="space-y-1.5">
             <Label htmlFor="dtr-person">Person</Label>
-            <Select value={userId ?? "all"} onValueChange={(value) => apply({ user: value })}>
+            <Select
+              value={userId ?? "all"}
+              onValueChange={(value) => apply({ user: value ?? undefined })}
+            >
               <SelectTrigger id="dtr-person" className="w-full">
                 <SelectValue placeholder="Everyone" />
               </SelectTrigger>

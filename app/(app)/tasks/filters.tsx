@@ -29,7 +29,9 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
   const router = useRouter();
   const params = useSearchParams();
 
-  function setParam(key: string, value: string) {
+  // Base UI's Select emits `string | null` on clear, where Radix emitted "".
+  // The falsy branch below already handles both.
+  function setParam(key: string, value: string | null) {
     const next = new URLSearchParams(params.toString());
     if (!value || value === ALL) next.delete(key);
     else next.set(key, value);

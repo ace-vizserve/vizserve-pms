@@ -145,7 +145,7 @@ export function ReviewPanel({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="assignee">Person in charge</Label>
-              <Select value={assigneeId} onValueChange={setAssigneeId}>
+              <Select value={assigneeId} onValueChange={(v) => v !== null && (v)}>
                 <SelectTrigger id="assignee">
                   <SelectValue placeholder="Choose who does the work" />
                 </SelectTrigger>
@@ -165,7 +165,7 @@ export function ReviewPanel({
 
             <div className="space-y-2">
               <Label htmlFor="qa">QA reviewer</Label>
-              <Select value={qaAssigneeId} onValueChange={setQaAssigneeId}>
+              <Select value={qaAssigneeId} onValueChange={(v) => v !== null && (v)}>
                 <SelectTrigger id="qa">
                   <SelectValue />
                 </SelectTrigger>
@@ -216,7 +216,7 @@ export function ReviewPanel({
           {lists.length > 0 ? (
             <div className="space-y-2">
               <Label htmlFor="list">List</Label>
-              <Select value={listId} onValueChange={setListId}>
+              <Select value={listId} onValueChange={(v) => v !== null && (v)}>
                 <SelectTrigger id="list" className="w-64">
                   <SelectValue />
                 </SelectTrigger>

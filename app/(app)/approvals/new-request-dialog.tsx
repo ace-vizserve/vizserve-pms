@@ -109,12 +109,10 @@ export function NewRequestDialog() {
         if (!next) setErrors({});
       }}
     >
-      <DialogTrigger asChild>
-        <Button>
+      <DialogTrigger render={<Button />}>
           <Plus className="size-4" />
           New request
-        </Button>
-      </DialogTrigger>
+        </DialogTrigger>
 
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>

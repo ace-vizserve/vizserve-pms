@@ -42,14 +42,12 @@ export function UserMenu({
 
   return (
     <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="h-auto gap-2 px-2 py-1.5">
+      <DropdownMenuTrigger render={<Button variant="ghost" className="h-auto gap-2 px-2 py-1.5" />}>
           <span className="flex size-7 items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground">
             {initials}
           </span>
           <span className="hidden text-sm sm:inline">{displayName}</span>
-        </Button>
-      </DropdownMenuTrigger>
+        </DropdownMenuTrigger>
 
       <DropdownMenuContent align="end" className="w-64">
         <DropdownMenuLabel className="font-normal">
@@ -74,12 +72,10 @@ export function UserMenu({
 
         <form action={signOut}>
           <button type="submit" className="w-full">
-            <DropdownMenuItem asChild>
-              <span className="cursor-pointer">
+            <DropdownMenuItem render={<span className="cursor-pointer" />}>
                 <LogOut className="size-4" />
                 Sign out
-              </span>
-            </DropdownMenuItem>
+              </DropdownMenuItem>
           </button>
         </form>
       </DropdownMenuContent>

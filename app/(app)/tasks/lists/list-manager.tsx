@@ -252,7 +252,7 @@ function ListForm({
             <Label htmlFor="department">Department</Label>
             <Select
               value={departmentId}
-              onValueChange={setDepartmentId}
+              onValueChange={(v) => v !== null && (v)}
               // Moving a list between departments would strand every task in it
               // under a team that cannot see them.
               disabled={Boolean(list)}

@@ -75,24 +75,17 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
           {/* White on brand blue is the same 6.54:1 pair as brand-on-white,
               just inverted — the only CTA treatment that stays legible here. */}
           <Button
-            asChild
             size="sm"
-            className="rounded-full bg-white text-brand-surface hover:bg-white/90 active:bg-white/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-          >
-            <Link href={ctaHref}>{ctaLabel}</Link>
-          </Button>
+            className="rounded-full bg-white text-brand-surface hover:bg-white/90 active:bg-white/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" render={<Link href={ctaHref} />}>{ctaLabel}</Button>
 
           <Sheet open={open} onOpenChange={setOpen}>
-            <SheetTrigger asChild>
-              <Button
+            <SheetTrigger render={<Button
                 variant="ghost"
                 size="icon-sm"
-                className="-mr-2 text-white hover:bg-white/10 hover:text-white md:hidden"
-              >
+                className="-mr-2 text-white hover:bg-white/10 hover:text-white md:hidden" />}>
                 <Menu className="size-5" />
                 <span className="sr-only">Open menu</span>
-              </Button>
-            </SheetTrigger>
+              </SheetTrigger>
 
             <SheetContent side="right" className="w-64 p-3 pt-12">
               <SheetTitle className="sr-only">Menu</SheetTitle>

@@ -40,12 +40,10 @@ export default async function FormsPage() {
             Client-facing request forms. Publishing one gives it a public URL that needs no login.
           </p>
         </div>
-        <Button asChild size="sm">
-          <Link href="/forms/new">
+        <Button size="sm" render={<Link href="/forms/new" />}>
             <Plus />
             New form
-          </Link>
-        </Button>
+          </Button>
       </div>
 
       {!forms || forms.length === 0 ? (
@@ -55,9 +53,7 @@ export default async function FormsPage() {
             A form defines what a client must tell you before the team will accept the work. Every
             required field is a question you will never have to chase.
           </p>
-          <Button asChild size="sm" className="mt-4">
-            <Link href="/forms/new">Create the first form</Link>
-          </Button>
+          <Button size="sm" className="mt-4" render={<Link href="/forms/new" />}>Create the first form</Button>
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border">

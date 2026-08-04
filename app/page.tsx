@@ -201,23 +201,15 @@ export default async function LandingPage() {
 
               <div className="mt-7 flex flex-col items-center justify-center gap-2.5 sm:flex-row">
                 <Button
-                  asChild
                   size="lg"
-                  className="w-full rounded-full bg-brand text-brand-foreground hover:bg-brand/90 active:bg-brand/80 sm:w-auto"
-                >
-                  <Link href={signedIn ? "/dashboard" : "/login"}>
+                  className="w-full rounded-full bg-brand text-brand-foreground hover:bg-brand/90 active:bg-brand/80 sm:w-auto" render={<Link href={signedIn ? "/dashboard" : "/login"} />}>
                     {signedIn ? "Open dashboard" : "Sign in"}
                     <ArrowRight className="size-4" />
-                  </Link>
-                </Button>
+                  </Button>
                 <Button
-                  asChild
                   size="lg"
                   variant="outline"
-                  className="w-full rounded-full sm:w-auto"
-                >
-                  <ScrollLink href="#lifecycle">See how it works</ScrollLink>
-                </Button>
+                  className="w-full rounded-full sm:w-auto" render={<ScrollLink href="#lifecycle" />}>See how it works</Button>
               </div>
 
               <p className="mt-4 text-xs text-muted-foreground">
@@ -412,15 +404,11 @@ export default async function LandingPage() {
               Sign in with your VizServe account to pick up what is waiting on you.
             </p>
             <Button
-              asChild
               size="lg"
-              className="mt-6 rounded-full bg-background text-foreground hover:bg-background/90 active:bg-background/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white"
-            >
-              <Link href={signedIn ? "/dashboard" : "/login"}>
+              className="mt-6 rounded-full bg-background text-foreground hover:bg-background/90 active:bg-background/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" render={<Link href={signedIn ? "/dashboard" : "/login"} />}>
                 {signedIn ? "Open dashboard" : "Sign in"}
                 <ArrowRight className="size-4" />
-              </Link>
-            </Button>
+              </Button>
           </div>
         </section>
       </main>

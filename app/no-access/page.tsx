@@ -73,11 +73,9 @@ export default async function NoAccessPage({
                 Sign out
               </Button>
             </form>
-            <Button asChild variant="ghost">
-              <a href="mailto:amier.vizbytes@vizserve.hfse.edu.sg?subject=VizServe%20PMS%20access">
+            <Button variant="ghost" render={<a href="mailto:amier.vizbytes@vizserve.hfse.edu.sg?subject=VizServe%20PMS%20access" />}>
                 Request access
-              </a>
-            </Button>
+              </Button>
           </div>
         </div>
       </div>

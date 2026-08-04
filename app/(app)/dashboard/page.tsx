@@ -116,31 +116,25 @@ export default async function DashboardPage() {
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
         <Card title="Time in / out" description="Punch without leaving the dashboard">
           <PunchPanel initial={punchState} compact />
-          <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
-            <Link href="/dtr">
+          <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/dtr" />}>
               Open my DTR <ArrowRight className="size-3.5" />
-            </Link>
-          </Button>
+            </Button>
         </Card>
 
         {isApprover ? (
           <Card title="Pending approvals" description="Requests awaiting your decision">
             <Metric value={pending.count ?? 0} label="waiting" />
-            <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
-              <Link href="/requests?status=PENDING_REVIEW">
+            <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/requests?status=PENDING_REVIEW" />}>
                 Open queue <ArrowRight className="size-3.5" />
-              </Link>
-            </Button>
+              </Button>
           </Card>
         ) : null}
 
         <Card title="My tasks" description="Work assigned to you, still open">
           <Metric value={myTasks.count ?? 0} label="open" />
-          <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
-            <Link href="/tasks?view=mine">
+          <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/tasks?view=mine" />}>
               Open my tasks <ArrowRight className="size-3.5" />
-            </Link>
-          </Button>
+            </Button>
         </Card>
 
         {/* Only shown when there is actually something to review. A permanent
@@ -148,21 +142,17 @@ export default async function DashboardPage() {
         {(myQa.count ?? 0) > 0 ? (
           <Card title="Waiting on my QA" description="Work that needs your review">
             <Metric value={myQa.count ?? 0} label="to review" />
-            <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
-              <Link href="/tasks?view=qa">
+            <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/tasks?view=qa" />}>
                 Open QA queue <ArrowRight className="size-3.5" />
-              </Link>
-            </Button>
+              </Button>
           </Card>
         ) : null}
 
         <Card title="Inbox" description="Notifications about your work">
           <Metric value={unread.count ?? 0} label="unread" />
-          <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
-            <Link href="/inbox">
+          <Button variant="ghost" size="sm" className="mt-3 -ml-2" render={<Link href="/inbox" />}>
               Open inbox <ArrowRight className="size-3.5" />
-            </Link>
-          </Button>
+            </Button>
         </Card>
       </div>
     </div>

@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npm install @base-ui/react cmdk next-themes motion --no-fund --no-audit 2>&1)",
+      "PowerShell(npm uninstall @tanstack/react-query @tanstack/react-table @dnd-kit/core @dnd-kit/modifiers @dnd-kit/sortable @dnd-kit/utilities --no-fund --no-audit 2>&1)",
+      "PowerShell(\"--- remove dead deps ---\")"
+    ]
+  }
+}

@@ -23,15 +23,17 @@ export function ScrollLink({
   children,
   className,
   onNavigate,
-  // Rest props are forwarded so this composes under `<Button asChild>` —
-  // Radix's Slot hands the child its data-slot/aria attributes, and dropping
-  // them silently would leave the button unstyled in any rule that keys off
-  // them.
+  // Rest props are forwarded so this composes under `<Button render={…} />` —
+  // Base UI hands the rendered element its data-slot/aria attributes, and
+  // dropping them silently would leave the button unstyled in any rule that
+  // keys off them.
   ...rest
 }: Omit<ComponentProps<"a">, "href" | "onClick"> & {
   /** Same-page hash target, e.g. `#modules`. */
   href: `#${string}`;
-  children: ReactNode;
+  // Optional because as a `render` template this is written `<ScrollLink />`
+  // with no children — Base UI injects the parent's children at runtime.
+  children?: ReactNode;
   onNavigate?: () => void;
 }) {
   function handleClick(event: MouseEvent<HTMLAnchorElement>) {
