@@ -198,6 +198,103 @@ export function addBusinessDays(value: string, days: number): string | null {
   return cursor;
 }
 
+// ---------------------------------------------------------------------------
+// Work dates (Phase 5, P5-12)
+// ---------------------------------------------------------------------------
+
+/**
+ * The longest a shift may stay open before a time-out is refused.
+ *
+ * Q4's recommendation. An 18-hour-old punch-in is a forgotten clock-out, not a
+ * shift — and accepting it silently writes a fake 18-hour day into payroll,
+ * which is the expensive kind of wrong. The DTR rules make time-in
+ * unoverwritable, so there is no way for the user to undo it afterwards either;
+ * the correction has to go through a No Time-Out request.
+ */
+export const MAX_SHIFT_HOURS = 18;
+
+/** Yesterday in app time, as `YYYY-MM-DD`. */
+export function yesterdayInAppZone(): string {
+  return addDays(todayInAppZone(), -1)!;
+}
+
+/** `HH:mm` in app time, e.g. "22:00". Em dash for null, like formatDate. */
+export function formatAppTime(value: string | Date | null | undefined): string {
+  if (!value) return "—";
+
+  const date = typeof value === "string" ? new Date(value) : value;
+  if (Number.isNaN(date.getTime())) return "—";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: APP_TIME_ZONE,
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).format(date);
+}
+
+/**
+ * Which `work_date` a time-out may attach to.
+ *
+ * Q4, as recommended in docs/09: today, or yesterday when yesterday's shift was
+ * left open. That is the narrowest window that still serves Amier's worked
+ * example — in 22:00 on Jul 22, out 01:00 on Jul 23, recorded against Jul 22 —
+ * while refusing an arbitrary backdate to a favourable past date.
+ *
+ * Time-IN takes no date at all and is not served by this function: it always
+ * attaches to today, which is what removes the backdating hole entirely.
+ */
+export function allowedTimeOutDates(hasOpenShiftYesterday: boolean): string[] {
+  const today = todayInAppZone();
+  return hasOpenShiftYesterday ? [today, yesterdayInAppZone()] : [today];
+}
+
+/**
+ * Minutes worked between two instants. Null if either is missing.
+ *
+ * Deliberately instant arithmetic rather than clock arithmetic: a shift that
+ * crosses midnight is a real duration, and subtracting wall-clock times would
+ * return a negative number for exactly the overnight case the DTR exists to
+ * handle.
+ */
+export function workedMinutes(
+  timeIn: string | null | undefined,
+  timeOut: string | null | undefined,
+): number | null {
+  if (!timeIn || !timeOut) return null;
+
+  const start = new Date(timeIn).getTime();
+  const end = new Date(timeOut).getTime();
+  if (Number.isNaN(start) || Number.isNaN(end)) return null;
+
+  const minutes = Math.round((end - start) / 60_000);
+  return minutes < 0 ? null : minutes;
+}
+
+/** "8h 15m", "45m", "—". For the DTR list and the payroll export. */
+export function formatDuration(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || minutes < 0) return "—";
+
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+
+  if (hours === 0) return `${rest}m`;
+  if (rest === 0) return `${hours}h`;
+  return `${hours}h ${rest}m`;
+}
+
+/**
+ * Decimal hours to two places — "8.25" — for the payroll export only.
+ *
+ * Payroll multiplies by a rate, and "8h 15m" does not multiply. Kept separate
+ * from formatDuration so nobody renders a spreadsheet number into a UI where a
+ * human is reading it.
+ */
+export function decimalHours(minutes: number | null | undefined): string {
+  if (minutes === null || minutes === undefined || minutes < 0) return "";
+  return (minutes / 60).toFixed(2);
+}
+
 /**
  * "in 2 days", "tomorrow", "today", "3 days ago".
  *

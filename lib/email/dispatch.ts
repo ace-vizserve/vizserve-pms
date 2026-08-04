@@ -60,6 +60,14 @@ const PRESENTATION: Record<
     subject: (title) => title,
     action: "Open in VizServe PMS",
   },
+  // Ships email-off (P5-05 seeds send_email = false) — the requester is staff
+  // with an inbox, and docs/12 reserves email for people who have no other
+  // channel. Mapped regardless, because the switch is flippable at runtime
+  // without a deploy and an unmapped type would then send a blank email.
+  internal_decision: {
+    subject: (title) => `Your request — ${title}`,
+    action: "Open the request",
+  },
 };
 
 export type DispatchSummary = {

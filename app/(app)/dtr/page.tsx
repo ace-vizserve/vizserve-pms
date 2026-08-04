@@ -1,0 +1,208 @@
+import type { Metadata } from "next";
+
+import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import {
+  addDays,
+  formatAppTime,
+  formatDate,
+  formatDuration,
+  todayInAppZone,
+  workedMinutes,
+} from "@/lib/dates";
+import { loadPunchState } from "@/lib/dtr-server";
+import { createClient } from "@/utils/supabase/server";
+import { DtrToolbar } from "./dtr-toolbar";
+import { PunchPanel } from "./punch-panel";
+
+export const metadata: Metadata = { title: "DTR" };
+
+/**
+ * P5-04 — the daily time record.
+ *
+ * "Default view nyan, pag-click, is yung list view lang ng mga time in, time
+ * out" (Amier, 19:10). A list of days, not a calendar and not a chart — this is
+ * the screen someone opens to check whether yesterday recorded properly.
+ *
+ * SCOPE IS RLS'S JOB. This query carries no department filter and no
+ * `user_id = me` clause: the policy returns your own rows plus your team's if
+ * you lead one. Restating that here would imply the policy is optional, and
+ * would drift from it the first time either changed.
+ */
+export default async function DtrPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string; user?: string }>;
+}) {
+  const context = await requireAuthContext();
+  const params = await searchParams;
+  const supabase = await createClient();
+
+  const today = todayInAppZone();
+  // Default to the last 30 days rather than the calendar month: on the 1st, a
+  // month-to-date view is one row and looks broken.
+  const from = params.from ?? addDays(today, -29)!;
+  const to = params.to ?? today;
+  const selectedUser = params.user ?? null;
+
+  const isLead = roleAtLeast(context.role, "team_leader");
+
+  const [punchState, entriesResult, peopleResult] = await Promise.all([
+    loadPunchState(context.userId),
+    (() => {
+      let query = supabase
+        .from("vizserve_pms_dtr_entries")
+        .select(
+          "id, work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!inner(full_name)",
+        )
+        .gte("work_date", from)
+        .lte("work_date", to)
+        .order("work_date", { ascending: false })
+        .limit(500);
+
+      if (selectedUser) query = query.eq("user_id", selectedUser);
+      return query;
+    })(),
+    // The picker only makes sense for someone who can see more than themselves.
+    // Reads through the same RLS as the list, so it cannot offer a person whose
+    // rows would then come back empty.
+    isLead
+      ? supabase
+          .from("vizserve_pms_users")
+          .select("id, full_name")
+          .eq("is_active", true)
+          .order("full_name")
+      : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
+  ]);
+
+  type Entry = {
+    id: string;
+    work_date: string;
+    time_in: string | null;
+    time_out: string | null;
+    corrected_at: string | null;
+    user_id: string;
+    vizserve_pms_users: { full_name: string } | null;
+  };
+
+  const entries = (entriesResult.data ?? []) as unknown as Entry[];
+  const people = peopleResult.data ?? [];
+  const showPerson = isLead && !selectedUser;
+
+  const totalMinutes = entries.reduce(
+    (sum, entry) => sum + (workedMinutes(entry.time_in, entry.time_out) ?? 0),
+    0,
+  );
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-6">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">DTR</h1>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Your daily time record. Times are captured by the server — the earliest time-in and the
+          latest time-out for each day are what stand.
+        </p>
+      </div>
+
+      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_1fr] lg:items-start">
+        <PunchPanel initial={punchState} />
+
+        <div className="space-y-4">
+          <DtrToolbar
+            people={people}
+            from={from}
+            to={to}
+            userId={selectedUser}
+            canExport={isLead}
+          />
+
+          {entries.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-10 text-center">
+              <p className="text-sm font-medium">No entries in this range</p>
+              <p className="mx-auto mt-1 max-w-md text-xs text-muted-foreground">
+                Days with no punch have no row at all. If a day is missing that should not be, raise
+                a No Time-In request from Approvals.
+              </p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto rounded-lg border">
+              <table className="w-full text-sm">
+                <thead className="bg-muted/50 text-xs text-muted-foreground">
+                  <tr>
+                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
+                      Date
+                    </th>
+                    {showPerson ? (
+                      <th scope="col" className="px-4 py-2.5 text-left font-medium">
+                        Person
+                      </th>
+                    ) : null}
+                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
+                      Time in
+                    </th>
+                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
+                      Time out
+                    </th>
+                    <th scope="col" className="px-4 py-2.5 text-left font-medium">
+                      Worked
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {entries.map((entry) => {
+                    const minutes = workedMinutes(entry.time_in, entry.time_out);
+                    const open = Boolean(entry.time_in) && !entry.time_out;
+
+                    return (
+                      <tr key={entry.id} className="border-t align-top hover:bg-muted/30">
+                        <td className="px-4 py-3 whitespace-nowrap">
+                          {formatDate(entry.work_date)}
+                          {/* Provenance in words. A corrected time is a
+                              different fact from a punched one, and this is the
+                              row someone points at in a payroll dispute. */}
+                          {entry.corrected_at ? (
+                            <p className="mt-0.5 text-2xs font-medium text-info">Corrected</p>
+                          ) : null}
+                        </td>
+                        {showPerson ? (
+                          <td className="px-4 py-3">
+                            {entry.vizserve_pms_users?.full_name ?? "—"}
+                          </td>
+                        ) : null}
+                        <td className="px-4 py-3 tabular-nums whitespace-nowrap">
+                          {formatAppTime(entry.time_in)}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums whitespace-nowrap">
+                          {formatAppTime(entry.time_out)}
+                          {open ? (
+                            <p className="mt-0.5 text-2xs font-medium text-warning">Still open</p>
+                          ) : null}
+                        </td>
+                        <td className="px-4 py-3 tabular-nums whitespace-nowrap">
+                          {formatDuration(minutes)}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                <tfoot className="border-t bg-muted/30 text-xs">
+                  <tr>
+                    <th
+                      scope="row"
+                      colSpan={showPerson ? 4 : 3}
+                      className="px-4 py-2.5 text-left font-medium"
+                    >
+                      Total in range
+                    </th>
+                    <td className="px-4 py-2.5 font-semibold tabular-nums">
+                      {formatDuration(totalMinutes)}
+                    </td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

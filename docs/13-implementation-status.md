@@ -15,7 +15,8 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **2 — Approval Engine + Gate 1** | **Done.** All exit criteria asserted and green |
 | **3 — Tasks + QA (Gate 2)** | **Done.** All exit criteria asserted and green |
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
-| **5–6** | Not started |
+| **5 — DTR + Internal Approvals** | **Code complete, unverified.** All 12 backlog items built; the three migrations are not applied anywhere, so 5 of 6 exit criteria are asserted but skipped |
+| **6** | Not started |
 
 `npm run verify` is green: **235 tests, 0 failures**, of which 150 run against a live database as genuinely signed-in users.
 
@@ -191,6 +192,59 @@ Every db suite **detects whether its migration has been applied** and skips with
 
 ---
 
+## Phase 5 — DTR and Internal Approvals
+
+**Code complete; NOT verified against a database.** The three migrations below have not been applied to any project, so five of the six exit criteria are written and asserted but currently *skipped*.
+
+| ID | Item | State |
+|----|------|-------|
+| P5-01 | `vizserve_pms_dtr_entries` migration | ✅ `UNIQUE (user_id, work_date)`, RLS, no INSERT/UPDATE policy |
+| P5-02 | Punch endpoint | ✅ `vizserve_pms_punch` — earliest-in / latest-out, plus the Q4 guards |
+| P5-03 | Dashboard punch shortcut | ✅ The Phase 0 placeholder is real now |
+| P5-04 | DTR list view | ✅ `/dtr`, scoped by RLS, with a date-range filter |
+| P5-05 | `vizserve_pms_internal_requests` migration | ✅ Four types, per-type CHECK constraints |
+| P5-06 | Four request forms | ✅ One dialog, discriminated union |
+| P5-07 | Approval routing | ✅ Department snapshotted from the requester at submission |
+| P5-08 | Approve / reject | ✅ Straight onto the P2-00 engine, unchanged |
+| P5-09 | Correction writes into the DTR | ✅ The only path allowed to overwrite an earliest-in |
+| P5-10 | Approvals list view | ✅ `/approvals` — mine, and pending my approval |
+| P5-11 | Payroll export | ✅ CSV, not `xlsx` — see below |
+| P5-12 | `lib/dates.ts` work dates | ✅ Plus 17 unit tests. No date library added |
+
+### The engine was not touched
+
+The Phase 2 acceptance test was "a throwaway second request type routing end to end without touching engine code". Phase 5 is that test with real stakes: `vizserve_pms_decide_internal_request` calls `vizserve_pms_record_decision` exactly the way Gate 1 does, and **no line of the P2-00 engine section changed**. Scope, the mandatory reason on reject, the approval row and its audit entry all came for free.
+
+### Exit criteria
+
+- [ ] Double punch-in does not change time-in; double punch-out does update it
+- [ ] An OT shift ending 01:00 lands on the prior work date
+- [ ] All four internal request types submit and route correctly
+- [ ] An approved No Time-In actually corrects the DTR record
+- [x] No leave-balance logic exists anywhere — asserted by `tests/unit/no-leave-balance.test.ts`
+- [ ] Payroll can export a month of DTR as CSV
+
+The five unticked boxes are all asserted in `tests/db/phase5.test.ts` (20 cases) and tick themselves the moment the migrations are applied.
+
+### Open questions this phase built past
+
+- **Q4 is still unanswered.** The punch rules implement the *recommendation* in docs/09 — server timestamp authoritative, time-in always today, time-out today or yesterday-if-open, an 18-hour cut-off. Amier has confirmed none of it. Changing the answer means changing `vizserve_pms_punch` and nothing else.
+- **Q8 is still unanswered.** What is built handles OT that runs late, which is the rule as stated. A *scheduled* 22:00–06:00 shift is a different model and would need the work-date rule revisited.
+
+### Deviations worth knowing
+
+1. **CSV, not `xlsx`.** P5-11 suggests SheetJS "same as the SIS masterfile export", but the binding exit criterion says CSV, `xlsx` is not a dependency here, and payroll opens either one in Excel. Revisit if formatting or multiple sheets are actually wanted.
+2. **A new notification type needed its own migration file.** Postgres forbids *using* an enum value in the transaction that adds it, and each migration file is applied as one transaction — so `internal_decision` is added alone in `20260804151000` and first used in `20260804152000`.
+3. **`internal_decision` ships email-off.** The requester is staff with an inbox, and docs/12 reserves email for people who have no other channel.
+
+### ⚠️ Every db suite has been skipping silently
+
+`console.warn` at module scope is **swallowed by vitest 4** — verified with a probe on both a skipped and a passing file. Every suite in `tests/db/` announces its skip reason that way, so none of those reasons has ever been printed: the suites report "skipped" with no explanation, which is the exact failure this document warns about elsewhere.
+
+`process.stderr.write` survives. `tests/db/phase5.test.ts` uses it and prints properly; **the other eight db suites still need the same one-line change.**
+
+---
+
 ## Decisions taken during the build
 
 Recorded here because they are not in the phase docs and would otherwise look arbitrary.
@@ -247,15 +301,25 @@ Fixed by `20260729110000_p0_06_grants.sql`, which grants explicitly and sets `AL
 
 ## Recommended next step
 
-**Phase 3 — Tasks and Internal QA.** The largest phase in the set, with a
-pre-planned split: 3a is lists, the task list and detail views, the status
-machine, the resolution gate and manual tasks; 3b is the QA screens, QA
-pass/reject, the board view and `WAITING_FOR_INFO` reporting.
+**Apply the three Phase 5 migrations, then run `npm run verify`.** They are
+written and unapplied, which means 20 assertions covering five of the six Phase
+5 exit criteria are currently skipping. Paste them into the dashboard SQL editor
+in filename order — `20260804150000_p5_01_dtr.sql`, then
+`20260804151000_p5_05_notification_type.sql`, then
+`20260804152000_p5_05_internal_requests.sql`. **The middle one must be its own
+transaction**; it adds an enum value the third one uses, and Postgres refuses
+both in one.
 
-3a alone is a usable increment. A half-finished Phase 3 is not, and it is the
-worst place in the plan to stall, since Phase 4 depends on it entirely.
+After that, **Q4 needs Amier.** The punch rules are built to the recommendation,
+not to a confirmed decision, and the correction path is the part he has not seen
+— an accidental 06:00 punch is unfixable by the person it happened to, by
+design, and only a No Time-In approval can undo it. If he wants that looser, it
+is a change to one function.
 
-Two things still need a human and neither blocks Phase 3:
+Then **Phase 6 — Timesheet, Reporting, Archive**, the phase that lets ClickUp be
+cancelled.
+
+Two things still need a human and neither blocks Phase 6:
 
 - **Point an Entra tenant at the login and sign in once.** Identity linking is a
   project setting, not something a migration can enforce.

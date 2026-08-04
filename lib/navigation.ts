@@ -65,16 +65,14 @@ export const NAV_ITEMS: NavItem[] = [
     label: "DTR",
     href: "/dtr",
     minRole: "member",
-    enabled: false,
-    phase: "Phase 5",
+    enabled: true,
     icon: "clock",
   },
   {
     label: "Approvals",
     href: "/approvals",
     minRole: "member",
-    enabled: false,
-    phase: "Phase 5",
+    enabled: true,
     icon: "check",
   },
   {

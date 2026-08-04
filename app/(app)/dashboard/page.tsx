@@ -3,6 +3,8 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import { loadPunchState } from "@/lib/dtr-server";
+import { PunchPanel } from "../dtr/punch-panel";
 import { createClient } from "@/utils/supabase/server";
 import { Button } from "@/components/ui/button";
 
@@ -12,9 +14,9 @@ export const metadata: Metadata = { title: "Dashboard" };
  * P0-08 — dashboard.
  *
  * The time in/out shortcut is here because Amier asked for it explicitly
- * (16:30, "May in and out sa dashboard shortcut") — it renders and does nothing
- * until Phase 5, which is the intended state. Cards for unbuilt modules stay
- * visible so the shape of the product is legible from day one.
+ * (16:30, "May in and out sa dashboard shortcut"). P5-03 made it real; it was a
+ * disabled placeholder through Phases 0-4 so the shape of the product was
+ * legible before the module existed.
  *
  * The counts that CAN be real are real: both read through RLS, so each person's
  * numbers are their own scope by construction rather than by a filter someone
@@ -73,7 +75,8 @@ export default async function DashboardPage() {
   const isApprover = roleAtLeast(context.role, "team_leader");
   const firstName = context.fullName.trim().split(" ")[0] || "there";
 
-  const [pending, unread, myTasks, myQa] = await Promise.all([
+  const [punchState, pending, unread, myTasks, myQa] = await Promise.all([
+    loadPunchState(context.userId),
     isApprover
       ? supabase
           .from("vizserve_pms_requests")
@@ -111,13 +114,12 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <Card
-          title="Time in / out"
-          description="Punch without leaving the dashboard"
-          phase="Phase 5"
-        >
-          <Button disabled className="w-full">
-            Time in
+        <Card title="Time in / out" description="Punch without leaving the dashboard">
+          <PunchPanel initial={punchState} compact />
+          <Button asChild variant="ghost" size="sm" className="mt-3 -ml-2">
+            <Link href="/dtr">
+              Open my DTR <ArrowRight className="size-3.5" />
+            </Link>
           </Button>
         </Card>
 

@@ -25,8 +25,8 @@ Formatted for the ClickUp Gantt, in the same shape as **01 Online Admission Plan
 | 11 | UI/UX Design & Branding | 4 Aug 2026 | 4 Aug 2026 | ✅ |
 | 12 | **Email & Domain Configuration** | 5 Aug 2026 | 7 Aug 2026 | ⛔ **blocker** |
 | 13 | Testing and Bug Fixing | 5 Aug 2026 | 14 Aug 2026 | ⏳ |
-| 14 | DTR Module | 17 Aug 2026 | 28 Aug 2026 | ⏳ |
-| 15 | Internal Approvals Module | 31 Aug 2026 | 11 Sep 2026 | ⏳ |
+| 14 | DTR Module | 17 Aug 2026 | 28 Aug 2026 | 🟡 code done, migrations unapplied |
+| 15 | Internal Approvals Module | 31 Aug 2026 | 11 Sep 2026 | 🟡 code done, migrations unapplied |
 | 16 | Timesheet & Reporting Module | 14 Sep 2026 | 25 Sep 2026 | ⏳ |
 | 17 | ClickUp Data Migration | 28 Sep 2026 | 2 Oct 2026 | ⏳ |
 | 18 | Web Hosting & DNS Configuration | 5 Oct 2026 | 7 Oct 2026 | ⏳ |

@@ -16,7 +16,8 @@ export type VizservePmsNotificationType =
   | "assigned"
   | "status_changed"
   | "qa_requested"
-  | "client_decision";
+  | "client_decision"
+  | "internal_decision";
 
 export type VizservePmsFieldType =
   | "text"
@@ -29,6 +30,16 @@ export type VizservePmsFieldType =
   | "number";
 
 export type VizservePmsApprovalDecision = "approved" | "returned" | "rejected";
+
+/** Phase 5. Fixed list at launch — docs/09. Leave balances stay out of scope. */
+export type VizservePmsInternalRequestType =
+  | "LEAVE"
+  | "NO_TIME_IN"
+  | "NO_TIME_OUT"
+  | "REIMBURSEMENT";
+
+/** No RETURNED: P5-08 specifies approve or reject only. */
+export type VizservePmsInternalRequestStatus = "PENDING_REVIEW" | "APPROVED" | "REJECTED";
 
 /**
  * A client's answer at Gate 3.
@@ -864,6 +875,101 @@ export type Database = {
         }>;
         Relationships: [];
       };
+      vizserve_pms_dtr_entries: {
+        Row: {
+          id: string;
+          user_id: string;
+          work_date: string;
+          time_in: string | null;
+          time_out: string | null;
+          corrected_by: string | null;
+          corrected_at: string | null;
+          correction_request_id: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        // Rows arrive only through vizserve_pms_punch and the P5-09 correction
+        // path — there is no INSERT or UPDATE policy. These exist for the
+        // service-role seed path and for tests, not for app code.
+        Insert: {
+          id?: string;
+          user_id: string;
+          work_date: string;
+          time_in?: string | null;
+          time_out?: string | null;
+          corrected_by?: string | null;
+          corrected_at?: string | null;
+          correction_request_id?: string | null;
+        };
+        Update: Partial<{
+          time_in: string | null;
+          time_out: string | null;
+          corrected_by: string | null;
+          corrected_at: string | null;
+          correction_request_id: string | null;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_dtr_entries_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      vizserve_pms_internal_requests: {
+        Row: {
+          id: string;
+          request_type: VizservePmsInternalRequestType;
+          requester_id: string;
+          department_id: string;
+          status: VizservePmsInternalRequestStatus;
+          reason: string;
+          start_date: string | null;
+          end_date: string | null;
+          work_date: string | null;
+          correction_at: string | null;
+          amount: number | null;
+          decision_reason: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          request_type: VizservePmsInternalRequestType;
+          requester_id: string;
+          department_id: string;
+          status?: VizservePmsInternalRequestStatus;
+          reason: string;
+          start_date?: string | null;
+          end_date?: string | null;
+          work_date?: string | null;
+          correction_at?: string | null;
+          amount?: number | null;
+        };
+        Update: Partial<{
+          status: VizservePmsInternalRequestStatus;
+          decision_reason: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_internal_requests_requester_id_fkey";
+            columns: ["requester_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_internal_requests_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: Record<never, never>;
     Functions: {
@@ -942,6 +1048,31 @@ export type Database = {
       vizserve_pms_can_approve: {
         Args: { p_department_id: string };
         Returns: boolean;
+      };
+      vizserve_pms_punch: {
+        Args: { p_direction: string; p_work_date?: string | null };
+        Returns: Json;
+      };
+      vizserve_pms_submit_internal_request: {
+        Args: {
+          p_request_type: VizservePmsInternalRequestType;
+          p_reason: string;
+          p_start_date?: string | null;
+          p_end_date?: string | null;
+          p_work_date?: string | null;
+          /** Wall-clock 'HH:MM' on p_work_date; combined with it in Manila. */
+          p_correction_time?: string | null;
+          p_amount?: number | null;
+        };
+        Returns: Json;
+      };
+      vizserve_pms_decide_internal_request: {
+        Args: {
+          p_id: string;
+          p_decision: VizservePmsApprovalDecision;
+          p_reason?: string | null;
+        };
+        Returns: Json;
       };
       vizserve_pms_record_decision: {
         Args: {
@@ -1076,6 +1207,8 @@ export type Database = {
       vizserve_pms_task_status: VizservePmsTaskStatus;
       vizserve_pms_client_decision: VizservePmsClientDecision;
       vizserve_pms_token_purpose: VizservePmsTokenPurpose;
+      vizserve_pms_internal_request_type: VizservePmsInternalRequestType;
+      vizserve_pms_internal_request_status: VizservePmsInternalRequestStatus;
     };
     CompositeTypes: Record<never, never>;
   };
@@ -1085,3 +1218,6 @@ export type Database = {
 export type DepartmentRow = Database["public"]["Tables"]["vizserve_pms_departments"]["Row"];
 export type UserRow = Database["public"]["Tables"]["vizserve_pms_users"]["Row"];
 export type NotificationRow = Database["public"]["Tables"]["vizserve_pms_notifications"]["Row"];
+export type DtrEntryRow = Database["public"]["Tables"]["vizserve_pms_dtr_entries"]["Row"];
+export type InternalRequestRow =
+  Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];

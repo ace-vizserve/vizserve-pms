@@ -2,12 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   addDays,
+  allowedTimeOutDates,
   daysBetween,
+  decimalHours,
   formatDate,
+  formatDuration,
   isOverdue,
   parseDateOnly,
   toAppDateString,
   todayInAppZone,
+  workedMinutes,
+  yesterdayInAppZone,
 } from "@/lib/dates";
 
 /**
@@ -123,5 +128,87 @@ describe("formatDate", () => {
     expect(formatDate(null)).toBe("—");
     expect(formatDate("")).toBe("—");
     expect(formatDate("nonsense")).toBe("—");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Phase 5 — work dates (P5-12)
+// ---------------------------------------------------------------------------
+
+describe("workedMinutes — instants, not wall clocks", () => {
+  it("measures a normal shift", () => {
+    expect(workedMinutes("2026-08-03T01:00:00Z", "2026-08-03T09:15:00Z")).toBe(495);
+  });
+
+  it("measures an overnight shift as a positive duration", () => {
+    // THE case the DTR exists for: in 22:00 Manila on 22 Jul, out 01:00 on the
+    // 23rd. Wall-clock subtraction gives -21 hours; instant subtraction gives 3.
+    const timeIn = "2026-07-22T14:00:00Z"; // 22:00 Manila, 22 Jul
+    const timeOut = "2026-07-22T17:00:00Z"; // 01:00 Manila, 23 Jul
+    expect(workedMinutes(timeIn, timeOut)).toBe(180);
+  });
+
+  it("returns null rather than a negative duration when out precedes in", () => {
+    expect(workedMinutes("2026-08-03T09:00:00Z", "2026-08-03T01:00:00Z")).toBeNull();
+  });
+
+  it("returns null for an open shift", () => {
+    expect(workedMinutes("2026-08-03T01:00:00Z", null)).toBeNull();
+  });
+});
+
+describe("formatDuration", () => {
+  it.each([
+    [495, "8h 15m"],
+    [480, "8h"],
+    [45, "45m"],
+    [0, "0m"],
+  ])("renders %i minutes as %s", (minutes, expected) => {
+    expect(formatDuration(minutes)).toBe(expected);
+  });
+
+  it("renders an open shift as an em dash", () => {
+    expect(formatDuration(null)).toBe("—");
+  });
+});
+
+describe("decimalHours — payroll multiplies by a rate", () => {
+  it.each([
+    [495, "8.25"],
+    [480, "8.00"],
+    [30, "0.50"],
+  ])("renders %i minutes as %s", (minutes, expected) => {
+    expect(decimalHours(minutes)).toBe(expected);
+  });
+
+  it("renders an open shift as empty, not as zero", () => {
+    // A zero would be summed by payroll as a real worked day.
+    expect(decimalHours(null)).toBe("");
+  });
+});
+
+describe("allowedTimeOutDates — Q4's backdating guard", () => {
+  it("offers today only when yesterday has no open shift", () => {
+    expect(allowedTimeOutDates(false)).toEqual([todayInAppZone()]);
+  });
+
+  it("offers yesterday as well when yesterday's shift was left open", () => {
+    const allowed = allowedTimeOutDates(true);
+    expect(allowed).toContain(todayInAppZone());
+    expect(allowed).toContain(yesterdayInAppZone());
+    // Never more than those two — the whole point is that an arbitrary past
+    // date cannot be chosen.
+    expect(allowed).toHaveLength(2);
+  });
+
+  it("never offers a date older than yesterday", () => {
+    const twoDaysAgo = addDays(todayInAppZone(), -2)!;
+    expect(allowedTimeOutDates(true)).not.toContain(twoDaysAgo);
+  });
+});
+
+describe("yesterdayInAppZone", () => {
+  it("is exactly one day before today in app time", () => {
+    expect(daysBetween(yesterdayInAppZone(), todayInAppZone())).toBe(1);
   });
 });

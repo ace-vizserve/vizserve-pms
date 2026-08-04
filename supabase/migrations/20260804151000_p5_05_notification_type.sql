@@ -1,0 +1,16 @@
+-- P5-05 (a) — one new notification type, alone in its own migration.
+--
+-- THIS FILE CONTAINS ONE STATEMENT ON PURPOSE. Postgres forbids *using* an enum
+-- value in the same transaction that adds it ("unsafe use of new value"), and
+-- each migration file here is applied as one transaction in the SQL editor
+-- (docs/13). Putting the ALTER and the settings row that references it in one
+-- file would fail at apply time, on a step that looks trivial.
+--
+-- The next migration seeds its settings row and starts using it.
+--
+-- Why a new value rather than reusing one: the approver side of an internal
+-- request genuinely IS `pending_approval` and reuses it. The requester side is
+-- not — "your leave was approved" landing in the inbox as `status_changed`
+-- would be indistinguishable from ordinary task noise, and `status_changed` is
+-- deliberately email-off. A decision on your own leave is not noise.
+alter type vizserve_pms_notification_type add value if not exists 'internal_decision';
