@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import { ROLE_ORDER, type Role } from "@/lib/auth/roles";
 import { ROLE_LABELS } from "@/lib/schemas/users";
 
@@ -52,6 +53,8 @@ export type EditableUser = {
   role: Role;
   primary_department_id: string | null;
   is_active: boolean;
+  /** Which HFSE applications they may enter. See the access toggle below. */
+  app_access: string[];
   managed_department_ids: string[];
 };
 
@@ -118,6 +121,9 @@ function UserForm({
     user?.managed_department_ids ?? [],
   );
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
+  const [hasAppAccess, setHasAppAccess] = useState(
+    user ? user.app_access.includes(APP_ACCESS_KEY) : true,
+  );
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
@@ -146,7 +152,11 @@ function UserForm({
 
     startTransition(async () => {
       const result = user
-        ? await updateUser(user.id, { ...payload, is_active: isActive })
+        ? await updateUser(user.id, {
+            ...payload,
+            is_active: isActive,
+            has_app_access: hasAppAccess,
+          })
         : await createUser({ ...payload, email });
 
       if (!result.ok) {

@@ -102,6 +102,15 @@ export type Database = {
           role: VizservePmsUserRole;
           primary_department_id: string | null;
           is_active: boolean;
+          /**
+           * Which HFSE applications this person may enter.
+           *
+           * The source of truth for the access gate. Mirrored into
+           * `raw_app_meta_data` — service-role writable only, therefore
+           * trustworthy — and NEVER read from `raw_user_meta_data`, which the
+           * user can rewrite through GoTrue with their own token (D18).
+           */
+          app_access: string[];
           created_at: string;
           updated_at: string;
         };
@@ -112,6 +121,7 @@ export type Database = {
           role?: VizservePmsUserRole;
           primary_department_id?: string | null;
           is_active?: boolean;
+          app_access?: string[];
           created_at?: string;
           updated_at?: string;
         };
@@ -122,6 +132,7 @@ export type Database = {
           role?: VizservePmsUserRole;
           primary_department_id?: string | null;
           is_active?: boolean;
+          app_access?: string[];
           created_at?: string;
           updated_at?: string;
         };
@@ -863,6 +874,10 @@ export type Database = {
         Returns: boolean;
       };
       vizserve_pms_is_admin: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
+      vizserve_pms_has_app_access: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };

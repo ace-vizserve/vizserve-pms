@@ -4,6 +4,7 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/utils/supabase/server";
+import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import { ROLE_ORDER, roleAtLeast, type Role } from "@/lib/auth/roles";
 
 /**
@@ -36,6 +37,9 @@ import { ROLE_ORDER, roleAtLeast, type Role } from "@/lib/auth/roles";
  */
 export { ROLE_ORDER, roleAtLeast, type Role };
 
+/** Re-exported so every authorization concern is imported from one module. */
+export { APP_ACCESS_KEY };
+
 export type AuthContext = {
   userId: string;
   email: string;
@@ -46,6 +50,22 @@ export type AuthContext = {
   /** The departments they lead or oversee. Empty for a plain member. */
   managedDepartmentIds: string[];
 };
+
+/**
+ * Why a session did not resolve to a usable context.
+ *
+ * Distinguished because they need different answers on screen: "sign in" is
+ * useless advice to someone who IS signed in and simply is not a user of this
+ * product, and bouncing them to /login produces a loop.
+ */
+export type AuthDenial =
+  | "no_session"
+  /** Signed in, but has no profile row in this application at all. */
+  | "not_provisioned"
+  /** Has a profile, but it is deactivated. */
+  | "deactivated"
+  /** Has an active profile, but is not provisioned for THIS application. */
+  | "no_app_access";
 
 export class ForbiddenError extends Error {
   constructor(message = "You do not have access to this resource.") {
@@ -63,43 +83,84 @@ export class ForbiddenError extends Error {
  * Returns null for: no session, no profile row, or a deactivated profile.
  * Deactivation is a real gate, not a UI flag.
  */
+export const resolveAuth = cache(
+  async (): Promise<{ context: AuthContext } | { context: null; denial: AuthDenial }> => {
+    const supabase = await createClient();
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+
+    if (!user) return { context: null, denial: "no_session" };
+
+    const { data: profile } = await supabase
+      .from("vizserve_pms_users")
+      .select("id, email, full_name, role, primary_department_id, is_active, app_access")
+      .eq("id", user.id)
+      .maybeSingle();
+
+    // A valid session with no profile row. Real and expected: the auth pool is
+    // shared with other HFSE systems, and Entra SSO admits the whole tenant.
+    if (!profile) return { context: null, denial: "not_provisioned" };
+
+    if (!profile.is_active) return { context: null, denial: "deactivated" };
+
+    // THE APP ACCESS GATE.
+    //
+    // Read from the TABLE, not from `user.user_metadata.app_access`. The
+    // metadata copy exists and says the same thing, and is worthless here: any
+    // signed-in user can rewrite it through Supabase's own endpoint with their
+    // own token. Trusting it would let anyone locked out let themselves back in
+    // with one curl — see tests/db/scope.test.ts, which performs exactly that
+    // escalation, and `npm run check:metadata`, which fails the build for
+    // reading it in this path (D18).
+    //
+    // `user.app_metadata` would be trustworthy, but it is a snapshot taken when
+    // the token was issued. Revoking access should take effect now, not at the
+    // next refresh — so the table wins, and the JWT copy is only for the
+    // proxy's cheap redirect.
+    if (!(profile.app_access ?? []).includes(APP_ACCESS_KEY)) {
+      return { context: null, denial: "no_app_access" };
+    }
+
+    const { data: managed } = await supabase
+      .from("vizserve_pms_user_managed_departments")
+      .select("department_id")
+      .eq("user_id", user.id);
+
+    return {
+      context: {
+        userId: profile.id,
+        email: profile.email,
+        fullName: profile.full_name,
+        role: profile.role,
+        primaryDepartmentId: profile.primary_department_id,
+        managedDepartmentIds: (managed ?? []).map((row) => row.department_id),
+      },
+    };
+  },
+);
+
+/** The common case: a context or nothing, without caring which denial applied. */
 export const getAuthContext = cache(async (): Promise<AuthContext | null> => {
-  const supabase = await createClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) return null;
-
-  const { data: profile } = await supabase
-    .from("vizserve_pms_users")
-    .select("id, email, full_name, role, primary_department_id, is_active")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  if (!profile || !profile.is_active) return null;
-
-  const { data: managed } = await supabase
-    .from("vizserve_pms_user_managed_departments")
-    .select("department_id")
-    .eq("user_id", user.id);
-
-  return {
-    userId: profile.id,
-    email: profile.email,
-    fullName: profile.full_name,
-    role: profile.role,
-    primaryDepartmentId: profile.primary_department_id,
-    managedDepartmentIds: (managed ?? []).map((row) => row.department_id),
-  };
+  return (await resolveAuth()).context;
 });
 
-/** For pages. Sends anyone without a usable session to the login screen. */
+/**
+ * For pages. Sends anyone without a usable session somewhere they can act on.
+ *
+ * The branch matters. Someone who is signed in but not provisioned for this
+ * product does not need /login — they are already authenticated, so bouncing
+ * them there either loops or silently signs them back in and bounces again.
+ * They need to be told, plainly, that this is not their application.
+ */
 export async function requireAuthContext(): Promise<AuthContext> {
-  const context = await getAuthContext();
-  if (!context) redirect("/login");
-  return context;
+  const result = await resolveAuth();
+
+  if (result.context) return result.context;
+
+  if (result.denial === "no_session") redirect("/login");
+  redirect(`/no-access?reason=${result.denial}`);
 }
 
 /** For pages that a role floor guards. */

@@ -28,7 +28,7 @@ export default async function UsersPage() {
   const [{ data: users }, { data: departments }, { data: managed }] = await Promise.all([
     supabase
       .from("vizserve_pms_users")
-      .select("id, email, full_name, role, primary_department_id, is_active")
+      .select("id, email, full_name, role, primary_department_id, is_active, app_access")
       // Deactivated accounts sink to the bottom; the rest read alphabetically.
       .order("is_active", { ascending: false })
       .order("full_name"),

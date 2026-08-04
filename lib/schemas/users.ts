@@ -40,6 +40,15 @@ export const updateUserSchema = z.object({
   primary_department_id: z.uuid().nullable().default(null),
   managed_department_ids: managedDepartmentsSchema,
   is_active: z.boolean().default(true),
+  /**
+   * Whether this person may enter THIS application.
+   *
+   * Separate from `is_active` on purpose. Deactivated means "no longer with us";
+   * this means "a real, current colleague who works in a different system". The
+   * auth pool is shared with other HFSE products and Entra admits the whole
+   * tenant, so the two are genuinely different states.
+   */
+  has_app_access: z.boolean().default(true),
 });
 
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;

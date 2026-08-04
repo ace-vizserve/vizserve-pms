@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { APP_ACCESS_KEY, requireRole } from "@/lib/auth/authorization";
 import {
   createUserSchema,
   normaliseManagedDepartments,
@@ -46,6 +46,7 @@ type AuditableProfile = {
   role: string;
   primary_department_id: string | null;
   is_active: boolean;
+  app_access: string[];
   managed_department_ids: string[];
 };
 
@@ -55,7 +56,7 @@ async function readProfileForAudit(
 ): Promise<AuditableProfile | null> {
   const { data: profile } = await admin
     .from("vizserve_pms_users")
-    .select("email, full_name, role, primary_department_id, is_active")
+    .select("email, full_name, role, primary_department_id, is_active, app_access")
     .eq("id", userId)
     .maybeSingle();
 
@@ -158,6 +159,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
       role: values.role,
       primary_department_id: values.primary_department_id,
       is_active: true,
+      app_access: [APP_ACCESS_KEY],
     },
     { onConflict: "id" },
   );
@@ -212,6 +214,11 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
     if (!values.is_active) {
       return { ok: false, error: "You cannot deactivate your own account." };
     }
+    // Revoking your own app access locks you out mid-session, and the recovery
+    // is a SQL console. Same reasoning as the role and is_active guards above.
+    if (!values.has_app_access) {
+      return { ok: false, error: "You cannot remove your own access to this app." };
+    }
   }
 
   if (before.role === "admin" && (values.role !== "admin" || !values.is_active)) {
@@ -240,6 +247,9 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
       role: values.role,
       primary_department_id: values.primary_department_id,
       is_active: values.is_active,
+      // Revoking this closes every table at once — vizserve_pms_current_role()
+      // returns null without it, and every policy funnels through that.
+      app_access: values.has_app_access ? [APP_ACCESS_KEY] : [],
     })
     .eq("id", userId);
 
