@@ -40,9 +40,7 @@ export default async function FormsPage() {
     .select("id, name, slug, is_public, is_active, reference_prefix, department_id, updated_at")
     .order("updated_at", { ascending: false });
 
-  const { data: departments } = await supabase
-    .from("vizserve_pms_departments")
-    .select("id, name");
+  const { data: departments } = await supabase.from("vizserve_pms_departments").select("id, name");
 
   const departmentName = new Map((departments ?? []).map((d) => [d.id, d.name]));
   const rows = (forms ?? []) as FormRow[];

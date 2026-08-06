@@ -23,11 +23,7 @@ export const metadata: Metadata = {
  * request rather than periodic, and per-request feedback only gets answered if
  * it costs a few seconds.
  */
-export default async function FeedbackPage({
-  params,
-}: {
-  params: Promise<{ token: string }>;
-}) {
+export default async function FeedbackPage({ params }: { params: Promise<{ token: string }> }) {
   const { token } = await params;
   const supabase = await createClient();
 
@@ -38,8 +34,8 @@ export default async function FeedbackPage({
   return (
     <main className="min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-lg">
-        <div className="mb-6">
-          <BrandLockup subtitle="Feedback" />
+        <div className="mb-5">
+          <BrandLockup align="stacked" subtitle="Feedback" />
         </div>
 
         {!page ? (

@@ -25,8 +25,7 @@ import { createClient } from "@/utils/supabase/server";
  */
 
 export type DecisionResult =
-  | { ok: true; decision: string; status: string }
-  | { ok: false; error: string };
+  { ok: true; decision: string; status: string } | { ok: false; error: string };
 
 /** Every failure said the same way, so a probe learns nothing from the wording. */
 const MESSAGES: Record<string, string> = {
@@ -44,17 +43,13 @@ function clientIp(headerList: Headers): string | null {
   return headerList.get("x-real-ip");
 }
 
-export async function submitClientDecision(
-  token: string,
-  input: unknown,
-): Promise<DecisionResult> {
+export async function submitClientDecision(token: string, input: unknown): Promise<DecisionResult> {
   const parsed = clientDecisionSchema.safeParse(input);
 
   if (!parsed.success) {
     return {
       ok: false,
-      error:
-        parsed.error.issues[0]?.message ?? "Please check what you entered and try again.",
+      error: parsed.error.issues[0]?.message ?? "Please check what you entered and try again.",
     };
   }
 
@@ -89,10 +84,9 @@ export async function submitClientDecision(
   // awaited: the client is looking at a confirmation screen and should not wait
   // on our mail server to see it.
   if (result.decision === "APPROVED") {
-    void issueAndSendFeedbackRequest(
-      (data as { task_id?: string }).task_id ?? "",
-      { autoCompleted: false },
-    ).catch(() => {
+    void issueAndSendFeedbackRequest((data as { task_id?: string }).task_id ?? "", {
+      autoCompleted: false,
+    }).catch(() => {
       // Best effort. A missing feedback email is not worth failing an approval.
     });
   }

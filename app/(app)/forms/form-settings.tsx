@@ -78,6 +78,15 @@ export function FormSettings({
   // offering a guaranteed rejection from the database.
   const departmentLists = lists.filter((list) => list.department_id === departmentId);
 
+  // value → label maps for the two Selects below. Without these, Base UI's
+  // Select.Value falls back to rendering the raw value, and these two are the
+  // worst case of that: a bare UUID and the literal string "__none__".
+  const departmentItems = Object.fromEntries(departments.map((d) => [d.id, d.name]));
+  const listItems = {
+    [NO_LIST]: "No list",
+    ...Object.fromEntries(departmentLists.map((list) => [list.id, list.name])),
+  };
+
   const onSubmit = handleSubmit((values) => {
     setFormError(null);
 
@@ -137,7 +146,11 @@ export function FormSettings({
       <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-2">
           <Label htmlFor="department">Owning department</Label>
+          {/* `items` is what makes the trigger show "VizBytes" instead of the
+              department's UUID. Base UI's Select.Value renders the raw value
+              unless the Root is handed a value→label map. */}
           <Select
+            items={departmentItems}
             value={departmentId ?? ""}
             onValueChange={(value) => setValue("department_id", value, { shouldValidate: true })}
           >
@@ -153,7 +166,9 @@ export function FormSettings({
             </SelectContent>
           </Select>
           {/* This is what decides which Team Leader the request lands on. */}
-          <p className="text-xs text-muted-foreground">Routes submissions to this department&apos;s TL.</p>
+          <p className="text-xs text-muted-foreground">
+            Routes submissions to this department&apos;s TL.
+          </p>
           {errors.department_id ? (
             <p className="text-xs text-destructive">{errors.department_id.message}</p>
           ) : null}
@@ -196,10 +211,9 @@ export function FormSettings({
         <div className="space-y-2">
           <Label htmlFor="default_list">Default list</Label>
           <Select
+            items={listItems}
             value={watch("default_list_id") ?? NO_LIST}
-            onValueChange={(value) =>
-              setValue("default_list_id", value === NO_LIST ? null : value)
-            }
+            onValueChange={(value) => setValue("default_list_id", value === NO_LIST ? null : value)}
             disabled={departmentLists.length === 0}
           >
             <SelectTrigger id="default_list">

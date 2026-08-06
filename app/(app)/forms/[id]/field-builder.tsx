@@ -131,7 +131,12 @@ function FieldForm({
 
       <div className="space-y-2">
         <Label htmlFor="f-key">Field key</Label>
-        <Input id="f-key" value={fieldKey} onChange={(e) => setFieldKey(e.target.value)} disabled={isEditing} />
+        <Input
+          id="f-key"
+          value={fieldKey}
+          onChange={(e) => setFieldKey(e.target.value)}
+          disabled={isEditing}
+        />
         {/* The key is the contract behind every historical answer and the task
             column mapping, so it is fixed once the field exists (D20/R5).
             Renaming the label is always safe. */}
@@ -173,7 +178,10 @@ function FieldForm({
       </div>
 
       {error ? (
-        <p role="alert" className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+        <p
+          role="alert"
+          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+        >
           {error}
         </p>
       ) : null}
@@ -271,7 +279,11 @@ export function FieldBuilder({ formId, fields }: { formId: string; fields: Field
                 </p>
               </div>
 
-              <Button size="sm" variant="ghost" onClick={() => setEditingId(editingId === field.id ? null : field.id)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setEditingId(editingId === field.id ? null : field.id)}
+              >
                 {editingId === field.id ? "Close" : "Edit"}
               </Button>
               <Button size="sm" variant="ghost" onClick={() => toggleActive(field.id, false)}>
@@ -299,9 +311,7 @@ export function FieldBuilder({ formId, fields }: { formId: string; fields: Field
 
       {archived.length > 0 ? (
         <div className="space-y-2 rounded-lg border border-dashed p-4">
-          <p className="text-xs font-medium text-muted-foreground">
-            Archived ({archived.length})
-          </p>
+          <p className="text-xs font-medium text-muted-foreground">Archived ({archived.length})</p>
           {/* Archived rather than deleted: historical requests still store
               answers under these keys, so removing them would orphan data. */}
           <p className="text-xs text-muted-foreground">

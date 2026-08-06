@@ -3,11 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import {
-  assertDepartmentAccess,
-  ForbiddenError,
-  requireRole,
-} from "@/lib/auth/authorization";
+import { assertDepartmentAccess, ForbiddenError, requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { formFieldDraftSchema, formSettingsSchema } from "@/lib/schemas/forms";
 
@@ -21,8 +17,7 @@ import { formFieldDraftSchema, formSettingsSchema } from "@/lib/schemas/forms";
  */
 
 export type ActionResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
+  { ok: true; data: T } | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
 
 function flattenIssues(error: z.ZodError): Record<string, string[]> {
   const fieldErrors: Record<string, string[]> = {};
@@ -50,9 +45,11 @@ function isUniqueViolation(error: { code?: string } | null) {
  * generating the same COL-2026-0001, which surfaced as a raw 500 on the PUBLIC
  * form rather than an error anyone here would see.
  */
-function uniqueFieldError(
-  error: { message?: string; details?: string } | null,
-): { field: "slug" | "reference_prefix"; message: string; error: string } {
+function uniqueFieldError(error: { message?: string; details?: string } | null): {
+  field: "slug" | "reference_prefix";
+  message: string;
+  error: string;
+} {
   const haystack = `${error?.message ?? ""} ${error?.details ?? ""}`.toLowerCase();
 
   if (haystack.includes("reference_prefix")) {
@@ -92,7 +89,11 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   const parsed = formSettingsSchema.safeParse(input);
 
   if (!parsed.success) {
-    return { ok: false, error: "Check the highlighted fields.", fieldErrors: flattenIssues(parsed.error) };
+    return {
+      ok: false,
+      error: "Check the highlighted fields.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
   }
 
   if (parsed.data.department_id) {
@@ -118,15 +119,16 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   return { ok: true, data: { id: data.id } };
 }
 
-export async function updateFormSettings(
-  formId: string,
-  input: unknown,
-): Promise<ActionResult> {
+export async function updateFormSettings(formId: string, input: unknown): Promise<ActionResult> {
   const { context, supabase } = await assertCanEditForm(formId);
   const parsed = formSettingsSchema.safeParse(input);
 
   if (!parsed.success) {
-    return { ok: false, error: "Check the highlighted fields.", fieldErrors: flattenIssues(parsed.error) };
+    return {
+      ok: false,
+      error: "Check the highlighted fields.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
   }
 
   // Moving a form into a department you do not lead would hand your queue to
@@ -135,10 +137,7 @@ export async function updateFormSettings(
     assertDepartmentAccess(context, parsed.data.department_id);
   }
 
-  const { error } = await supabase
-    .from("vizserve_pms_forms")
-    .update(parsed.data)
-    .eq("id", formId);
+  const { error } = await supabase.from("vizserve_pms_forms").update(parsed.data).eq("id", formId);
 
   if (error) {
     if (isUniqueViolation(error)) {
@@ -158,7 +157,11 @@ export async function saveField(formId: string, input: unknown): Promise<ActionR
   const parsed = formFieldDraftSchema.safeParse(input);
 
   if (!parsed.success) {
-    return { ok: false, error: "Check the highlighted fields.", fieldErrors: flattenIssues(parsed.error) };
+    return {
+      ok: false,
+      error: "Check the highlighted fields.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
   }
 
   const { id, ...values } = parsed.data;

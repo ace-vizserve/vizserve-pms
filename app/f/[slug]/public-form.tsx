@@ -39,16 +39,14 @@ function FieldShell({
       <Label htmlFor={field.field_key}>
         {field.label}
         {field.is_required ? (
-          <span className="text-destructive" aria-label="required">
+          <span className="ml-0.5 text-destructive" aria-label="required">
             *
           </span>
         ) : (
-          <span className="text-xs font-normal text-muted-foreground">(optional)</span>
+          <span className="ml-1 text-xs font-normal text-muted-foreground">(optional)</span>
         )}
       </Label>
-      {field.help_text ? (
-        <p className="text-xs text-muted-foreground">{field.help_text}</p>
-      ) : null}
+      {field.help_text ? <p className="text-xs text-muted-foreground">{field.help_text}</p> : null}
       {children}
       {error ? (
         <p className="text-sm text-destructive" role="alert">
@@ -85,6 +83,25 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
   // bytes; this only spares the client picking something that cannot work.
   const accept = rules?.allowed_mime_types.length ? rules.allowed_mime_types.join(",") : undefined;
 
+  /**
+   * THE FORM-LEVEL ATTACHMENT — the fix for an unsubmittable form.
+   *
+   * `requires_attachment` is a property of the FORM, and
+   * `vizserve_pms_submit_request` rejects a submission with zero attachments
+   * when it is set. But the renderer only ever drew a file picker for a field of
+   * type `file`. Turn the toggle on without adding such a field — which the
+   * settings screen happily allows — and the client gets a form that the
+   * database refuses, with nothing on the page to attach anything to.
+   *
+   * So: when a file is required and no field collects one, the form grows its
+   * own attachment slot.
+   */
+  const hasFileField = form.fields.some((field) => field.field_type === "file");
+  const needsOwnAttachment = form.requires_attachment && !hasFileField;
+
+  const [formAttachments, setFormAttachments] = useState<AttachmentRef[]>([]);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+
   const {
     register,
     control,
@@ -111,20 +128,37 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
 
   const onSubmit = handleSubmit(async (values) => {
     setFormError(null);
+    setAttachmentError(null);
 
     // Files are already uploaded and live under their own field keys; the
     // submission carries the receipts. Flattened here rather than kept in
     // field_values, because the database stores files in request_attachments and
     // field_values holds answers.
-    const attachments = form.fields
-      .filter((field) => field.field_type === "file")
-      .flatMap((field) => (values.field_values[field.field_key] as AttachmentRef[] | undefined) ?? []);
+    const attachments = [
+      ...form.fields
+        .filter((field) => field.field_type === "file")
+        .flatMap(
+          (field) => (values.field_values[field.field_key] as AttachmentRef[] | undefined) ?? [],
+        ),
+      ...formAttachments,
+    ];
+
+    // Checked against the TOTAL, not against the form-level slot. A form can
+    // require a file while its only file field is optional, and the database
+    // counts attachments without caring which field they came from — so this
+    // has to ask the same question the server will.
+    if (form.requires_attachment && attachments.length === 0) {
+      setAttachmentError("This request needs at least one file attached.");
+      setFormError("Please attach the required file.");
+      return;
+    }
 
     const result = await submitPublicRequest({
       slug: form.slug,
       payload: values,
       attachments,
-      honeypot: (document.getElementById("company_website") as HTMLInputElement | null)?.value ?? "",
+      honeypot:
+        (document.getElementById("company_website") as HTMLInputElement | null)?.value ?? "",
     });
 
     if (result.ok) {
@@ -186,12 +220,15 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
       </div>
 
       <fieldset className="space-y-4">
-        <legend className="mb-3 text-sm font-semibold">Your details</legend>
+        <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your details</legend>
 
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="requester_name">
-              Your name<span className="text-destructive">*</span>
+              Your name
+              <span className="ml-0.5 text-destructive" aria-label="required">
+                *
+              </span>
             </Label>
             <Input id="requester_name" {...register("requester_name")} />
             {errors.requester_name ? (
@@ -201,7 +238,10 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
 
           <div className="space-y-2">
             <Label htmlFor="requester_email">
-              Email<span className="text-destructive">*</span>
+              Email
+              <span className="ml-0.5 text-destructive" aria-label="required">
+                *
+              </span>
             </Label>
             <Input id="requester_email" type="email" {...register("requester_email")} />
             <p className="text-xs text-muted-foreground">
@@ -215,11 +255,14 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
       </fieldset>
 
       <fieldset className="space-y-4">
-        <legend className="mb-3 text-sm font-semibold">Your request</legend>
+        <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your request</legend>
 
         <div className="space-y-2">
           <Label htmlFor="title">
-            Title<span className="text-destructive">*</span>
+            Title
+            <span className="ml-0.5 text-destructive" aria-label="required">
+              *
+            </span>
           </Label>
           <Input id="title" {...register("title")} />
           {errors.title ? (
@@ -229,7 +272,10 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
 
         <div className="space-y-2">
           <Label htmlFor="description">
-            Description<span className="text-destructive">*</span>
+            Description
+            <span className="ml-0.5 text-destructive" aria-label="required">
+              *
+            </span>
           </Label>
           <Textarea id="description" rows={4} {...register("description")} />
           {errors.description ? (
@@ -239,7 +285,10 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
 
         <div className="space-y-2">
           <Label htmlFor="target_date">
-            Target date<span className="text-destructive">*</span>
+            Target date
+            <span className="ml-0.5 text-destructive" aria-label="required">
+              *
+            </span>
           </Label>
           <Input id="target_date" type="date" className="w-auto" {...register("target_date")} />
           <p className="text-xs text-muted-foreground">
@@ -366,6 +415,42 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
             </FieldShell>
           );
         })}
+
+        {needsOwnAttachment ? (
+          <div className="space-y-2">
+            <Label htmlFor="request_attachment">
+              Attachment
+              <span className="text-destructive" aria-label="required">
+                *
+              </span>
+            </Label>
+            <p className="text-xs text-muted-foreground">
+              This request cannot be submitted without a file.
+            </p>
+            <FileField
+              id="request_attachment"
+              formId={form.id}
+              // null, not a made-up key. There is no `form_fields` row behind
+              // this slot, and `pending_attachments.field_key` is nullable for
+              // exactly that case — a synthetic key would look like a field
+              // that once existed and was deleted.
+              fieldKey={null}
+              value={formAttachments}
+              onChange={(next) => {
+                setFormAttachments(next);
+                if (next.length > 0) setAttachmentError(null);
+              }}
+              upload={uploadPublicAttachment}
+              accept={accept}
+              maxBytes={maxBytes}
+            />
+            {attachmentError ? (
+              <p className="text-sm text-destructive" role="alert">
+                {attachmentError}
+              </p>
+            ) : null}
+          </div>
+        ) : null}
       </fieldset>
 
       {formError ? (
@@ -377,9 +462,15 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
         </p>
       ) : null}
 
-      <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
-        {isSubmitting ? "Submitting…" : "Submit request"}
-      </Button>
+      <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row-reverse sm:items-center sm:justify-between">
+        <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
+          {isSubmitting ? "Submitting…" : "Submit request"}
+        </Button>
+        {/* What happens next, next to the button that makes it happen. */}
+        <p className="text-xs text-muted-foreground">
+          A team leader reviews this and may propose a different date.
+        </p>
+      </div>
     </form>
   );
 }

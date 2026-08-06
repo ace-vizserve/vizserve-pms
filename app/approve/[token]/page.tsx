@@ -43,8 +43,8 @@ function Shell({ children }: { children: React.ReactNode }) {
   return (
     <main className="min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-2xl">
-        <div className="mb-6">
-          <BrandLockup subtitle="Request approval" />
+        <div className="mb-5">
+          <BrandLockup align="stacked" subtitle="Request approval" />
         </div>
         {children}
       </div>
@@ -190,7 +190,7 @@ export default async function ClientApprovalPage({
                       className="grid gap-1 border-b py-2 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3"
                     >
                       <dt className="text-xs text-muted-foreground">{field.label}</dt>
-                      <dd className="min-w-0 break-words">
+                      <dd className="min-w-0 wrap-break-word">
                         {Array.isArray(raw) ? raw.join(", ") : String(raw)}
                       </dd>
                     </div>

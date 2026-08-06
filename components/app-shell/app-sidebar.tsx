@@ -11,6 +11,7 @@ import {
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
+  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
@@ -36,9 +37,18 @@ export type SidebarSection = { group: NavGroup; items: NavItem[] };
 export function AppSidebar({
   sections,
   user,
+  badges,
 }: {
   sections: SidebarSection[];
   user: { fullName: string; email: string; role: string; departments: string[] };
+  /**
+   * Counts to hang off nav items, keyed by href — `{ "/inbox": "99+" }`.
+   *
+   * Pre-formatted strings rather than numbers: the cap ("99+") is a
+   * presentation decision that belongs with the thing that knows the real
+   * count, and a sidebar badge is the wrong place to be doing arithmetic.
+   */
+  badges?: Record<string, string | null>;
 }) {
   const pathname = usePathname();
 
@@ -65,7 +75,12 @@ export function AppSidebar({
 
       <SidebarContent>
         {flow.map((section) => (
-          <NavSection key={section.group.label} section={section} pathname={pathname} />
+          <NavSection
+            key={section.group.label}
+            section={section}
+            pathname={pathname}
+            badges={badges}
+          />
         ))}
 
         {pinned.map((section) => (
@@ -73,6 +88,7 @@ export function AppSidebar({
             key={section.group.label}
             section={section}
             pathname={pathname}
+            badges={badges}
             className="mt-auto"
           />
         ))}
@@ -90,10 +106,12 @@ export function AppSidebar({
 function NavSection({
   section,
   pathname,
+  badges,
   className,
 }: {
   section: SidebarSection;
   pathname: string;
+  badges?: Record<string, string | null>;
   className?: string;
 }) {
   return (
@@ -124,6 +142,8 @@ function NavSection({
             );
           }
 
+          const badge = badges?.[item.href];
+
           return (
             <SidebarMenuItem key={item.href}>
               <SidebarMenuButton
@@ -134,6 +154,19 @@ function NavSection({
                 <NavIcon name={item.icon} />
                 <span>{item.label}</span>
               </SidebarMenuButton>
+
+              {/* Sibling of the button, not a child: SidebarMenuBadge is
+                  absolutely positioned and keys off the button as its peer.
+                  Nested inside, it would sit in the flex row and push the
+                  label. */}
+              {badge ? (
+                <SidebarMenuBadge className="bg-primary/10 text-primary">
+                  {badge}
+                  {/* The number alone reads as decoration to a screen reader,
+                      which announces the link as "Inbox 12". */}
+                  <span className="sr-only"> unread</span>
+                </SidebarMenuBadge>
+              ) : null}
             </SidebarMenuItem>
           );
         })}

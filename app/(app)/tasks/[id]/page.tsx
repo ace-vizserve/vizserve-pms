@@ -190,7 +190,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                         <span className="ml-1 text-2xs">(archived)</span>
                       ) : null}
                     </dt>
-                    <dd className="min-w-0 break-words">{rendered}</dd>
+                    <dd className="min-w-0 wrap-break-word">{rendered}</dd>
                   </div>
                 );
               })}

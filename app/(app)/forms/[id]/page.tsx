@@ -32,7 +32,9 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
 
   const { data: fieldRows } = await supabase
     .from("vizserve_pms_form_fields")
-    .select("id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order")
+    .select(
+      "id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order",
+    )
     .eq("form_id", id)
     .order("sort_order");
 
@@ -74,7 +76,12 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   }));
 
   return (
-    <PageShell className="mx-auto w-full max-w-3xl">
+    // Wider than the old max-w-3xl. This page is a builder, not a document: the
+    // settings card lays its fields out in two and three columns, and the narrow
+    // measure squeezed "Owning department" and "Reference prefix" into a width
+    // where neither could show its own value. max-w-5xl keeps a sensible line
+    // length for the description textarea while giving those rows room.
+    <PageShell className="mx-auto w-full max-w-5xl">
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={form.name} />

@@ -31,7 +31,7 @@
 | P0-07 | App shell + role-based nav | Left nav renders per role. Modules not yet built render as disabled placeholders so the shape is visible. Theme shadcn with the brand palette in `app/globals.css` — see `12-ui-and-notifications.md` | Kurt |
 | P0-08 | Dashboard skeleton | Placeholder cards: time in/out shortcut (disabled until Phase 5), pending approvals, my tickets, inbox | Kurt |
 | P0-09 | `vizserve_pms_audit_logs` table + write helper | One function, called from every mutation. Wire it now or it never gets wired | Ace |
-| P0-10 | `vizserve_pms_notifications` table + inbox list | Table, insert helper, and a plain list view. Include the per-type `send_email` flag (D12). Unread badge deferred — Amier 21:20 | Ace |
+| P0-10 | `vizserve_pms_notifications` table + inbox list | Table, insert helper, and a plain list view. Include the per-type `send_email` flag (D12). ~~Unread badge deferred — Amier 21:20~~ **Badge built 6 Aug 2026** at Kurt's request, capped at `99+`; the inbox also gained search, type/read filters and pagination once a real account passed 1,600 notifications | Ace |
 | P0-11 | Transactional email setup | `resend` (already in the SIS stack), sending from **vizserve.com**. Add SPF/DKIM/DMARC records for it. **Must land in Phase 0** — Phase 4 is entirely email-dependent and deliverability problems surface late | Kurt |
 | P0-12 | Seed + scope test suite | Vitest 4, SIS test layout. **Seed test accounts only** (below) — no real users until go-live. Plus tests asserting each role sees exactly the right row set | Ace |
 
