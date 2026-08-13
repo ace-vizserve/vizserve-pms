@@ -96,7 +96,16 @@ export function DataTable<T>({
         <TableBody>
           {rows.length === 0 ? (
             <TableRow className="hover:bg-transparent">
-              <TableCell colSpan={columns.length} className="p-0">
+              {/* `whitespace-normal` undoes TableCell's `whitespace-nowrap`,
+                  which is right for a time or a reference number and very wrong
+                  for a paragraph. Without it the empty state's description was
+                  laid out on a single unbreakable line, which set the table's
+                  minimum width to the length of that sentence — the header row
+                  then stretched to match, the first column scrolled out of
+                  view, and every empty list in the app grew a horizontal
+                  scrollbar. EmptyState's own `max-w-xs` could not fight it:
+                  a max-width cannot shrink content that refuses to wrap. */}
+              <TableCell colSpan={columns.length} className="p-0 whitespace-normal">
                 {empty ?? <EmptyRow />}
               </TableCell>
             </TableRow>

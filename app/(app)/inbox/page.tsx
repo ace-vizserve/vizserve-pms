@@ -136,50 +136,78 @@ export default async function InboxPage({
     // title, a line of context and a timestamp, and constraining it just wasted
     // two thirds of a wide screen and made the list taller than it needed to be.
     <PageShell>
-      {/* One row: search, then the two filters, then Mark all read at the far
-          end. `items-end` is what lines the unlabelled search box up with the
-          labelled selects — aligning on centre leaves the search sitting a few
-          pixels high, which is exactly the sort of thing that reads as sloppy
-          without anyone being able to say why. */}
-      <div className="flex flex-wrap items-end gap-3">
-        <InboxSearch initial={term} className="w-full sm:w-64 lg:w-72" />
+      {/*
+        STICKY toolbar. The list runs to hundreds of rows, and search, the two
+        filters and Mark all read are exactly the controls you reach for AFTER
+        scrolling — having to scroll back up to narrow the list is what made
+        this feel like a dead end.
 
-        <InboxFilters type={type} read={read} />
+        `top-16` parks it directly under the shell header, which is `h-16` and
+        already sticky at `z-30`. This sits at `z-20` so the header wins any
+        overlap rather than the two fighting.
 
-        {/* Marking all read while a search is active would silently clear rows
-            the person cannot see, so the control goes away — searching is a
-            reading task, not a triage one. */}
-        {unreadCount > 0 && !term ? (
-          <form action={markAllRead} className="ml-auto">
-            {/* Default size, not sm. Input, SelectTrigger and Button all sit at
-                h-8 on `default`; `sm` is h-7, and mixing the two is what left
-                this row four pixels out of alignment. */}
-            <Button type="submit" variant="outline">
-              <CheckCheck />
-              Mark all read
-            </Button>
-          </form>
-        ) : null}
+        `-mx-4 px-4` pulls the background out through PageShell's `p-4` gutters:
+        without it, rows sliding underneath stay visible in the 16px margin on
+        either side, which reads as a rendering fault rather than a design.
+
+        `bg-background` must be fully opaque for the same reason it is on the
+        header — a translucent bar shows the text passing beneath it.
+
+        Sticky only from `sm` up: below that the search goes full width and the
+        row wraps to three lines, which pinned to the top would hold roughly a
+        quarter of a phone screen hostage to show two dropdowns.
+      */}
+      <div className="-mx-4 -mb-4 bg-background px-4 pb-4 sm:sticky sm:top-16 sm:z-20">
+        {/* One row: search, then the two filters, then Mark all read at the far
+            end. `items-end` is what lines the unlabelled search box up with the
+            labelled selects — aligning on centre leaves the search sitting a few
+            pixels high, which is exactly the sort of thing that reads as sloppy
+            without anyone being able to say why. */}
+        <div className="flex flex-wrap items-end gap-3">
+          <InboxSearch initial={term} className="w-full sm:w-64 lg:w-72" />
+
+          <InboxFilters type={type} read={read} />
+
+          {/* Marking all read while a search is active would silently clear rows
+              the person cannot see, so the control goes away — searching is a
+              reading task, not a triage one. */}
+          {unreadCount > 0 && !term ? (
+            <form action={markAllRead} className="ml-auto">
+              {/* Default size, not sm. Input, SelectTrigger and Button all sit at
+                  h-8 on `default`; `sm` is h-7, and mixing the two is what left
+                  this row four pixels out of alignment. */}
+              <Button type="submit" variant="outline">
+                <CheckCheck />
+                Mark all read
+              </Button>
+            </form>
+          ) : null}
+        </div>
+
+        {/* The count travels with the controls rather than staying in the flow.
+            It is the readout for the filters directly above it, and a result
+            count that scrolls away from the filter that produced it is a number
+            with nothing to anchor it.
+
+            When anything is narrowing the list, the count has to describe the
+            RESULTS. Showing "1609 unread" above nine filtered rows is the kind
+            of mismatch that makes people distrust both numbers. */}
+        <p className="mt-4 text-xs text-muted-foreground">
+          {isFiltered ? (
+            <>
+              <span className="tabular-nums">{total}</span> {total === 1 ? "result" : "results"}
+              {term ? <> for &ldquo;{term}&rdquo;</> : null}
+              {unreadCount > 0 ? (
+                <span className="text-muted-foreground/70"> · {unreadCount} unread in total</span>
+              ) : null}
+            </>
+          ) : unreadCount > 0 ? (
+            `${unreadCount} unread`
+          ) : (
+            "All read"
+          )}
+        </p>
       </div>
-
-      {/* When anything is narrowing the list, the count has to describe the
-          RESULTS. Showing "1609 unread" above nine filtered rows is the kind of
-          mismatch that makes people distrust both numbers. */}
-      <p className="text-xs text-muted-foreground">
-        {isFiltered ? (
-          <>
-            <span className="tabular-nums">{total}</span> {total === 1 ? "result" : "results"}
-            {term ? <> for &ldquo;{term}&rdquo;</> : null}
-            {unreadCount > 0 ? (
-              <span className="text-muted-foreground/70"> · {unreadCount} unread in total</span>
-            ) : null}
-          </>
-        ) : unreadCount > 0 ? (
-          `${unreadCount} unread`
-        ) : (
-          "All read"
-        )}
-      </p>
 
       {rows.length === 0 ? (
         <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">

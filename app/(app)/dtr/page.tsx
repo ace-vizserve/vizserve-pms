@@ -98,6 +98,17 @@ export default async function DtrPage({
     0,
   );
 
+  // The rail summary. "Records" rather than "Days" on purpose: with the person
+  // filter on Everyone, one calendar day is several rows, and calling that a day
+  // count would be wrong in exactly the view a team leader uses most.
+  //
+  // The average divides by records that actually closed. Dividing by all of them
+  // would quietly drag the figure down every time somebody forgot to time out —
+  // which is the very thing "Still open" is there to point at.
+  const closed = entries.filter((entry) => workedMinutes(entry.time_in, entry.time_out) !== null);
+  const stillOpen = entries.filter((entry) => entry.time_in && !entry.time_out).length;
+  const averageMinutes = closed.length > 0 ? Math.round(totalMinutes / closed.length) : null;
+
   const columns: Column<Entry>[] = [
     {
       key: "date",
@@ -154,11 +165,43 @@ export default async function DtrPage({
   ];
 
   return (
-    <PageShell>
-      <div className="grid gap-4 lg:grid-cols-[minmax(0,20rem)_1fr] lg:items-start">
-        <PunchPanel initial={punchState} />
+    /*
+      From `lg` up this page does not scroll — it fits the viewport and the
+      table scrolls inside its own card.
 
-        <div className="space-y-4">
+      The height comes from flexbox, not from `calc(100svh - …)`. The shell is
+      already a chain of `flex-1` boxes inside a `min-h-svh` provider, so
+      `lg:flex-1 lg:min-h-0` here inherits the exact remaining height with no
+      arithmetic to get wrong. Guessing at the header and padding is what put a
+      scrollbar on a page that had nothing to scroll to.
+
+      `min-h-0` is the load-bearing half: a flex child's default `min-height:
+      auto` refuses to shrink below its content, so without it the table pushes
+      the page taller instead of scrolling inside itself.
+
+      Below `lg` this all switches off and the page scrolls normally — a fixed
+      viewport with two scroll regions on a phone is a trap.
+    */
+    <PageShell className="gap-3 lg:overflow-hidden">
+      <div className="grid gap-3 lg:min-h-0 lg:flex-1 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)]">
+        {/*
+          The left rail. It used to hold the punch panel alone, which is about
+          200px tall against a table that runs thirty rows — the rest of that
+          column was empty page for the entire scroll.
+
+          The filters moved into it, so the rail is punch + range + export and
+          the table gets the whole width of the right column. That is also the
+          better home for them: a date range you are adjusting while reading the
+          rows should not be a screen-length scroll away from the rows.
+
+          It scrolls itself rather than sticking to the page now: with the page
+          height pinned to the viewport there is no page scroll for a sticky
+          element to hold still against, and a short window still has to be able
+          to reach the Export button.
+        */}
+        <div className="flex flex-col gap-3 lg:min-h-0 lg:overflow-y-auto">
+          <PunchPanel initial={punchState} />
+
           <DtrToolbar
             people={people}
             from={from}
@@ -167,37 +210,117 @@ export default async function DtrPage({
             canExport={isLead}
           />
 
-          <DataTable
-            columns={columns}
-            rows={entries}
-            getRowKey={(entry) => entry.id}
-            empty={
-              <EmptyState
-                icon={<Clock />}
-                title="No entries in this range"
-                description="Days with no punch have no row at all. Widen the date range first; if a day is genuinely missing that should not be, raise a No Time-In request from Approvals."
-              />
-            }
-            footer={
-              <TableRow className="hover:bg-transparent">
-                <TableHead scope="row" colSpan={columns.length - 1}>
-                  Total in range
-                </TableHead>
-                <TableCell className="font-semibold tabular-nums">
+          {/* What fills the rest of the rail. The table already totals itself in
+              a footer row, but that footer is at the bottom of thirty rows —
+              which is no use to the person who opened this page to find out how
+              many hours the range came to. Same number, read without scrolling.
+
+              Only when there is something to summarise: four dashes under an
+              empty table is furniture, not information. */}
+          {entries.length > 0 ? (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
+              <div>
+                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Records</dt>
+                <dd className="mt-0.5 text-sm font-semibold tabular-nums">{entries.length}</dd>
+              </div>
+              <div>
+                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Total</dt>
+                <dd className="mt-0.5 text-sm font-semibold tabular-nums">
                   {formatDuration(totalMinutes)}
-                </TableCell>
-              </TableRow>
-            }
-          />
+                </dd>
+              </div>
+              <div>
+                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Average</dt>
+                <dd className="mt-0.5 text-sm font-semibold tabular-nums">
+                  {formatDuration(averageMinutes)}
+                </dd>
+              </div>
+              <div>
+                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+                  Still open
+                </dt>
+                {/* Stated in words as well as colour — a warning-coloured number
+                    is not a status on its own. */}
+                <dd
+                  className={
+                    stillOpen > 0
+                      ? "mt-0.5 text-sm font-semibold tabular-nums text-warning"
+                      : "mt-0.5 text-sm font-semibold tabular-nums"
+                  }
+                >
+                  {stillOpen}
+                  {stillOpen > 0 ? <span className="sr-only"> days not timed out</span> : null}
+                </dd>
+              </div>
+            </dl>
+          ) : null}
 
           {/* Kept from the old page heading. It is not decoration: it is why two
               punches on one day collapse into one row, which is the first thing
-              anyone asks about their own record. */}
-          <p className="text-xs text-muted-foreground">
-            Times are captured by the server — the earliest time-in and the latest time-out for each
-            day are what stand.
+              anyone asks about their own record. Beside the rail it explains the
+              table without costing the table any height. */}
+          <p className="px-1 text-xs text-muted-foreground">
+            Times are captured by the server — the earliest time-in and the latest time-out for
+            each day are what stand.
           </p>
         </div>
+
+        {/* Density lives here, not in components/ui/table.tsx. The shared table
+            is `h-10` headers and `p-2` cells because that suits the six other
+            lists in the app; the DTR is the one screen people read thirty rows
+            of at a time, so it gets tighter rows without dragging Requests and
+            Tasks along with it.
+
+            Descendant selectors rather than a `size` prop on DataTable — one
+            page wanting denser rows does not justify a new API on the shared
+            component, and the day a second page wants it, that is the moment
+            to add one. */}
+        <DataTable
+          // The card fills the row and the rows scroll inside it, so five
+          // hundred days of DTR never make the page itself longer.
+          //
+          // `[&>div]` is DataTableShell's inner scroller — it already handles
+          // the horizontal axis, so it is the right place to add the vertical
+          // one rather than nesting a second scroll container inside it.
+          //
+          // The header sticks to the top of that scroller. `bg-background` and
+          // the inset shadow rather than a border: a sticky `th` keeps its own
+          // background but a `border-b` declared on the `tr` does not travel
+          // with it, so the rule under the headings vanishes on first scroll.
+          //
+          // `[&_table]:h-full` ONLY when empty — it stretches the table to the
+          // card so the empty state centres in it. Left on with rows present it
+          // would stretch the ROWS instead, and a three-row range would render
+          // as three 200px-tall bands.
+          className={`[&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 lg:h-full lg:min-h-0 lg:[&>div]:h-full lg:[&>div]:overflow-y-auto lg:[&_thead_th]:sticky lg:[&_thead_th]:top-0 lg:[&_thead_th]:z-10 lg:[&_thead_th]:bg-background lg:[&_thead_th]:shadow-[inset_0_-1px_0_var(--border)] ${
+            entries.length === 0 ? "lg:[&_table]:h-full" : ""
+          }`}
+          columns={columns}
+          rows={entries}
+          getRowKey={(entry) => entry.id}
+          empty={
+            <EmptyState
+              // No min-height of its own any more. The table above is stretched
+              // to the card while the list is empty, and TableCell's
+              // `align-middle` does the centring — which cannot drift out of
+              // step with the layout the way a hardcoded viewport figure did.
+              className="py-10"
+              icon={<Clock />}
+              title="No entries in this range"
+              description="Days with no punch have no row at all. Widen the date range first; if a day is genuinely missing that should not be, raise a No Time-In request from Approvals."
+            />
+          }
+          footer={
+            <TableRow className="hover:bg-transparent">
+              <TableHead scope="row" colSpan={columns.length - 1}>
+                Total in range
+              </TableHead>
+              <TableCell className="font-semibold tabular-nums">
+                {formatDuration(totalMinutes)}
+              </TableCell>
+            </TableRow>
+          }
+        />
       </div>
     </PageShell>
   );

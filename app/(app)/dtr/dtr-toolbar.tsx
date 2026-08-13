@@ -44,6 +44,15 @@ export function DtrToolbar({
   const [exporting, startExport] = useTransition();
   const [range, setRange] = useState({ from, to });
 
+  // Base UI's Select.Value renders the RAW VALUE unless the Root is given an
+  // items map — which is why this trigger read literally "all" instead of
+  // "Everyone in scope". Same gap that was already documented in the inbox
+  // filters; this is the DTR's copy of it.
+  const personItems: Record<string, string> = {
+    all: "Everyone in scope",
+    ...Object.fromEntries(people.map((person) => [person.id, person.full_name])),
+  };
+
   function apply(next: Partial<{ from: string; to: string; user: string }>) {
     const query = new URLSearchParams(params.toString());
     for (const [key, value] of Object.entries(next)) {
@@ -77,55 +86,67 @@ export function DtrToolbar({
   }
 
   return (
-    <div className="flex flex-col gap-3 rounded-xl bg-card p-4 ring-1 ring-foreground/10 sm:flex-row sm:items-end">
-      <div className="grid flex-1 gap-3 sm:grid-cols-3">
-        <div className="space-y-1.5">
-          <Label htmlFor="dtr-from">From</Label>
-          <Input
-            id="dtr-from"
-            type="date"
-            value={range.from}
-            onChange={(event) => setRange((r) => ({ ...r, from: event.target.value }))}
-            onBlur={(event) => apply({ from: event.target.value })}
-          />
-        </div>
-
-        <div className="space-y-1.5">
-          <Label htmlFor="dtr-to">To</Label>
-          <Input
-            id="dtr-to"
-            type="date"
-            value={range.to}
-            onChange={(event) => setRange((r) => ({ ...r, to: event.target.value }))}
-            onBlur={(event) => apply({ to: event.target.value })}
-          />
-        </div>
-
-        {people.length > 0 ? (
-          <div className="space-y-1.5">
-            <Label htmlFor="dtr-person">Person</Label>
-            <Select
-              value={userId ?? "all"}
-              onValueChange={(value) => apply({ user: value ?? undefined })}
-            >
-              <SelectTrigger id="dtr-person" className="w-full">
-                <SelectValue placeholder="Everyone" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Everyone in scope</SelectItem>
-                {people.map((person) => (
-                  <SelectItem key={person.id} value={person.id}>
-                    {person.full_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        ) : null}
+    /*
+      Stacks rather than spreading across the page. This lives in the DTR page's
+      left rail beside the table now, not in a full-width bar above it, so every
+      control takes the rail's width — a native date input is close to its own
+      minimum at 140px, and two of them side by side in a 19rem column is how
+      you get a clipped picker on Windows.
+    */
+    <div className="flex flex-col gap-2 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
+      <div className="space-y-1">
+        <Label htmlFor="dtr-from" className="text-xs text-muted-foreground">
+          From
+        </Label>
+        <Input
+          id="dtr-from"
+          type="date"
+          value={range.from}
+          onChange={(event) => setRange((r) => ({ ...r, from: event.target.value }))}
+          onBlur={(event) => apply({ from: event.target.value })}
+        />
       </div>
 
+      <div className="space-y-1">
+        <Label htmlFor="dtr-to" className="text-xs text-muted-foreground">
+          To
+        </Label>
+        <Input
+          id="dtr-to"
+          type="date"
+          value={range.to}
+          onChange={(event) => setRange((r) => ({ ...r, to: event.target.value }))}
+          onBlur={(event) => apply({ to: event.target.value })}
+        />
+      </div>
+
+      {people.length > 0 ? (
+        <div className="space-y-1">
+          <Label htmlFor="dtr-person" className="text-xs text-muted-foreground">
+            Person
+          </Label>
+          <Select
+            items={personItems}
+            value={userId ?? "all"}
+            onValueChange={(value) => apply({ user: value ?? undefined })}
+          >
+            <SelectTrigger id="dtr-person" className="w-full">
+              <SelectValue placeholder="Everyone" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Everyone in scope</SelectItem>
+              {people.map((person) => (
+                <SelectItem key={person.id} value={person.id}>
+                  {person.full_name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
       {canExport ? (
-        <Button variant="outline" loading={exporting} onClick={download}>
+        <Button variant="outline" className="w-full" loading={exporting} onClick={download}>
           <Download className="size-4" />
           Export CSV
         </Button>

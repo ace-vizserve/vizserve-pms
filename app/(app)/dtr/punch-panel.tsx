@@ -79,9 +79,12 @@ export function PunchPanel({
   const worked = workedMinutes(timeIn, timeOut);
 
   return (
-    <div className={compact ? "" : "rounded-xl bg-card p-5 ring-1 ring-foreground/10"}>
+    // p-3, matching the filter card and the summary directly beneath it in the
+    // DTR rail. p-5 was the one padding in that column that lined up with
+    // nothing, which is what made the rail read as three unrelated boxes.
+    <div className={compact ? "" : "rounded-xl bg-card p-3 ring-1 ring-foreground/10"}>
       {!compact ? (
-        <div className="mb-4">
+        <div className="mb-3">
           <h2 className="text-sm font-semibold">Today</h2>
           <p className="mt-0.5 text-xs text-muted-foreground">
             {formatDate(state.today?.work_date ?? null)}
@@ -89,7 +92,7 @@ export function PunchPanel({
         </div>
       ) : null}
 
-      <dl className="mb-4 grid grid-cols-3 gap-3">
+      <dl className="mb-3 grid grid-cols-3 gap-2">
         <div>
           <dt className="text-2xs tracking-wide text-muted-foreground uppercase">In</dt>
           <dd className="mt-0.5 text-sm font-semibold tabular-nums">{formatAppTime(timeIn)}</dd>

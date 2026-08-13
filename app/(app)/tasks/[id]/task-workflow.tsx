@@ -147,7 +147,7 @@ export function TaskWorkflow({
   }
 
   return (
-    <Card>
+    <Card size="sm">
       <CardHeader>
         <CardTitle>The work</CardTitle>
         {isTerminal(status) ? (
@@ -159,15 +159,19 @@ export function TaskWorkflow({
         ) : null}
       </CardHeader>
 
-      <CardContent className="space-y-4">
+      <CardContent className="space-y-3">
         {/* -------------------------------------------------------------- */}
         {/* The resolution. The thing this phase exists to capture.        */}
         {/* -------------------------------------------------------------- */}
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           <Label htmlFor="resolution">Resolution</Label>
+          {/* Three rows, not four. Textarea carries `field-sizing-content`, so
+              rows is a floor it grows past as you type — reserving a fourth
+              empty line bought nothing and pushed the transition buttons, the
+              reason most people open this page at all, further down. */}
           <Textarea
             id="resolution"
-            rows={4}
+            rows={3}
             value={resolution}
             disabled={!canEdit || pending}
             onChange={(event) => setResolution(event.target.value)}
@@ -179,8 +183,8 @@ export function TaskWorkflow({
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-1.5">
             <Label htmlFor="output_link">Output link</Label>
             <Input
               id="output_link"
@@ -192,7 +196,7 @@ export function TaskWorkflow({
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="due">Due date</Label>
             <Input
               id="due"
@@ -205,7 +209,7 @@ export function TaskWorkflow({
         </div>
 
         {lists.length > 0 ? (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="list">List</Label>
             <Select value={listId} onValueChange={(v) => v !== null && (v)} disabled={!canEdit || pending}>
               <SelectTrigger id="list" className="w-64">
@@ -234,8 +238,8 @@ export function TaskWorkflow({
         {/* Transitions                                                     */}
         {/* -------------------------------------------------------------- */}
         {prompt ? (
-          <div className="space-y-3 border-t pt-4">
-            <div className="space-y-2">
+          <div className="space-y-2.5 border-t pt-3">
+            <div className="space-y-1.5">
               <Label htmlFor="comment">
                 {prompt.to === "WAITING_FOR_INFO"
                   ? "What are you waiting for?"
@@ -274,7 +278,7 @@ export function TaskWorkflow({
             </div>
           </div>
         ) : transitions.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
             {transitions.map((transition) => {
               const blocked = transition.requires === "resolution" && resolutionMissing;
 
@@ -298,7 +302,7 @@ export function TaskWorkflow({
             ) : null}
           </div>
         ) : (
-          <p className="border-t pt-4 text-xs text-muted-foreground">
+          <p className="border-t pt-3 text-xs text-muted-foreground">
             {isTerminal(status)
               ? "This task is finished."
               : "Nothing for you to do here right now — it is with somebody else."}
@@ -319,7 +323,7 @@ export function TaskWorkflow({
         ) : null}
 
         {overrideOpen ? (
-          <div className="space-y-3 rounded-md border border-warning/40 bg-warning-subtle/40 p-4">
+          <div className="space-y-2.5 rounded-md border border-warning/40 bg-warning-subtle/40 p-3">
             <p className="flex items-start gap-2 text-xs text-warning">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               This skips the normal stages. It is recorded as forced, with your reason, and stays
@@ -386,9 +390,9 @@ export function TaskWorkflow({
         {/* Reassignment — a lead decision, not self-service.               */}
         {/* -------------------------------------------------------------- */}
         {viewer.leadsDepartment ? (
-          <details className="border-t pt-4">
+          <details className="border-t pt-3">
             <summary className="cursor-pointer text-xs text-muted-foreground">Reassign</summary>
-            <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="new_pic">Person in charge</Label>
                 <Select

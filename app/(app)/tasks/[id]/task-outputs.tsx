@@ -106,7 +106,7 @@ export function TaskOutputs({
   }
 
   return (
-    <Card>
+    <Card size="sm">
       <CardHeader>
         <CardTitle>Output files</CardTitle>
         <CardDescription className="text-xs">
@@ -143,11 +143,11 @@ export function TaskOutputs({
             {canUpload ? "Nothing uploaded yet." : "None."}
           </p>
         ) : (
-          <ul className="space-y-1">
+          <ul className="space-y-0.5">
             {attachments.map((attachment) => (
               <li
                 key={attachment.id}
-                className="flex items-center gap-2 rounded-md px-2 py-2 text-sm hover:bg-muted/50"
+                className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50"
               >
                 <button
                   type="button"

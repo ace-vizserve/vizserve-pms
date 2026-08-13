@@ -9,7 +9,12 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground [a]:hover:bg-primary/80",
+        // Plain `hover:`, not badge.tsx's `[a]:hover:` — an `:is(a)` compound
+        // outranks a caller's `hover:bg-*` in `className`, so a button rendered
+        // as a link silently repainted itself `--primary` on hover no matter
+        // what was passed in. A button is interactive whether or not it is an
+        // anchor, so the anchor scope bought nothing and cost the override.
+        default: "bg-primary text-primary-foreground hover:bg-primary/80",
         outline:
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary:
