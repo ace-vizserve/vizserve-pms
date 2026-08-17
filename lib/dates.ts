@@ -126,6 +126,75 @@ export function addDays(value: string, days: number): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Weeks (Phase 6 — the timesheet)
+// ---------------------------------------------------------------------------
+
+/**
+ * The Monday on or before a `YYYY-MM-DD`.
+ *
+ * Monday-start, not Sunday-start: the timesheet week has to line up with the
+ * working week people are reporting on, and a Sunday-start grid splits every
+ * weekend across two timesheets.
+ *
+ * Weekday comes from `getUTCDay()` on the midday-UTC value `parseDateOnly`
+ * returns — the local `getDay()` would read the server's zone and shift the
+ * week boundary by a day for anyone west of UTC.
+ */
+export function startOfWeek(value: string): string | null {
+  const date = parseDateOnly(value);
+  if (!date) return null;
+
+  // getUTCDay: 0 = Sunday. Sunday belongs to the week that has just ended, so
+  // it goes back six days rather than forward one.
+  const weekday = date.getUTCDay();
+  const backwards = weekday === 0 ? 6 : weekday - 1;
+  return addDays(value, -backwards);
+}
+
+/** The seven `YYYY-MM-DD` days of the week containing `value`, Monday first. */
+export function weekDates(value: string): string[] {
+  const monday = startOfWeek(value);
+  if (!monday) return [];
+
+  return Array.from({ length: 7 }, (_, offset) => addDays(monday, offset)).filter(
+    (date): date is string => date !== null,
+  );
+}
+
+/** Short weekday for a column heading — "Mon". */
+export function formatWeekday(value: string): string {
+  const date = parseDateOnly(value);
+  if (!date) return "—";
+
+  // timeZone: UTC, because the value is already a calendar date pinned to
+  // midday UTC. Formatting it in Manila would be a second conversion of a date
+  // that was never an instant.
+  return new Intl.DateTimeFormat("en-GB", { timeZone: "UTC", weekday: "short" }).format(date);
+}
+
+/** "4 – 10 Aug 2026", collapsing the parts both ends share. */
+export function formatWeekRange(monday: string): string {
+  const sunday = addDays(monday, 6);
+  if (!sunday) return formatDate(monday);
+
+  const start = parseDateOnly(monday);
+  const end = parseDateOnly(sunday);
+  if (!start || !end) return formatDate(monday);
+
+  const sameMonth = monday.slice(0, 7) === sunday.slice(0, 7);
+  const sameYear = monday.slice(0, 4) === sunday.slice(0, 4);
+
+  const startFormat = new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    day: "numeric",
+    ...(sameMonth ? {} : { month: "short" }),
+    ...(sameYear ? {} : { year: "numeric" }),
+  });
+
+  return `${startFormat.format(start)} – ${formatDate(sunday)}`;
+}
+
+// ---------------------------------------------------------------------------
 // Business days (Phase 4, Q6)
 // ---------------------------------------------------------------------------
 

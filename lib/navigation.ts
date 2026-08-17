@@ -79,8 +79,10 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Timesheet",
     href: "/timesheet",
     minRole: "member",
-    enabled: false,
-    phase: "Phase 6",
+    // Enabled with P6-02/P6-03. The route exists and the table behind it does
+    // too; leaving it disabled would now be the nav lying in the other
+    // direction, which is worse than the placeholder it replaced.
+    enabled: true,
     icon: "timesheet",
   },
   {

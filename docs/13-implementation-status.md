@@ -15,8 +15,8 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **2 — Approval Engine + Gate 1** | **Done.** All exit criteria asserted and green |
 | **3 — Tasks + QA (Gate 2)** | **Done.** All exit criteria asserted and green |
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
-| **5 — DTR + Internal Approvals** | **Code complete, unverified.** All 12 backlog items built; the three migrations are not applied anywhere, so 5 of 6 exit criteria are asserted but skipped |
-| **6** | Not started |
+| **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
+| **6 — Timesheet, Reporting, Archive** | **Started.** The timesheet (P6-01/02/03) is built, applied and green — 13 db cases plus 19 unit. P6-04 onward not begun |
 
 `npm run verify` is green: **235 tests, 0 failures**, of which 150 run against a live database as genuinely signed-in users.
 
@@ -194,7 +194,7 @@ Every db suite **detects whether its migration has been applied** and skips with
 
 ## Phase 5 — DTR and Internal Approvals
 
-**Code complete; NOT verified against a database.** The three migrations below have not been applied to any project, so five of the six exit criteria are written and asserted but currently *skipped*.
+**Done and verified.** *Corrected 17 Aug 2026: the three migrations are applied and `tests/db/phase5.test.ts` passes 20/20. The paragraph below described the state on 4 August.* ~~Code complete; NOT verified against a database. The three migrations below have not been applied to any project, so five of the six exit criteria are written and asserted but currently skipped.~~
 
 | ID | Item | State |
 |----|------|-------|
@@ -217,14 +217,14 @@ The Phase 2 acceptance test was "a throwaway second request type routing end to 
 
 ### Exit criteria
 
-- [ ] Double punch-in does not change time-in; double punch-out does update it
-- [ ] An OT shift ending 01:00 lands on the prior work date
-- [ ] All four internal request types submit and route correctly
-- [ ] An approved No Time-In actually corrects the DTR record
+- [x] Double punch-in does not change time-in; double punch-out does update it
+- [x] An OT shift ending 01:00 lands on the prior work date
+- [x] All four internal request types submit and route correctly
+- [x] An approved No Time-In actually corrects the DTR record
 - [x] No leave-balance logic exists anywhere — asserted by `tests/unit/no-leave-balance.test.ts`
-- [ ] Payroll can export a month of DTR as CSV
+- [x] Payroll can export a month of DTR as CSV
 
-The five unticked boxes are all asserted in `tests/db/phase5.test.ts` (20 cases) and tick themselves the moment the migrations are applied.
+All six green as of 17 Aug 2026: `tests/db/phase5.test.ts` runs its 20 cases against the live project rather than skipping.
 
 ### Open questions this phase built past
 
@@ -242,6 +242,59 @@ The five unticked boxes are all asserted in `tests/db/phase5.test.ts` (20 cases)
 `console.warn` at module scope is **swallowed by vitest 4** — verified with a probe on both a skipped and a passing file. Every suite in `tests/db/` announces its skip reason that way, so none of those reasons has ever been printed: the suites report "skipped" with no explanation, which is the exact failure this document warns about elsewhere.
 
 `process.stderr.write` survives. `tests/db/phase5.test.ts` uses it and prints properly; **the other eight db suites still need the same one-line change.**
+
+---
+
+## Phase 6 — Timesheet, Reporting, Archive
+
+**The timesheet is built and VERIFIED against the linked project.** `tests/db/timesheet.test.ts` — 13 cases, run as genuinely signed-in users through RLS — passes, as do the 19 unit cases in `tests/unit/timesheet.test.ts` covering the week maths and the schema.
+
+| ID | Item | State |
+|----|------|-------|
+| P6-01 | `vizserve_pms_timesheet_entries` migration, `task_id NOT NULL` | ✅ Plus RLS, grants, the day-total trigger |
+| P6-02 | Timesheet entry UI, task picker scoped to assigned tasks | ✅ `/timesheet` — select only, no free text |
+| P6-03 | Timesheet table / week view | ✅ Monday-start, week in the URL, edit in place |
+| P6-04 | Turnaround time reporting | ⛔ Not started |
+| P6-05 | Status/volume dashboards per department | ⛔ Not started |
+| P6-06 | Negotiation and auto-complete split reports | ⛔ Not started |
+| P6-07 | Feedback results report | ⛔ Not started |
+| P6-08 | Archive | ⛔ Not started |
+| P6-09 | CSV export across reports | ⛔ Not started |
+| P6-10 | ClickUp migration + cutover | ⛔ Not started |
+
+**This migration does not depend on Phase 5.** It references `vizserve_pms_tasks`, `vizserve_pms_users`, `vizserve_pms_manages_department` and `vizserve_pms_set_updated_at` — all Phase 0–3.
+
+### ⚠️ The table was applied by paste, so `db:push` and the database disagree
+
+`vizserve_pms_timesheet_entries` is live in the project and the suite passes against it, but the migration went in through the dashboard SQL editor (§ *Applying migrations*), which does not write to `supabase_migrations.schema_migrations`. A future `npm run db:push` will therefore try to `create table` something that already exists and stop on it — the same trap applies to the Phase 5 three, which are also live and also unrecorded. Either record them as applied (`supabase migration repair --status applied <version>`) or expect to skip past them by hand. **Do not "fix" this by adding `if not exists`**: that turns a loud, correct failure into a migration that silently does nothing when the shapes have drifted.
+
+### The one constraint that is the feature
+
+`task_id NOT NULL` is the rule (Amier 33:20, *"hindi ka rin pwede-pwede mag-log ng gusto mo"*), and it is enforced three deep on purpose:
+
+1. **The column.** No default, not nullable.
+2. **`vizserve_pms_may_log_time(task_id, auth.uid())` inside the INSERT and UPDATE policies.** Not just "a task" — a task you are the PIC or the QA reviewer on. A lead who did not do the work cannot book hours to it; if they did do the work, the fix is to assign it to them, which is worth recording anyway.
+3. **The zod type is non-optional**, so logging without a task fails to compile rather than at runtime.
+
+### Deviations worth knowing
+
+1. **Durations, not intervals.** An entry is "90 minutes on this task on this day", not a start and an end. The DTR already owns when somebody was at work; two tables both claiming to know that is two tables that will disagree. This one answers where the day went.
+2. **Minutes, not decimal hours.** 7.4 hours is ambiguous between 7h24 and 7h40, and rounding it through a week's totals is how a timesheet stops adding up. The UI takes hours and minutes as two fields for the same reason.
+3. **Several entries per task per day are allowed** — no unique key. An hour before lunch and two after is two facts with two notes, and the notes are the part a reviewer reads.
+4. **The 24-hour day cap is a trigger, not a CHECK.** The rule spans rows: a CHECK sees only the row in front of it, and the way this goes wrong is six plausible entries totalling thirty hours. The trigger locks the day's rows before summing — without `FOR UPDATE` two concurrent inserts each read a total excluding the other and both pass.
+5. **First person only.** A department lead can READ their team's entries and cannot write them. Hours somebody else entered under your name are not your hours.
+6. **No person picker on `/timesheet`.** RLS would allow a lead to read a team member's week, but reading a team's week is a reporting question (P6-05). Answering half of it inside the entry screen produces a report nobody trusts because it is also an editor.
+
+### Exit criteria
+
+- [x] Time cannot be logged without a task — asserted in `tests/unit/timesheet.test.ts` and, against the live database, in `tests/db/timesheet.test.ts`
+- [ ] All seven metrics reportable with a date range — P6-04/06/07 not started
+- [ ] Archived requests remain queryable — P6-08 not started
+- [ ] A written cutover plan exists — P6-10 not started
+
+### `lib/database.types.ts` was hand-edited
+
+The table was added by hand, in the same style as the note at the top of that file: hand-written until a database is reachable. **Re-run `npm run db:types` once the migration is applied** and treat the generated file as authoritative from that point.
 
 ---
 
@@ -301,23 +354,23 @@ Fixed by `20260729110000_p0_06_grants.sql`, which grants explicitly and sets `AL
 
 ## Recommended next step
 
-**Apply the three Phase 5 migrations, then run `npm run verify`.** They are
-written and unapplied, which means 20 assertions covering five of the six Phase
-5 exit criteria are currently skipping. Paste them into the dashboard SQL editor
-in filename order — `20260804150000_p5_01_dtr.sql`, then
-`20260804151000_p5_05_notification_type.sql`, then
-`20260804152000_p5_05_internal_requests.sql`. **The middle one must be its own
-transaction**; it adds an enum value the third one uses, and Postgres refuses
-both in one.
+*Superseded 17 Aug 2026 — the Phase 5 migrations are applied and their 20
+assertions pass. What follows was the next step on 4 August and is kept for the
+record: paste them into the dashboard SQL editor in filename order, and note
+that `20260804151000_p5_05_notification_type.sql` must be its own transaction
+because it adds an enum value the third file uses.*
 
-After that, **Q4 needs Amier.** The punch rules are built to the recommendation,
+**Q4 needs Amier.** The punch rules are built to the recommendation,
 not to a confirmed decision, and the correction path is the part he has not seen
 — an accidental 06:00 punch is unfixable by the person it happened to, by
 design, and only a No Time-In approval can undo it. If he wants that looser, it
 is a change to one function.
 
-Then **Phase 6 — Timesheet, Reporting, Archive**, the phase that lets ClickUp be
-cancelled.
+**Phase 6 has started.** The timesheet is built and its migration —
+`20260817090000_p6_01_timesheet.sql` — is unapplied like the Phase 5 three. It
+does not depend on them, so it can go in the same paste or on its own; apply it
+and 16 more assertions stop skipping. Reporting, archive and the ClickUp cutover
+(P6-04 onward) are the rest of the phase and have not been started.
 
 Two things still need a human and neither blocks Phase 6:
 

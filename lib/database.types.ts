@@ -917,6 +917,49 @@ export type Database = {
           },
         ];
       };
+      vizserve_pms_timesheet_entries: {
+        Row: {
+          id: string;
+          user_id: string;
+          task_id: string;
+          work_date: string;
+          minutes: number;
+          note: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        // task_id is required here and nowhere is it optional. That is the
+        // whole feature (docs/09, Amier 33:20) expressed in the type: a call
+        // that omits it does not compile, rather than reaching the NOT NULL.
+        Insert: {
+          id?: string;
+          user_id: string;
+          task_id: string;
+          work_date: string;
+          minutes: number;
+          note?: string | null;
+        };
+        Update: Partial<{
+          task_id: string;
+          work_date: string;
+          minutes: number;
+          note: string | null;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_timesheet_entries_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_timesheet_entries_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_internal_requests: {
         Row: {
           id: string;
@@ -1221,3 +1264,5 @@ export type NotificationRow = Database["public"]["Tables"]["vizserve_pms_notific
 export type DtrEntryRow = Database["public"]["Tables"]["vizserve_pms_dtr_entries"]["Row"];
 export type InternalRequestRow =
   Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];
+export type TimesheetEntryRow =
+  Database["public"]["Tables"]["vizserve_pms_timesheet_entries"]["Row"];
