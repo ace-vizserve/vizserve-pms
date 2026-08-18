@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TASK_STATUS_OPTIONS } from "@/components/status-badge";
+import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/schemas/tasks";
 
 const ALL = "__all__";
 
@@ -40,7 +41,34 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
     router.push(`/tasks?${next.toString()}`);
   }
 
-  const hasFilters = ["status", "view", "list"].some((key) => params.get(key));
+  const hasFilters = ["status", "view", "list", "priority", "sort"].some((key) =>
+    params.get(key),
+  );
+
+  /*
+   * J — the priority filter, and the sort that stops the column being decoration.
+   *
+   * Highest first, unlike `TASK_PRIORITIES` itself: that constant is declared
+   * low→high because Postgres compares enums by declaration order and every sort
+   * in the app depends on it, while a person reading a picker scans from the most
+   * severe down.
+   *
+   * "No priority" is a real option rather than an omission — it is what most
+   * tasks are, and "show me the unranked backlog" is a question worth asking.
+   * It is `none`, not an empty string, because an empty string is how this Select
+   * says "cleared".
+   */
+  const priorityItems: Record<string, string> = {
+    [ALL]: "Any priority",
+    ...Object.fromEntries(
+      [...TASK_PRIORITIES].reverse().map((value) => [value, TASK_PRIORITY_LABELS[value]]),
+    ),
+  };
+
+  const sortItems: Record<string, string> = {
+    due: "Due date",
+    priority: "Priority",
+  };
 
   // Base UI renders the RAW VALUE in <SelectValue> unless the root is handed an
   // items map. Without these the Status filter showed the literal "__all__"
@@ -105,6 +133,51 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
           </Select>
         </div>
       ) : null}
+
+      <div className="space-y-1.5">
+        <Label htmlFor="priority" className="text-xs text-muted-foreground">
+          Priority
+        </Label>
+        <Select
+          items={priorityItems}
+          value={params.get("priority") ?? ALL}
+          onValueChange={(value) => setParam("priority", value)}
+        >
+          <SelectTrigger id="priority" className="w-40">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value={ALL}>Any priority</SelectItem>
+            {[...TASK_PRIORITIES].reverse().map((value) => (
+              <SelectItem key={value} value={value}>
+                {TASK_PRIORITY_LABELS[value]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="space-y-1.5">
+        <Label htmlFor="sort" className="text-xs text-muted-foreground">
+          Sort by
+        </Label>
+        <Select
+          items={sortItems}
+          value={params.get("sort") ?? "due"}
+          // `due` is the default, so choosing it REMOVES the parameter rather
+          // than pinning it — a URL that says `?sort=due` claims a choice
+          // somebody did not make, and it survives every later filter change.
+          onValueChange={(value) => setParam("sort", value === "due" ? null : value)}
+        >
+          <SelectTrigger id="sort" className="w-36">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="due">Due date</SelectItem>
+            <SelectItem value="priority">Priority</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
 
       {hasFilters ? (
         <Button variant="ghost" size="sm" onClick={() => router.push("/tasks")}>

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Check, ChevronDown } from "lucide-react";
+import { ArrowRightLeft, Check, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -81,6 +81,7 @@ export function TaskStatusSelect({
   task,
   resolutionMissing = false,
   align = "start",
+  variant = "chip",
   className,
   onMoved,
 }: {
@@ -96,6 +97,17 @@ export function TaskStatusSelect({
    */
   resolutionMissing?: boolean;
   align?: "start" | "center" | "end";
+  /**
+   * `chip` states the status and opens the list — the task detail, where nothing
+   * else on screen says where the work is.
+   *
+   * `compact` is a glyph with no label, for a LIST ROW or a BOARD CARD. There the
+   * group heading or the column already carries the status, and repeating it on
+   * every row would draw eight identical pills under a heading that says the
+   * same word — which is exactly why the list has no status column. The control
+   * still has to be reachable, so it becomes an action rather than a value.
+   */
+  variant?: "chip" | "compact";
   className?: string;
   /** The detail page has local state to reset; a row only needs the refresh. */
   onMoved?: () => void;
@@ -156,8 +168,16 @@ export function TaskStatusSelect({
    * are different facts, so the tooltip says which one it is.
    */
   if (transitions.length === 0) {
+    const why = isTerminal(status) ? "This task is finished." : "This is with somebody else.";
+
+    // A compact trigger that cannot open would be an invisible dead control on a
+    // row, so it renders as nothing at all — the group heading already says
+    // where the task is. The chip form still shows the status, because on the
+    // detail page it is the only thing that does.
+    if (variant === "compact") return null;
+
     return (
-      <span title={isTerminal(status) ? "This task is finished." : "This is with somebody else."}>
+      <span title={why}>
         <TaskStatusBadge status={status} className={className} />
       </span>
     );
@@ -175,18 +195,30 @@ export function TaskStatusSelect({
     >
       <PopoverTrigger
         disabled={pending}
+        title={variant === "compact" ? `Move — currently ${TASK_STATUS_LABELS[status]}` : undefined}
         aria-label={`Status: ${TASK_STATUS_LABELS[status]}. Change it.`}
         className={cn(
-          "inline-flex shrink-0 items-center gap-1 rounded-md",
-          "hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          variant === "compact"
+            ? cn(
+                "inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground",
+                "hover:bg-accent hover:text-foreground",
+              )
+            : "inline-flex shrink-0 items-center gap-1 rounded-md hover:opacity-90",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-60",
           className,
         )}
       >
-        <TaskStatusBadge status={status} />
-        {/* The chip alone looks like every other read-only pill in the app. The
-            chevron is the only thing marking this one as a control. */}
-        <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+        {variant === "compact" ? (
+          <ArrowRightLeft className="size-3.5" aria-hidden />
+        ) : (
+          <>
+            <TaskStatusBadge status={status} />
+            {/* The chip alone looks like every other read-only pill in the app.
+                The chevron is the only thing marking this one as a control. */}
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          </>
+        )}
       </PopoverTrigger>
 
       <PopoverContent align={align} className="w-72 p-0">

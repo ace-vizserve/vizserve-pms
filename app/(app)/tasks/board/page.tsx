@@ -3,20 +3,25 @@ import Link from "next/link";
 import { CalendarDays, Link2, ListTree } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
+  type TaskPriority,
   isTerminal,
 } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
-import { TaskStatusBadge, taskStatusSurface } from "@/components/status-badge";
+import { TaskPriorityBadge, TaskStatusBadge, taskStatusSurface } from "@/components/status-badge";
 
+import { SubtaskProgress, TaskRowActions } from "../inline";
 import { NewTaskButton } from "../new-task-button";
+import { QuickAddTask } from "../quick-add";
+import { TaskStatusSelect } from "../status-select";
 import { TaskToolbar } from "../toolbar";
 
 export const metadata: Metadata = { title: "Board" };
@@ -64,7 +69,7 @@ function initials(name: string): string {
 export default async function TaskBoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string }>;
+  searchParams: Promise<{ view?: string; kind?: string }>;
 }) {
   const context = await requireAuthContext();
   const params = await searchParams;
@@ -73,7 +78,7 @@ export default async function TaskBoardPage({
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, output_link, parent_task_id",
+      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, request_id, is_personal, priority, output_link, parent_task_id, resolution",
     )
     .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
     .order("due_date", { ascending: true, nullsFirst: false });
@@ -85,6 +90,20 @@ export default async function TaskBoardPage({
   if (params.view === "qa") {
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
+
+  /*
+   * The client/internal split, which the toolbar has been CARRYING here since it
+   * was built and the board ignored.
+   *
+   * `VIEWS` in toolbar.tsx lists `kind` among the parameters that survive the
+   * switch from list to board, so a filtered list produced a URL saying
+   * `?kind=internal` on a board that showed everything — a control that claims a
+   * filter it does not apply, which is trap 4's shape in the UI rather than in
+   * SQL. Same one-column test as the list, and the same one `taskCategory` uses.
+   */
+  const kind = params.kind === "internal" || params.kind === "client" ? params.kind : "all";
+  if (kind === "client") query = query.not("request_id", "is", null);
+  if (kind === "internal") query = query.is("request_id", null);
 
   const [{ data: tasks }, { data: people }] = await Promise.all([
     query,
@@ -109,6 +128,52 @@ export default async function TaskBoardPage({
 
   const topLevel = (tasks ?? []).filter((task) => !task.parent_task_id);
 
+  /*
+   * K5 — PROGRESS, and the board cannot derive it the way the list does.
+   *
+   * The board excludes the two terminal statuses by design (a column that
+   * accumulates every finished ticket since launch is an archive nobody
+   * scrolls), so a finished subtask is not in `tasks` at all — counting done
+   * children from these rows would report 0/3 on a task whose three subtasks are
+   * all complete. Hence a separate query, unfiltered by status.
+   */
+  const parentIds = topLevel.map((task) => task.id);
+
+  const { data: childRows } = parentIds.length
+    ? await supabase
+        .from("vizserve_pms_tasks")
+        .select("id, parent_task_id, status")
+        .in("parent_task_id", parentIds)
+    : { data: [] };
+
+  const progress = new Map<string, { done: number; total: number }>();
+  for (const child of childRows ?? []) {
+    if (!child.parent_task_id) continue;
+    const entry = progress.get(child.parent_task_id) ?? { done: 0, total: 0 };
+    entry.total += 1;
+    // Both terminal statuses count as done. They are deliberately distinct, but
+    // "the work is finished" is true of each and that is all a bar asks.
+    if (isTerminal(child.status)) entry.done += 1;
+    progress.set(child.parent_task_id, entry);
+  }
+
+  /**
+   * Which seat the reader is in, per task — for the status control on the card.
+   *
+   * Not an authorization decision: `vizserve_pms_transition_task` re-checks all
+   * of it. It only decides which moves are worth offering.
+   */
+  const isAdmin = roleAtLeast(context.role, "admin");
+  function seat(task: { assignee_id: string | null; qa_assignee_id: string | null; department_id: string }) {
+    return {
+      isPic: task.assignee_id === context.userId,
+      isQa: task.qa_assignee_id === context.userId,
+      leadsDepartment:
+        context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
+      isAdmin,
+    };
+  }
+
   const byStatus = new Map<VizservePmsTaskStatus, typeof topLevel>(
     BOARD_COLUMNS.map((status) => [status, []]),
   );
@@ -121,8 +186,8 @@ export default async function TaskBoardPage({
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
         <TaskToolbar view="board" />
         <p className="min-w-0 text-xs text-muted-foreground">
-          Open a card to move it — the steps available depend on where it is and whether you are the
-          PIC or the reviewer.
+          Hover a card to move, rename or add to it. Internal work goes to any stage; client work
+          follows its gates.
         </p>
       </div>
 
@@ -187,20 +252,63 @@ export default async function TaskBoardPage({
                     column.map((task) => {
                       const late = isOverdue(task.due_date);
                       const subtasks = subtaskCount.get(task.id) ?? 0;
+                      const bars = progress.get(task.id);
                       const pic = task.assignee_id ? nameOf.get(task.assignee_id) : null;
                       const qa = task.qa_assignee_id ? nameOf.get(task.qa_assignee_id) : null;
 
                       return (
-                        <Link
+                        /*
+                          A DIV, not a Link, and the title carries the href.
+
+                          K3 put a status control, a rename and a subtask add on
+                          this card, and an interactive control inside an anchor
+                          is invalid HTML that swallows its own clicks: the
+                          anchor wins and the popover never opens. So the
+                          whole-card link is gone and the title is the
+                          affordance.
+                        */
+                        <div
                           key={task.id}
-                          href={`/tasks/${task.id}`}
-                          className="flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg"
+                          className="group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg"
                         >
-                          <span className="line-clamp-2 text-sm leading-snug font-medium">
-                            {task.title}
-                          </span>
+                          <div className="flex items-start gap-1.5">
+                            <Link
+                              href={`/tasks/${task.id}`}
+                              className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium hover:underline"
+                            >
+                              {task.title}
+                            </Link>
+
+                            <TaskRowActions
+                              taskId={task.id}
+                              title={task.title}
+                              priority={task.priority as TaskPriority | null}
+                            >
+                              {/* The glyph, not the chip: this card sits IN the
+                                  column whose heading is its status. */}
+                              <TaskStatusSelect
+                                taskId={task.id}
+                                status={task.status}
+                                viewer={seat(task)}
+                                task={task}
+                                resolutionMissing={!task.resolution?.trim()}
+                                variant="compact"
+                                align="end"
+                              />
+                            </TaskRowActions>
+                          </div>
 
                           <span className="flex flex-wrap items-center gap-1.5">
+                            {/* Renders nothing when unranked, which is most
+                                tasks: a mark carried by everything marks
+                                nothing. Read-only here, because the hover
+                                strip's flag is where it changes and one field
+                                does not get two controls on one card. */}
+                            <TaskPriorityBadge
+                              priority={task.priority as TaskPriority | null}
+                              className="h-5 px-1.5"
+                            />
+
                             {/* PIC and QA, in that order. The second assignee is
                                 the thing this product turns on, so a board that
                                 showed only the PIC would be hiding half of who
@@ -243,13 +351,27 @@ export default async function TaskBoardPage({
                           {/* Its own line under a rule, as on the reference
                               board: a subtask count is about the task's shape,
                               not about who or when. */}
-                          {subtasks > 0 ? (
+                          {/*
+                            THE COUNT AND THE RATIO COME FROM DIFFERENT QUERIES,
+                            deliberately. `subtasks` counts the children still
+                            live on this board; `bars` counts every child,
+                            including the finished ones the board excludes by
+                            design. The ratio needs the second, so it is
+                            preferred — the count is the fallback for a parent
+                            whose children the policy did not return.
+                          */}
+                          {bars ? (
+                            <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
+                              <ListTree className="size-3.5 shrink-0" aria-hidden />
+                              <SubtaskProgress done={bars.done} total={bars.total} />
+                            </span>
+                          ) : subtasks > 0 ? (
                             <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
                               <ListTree className="size-3.5 shrink-0" aria-hidden />
                               {subtasks} {subtasks === 1 ? "subtask" : "subtasks"}
                             </span>
                           ) : null}
-                        </Link>
+                        </div>
                       );
                     })
                   )}
@@ -258,7 +380,19 @@ export default async function TaskBoardPage({
                 {/* Renders nothing at all for a member — creating work for other
                     people is a Team Leader decision, and the button settles that
                     for itself rather than the board guessing at the role. */}
-                {status === INITIAL_TASK_STATUS ? <NewTaskButton trigger="column" /> : null}
+                {/*
+                  Only the first column, and that is a database constraint rather
+                  than a layout choice: `status` is not a writable column and both
+                  create functions open every task at OPEN, so an add control
+                  under Ongoing would promise a stage it cannot produce. See
+                  `quickAddTask`.
+                */}
+                {status === INITIAL_TASK_STATUS ? (
+                  <>
+                    <QuickAddTask shape="column" />
+                    <NewTaskButton trigger="column" />
+                  </>
+                ) : null}
               </section>
             );
           })}

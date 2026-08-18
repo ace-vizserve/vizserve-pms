@@ -382,6 +382,183 @@ export async function setTaskParent(taskId: string, input: unknown): Promise<Act
 }
 
 /**
+ * K3 — `+` on a row: create a task and nest it under this one, in one call.
+ *
+ * P7-09 shipped `vizserve_pms_set_task_parent`, a one-level trigger and a
+ * same-department rule, and nothing has ever called it — the board only
+ * displayed a count. This is that caller.
+ *
+ * TWO WRITES, and they live here rather than in the component so a child created
+ * but not nested is reported as exactly that, instead of appearing as a stray
+ * top-level task nobody meant to make. There is no create-with-parent function
+ * and adding one would mean changing an applied signature (trap 3).
+ *
+ * The parent decides both things this cannot ask about:
+ *
+ *   department  the trigger requires them to match, so it is read off the parent
+ *   is_personal a subtask of your own work is your own work — so a personal
+ *               parent goes through `create_personal_task` and inherits `true`
+ *
+ * That second one matters more than it looks. Routing a personal parent's child
+ * through `create_task` would produce a subtask its owner could not close
+ * without a QA reviewer, hanging off a parent they can.
+ */
+export async function createSubtask(
+  parentId: string,
+  input: unknown,
+): Promise<ActionResult<{ taskId: string }>> {
+  await requireAuthContextOrThrow();
+
+  const parsed = z
+    .object({ title: z.string().trim().min(1, "A subtask needs a title.").max(300) })
+    .safeParse(input);
+
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "A subtask needs a title." };
+  }
+
+  const supabase = await createClient();
+
+  // Read through the caller's own client, so RLS decides whether they may see
+  // the parent at all. A parent they cannot read is not one they may nest work
+  // under, and this is the check that says so first.
+  const { data: parent } = await supabase
+    .from("vizserve_pms_tasks")
+    .select("id, department_id, is_personal, assignee_id, parent_task_id")
+    .eq("id", parentId)
+    .maybeSingle();
+
+  if (!parent) return { ok: false, error: "That task is not available." };
+
+  // The trigger refuses this too. Saying it here costs nothing and names the
+  // rule, rather than surfacing a constraint message about depth.
+  if (parent.parent_task_id) {
+    return { ok: false, error: "Subtasks go one level deep — this is already a subtask." };
+  }
+
+  const created = parent.is_personal
+    ? await supabase.rpc("vizserve_pms_create_personal_task", {
+        p_title: parsed.data.title,
+        p_description: "",
+        p_due_date: null,
+        p_list_id: null,
+        p_priority: null,
+      })
+    : await supabase.rpc("vizserve_pms_create_task", {
+        p_department_id: parent.department_id,
+        p_title: parsed.data.title,
+        p_description: "",
+        // Inherits the parent's PIC. A subtask that lands unassigned is one
+        // nobody sees on their own list, which is where subtasks go to die.
+        p_assignee_id: parent.assignee_id,
+        p_qa_assignee_id: null,
+        p_due_date: null,
+        p_list_id: null,
+        p_priority: null,
+      });
+
+  if (created.error) return { ok: false, error: readableError(created.error) };
+
+  const taskId = (created.data as { task_id: string }).task_id;
+
+  const { data: nested, error: nestError } = await supabase
+    .from("vizserve_pms_tasks")
+    .update({ parent_task_id: parentId })
+    .eq("id", taskId)
+    .select("id");
+
+  // The child EXISTS at this point. Both branches say so rather than implying
+  // nothing happened — it is a real task on somebody's list, just not nested.
+  if (nestError) {
+    refresh(parentId);
+    return {
+      ok: false,
+      error: `The task was created but not nested: ${readableError(nestError).toLowerCase()}`,
+    };
+  }
+  if (!nested || nested.length === 0) {
+    refresh(parentId);
+    return {
+      ok: false,
+      error: "The task was created, but it could not be nested under this one.",
+    };
+  }
+
+  dispatchPendingEmailsInBackground();
+  refresh(parentId);
+  return { ok: true, data: { taskId } };
+}
+
+/**
+ * K3 — "+ Add Task" at the foot of a status group or a board column.
+ *
+ * A title, Enter, done. It replaces the dialog for the common case; the dialog
+ * stays for the time somebody wants to fill in everything at once.
+ *
+ * IT CAN ONLY EVER CREATE AT `OPEN`, and the callers are built around that
+ * rather than around a parameter. `status` is not a writable column and both
+ * create functions open every task at `INITIAL_TASK_STATUS`, so an "+ Add Task"
+ * under the *In progress* heading could not make a task in progress. The two
+ * honest options were to offer it in the first group only, or to create at OPEN
+ * and immediately transition — and the second writes two history rows for one
+ * button press, so the trail would show a task opened and started in the same
+ * second by somebody who did one thing. The history is what this app protects
+ * hardest, so: first group only.
+ *
+ * Which function it calls is the same `is_personal` decision the dialog makes. A
+ * member adding a line to their own list is recording their own work.
+ */
+export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskId: string }>> {
+  const context = await requireAuthContextOrThrow();
+
+  const parsed = z
+    .object({
+      title: z.string().trim().min(1, "A task needs a title.").max(300),
+      /**
+       * Only ever the caller's own department or one they lead — and it is not
+       * trusted from here: `vizserve_pms_create_task` re-reads the caller's row
+       * and refuses anything else. Null means "file it as my own".
+       */
+      department_id: z.uuid().nullable().default(null),
+      assignee_id: z.uuid().nullable().default(null),
+    })
+    .safeParse(input);
+
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "A task needs a title." };
+  }
+
+  const values = parsed.data;
+  const supabase = await createClient();
+
+  const created = values.department_id
+    ? await supabase.rpc("vizserve_pms_create_task", {
+        p_department_id: values.department_id,
+        p_title: values.title,
+        p_description: "",
+        p_assignee_id: values.assignee_id ?? context.userId,
+        p_qa_assignee_id: null,
+        p_due_date: null,
+        p_list_id: null,
+        p_priority: null,
+      })
+    : await supabase.rpc("vizserve_pms_create_personal_task", {
+        p_title: values.title,
+        p_description: "",
+        p_due_date: null,
+        p_list_id: null,
+        p_priority: null,
+      });
+
+  if (created.error) return { ok: false, error: readableError(created.error) };
+
+  dispatchPendingEmailsInBackground();
+  refresh();
+
+  return { ok: true, data: { taskId: (created.data as { task_id: string }).task_id } };
+}
+
+/**
  * P7-14 — reassignment is no longer a Team Leader decision.
  *
  * IT USED TO BE `requireRole("team_leader")`, and that line outlived the rule it
