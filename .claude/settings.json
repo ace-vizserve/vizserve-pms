@@ -16,7 +16,8 @@
       "Bash(git mv *)",
       "Bash(mv \"app/\\(app\\)/dashboard/home-widgets.tsx\" \"app/\\(app\\)/_home/home-widgets.tsx\")",
       "Bash(mv \"app/\\(app\\)/dashboard/leave-calendar.tsx\" \"app/\\(app\\)/_home/leave-calendar.tsx\")",
-      "Bash(mv \"app/\\(app\\)/dashboard/page.tsx\" \"app/\\(app\\)/page.tsx\")"
+      "Bash(mv \"app/\\(app\\)/dashboard/page.tsx\" \"app/\\(app\\)/page.tsx\")",
+      "Bash(sed -n '1,20p' \"C:/Users/Ace/.claude/plans/shiny-beaming-crab.md\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\Ace\\.claude\\plans"

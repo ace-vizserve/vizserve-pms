@@ -509,21 +509,42 @@ wider than either was meant to be. Both drops are now `if exists`.
 |---|---|
 | K3 | The status **dropdown** — one control on the detail, the list row and the board card. Internal work offers every status but `FOR_CLIENT_APPROVAL`; client work only its legal moves, and no illegal move is rendered greyed |
 | K3 | Inline edit of title, both dates, priority and the estimate. Every editor `.select()`s and rolls the field back on a zero-row refusal (trap 9) |
-| K3 | Quick add at the foot of the **first** group and column only — `status` is not writable, so it cannot create anywhere else |
+| K3 | Inline creation is a **whole fillable row** (list) or card (board) — name, assignee, both dates, priority, estimate — at **every** stage but `FOR_CLIENT_APPROVAL`. The plan said first-group-only; that was reversed 19 Aug, because everything it creates is internal or personal work and P7-13a lets that move freely |
+| K3 | **A subtask is just another task, nested.** The `+` on a row opens the same composer with `parent_task_id` set. The separate `createSubtask` action is gone — two forms for "make a task" is how the subtask one ends up without the fields the other grew |
 | K4 | Comment thread, in a popover from the row and inline on the detail — one component, used twice |
 | K5 | Progress, time tracked, time estimate and latest comment on the row |
 | J | Priority sort and filter |
 | F | The missed-punch shortcut from a DTR row into `/approvals?type=&date=` |
 | I2/I3/I4 | The dashboard: timesheet strip, "Needs you" as rows ordered by urgency, the lead's band |
 | E1/E2 | `/timesheet/team` and **`/reports`** |
-| K1 | **Several assignees have a screen at last** — the join table, `is_on_task` and its four policy sites shipped 18 Aug and nothing had ever called them. Monogram stack + searchable picker |
+| K1 | **Several assignees have a screen at last** — the join table, `is_on_task` and its four policy sites shipped 18 Aug and nothing had ever called them. Monogram stack + searchable picker, name on hover |
 | — | The task list's columns are Amier's reference set: name · progress · assignee · priority · start · due · date closed · estimate · tracked · latest comment. Date closed is read from the status history, never a column |
-| — | Sidebar groups collapse; a **project tree** (departments as folders, lists inside) replaces the filter panel as the way to reach a list |
+| — | **Sidebar:** groups collapse; child routes are nested (Tasks → List/Board/Lists, Timesheet → My week/Team week); a **project tree** (departments as folders, lists inside) replaces the filter panel as the way to reach a list |
 | H | The timesheet cell says it saved, and no longer loses an abandoned draft |
 
 **The board's cards are `<div>`s, not `<Link>`s.** An interactive control inside an
 anchor swallows its own clicks, so the whole-card link was replaced by a link on
 the title. Worth knowing before "restoring" it.
+
+### ⚠️ The recurring failure: a migration lands, the layer that reaches it does not
+
+**Four instances in two days**, all found by hand and none by a test — because the
+db suites exercise SQL directly and never the path a person takes. Check this
+explicitly whenever a migration is applied: *what screen or action makes this
+reachable, and does it exist?*
+
+| Applied | What stayed unreachable |
+|---|---|
+| `p7_14` — a member may create and reassign work in their own department | `createTask` and `reassignTask` both still called `requireRole("team_leader")` |
+| `p7_14` again | `vizserve_pms_users` was readable only as self-or-managed, so a member could not **see** a colleague to assign to (fixed by `p7_17`) |
+| `p7_11` / `p7_15` — `priority`, `estimate_minutes` | Both sat in `taskDetailsSchema` and nothing ever wrote them; the detail form parsed and dropped them |
+| `p7_09` / `p7_13` — subtasks, several assignees | Neither had ever been called by any UI at all |
+
+The mirror of it also happened once, in the other direction: the sidebar's
+"Create a list" row linked **every** member to `/tasks/lists`, which is
+`requireRole("team_leader")` — a door offered to people it does not open for.
+Hiding a link protects nobody (the page re-checks, RLS re-checks under it); it
+just stops advertising a dead end.
 
 ### 🔒 P7-00 — a live authorization hole, found and closed
 
