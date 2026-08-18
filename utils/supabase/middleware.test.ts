@@ -7,11 +7,30 @@ import { isPublicPath } from "./middleware";
  * away from opening the whole app: every pathname starts with "/", so a bare
  * "/" in PUBLIC_PREFIXES would return true for `/dashboard` too.
  *
- * These cases exist to fail loudly if that happens.
+ * These cases exist to fail loudly if that happens. Note that `/` itself is NOT
+ * public any more — see the first case.
  */
 describe("isPublicPath", () => {
-  it("allows the marketing landing page, and only at the root", () => {
-    expect(isPublicPath("/")).toBe(true);
+  it("keeps the root behind the session gate", () => {
+    /*
+     * THIS ASSERTION IS REVERSED FROM WHAT IT WAS, and the reversal is the
+     * decision rather than a regression.
+     *
+     * It read `toBe(true)` and was titled "allows the marketing landing page".
+     * That page is gone: P7-10 made `/` the STAFF HOME — the day's shape, the
+     * punch panel, the leave calendar — and nobody who works at VizServe is the
+     * person a marketing page argues to. `PUBLIC_EXACT` was emptied to match, so
+     * an anonymous visitor is sent to /login before `app/page.tsx` runs. The old
+     * landing page is kept verbatim under docs/archive/landing-page/.
+     *
+     * The test was left asserting the old behaviour and has been failing since,
+     * which is also why `npm run verify` was not green when this was found.
+     *
+     * It stays as a test rather than being deleted, because "/" is the one path
+     * where a careless re-add to PUBLIC_EXACT would expose the staff home to
+     * anyone with the URL.
+     */
+    expect(isPublicPath("/")).toBe(false);
   });
 
   it.each([

@@ -465,22 +465,34 @@ describe.skipIf(!run)("P5-09 — approval writes the correction into the DTR", (
     const member = await signIn("member1VizBytes");
     await clearDtr(member.userId);
 
-    // A wrong, early punch — the exact situation R3 says the user cannot fix,
-    // because earliest-in wins permanently.
-    await member.client.rpc("vizserve_pms_punch", { p_direction: "in" });
+    /*
+     * YESTERDAY, AND SEEDED RATHER THAN PUNCHED — clock independence, the same
+     * fix `4e0caea` made to the shift-inversion test below.
+     *
+     * This used to punch in on `today` and then correct today at 09:30.
+     * Submission refuses a time that has not happened yet, so the test passed
+     * between 09:30 and midnight Manila and failed every other hour — it was
+     * found failing at 01:40. Nothing about the rule under test needs today:
+     * what is being proved is that an approved correction overwrites an
+     * earliest-in that R3 says the user cannot fix, and yesterday proves it
+     * just as well while keeping 09:30 firmly in the past.
+     *
+     * Seeding through the service role rather than punching is the other half.
+     * `vizserve_pms_punch` can only ever write TODAY — it reads the Manila clock
+     * itself — so a punch cannot produce yesterday's row at all.
+     */
+    const before = { time_in: `${yesterday}T00:15:00Z` }; // 08:15 Manila
 
-    const { data: before } = await adminClient()
-      .from("vizserve_pms_dtr_entries")
-      .select("time_in")
-      .eq("user_id", member.userId)
-      .eq("work_date", today)
-      .single();
-    expect(before!.time_in).not.toBeNull();
+    await adminClient().from("vizserve_pms_dtr_entries").insert({
+      user_id: member.userId,
+      work_date: yesterday,
+      time_in: before.time_in,
+    });
 
     const id = await submit(member.client, {
       p_request_type: "NO_TIME_IN",
       p_reason: "Punched in early by mistake.",
-      p_work_date: today,
+      p_work_date: yesterday,
       p_correction_time: "09:30",
     });
 
@@ -496,10 +508,10 @@ describe.skipIf(!run)("P5-09 — approval writes the correction into the DTR", (
       .from("vizserve_pms_dtr_entries")
       .select("time_in, corrected_at, corrected_by, correction_request_id")
       .eq("user_id", member.userId)
-      .eq("work_date", today)
+      .eq("work_date", yesterday)
       .single();
 
-    expect(after!.time_in).not.toBe(before!.time_in);
+    expect(after!.time_in).not.toBe(before.time_in);
     // 09:30 Manila is 01:30 UTC.
     expect(new Date(after!.time_in!).toISOString()).toContain("T01:30");
     // Provenance: the row must say it was corrected, and by which request.
@@ -512,10 +524,13 @@ describe.skipIf(!run)("P5-09 — approval writes the correction into the DTR", (
     const member = await signIn("member1VizAssists");
     await clearDtr(member.userId);
 
+    // Yesterday, for the same reason as above: 07:45 has not happened yet if the
+    // suite runs before 07:45, and "the day was never punched" is equally true
+    // of yesterday.
     const id = await submit(member.client, {
       p_request_type: "NO_TIME_IN",
       p_reason: "Worked but never tapped in.",
-      p_work_date: today,
+      p_work_date: yesterday,
       p_correction_time: "07:45",
     });
 
@@ -530,7 +545,7 @@ describe.skipIf(!run)("P5-09 — approval writes the correction into the DTR", (
       .from("vizserve_pms_dtr_entries")
       .select("time_in, time_out")
       .eq("user_id", member.userId)
-      .eq("work_date", today)
+      .eq("work_date", yesterday)
       .single();
 
     expect(row!.time_in).not.toBeNull();
@@ -541,10 +556,12 @@ describe.skipIf(!run)("P5-09 — approval writes the correction into the DTR", (
     const member = await signIn("member2VizBytes");
     await clearDtr(member.userId);
 
+    // Yesterday again. 06:00 is in the future for any run before dawn, and the
+    // rule under test — a rejection writes nothing — does not care which day.
     const id = await submit(member.client, {
       p_request_type: "NO_TIME_IN",
       p_reason: "Should not be applied.",
-      p_work_date: today,
+      p_work_date: yesterday,
       p_correction_time: "06:00",
     });
 
@@ -559,7 +576,7 @@ describe.skipIf(!run)("P5-09 — approval writes the correction into the DTR", (
       .from("vizserve_pms_dtr_entries")
       .select("id")
       .eq("user_id", member.userId)
-      .eq("work_date", today)
+      .eq("work_date", yesterday)
       .maybeSingle();
 
     expect(row).toBeNull();

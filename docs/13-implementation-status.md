@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 18 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 19 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -16,23 +16,48 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **3 — Tasks + QA (Gate 2)** | **Done.** All exit criteria asserted and green |
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
-| **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. P6-04 onward not begun |
-| **7 — Personal tasks, overtime, timesheet approval** | **Backend done and applied. NO SCREENS.** Ten migrations live — see below |
+| **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). P6-04/06/07/08/09 not begun |
+| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live — see below |
 
-`npm run verify` is green: **488 passed, 2 skipped, 0 failures.** The 2 skips are the opt-in email deliverability tests.
+`npm run verify` is green: **562 passed, 2 skipped, 0 failures** (19 Aug). The 2
+skips are the opt-in email deliverability tests. Unit tests are at 258, up from 233
+before the screens; `tests/db` is 286/286 across 12 files. Lint reports **0 errors
+and 7 warnings**, all pre-existing.
+
+That run closed one long-standing gap and found two pre-existing failures:
+
+- **`p7_12`'s eight leave-type db cases executed for the first time** and all pass.
+  They had been skipping on a stale PostgREST schema cache since 18 Aug, so the
+  migration was only ever verified by direct query.
+- **Three `phase5` DTR-correction cases were clock-dependent** — they corrected
+  *today* at 09:30 / 07:45 / 06:00, and the function refuses a time that has not
+  happened yet, so each passed only after its own hour. The same defect `4e0caea`
+  fixed in a neighbouring test. Re-dated to yesterday.
+- **`utils/supabase/middleware.test.ts` still asserted `/` was public**, which
+  stopped being true when P7-10 made `/` the staff home and emptied
+  `PUBLIC_EXACT`.
 
 ---
 
-## ⚠️ Phase 7 has a backend and no front end
+## Phase 7 is complete — backend and screens
 
-The most important thing to know before touching anything. Ten migrations are applied and the suite is green, but **not one screen was built** — held deliberately at the user's instruction, to be resumed on their signal.
+**This section used to say "a backend and no front end".** It was true from 18 Aug
+until the screens landed on 19 Aug, and it is recorded here rather than deleted
+because anybody working from a stale copy of this file will have read it.
 
-So all of the following are real, enforced, tested, and reachable **only through the API**: a member creating and completing a personal task, a week of timesheet submitted for approval and locked, overtime as an approvable request, task comments, subtasks, and free status movement on internal work.
+Eighteen migrations are applied and every screen the plan owed is built. The
+design, the traps, and what is still owed are in the plan file:
+`~/.claude/plans/shiny-beaming-crab.md` — its **STATUS** block is the authority,
+and it is where the loose ends live.
 
-The design, the traps, and exactly how far it got are in the plan file:
-`~/.claude/plans/shiny-beaming-crab.md` — its **STATUS** block is the authority.
+**Every db suite now proves its own migration.** `p7_12`'s eight leave-type cases
+had been skipping on a stale PostgREST schema cache and the migration was verified
+by direct query instead; as of 19 Aug all eight execute and pass. Read the warning
+immediately below before running a db suite yourself.
 
-One thread is waiting on Amier: the **list of leave types**, which is the only thing blocking that slice.
+The leave-type list that was blocking slice G **arrived on 18 Aug** and is applied
+as `p7_12`: Vacation, Sick, Service Incentive, Birthday, Maternity, Paternity,
+Solo Parent, Special Leave for Women, seeded in that order (usage, not alphabet).
 
 Settled 18 Aug: **"billed time" means the time entered against a task on the timesheet** — not client-chargeable. There is no billable/non-billable split in the schema and none is being built.
 
@@ -277,7 +302,7 @@ All six green as of 17 Aug 2026: `tests/db/phase5.test.ts` runs its 20 cases aga
 | P6-02 | Timesheet week grid, add-task picker scoped to assigned tasks | ✅ `/timesheet` — task rows × day columns, picker only, no free text |
 | P6-03 | Week navigation, totals, per-cell notes and splits | ✅ Monday-start, week in the URL, typed in the cell |
 | P6-04 | Turnaround time reporting | ⛔ Not started |
-| P6-05 | Status/volume dashboards per department | ⛔ Not started |
+| P6-05 | Status/volume dashboards per department | ✅ `/timesheet/team` (E1) + `/reports` (E2), 19 Aug. The **narrow** reading only — tasks by stage, requests by status, overdue, hours per department |
 | P6-06 | Negotiation and auto-complete split reports | ⛔ Not started |
 | P6-07 | Feedback results report | ⛔ Not started |
 | P6-08 | Archive | ⛔ Not started |
@@ -417,9 +442,12 @@ Two things still need a human and neither blocks Phase 6:
 
 ---
 
-## Phase 7 — personal tasks, overtime, timesheet approval (18 Aug 2026)
+## Phase 7 — personal tasks, overtime, timesheet approval (18–19 Aug 2026)
 
-Backend complete and applied. **No screens** — see the warning at the top.
+Backend and screens complete. Eighteen migrations, all applied by hand through the
+Supabase SQL editor in filename order — **not** recorded in
+`supabase_migrations.schema_migrations`, so `npm run db:push` will trip on them
+(see the note at `:267`).
 
 | ID | Item | State |
 |----|------|-------|
@@ -430,7 +458,31 @@ Backend complete and applied. **No screens** — see the warning at the top.
 | P7-05 | `vizserve_pms_timesheet_weeks`, submit/decide, entry locking | ✅ Third consumer of the P2-00 engine, engine untouched |
 | P7-06 | Free status movement for internal work, `start_date` | ✅ |
 | P7-07/08 | Task comments + `commented` notification type | ✅ Flat, author-only edit, inbox-only |
-| P7-09 | Subtasks via `parent_task_id` | ✅ One level, enforced by trigger |
+| P7-09 | Subtasks via `parent_task_id` | ✅ One level, enforced by trigger. **`+` on any row calls it** (19 Aug) — it had no UI at all until then |
+| P7-11 | Task priority, nullable, in the column UPDATE grant | ✅ Picker, badge, sort and filter |
+| P7-12 | Leave types as an admin-editable table | ✅ applied, and **its eight db cases now execute and pass** (19 Aug) — they had been skipping on a stale PostgREST schema cache |
+| P7-13/13a | Several assignees; internal work moves freely | ✅ `FOR_CLIENT_APPROVAL` is a dead end, not a gate. Every move still writes history |
+| P7-14 | A member creates and reassigns inside their own department | ✅ The **actions** caught up on 19 Aug — both still carried `requireRole("team_leader")`, so the applied migration was unreachable from the app |
+| P7-15 | `estimate_minutes` + `vizserve_pms_task_time_tracked()` | ✅ The rollup is `SECURITY DEFINER` because the timesheet policy is per-person |
+
+### Screens (19 Aug 2026)
+
+| Slice | What shipped |
+|---|---|
+| K3 | The status **dropdown** — one control on the detail, the list row and the board card. Internal work offers every status but `FOR_CLIENT_APPROVAL`; client work only its legal moves, and no illegal move is rendered greyed |
+| K3 | Inline edit of title, both dates, priority and the estimate. Every editor `.select()`s and rolls the field back on a zero-row refusal (trap 9) |
+| K3 | Quick add at the foot of the **first** group and column only — `status` is not writable, so it cannot create anywhere else |
+| K4 | Comment thread, in a popover from the row and inline on the detail — one component, used twice |
+| K5 | Progress, time tracked, time estimate and latest comment on the row |
+| J | Priority sort and filter |
+| F | The missed-punch shortcut from a DTR row into `/approvals?type=&date=` |
+| I2/I3/I4 | The dashboard: timesheet strip, "Needs you" as rows ordered by urgency, the lead's band |
+| E1/E2 | `/timesheet/team` and **`/reports`** |
+| H | The timesheet cell says it saved, and no longer loses an abandoned draft |
+
+**The board's cards are `<div>`s, not `<Link>`s.** An interactive control inside an
+anchor swallows its own clicks, so the whole-card link was replaced by a link on
+the title. Worth knowing before "restoring" it.
 
 ### 🔒 P7-00 — a live authorization hole, found and closed
 
