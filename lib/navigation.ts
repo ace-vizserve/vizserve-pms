@@ -89,6 +89,17 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "timesheet",
   },
   {
+    // P6-05 / slice E1. Team leaders and up: this is where submitted weeks are
+    // approved, and it is where the submit notification's link_path points
+    // (`20260818110000_p7_05_timesheet_weeks.sql:339`). A member has nobody to
+    // review, and the page says so rather than 404ing if they reach it.
+    label: "Team week",
+    href: "/timesheet/team",
+    minRole: "team_leader",
+    enabled: true,
+    icon: "timesheet",
+  },
+  {
     label: "Inbox",
     href: "/inbox",
     minRole: "member",
@@ -133,7 +144,7 @@ export type NavGroup = { label: string; hrefs: string[]; pinBottom?: boolean };
 
 export const NAV_GROUPS: NavGroup[] = [
   { label: "Work", hrefs: ["/dashboard", "/requests", "/tasks", "/inbox"] },
-  { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
+  { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet", "/timesheet/team"] },
   { label: "Manage", hrefs: ["/forms"] },
   { label: "Admin", hrefs: ["/admin/users"], pinBottom: true },
 ];

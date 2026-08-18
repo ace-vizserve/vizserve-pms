@@ -1,4 +1,5 @@
 import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatCellDuration } from "@/lib/schemas/timesheet";
 import type { InternalRequestRow } from "@/lib/database.types";
 
 /**
@@ -27,7 +28,25 @@ export function requestDetail(request: InternalRequestRow): string {
         minimumFractionDigits: 2,
         maximumFractionDigits: 2,
       })}`;
-    default:
+    case "OVERTIME":
+      // Was falling through to the correction branch, which reads
+      // `correction_at` — null on every overtime row — and rendered every one of
+      // them as "18 Aug at —".
+      return `${formatDate(request.work_date)} · ${formatCellDuration(request.overtime_minutes ?? 0)}`;
+    case "NO_TIME_IN":
+    case "NO_TIME_OUT":
       return `${formatDate(request.work_date)} at ${formatDateTime(request.correction_at).split(", ")[1] ?? "—"}`;
+    default: {
+      /**
+       * The `default:` this replaces is why overtime mis-rendered for a while:
+       * a new type fell into the correction branch and produced a plausible,
+       * wrong sentence instead of failing.
+       *
+       * Assigning to `never` makes the next added type a COMPILE error here
+       * rather than a quiet mis-render. Do not turn this back into a fallback.
+       */
+      const exhaustive: never = request.request_type;
+      return exhaustive;
+    }
   }
 }

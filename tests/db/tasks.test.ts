@@ -85,11 +85,23 @@ const priorityApplied =
     ? !(await adminClient().from("vizserve_pms_tasks").select("priority").limit(1)).error
     : false;
 
+const assigneesApplied =
+  dbTestsEnabled && migrationApplied
+    ? !(await adminClient().from("vizserve_pms_task_assignees").select("task_id").limit(1)).error
+    : false;
+
+const estimateApplied =
+  dbTestsEnabled && migrationApplied
+    ? !(await adminClient().from("vizserve_pms_tasks").select("estimate_minutes").limit(1)).error
+    : false;
+
 for (const [flag, label, file] of [
   [flexibilityApplied, "P7-06", "20260818120000_p7_06_task_flexibility.sql"],
   [commentsApplied, "P7-08", "20260818120200_p7_08_task_comments.sql"],
   [subtasksApplied, "P7-09", "20260818120300_p7_09_subtasks.sql"],
   [priorityApplied, "P7-11", "20260818140000_p7_11_task_priority.sql"],
+  [assigneesApplied, "P7-13", "20260818160000_p7_13_task_assignees.sql"],
+  [estimateApplied, "P7-15", "20260818180000_p7_15_estimate_and_tracked.sql"],
 ] as const) {
   if (dbTestsEnabled && migrationApplied && !flag) {
     process.stderr.write(`\n  tasks.test.ts — ${label} cases SKIPPED. ${file} is not applied.\n`);
@@ -329,7 +341,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
   // =========================================================================
   describe("the resolution gate (P3-07)", () => {
     it.skipIf(!migrationApplied)("refuses FOR_QA while the resolution is empty", async () => {
-      const taskId = await makeTask();
+      // CLIENT work, since P7-13. This gate is gone for internal tasks — work
+      // with no client moves freely — but it is exactly as strict as it ever
+      // was for work a client is waiting on, which is what it existed to
+      // protect.
+      const taskId = await makeRequestTask();
       await advanceTo(taskId, "ONGOING");
 
       const { client } = await signIn("member1VizBytes");
@@ -344,7 +360,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
     });
 
     it.skipIf(!migrationApplied)("refuses a whitespace-only resolution", async () => {
-      const taskId = await makeTask();
+      // CLIENT work, since P7-13. This gate is gone for internal tasks — work
+      // with no client moves freely — but it is exactly as strict as it ever
+      // was for work a client is waiting on, which is what it existed to
+      // protect.
+      const taskId = await makeRequestTask();
       await advanceTo(taskId, "ONGOING");
 
       await adminClient().from("vizserve_pms_tasks").update({ resolution: "    " }).eq("id", taskId);
@@ -461,7 +481,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
     });
 
     it.skipIf(!migrationApplied)("rejects OPEN → COMPLETED", async () => {
-      const taskId = await makeTask();
+      // CLIENT work, since P7-13. This gate is gone for internal tasks — work
+      // with no client moves freely — but it is exactly as strict as it ever
+      // was for work a client is waiting on, which is what it existed to
+      // protect.
+      const taskId = await makeRequestTask();
       const { client } = await signIn("tlVizBytes");
 
       const { error } = await client.rpc("vizserve_pms_transition_task", {
@@ -527,7 +551,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
   // =========================================================================
   describe("actor rules", () => {
     it.skipIf(!migrationApplied)("the QA reviewer cannot start the PIC's work", async () => {
-      const taskId = await makeTask();
+      // CLIENT work, since P7-13. This gate is gone for internal tasks — work
+      // with no client moves freely — but it is exactly as strict as it ever
+      // was for work a client is waiting on, which is what it existed to
+      // protect.
+      const taskId = await makeRequestTask();
       const { client } = await signIn("member2VizBytes");
 
       const { error } = await client.rpc("vizserve_pms_transition_task", {
@@ -542,7 +570,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
     it.skipIf(!migrationApplied)("the PIC cannot QA their own work", async () => {
       // The whole point of Gate 2. If the PIC can move it out of FOR_QA, the
       // second pair of eyes is optional.
-      const taskId = await makeTask();
+      //
+      // CLIENT work only, since P7-13. Internal work has no client and no
+      // reviewer step left to protect, so one person taking their own internal
+      // task to done is now the intended behaviour rather than a hole.
+      const taskId = await makeRequestTask();
       await advanceTo(taskId, "FOR_QA");
 
       const { client } = await signIn("member1VizBytes");
@@ -574,7 +606,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
   // =========================================================================
   describe("QA rejection (P3-10)", () => {
     it.skipIf(!migrationApplied)("requires a comment", async () => {
-      const taskId = await makeTask();
+      // CLIENT work, since P7-13. This gate is gone for internal tasks — work
+      // with no client moves freely — but it is exactly as strict as it ever
+      // was for work a client is waiting on, which is what it existed to
+      // protect.
+      const taskId = await makeRequestTask();
       await advanceTo(taskId, "QA_IN_PROGRESS");
 
       const { client } = await signIn("member2VizBytes");
@@ -657,7 +693,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
   // =========================================================================
   describe("WAITING_FOR_INFO", () => {
     it.skipIf(!migrationApplied)("requires a note on entry", async () => {
-      const taskId = await makeTask();
+      // CLIENT work, since P7-13. This gate is gone for internal tasks — work
+      // with no client moves freely — but it is exactly as strict as it ever
+      // was for work a client is waiting on, which is what it existed to
+      // protect.
+      const taskId = await makeRequestTask();
       await advanceTo(taskId, "ONGOING");
 
       const { client } = await signIn("member1VizBytes");
@@ -883,11 +923,14 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       expect(error).not.toBeNull();
     });
 
-    it.skipIf(!migrationApplied)("refuse a member outright", async () => {
+    it.skipIf(!migrationApplied)("refuse a member ANOTHER department", async () => {
+      // P7-14 let members create work — in their own department only. The
+      // department is resolved from their own row rather than trusted from the
+      // parameter, so this is refused rather than merely discouraged.
       const { client } = await signIn("member1VizBytes");
 
       const { error } = await client.rpc("vizserve_pms_create_task", {
-        p_department_id: DEPARTMENTS.VizBytes,
+        p_department_id: DEPARTMENTS.VizAssists,
         p_title: "Should not exist",
         p_description: "",
         p_assignee_id: null,
@@ -896,7 +939,27 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
         p_list_id: null,
       });
 
-      expect(error).not.toBeNull();
+      expect(error?.message ?? "").toContain("outside your scope");
+    });
+
+    it.skipIf(!migrationApplied)("let a member create in their own department", async () => {
+      // The other half of P7-14, and the change that matters: somebody notices
+      // a thing, makes a card, and puts a colleague's name on it without a lead
+      // in the loop.
+      const { client } = await signIn("member1VizBytes");
+
+      const { data, error } = await client.rpc("vizserve_pms_create_task", {
+        p_department_id: DEPARTMENTS.VizBytes,
+        p_title: "Member-created",
+        p_description: "",
+        p_assignee_id: qaId,
+        p_qa_assignee_id: null,
+        p_due_date: null,
+        p_list_id: null,
+      });
+
+      expect(error).toBeNull();
+      created.push((data as { task_id: string }).task_id);
     });
 
     it.skipIf(!migrationApplied)("notify the assignee", async () => {
@@ -1163,16 +1226,11 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
         p_comment: null,
       });
 
-      // The resolution gate applies here too — every completed task says what
-      // was done, whoever closed it.
-      const blocked = await me.client.rpc("vizserve_pms_transition_task", {
-        p_task_id: taskId,
-        p_to_status: "COMPLETED",
-        p_comment: null,
-      });
-      expect(blocked.error).not.toBeNull();
-      expect(await statusOf(taskId)).toBe("ONGOING");
-
+      // The resolution gate USED to apply here. P7-13 removed it along with
+      // every other gate on work that has no client: closing your own task is
+      // now one move, with nothing to fill in first. A resolution is still
+      // recorded when somebody writes one, and reporting reads it when it is
+      // there — it is simply no longer demanded.
       await me.client
         .from("vizserve_pms_tasks")
         .update({ resolution: "Read it, notes in the shared doc." })
@@ -1188,28 +1246,30 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       expect(await statusOf(taskId)).toBe("COMPLETED");
     });
 
-    it.skipIf(!completionApplied)(
-      "the same move is refused on work somebody else assigned",
-      async () => {
-        const taskId = await makeTask();
-        await advanceTo(taskId, "ONGOING");
+    it.skipIf(!completionApplied)("the same move is refused on CLIENT work", async () => {
+      // Internal work used to be refused here too. P7-13 removed that: work
+      // with no client moves freely, and closing your own internal task from
+      // ONGOING is now the ordinary case rather than a shortcut round a gate.
+      // Client work keeps every gate, because each has somebody outside the
+      // company on the other end.
+      const taskId = await makeRequestTask();
+      await advanceTo(taskId, "ONGOING");
 
-        await adminClient()
-          .from("vizserve_pms_tasks")
-          .update({ resolution: "Done." })
-          .eq("id", taskId);
+      await adminClient()
+        .from("vizserve_pms_tasks")
+        .update({ resolution: "Done." })
+        .eq("id", taskId);
 
-        const pic = await signIn("member1VizBytes");
-        const { error } = await pic.client.rpc("vizserve_pms_transition_task", {
-          p_task_id: taskId,
-          p_to_status: "COMPLETED",
-          p_comment: null,
-        });
+      const pic = await signIn("member1VizBytes");
+      const { error } = await pic.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: taskId,
+        p_to_status: "COMPLETED",
+        p_comment: null,
+      });
 
-        expect(error).not.toBeNull();
-        expect(await statusOf(taskId)).toBe("ONGOING");
-      },
-    );
+      expect(error).not.toBeNull();
+      expect(await statusOf(taskId)).toBe("ONGOING");
+    });
 
     it.skipIf(!completionApplied)("internal work is closed by its QA reviewer", async () => {
       // The exit that closing the client gate made necessary. Without it a task
@@ -1294,10 +1354,10 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       expect((await move(taskId, "OPEN")).error).toBeNull();
       expect(await statusOf(taskId)).toBe("OPEN");
 
-      // Entering WAITING_FOR_INFO still costs a note, from OPEN as much as from
-      // ONGOING — that note is the only thing that makes "blocked on what"
-      // answerable later.
-      expect((await move(taskId, "WAITING_FOR_INFO")).error).not.toBeNull();
+      // The note used to be required here. P7-13 dropped it with the rest of
+      // the gates on internal work — parking is now one move. A note still
+      // travels with the transition when one is given, and is still what makes
+      // "blocked on what" answerable; it is just no longer compulsory.
       expect((await move(taskId, "WAITING_FOR_INFO", "Waiting on the supplier.")).error).toBeNull();
       expect(await statusOf(taskId)).toBe("WAITING_FOR_INFO");
 
@@ -1862,6 +1922,255 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       } as never);
 
       expect(error).not.toBeNull();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // P7-13 / P7-15 — internal tasks as their own object.
+  // ---------------------------------------------------------------------------
+
+  describe.skipIf(!dbTestsEnabled)("P7-13 several assignees", () => {
+    it.skipIf(!assigneesApplied)("a second assignee can see, log against and move it", async () => {
+      // Four rights in one test on purpose: they are one decision. A second
+      // assignee who can see a task but not move it is not "partly working", it
+      // is the feature not existing.
+      // QA-less on purpose: the default fixture seats member2 as the QA
+      // reviewer, who can already see and move the task — which would make this
+      // pass without the assignees table existing at all.
+      const taskId = await makeTask({ p_qa_assignee_id: null });
+      const other = await signIn("member2VizBytes");
+
+      const before = await other.client.from("vizserve_pms_tasks").select("id").eq("id", taskId);
+      expect(before.data ?? []).toHaveLength(0);
+
+      const tl = await signIn("tlVizBytes");
+      const added = await tl.client.rpc("vizserve_pms_add_task_assignee", {
+        p_task_id: taskId,
+        p_user_id: other.userId,
+      });
+      expect(added.error).toBeNull();
+
+      const after = await other.client.from("vizserve_pms_tasks").select("id").eq("id", taskId);
+      expect(after.data ?? []).toHaveLength(1);
+
+      const logged = await other.client
+        .from("vizserve_pms_timesheet_entries")
+        .insert({
+          user_id: other.userId,
+          task_id: taskId,
+          work_date: new Date().toISOString().slice(0, 10),
+          minutes: 15,
+        })
+        .select("id");
+      expect(logged.error).toBeNull();
+
+      const moved = await other.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: taskId,
+        p_to_status: "ONGOING",
+        p_comment: null,
+      });
+      expect(moved.error).toBeNull();
+
+      await adminClient().from("vizserve_pms_timesheet_entries").delete().eq("task_id", taskId);
+    });
+
+    it.skipIf(!assigneesApplied)("removing them takes all of it away again", async () => {
+      const taskId = await makeTask({ p_qa_assignee_id: null });
+      const other = await signIn("member2VizBytes");
+      const tl = await signIn("tlVizBytes");
+
+      await tl.client.rpc("vizserve_pms_add_task_assignee", {
+        p_task_id: taskId,
+        p_user_id: other.userId,
+      });
+      await tl.client.rpc("vizserve_pms_remove_task_assignee", {
+        p_task_id: taskId,
+        p_user_id: other.userId,
+      });
+
+      const seen = await other.client.from("vizserve_pms_tasks").select("id").eq("id", taskId);
+      expect(seen.data ?? []).toHaveLength(0);
+    });
+
+    it.skipIf(!assigneesApplied)("refuses somebody from another department", async () => {
+      const taskId = await makeTask();
+      const tl = await signIn("tlVizBytes");
+      const outsider = await signIn("member1VizAssists");
+
+      const { error } = await tl.client.rpc("vizserve_pms_add_task_assignee", {
+        p_task_id: taskId,
+        p_user_id: outsider.userId,
+      });
+
+      expect(error?.message ?? "").toContain("not an active member");
+    });
+
+    it.skipIf(!assigneesApplied)("will not remove the accountable name", async () => {
+      // `assignee_id` is a column, not a row here. Emptying it is a reassignment,
+      // which is a different decision with a different rule.
+      const taskId = await makeTask();
+      const tl = await signIn("tlVizBytes");
+
+      const { error } = await tl.client.rpc("vizserve_pms_remove_task_assignee", {
+        p_task_id: taskId,
+        p_user_id: picId,
+      });
+
+      expect(error?.message ?? "").toContain("Reassign it instead");
+    });
+  });
+
+  describe.skipIf(!dbTestsEnabled)("P7-13 internal work moves freely", () => {
+    it.skipIf(!assigneesApplied)("goes anywhere, with no required fields", async () => {
+      const taskId = await makeTask();
+      const pic = await signIn("member1VizBytes");
+
+      async function move(to: string) {
+        const { error } = await pic.client.rpc("vizserve_pms_transition_task", {
+          p_task_id: taskId,
+          p_to_status: to as never,
+          p_comment: null,
+        });
+        return error;
+      }
+
+      // Straight to done with no resolution, parked with no comment, reopened,
+      // and into QA without passing FOR_QA. Every one was refused before P7-13.
+      expect(await move("ONGOING")).toBeNull();
+      expect(await move("COMPLETED")).toBeNull();
+      expect(await move("WAITING_FOR_INFO")).toBeNull();
+      expect(await move("OPEN")).toBeNull();
+      expect(await move("QA_IN_PROGRESS")).toBeNull();
+    });
+
+    it.skipIf(!assigneesApplied)("still cannot reach the client gate", async () => {
+      // Not a gate, a dead end: `vizserve_pms_issue_approval_token` refuses a task
+      // with no request, so a task moved there could never finish or move back.
+      const taskId = await makeTask();
+      const pic = await signIn("member1VizBytes");
+
+      const { error } = await pic.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: taskId,
+        p_to_status: "FOR_CLIENT_APPROVAL",
+        p_comment: null,
+      });
+
+      expect(error?.message ?? "").toContain("no client to approve");
+    });
+
+    it.skipIf(!assigneesApplied)("writes history for every one of those moves", async () => {
+      // THE INVARIANT THAT MUST SURVIVE FREE MOVEMENT. No gates was never meant
+      // to mean no record, and `status` stays outside the column UPDATE grant so
+      // this function is still the only way it changes at all.
+      const taskId = await makeTask();
+      const pic = await signIn("member1VizBytes");
+
+      for (const to of ["ONGOING", "COMPLETED", "OPEN"]) {
+        await pic.client.rpc("vizserve_pms_transition_task", {
+          p_task_id: taskId,
+          p_to_status: to as never,
+          p_comment: null,
+        });
+      }
+
+      const { data } = await adminClient()
+        .from("vizserve_pms_task_status_history")
+        .select("to_status")
+        .eq("task_id", taskId)
+        .order("created_at");
+
+      expect((data ?? []).map((row) => row.to_status)).toEqual([
+        "OPEN",
+        "ONGOING",
+        "COMPLETED",
+        "OPEN",
+      ]);
+    });
+
+    it.skipIf(!assigneesApplied)("leaves CLIENT work on the strict pipeline", async () => {
+      const taskId = await makeRequestTask();
+      const pic = await signIn("member1VizBytes");
+
+      await pic.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: taskId,
+        p_to_status: "ONGOING",
+        p_comment: null,
+      });
+
+      // No resolution written, so the gate must hold.
+      const { error } = await pic.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: taskId,
+        p_to_status: "FOR_QA",
+        p_comment: null,
+      });
+
+      expect(error).not.toBeNull();
+      expect(await statusOf(taskId)).toBe("ONGOING");
+    });
+  });
+
+  describe.skipIf(!dbTestsEnabled)("P7-15 estimate and time tracked", () => {
+    it.skipIf(!estimateApplied)("an estimate defaults to null and is editable", async () => {
+      const taskId = await makeTask();
+      const pic = await signIn("member1VizBytes");
+
+      const { data: before } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("estimate_minutes")
+        .eq("id", taskId)
+        .single();
+      expect(before!.estimate_minutes).toBeNull();
+
+      const { error } = await pic.client
+        .from("vizserve_pms_tasks")
+        .update({ estimate_minutes: 120 })
+        .eq("id", taskId);
+      expect(error).toBeNull();
+    });
+
+    it.skipIf(!estimateApplied)("sums everyone's hours, not just the caller's own", async () => {
+      // THE REASON THE FUNCTION EXISTS. The entries policy is per-person, so a
+      // plain sum would show each viewer only their own hours and call it the
+      // task total. Two people log against one task; both must read 90.
+      const taskId = await makeTask();
+      const pic = await signIn("member1VizBytes");
+      const other = await signIn("member2VizBytes");
+      const day = new Date().toISOString().slice(0, 10);
+
+      const tl = await signIn("tlVizBytes");
+      await tl.client.rpc("vizserve_pms_add_task_assignee", {
+        p_task_id: taskId,
+        p_user_id: other.userId,
+      });
+
+      await pic.client
+        .from("vizserve_pms_timesheet_entries")
+        .insert({ user_id: pic.userId, task_id: taskId, work_date: day, minutes: 60 });
+      await other.client
+        .from("vizserve_pms_timesheet_entries")
+        .insert({ user_id: other.userId, task_id: taskId, work_date: day, minutes: 30 });
+
+      for (const who of [pic, other]) {
+        const { data, error } = await who.client.rpc("vizserve_pms_task_time_tracked", {
+          p_task_ids: [taskId],
+        });
+        expect(error).toBeNull();
+        expect((data as unknown as { minutes: number }[])[0]!.minutes).toBe(90);
+      }
+
+      await adminClient().from("vizserve_pms_timesheet_entries").delete().eq("task_id", taskId);
+    });
+
+    it.skipIf(!estimateApplied)("returns nothing for a task the caller cannot see", async () => {
+      const taskId = await makeTask();
+      const outsider = await signIn("member1VizAssists");
+
+      const { data, error } = await outsider.client.rpc("vizserve_pms_task_time_tracked", {
+        p_task_ids: [taskId],
+      });
+
+      expect(error).toBeNull();
+      expect((data as unknown as unknown[]) ?? []).toHaveLength(0);
     });
   });
 });

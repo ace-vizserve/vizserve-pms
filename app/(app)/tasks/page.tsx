@@ -5,9 +5,19 @@ import { ListChecks } from "lucide-react";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
-import { INITIAL_TASK_STATUS, TASK_STATUSES, isTerminal } from "@/lib/schemas/tasks";
-import { isTaskStatus } from "@/components/status-badge";
+import {
+  INITIAL_TASK_STATUS,
+  TASK_CATEGORY_LABELS,
+  TASK_STATUSES,
+  type TaskPriority,
+  isTerminal,
+  taskCategory,
+} from "@/lib/schemas/tasks";
+import { TaskPriorityBadge, isTaskStatus } from "@/components/status-badge";
 import { DataTable, type Column } from "@/components/data-table";
+
+import type { TaskComment } from "./comment-thread";
+import { LatestCommentCell } from "./latest-comment-cell";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
@@ -30,6 +40,10 @@ type TaskRow = {
   qa_assignee_id: string | null;
   list_id: string | null;
   request_id: string | null;
+  /** P7-01. With `request_id`, decides which of the three categories this is. */
+  is_personal: boolean;
+  /** P7-11. Null on most tasks — that is the ordinary state, not a gap. */
+  priority: TaskPriority | null;
 };
 
 /**
@@ -60,7 +74,7 @@ type TaskRow = {
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; view?: string; list?: string }>;
+  searchParams: Promise<{ status?: string; view?: string; list?: string; kind?: string }>;
 }) {
   const context = await requireAuthContext();
   const params = await searchParams;
@@ -68,10 +82,24 @@ export default async function TasksPage({
 
   const view = params.view === "mine" || params.view === "qa" ? params.view : "all";
 
+  /*
+   * Client work and internal work are two different jobs and get two different
+   * lists. They share a table and a status enum and almost nothing else: a
+   * client task is a contract with gates protecting somebody outside the
+   * company, an internal task is a board card several people share and anyone
+   * can drag between stages.
+   *
+   * "internal" INCLUDES personal work — `scopeAllows("internal", "personal")`
+   * is true, and splitting them here would make the page argue with the
+   * transition rules. `request_id` is the only test needed, and it is the same
+   * one `taskCategory` uses.
+   */
+  const kind = params.kind === "internal" || params.kind === "client" ? params.kind : "all";
+
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, resolution",
+      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, resolution",
     )
     // Nearest deadline first; undated work sinks rather than leading the queue.
     .order("due_date", { ascending: true, nullsFirst: false })
@@ -79,6 +107,8 @@ export default async function TasksPage({
 
   if (isTaskStatus(params.status)) query = query.eq("status", params.status);
   if (params.list) query = query.eq("list_id", params.list);
+  if (kind === "client") query = query.not("request_id", "is", null);
+  if (kind === "internal") query = query.is("request_id", null);
   if (view === "mine") query = query.eq("assignee_id", context.userId);
   // P3-08 — the QA queue is a view of this list, not a separate screen with a
   // separate set of rules that can drift from it.
@@ -94,11 +124,49 @@ export default async function TasksPage({
     ],
   );
 
+  /*
+   * P7-08 / K5 — every comment on every visible task, in ONE query.
+   *
+   * A query per row is an N+1 on the page people leave open all day, and the
+   * cell needs the whole thread rather than just the last line: clicking it
+   * opens the conversation in place, so fetching only the latest would mean a
+   * second round trip on every open.
+   *
+   * Scoped by `.in()` on the ids already returned, so a task the policy did not
+   * return cannot have its comments pulled in through the back door — and the
+   * comments table has its own policy underneath this anyway.
+   */
+  const taskIds = (tasks ?? []).map((task) => task.id);
+
+  const { data: commentRows } = taskIds.length
+    ? await supabase
+        .from("vizserve_pms_task_comments")
+        .select("id, task_id, body, author_id, created_at, updated_at")
+        .in("task_id", taskIds)
+        .order("created_at", { ascending: true })
+    : { data: [] };
+
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
   const listName = new Map((lists ?? []).map((list) => [list.id, list.name]));
 
+  // Threads by task, oldest first — the order they were fetched in, so the cell
+  // can take the last one without sorting again.
+  const threads = new Map<string, TaskComment[]>();
+  for (const row of commentRows ?? []) {
+    const thread = threads.get(row.task_id) ?? [];
+    thread.push({
+      id: row.id,
+      body: row.body,
+      authorId: row.author_id,
+      authorName: nameOf.get(row.author_id) ?? "Someone no longer active",
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    });
+    threads.set(row.task_id, thread);
+  }
+
   const rows = (tasks ?? []) as TaskRow[];
-  const isFiltered = Boolean(params.status || params.list) || view !== "all";
+  const isFiltered = Boolean(params.status || params.list) || view !== "all" || kind !== "all";
 
   const grouped = new Map<VizservePmsTaskStatus, TaskRow[]>(
     TASK_STATUSES.map((status) => [status, [] as TaskRow[]]),
@@ -127,14 +195,23 @@ export default async function TasksPage({
       className: "max-w-sm whitespace-normal",
       cell: (task) => (
         <>
-          <Link href={`/tasks/${task.id}`} className="font-medium hover:underline">
-            {task.title}
-          </Link>
+          <span className="flex min-w-0 items-center gap-2">
+            <Link href={`/tasks/${task.id}`} className="truncate font-medium hover:underline">
+              {task.title}
+            </Link>
+            {/* Renders nothing when unranked, which is most tasks. A "None"
+                chip on every row would mark everything, and a mark carried by
+                everything marks nothing. */}
+            <TaskPriorityBadge priority={task.priority} className="h-5 px-1.5" />
+          </span>
           <div className="mt-0.5 flex flex-wrap gap-x-2 text-2xs text-muted-foreground">
             {task.list_id ? <span>{listName.get(task.list_id)}</span> : null}
-            {/* Where it came from. A manual task has no request and saying so is
-                more useful than an empty column. */}
-            <span>{task.request_id ? "From a request" : "Added by hand"}</span>
+            {/* P7-01. THREE categories, not two. "Added by hand" used to cover
+                both work a lead assigned you and work you made for yourself —
+                and those finish differently: an assigned task goes through
+                review, a personal one you close yourself. The distinction this
+                slice exists to make is not visible unless it is said here. */}
+            <span>{TASK_CATEGORY_LABELS[taskCategory(task)]}</span>
           </div>
         </>
       ),
@@ -176,6 +253,21 @@ export default async function TasksPage({
           </>
         );
       },
+    },
+    {
+      key: "comment",
+      header: "Latest comment",
+      // Last column, and the widest thing in the row. It is the only cell that
+      // is a control rather than a value, so it sits where the eye finishes.
+      className: "hidden xl:table-cell",
+      cell: (task) => (
+        <LatestCommentCell
+          taskId={task.id}
+          taskTitle={task.title}
+          comments={threads.get(task.id) ?? []}
+          viewerId={context.userId}
+        />
+      ),
     },
   ];
 

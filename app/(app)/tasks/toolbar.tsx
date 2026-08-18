@@ -42,7 +42,7 @@ const VIEWS = [
     href: "/tasks/board",
     label: "Board",
     icon: LayoutGrid,
-    carries: ["view"],
+    carries: ["view", "kind"],
   },
 ] as const;
 
@@ -50,6 +50,29 @@ const SCOPES = [
   { value: "all", label: "All" },
   { value: "mine", label: "Mine" },
   { value: "qa", label: "Waiting on my QA" },
+] as const;
+
+/**
+ * Client work and internal work are two different jobs, so they get two
+ * different lists.
+ *
+ * They share a table and a status enum and almost nothing else: a client task
+ * is a contract with gates that exist to protect somebody outside the company,
+ * and an internal task is a board card several people share and anyone can
+ * drag. Mixing them means every row on the page answers "what can I do with
+ * this" differently from the one above it.
+ *
+ * "Internal" INCLUDES personal work, which is why there are two tabs and not
+ * three — `scopeAllows("internal", "personal")` is true, and a personal task is
+ * internal work whose owner may also close it. Splitting them here would make
+ * the page argue with the transition rules.
+ *
+ * `all` is the absence of the parameter, so the default hides nothing.
+ */
+const KINDS = [
+  { value: "all", label: "All work" },
+  { value: "internal", label: "Internal" },
+  { value: "client", label: "Client" },
 ] as const;
 
 /** The segmented track. Flat — it is a place, not a control (elevation rule). */
@@ -65,6 +88,7 @@ export function TaskToolbar({ view }: { view: "list" | "board" }) {
   const params = useSearchParams();
 
   const scope = params.get("view") ?? "all";
+  const kind = params.get("kind") ?? "all";
 
   /** The other route, keeping whatever that route can honestly honour. */
   function withParams(href: string, carries: readonly string[] | null) {
@@ -84,6 +108,15 @@ export function TaskToolbar({ view }: { view: "list" | "board" }) {
     return query ? `${pathname}?${query}` : pathname;
   }
 
+  /** Same, for the client/internal split. */
+  function withKind(value: string) {
+    const next = new URLSearchParams(params.toString());
+    if (value === "all") next.delete("kind");
+    else next.set("kind", value);
+    const query = next.toString();
+    return query ? `${pathname}?${query}` : pathname;
+  }
+
   return (
     <div className="flex flex-wrap items-center gap-2">
       <div className={TRACK} role="group" aria-label="View">
@@ -99,6 +132,23 @@ export function TaskToolbar({ view }: { view: "list" | "board" }) {
               className={cn(SEGMENT, active && SEGMENT_ON)}
             >
               <Icon className="size-3.5" aria-hidden />
+              {item.label}
+            </Link>
+          );
+        })}
+      </div>
+
+      <div className={TRACK} role="group" aria-label="Kind of work">
+        {KINDS.map((item) => {
+          const active = kind === item.value;
+
+          return (
+            <Link
+              key={item.value}
+              href={withKind(item.value)}
+              aria-current={active ? "true" : undefined}
+              className={cn(SEGMENT, active && SEGMENT_ON)}
+            >
               {item.label}
             </Link>
           );

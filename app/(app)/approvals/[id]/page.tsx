@@ -6,6 +6,7 @@ import { ArrowLeft } from "lucide-react";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate, formatDateTime } from "@/lib/dates";
+import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
 import { createClient } from "@/utils/supabase/server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
@@ -19,6 +20,8 @@ export const metadata: Metadata = { title: "Request" };
 
 type Row = InternalRequestRow & {
   vizserve_pms_users: { full_name: string; email: string } | null;
+  /** Null on every non-LEAVE row, and on LEAVE rows older than P7-12. */
+  vizserve_pms_leave_types: { label: string } | null;
 };
 
 function Field({ label, value }: { label: string; value: string }) {
@@ -38,7 +41,13 @@ export default async function InternalRequestPage({ params }: { params: Promise<
   const { data } = await supabase
     .from("vizserve_pms_internal_requests")
     .select(
-      "*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name, email)",
+      // P7-12 — the leave type comes along as an embed rather than a second
+      // query. It is visible HERE, to the requester and to the lead deciding
+      // it, and deliberately nowhere else: `vizserve_pms_leave_calendar`
+      // returns dates and a name and no type, because "on sick leave" is
+      // health information about a named colleague.
+      "*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name, email)," +
+        " vizserve_pms_leave_types(label)",
     )
     .eq("id", id)
     .maybeSingle();
@@ -93,8 +102,25 @@ export default async function InternalRequestPage({ params }: { params: Promise<
 
             {request.request_type === "LEAVE" ? (
               <>
+                {/* Falls back rather than showing nothing: LEAVE rows filed
+                    before P7-12 have no type, and the constraint is NOT VALID
+                    precisely so those stay readable. */}
+                <Field
+                  label="Leave type"
+                  value={request.vizserve_pms_leave_types?.label ?? "Not recorded"}
+                />
                 <Field label="First day" value={formatDate(request.start_date)} />
                 <Field label="Last day" value={formatDate(request.end_date)} />
+              </>
+            ) : null}
+
+            {request.request_type === "OVERTIME" ? (
+              <>
+                <Field label="Day worked" value={formatDate(request.work_date)} />
+                <Field
+                  label="How long"
+                  value={formatCellDuration(request.overtime_minutes ?? 0)}
+                />
               </>
             ) : null}
 

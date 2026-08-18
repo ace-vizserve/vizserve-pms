@@ -595,6 +595,8 @@ export type Database = {
            * work, not a state transition.
            */
           priority: VizservePmsTaskPriority | null;
+          /** P7-15. Minutes somebody expects it to take. Null = nobody estimated. */
+          estimate_minutes: number | null;
           field_values: Json;
           resolution: string | null;
           output_link: string | null;
@@ -624,6 +626,7 @@ export type Database = {
           output_link: string | null;
           list_id: string | null;
           priority: VizservePmsTaskPriority | null;
+          estimate_minutes: number | null;
         }>;
         Relationships: [
           {
@@ -869,6 +872,22 @@ export type Database = {
         Relationships: [];
       };
       /** The legal-transition table as data. Mirrored in lib/schemas/tasks.ts. */
+      /**
+       * P7-13. Additional people on a task. Written only through
+       * `vizserve_pms_add_task_assignee` / `..._remove_task_assignee`, so there
+       * is no INSERT or DELETE policy and nothing may write here directly.
+       */
+      vizserve_pms_task_assignees: {
+        Row: {
+          task_id: string;
+          user_id: string;
+          added_by: string | null;
+          added_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       vizserve_pms_task_comments: {
         Row: {
           id: string;
@@ -1460,6 +1479,30 @@ export type Database = {
           p_priority?: VizservePmsTaskPriority | null;
         };
         Returns: Json;
+      };
+      vizserve_pms_is_on_task: {
+        /** P7-13. PIC, QA reviewer, or on the assignees table. Not "may see it". */
+        Args: { p_task_id: string; p_user_id: string };
+        Returns: boolean;
+      };
+      vizserve_pms_add_task_assignee: {
+        Args: { p_task_id: string; p_user_id: string };
+        Returns: Json;
+      };
+      vizserve_pms_remove_task_assignee: {
+        Args: { p_task_id: string; p_user_id: string };
+        Returns: Json;
+      };
+      /**
+       * P7-15. Minutes logged per task, summed inside a SECURITY DEFINER.
+       *
+       * NOT a plain sum on the entries table: that table's policy is per-person,
+       * so summing it client-side shows each viewer only their own hours and
+       * calls it the task total.
+       */
+      vizserve_pms_task_time_tracked: {
+        Args: { p_task_ids: string[] };
+        Returns: { task_id: string; minutes: number }[];
       };
       vizserve_pms_task_waiting_duration: {
         Args: { p_task_id: string };

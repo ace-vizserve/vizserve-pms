@@ -124,6 +124,7 @@ export function WeekGrid({
   rows,
   tasks,
   locked,
+  approvedOvertime = {},
 }: {
   monday: string;
   days: string[];
@@ -143,6 +144,17 @@ export function WeekGrid({
    * is the same fact expressed as an absence of controls.
    */
   locked: boolean;
+  /**
+   * P7-04 / slice D — `YYYY-MM-DD` → approved overtime minutes for that day.
+   *
+   * Raises the eight-hour threshold rather than removing it: a day with two
+   * hours approved is fine at ten and still over at eleven. A day with no entry
+   * here keeps the plain 480.
+   *
+   * Advisory only. The enforced rule is the 1440-minute day trigger, and
+   * approved overtime is capped at 960 so `480 + approved` can never exceed it.
+   */
+  approvedOvertime?: Record<string, number>;
 }) {
   // The week is in the key, so navigating to another week reads that week's
   // rows rather than carrying this week's across.
@@ -214,14 +226,62 @@ export function WeekGrid({
    */
   function dayBar(day: string) {
     const total = dayTotal(day);
-    const state = dayState(total);
+    const granted = approvedOvertime[day] ?? 0;
+    const state = dayState(total, granted);
 
     return {
       state,
-      width: `${Math.min(100, Math.round((total / STANDARD_DAY_MINUTES) * 100))}%`,
+      granted,
+      // Scaled against the day's OWN threshold, so an approved eleven-hour day
+      // reads as a full bar rather than a 137% overflow that has to be clamped.
+      width: `${Math.min(100, Math.round((total / (STANDARD_DAY_MINUTES + granted)) * 100))}%`,
       fill: state === "over" ? "bg-destructive" : state === "overtime" ? "bg-warning" : "bg-primary grade-primary",
     };
   }
+
+  /**
+   * The marker under a day total, in WORDS.
+   *
+   * State is never conveyed by colour alone here — every status pill in this
+   * app carries its label and a bar is no different. A `title` attribute would
+   * not do either: it is not an affordance on touch.
+   *
+   * Returns null for a normal or empty day, so the ordinary week carries no
+   * decoration at all.
+   */
+  function dayNote(day: string): { mark: string; spoken: string } | null {
+    const total = dayTotal(day);
+    const granted = approvedOvertime[day] ?? 0;
+    const state = dayState(total, granted);
+
+    if (state === "overtime") {
+      return {
+        mark: "OT",
+        spoken: `${formatDuration(total)} logged, within the ${formatDuration(
+          STANDARD_DAY_MINUTES + granted,
+        )} approved for this day.`,
+      };
+    }
+
+    if (state === "over") {
+      return {
+        mark: "over",
+        spoken: `${formatDuration(total)} logged, ${formatDuration(
+          total - STANDARD_DAY_MINUTES - granted,
+        )} more than the ${formatDuration(STANDARD_DAY_MINUTES + granted)} ${
+          granted > 0 ? "approved for this day" : "standard day"
+        }.`,
+      };
+    }
+
+    return null;
+  }
+
+  // Counted, not inferred from the week total: there is no 40-hour constant in
+  // this repo and no working-days-per-week concept, so "the week is over" would
+  // mean deciding whether Saturday counts — which nobody has answered. A week
+  // is over when a day in it is.
+  const daysOver = days.filter((day) => dayNote(day)?.mark === "over").length;
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
@@ -406,11 +466,45 @@ export function WeekGrid({
                 Total
               </th>
 
-              {days.map((day) => (
-                <td key={day} className="border-l px-1 py-2 text-center text-sm font-semibold tabular-nums">
-                  {dayTotal(day) > 0 ? formatCellDuration(dayTotal(day)) : "—"}
-                </td>
-              ))}
+              {days.map((day) => {
+                const note = dayNote(day);
+
+                return (
+                  <td key={day} className="border-l px-1 py-2 text-center text-sm font-semibold tabular-nums">
+                    <span
+                      className={
+                        note?.mark === "over"
+                          ? "text-destructive"
+                          : note?.mark === "OT"
+                            ? "text-warning"
+                            : undefined
+                      }
+                    >
+                      {dayTotal(day) > 0 ? formatCellDuration(dayTotal(day)) : "—"}
+                    </span>
+
+                    {/* The word, under the number. Colour alone would leave a
+                        long day and an approved long day looking identical to
+                        anyone who cannot separate amber from red — and those
+                        two mean opposite things. */}
+                    {note ? (
+                      <span
+                        aria-hidden
+                        className={cn(
+                          "mt-0.5 block text-2xs leading-none font-medium",
+                          note.mark === "over" ? "text-destructive" : "text-warning",
+                        )}
+                      >
+                        {note.mark}
+                      </span>
+                    ) : null}
+
+                    {/* The same fact as a sentence, for a screen reader. "OT"
+                        on its own is not readable out loud. */}
+                    {note ? <span className="sr-only">{note.spoken}</span> : null}
+                  </td>
+                );
+              })}
 
               <td className="border-l px-2 py-2 text-right text-sm font-semibold tabular-nums">
                 {weekTotal > 0 ? formatCellDuration(weekTotal) : "—"}
@@ -424,6 +518,17 @@ export function WeekGrid({
         {weekTotal > 0 ? (
           <>
             <span className="font-medium text-foreground">{formatDuration(weekTotal)}</span> this week ·{" "}
+          </>
+        ) : null}
+
+        {/* Days, not hours. There is no weekly standard in this codebase to be
+            over BY, so the honest statement is how many days ran long. */}
+        {daysOver > 0 ? (
+          <>
+            <span className="font-medium text-destructive">
+              {daysOver === 1 ? "1 day over" : `${daysOver} days over`}
+            </span>{" "}
+            the standard day ·{" "}
           </>
         ) : null}
         {/* The typing hint is instructions for a thing that can no longer be

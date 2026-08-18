@@ -68,12 +68,24 @@ describe("availableTransitions — every category has exactly one way to finish"
     expect(targets(availableTransitions("ONGOING", PIC, PERSONAL))).toContain("COMPLETED");
   });
 
-  it("does not offer that on work somebody else assigned", () => {
-    expect(targets(availableTransitions("ONGOING", PIC, INTERNAL))).not.toContain("COMPLETED");
+  it("does not let CLIENT work skip to done", () => {
+    // Internal work used to be barred from this too. P7-13 removed that: work
+    // with no client moves freely, and closing your own internal task from
+    // ONGOING is the ordinary case rather than a shortcut round a gate.
+    // Client work keeps every gate, because each one has somebody outside the
+    // company on the other end.
     expect(targets(availableTransitions("ONGOING", PIC, CLIENT))).not.toContain("COMPLETED");
   });
 
+  it("lets internal work go straight to done — P7-13", () => {
+    expect(targets(availableTransitions("ONGOING", PIC, INTERNAL))).toContain("COMPLETED");
+  });
+
   it("sends only client work to the client gate", () => {
+    // For internal work this is now the ONE exclusion in the free-movement
+    // branch rather than a missing table row — a dead end, not a gate:
+    // `vizserve_pms_issue_approval_token` refuses a task with no request, so a
+    // task moved there could never be finished or moved back.
     expect(targets(availableTransitions("QA_IN_PROGRESS", QA, CLIENT))).toContain(
       "FOR_CLIENT_APPROVAL",
     );

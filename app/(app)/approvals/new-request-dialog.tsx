@@ -22,9 +22,14 @@ import {
   INTERNAL_REQUEST_BLURBS,
   INTERNAL_REQUEST_LABELS,
   INTERNAL_REQUEST_TYPES,
+  MAX_OVERTIME_MINUTES,
   type InternalRequestType,
 } from "@/lib/schemas/internal-requests";
+import { toMinutes } from "@/lib/schemas/timesheet";
 import { submitInternalRequest } from "./actions";
+
+/** Only what the picker needs. The server page selects the active ones, in order. */
+export type PickableLeaveType = { id: string; label: string };
 
 /**
  * P5-06 — the four internal request forms.
@@ -46,7 +51,7 @@ function FieldError({ messages }: { messages?: string[] }) {
   );
 }
 
-export function NewRequestDialog() {
+export function NewRequestDialog({ leaveTypes = [] }: { leaveTypes?: PickableLeaveType[] }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [type, setType] = useState<InternalRequestType>("LEAVE");
@@ -69,6 +74,7 @@ export function NewRequestDialog() {
             reason,
             start_date: String(formData.get("start_date") ?? ""),
             end_date: String(formData.get("end_date") ?? ""),
+            leave_type_id: String(formData.get("leave_type_id") ?? ""),
           }
         : type === "REIMBURSEMENT"
           ? {
@@ -78,12 +84,26 @@ export function NewRequestDialog() {
               // than "enter the amount". NaN gets the right message.
               amount: Number(String(formData.get("amount") ?? "").trim() || "NaN"),
             }
-          : {
-              request_type: type,
-              reason,
-              work_date: String(formData.get("work_date") ?? ""),
-              correction_time: String(formData.get("correction_time") ?? ""),
-            };
+          : type === "OVERTIME"
+            ? {
+                request_type: "OVERTIME" as const,
+                reason,
+                work_date: String(formData.get("work_date") ?? ""),
+                // Two fields, one number. `toMinutes` is the parser the
+                // timesheet already uses — a second one here would be a second
+                // set of rules about what "1h 30" means.
+                overtime_minutes:
+                  toMinutes(
+                    String(formData.get("overtime_hours") ?? ""),
+                    String(formData.get("overtime_mins") ?? ""),
+                  ) ?? Number.NaN,
+              }
+            : {
+                request_type: type,
+                reason,
+                work_date: String(formData.get("work_date") ?? ""),
+                correction_time: String(formData.get("correction_time") ?? ""),
+              };
 
     startTransition(async () => {
       const result = await submitInternalRequest(payload);
@@ -123,10 +143,13 @@ export function NewRequestDialog() {
         <form action={submit} className="space-y-4">
           <div className="space-y-2">
             <Label>Type</Label>
-            {/* Buttons rather than a select: there are exactly four, they are
-                not going to grow, and the choice changes the rest of the form —
-                which is worth seeing all at once. */}
-            <div className="grid grid-cols-2 gap-2">
+            {/* Buttons rather than a select: the choice changes the rest of the
+                form, which is worth seeing all at once.
+
+                Three columns, not two. P7-04 made this five types, and an odd
+                number in a two-column grid leaves the last button stranded on a
+                row of its own looking like a different kind of control. */}
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {INTERNAL_REQUEST_TYPES.map((option) => (
                 <button
                   key={option}
@@ -149,16 +172,96 @@ export function NewRequestDialog() {
           </div>
 
           {type === "LEAVE" ? (
+            <>
+              {/* P7-12. REQUIRED — the shape constraint refuses a LEAVE row
+                  without one, so this is not an optional refinement: the whole
+                  type stops submitting without it.
+
+                  A native select rather than the styled one, and a plain list
+                  rather than grouped: the list is admin-editable data, so any
+                  grouping here would be a second opinion about it that goes
+                  stale the first time HR adds a type. */}
+              <div className="space-y-2">
+                <Label htmlFor="leave_type_id">Leave type</Label>
+                <select
+                  id="leave_type_id"
+                  name="leave_type_id"
+                  defaultValue=""
+                  className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <option value="" disabled>
+                    Choose one…
+                  </option>
+                  {leaveTypes.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+                <FieldError messages={errors.leave_type_id} />
+              </div>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-2">
+                  <Label htmlFor="start_date">First day</Label>
+                  <Input id="start_date" name="start_date" type="date" defaultValue={today} />
+                  <FieldError messages={errors.start_date} />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="end_date">Last day</Label>
+                  <Input id="end_date" name="end_date" type="date" defaultValue={today} />
+                  <FieldError messages={errors.end_date} />
+                </div>
+              </div>
+            </>
+          ) : null}
+
+          {type === "OVERTIME" ? (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
-                <Label htmlFor="start_date">First day</Label>
-                <Input id="start_date" name="start_date" type="date" defaultValue={today} />
-                <FieldError messages={errors.start_date} />
+                <Label htmlFor="work_date">Which day</Label>
+                {/* Today is allowed and capped there. Asking at 17:00 for the
+                    evening you are about to work is the ordinary case; the
+                    submit function says so too. */}
+                <Input
+                  id="work_date"
+                  name="work_date"
+                  type="date"
+                  max={today}
+                  defaultValue={today}
+                />
+                <FieldError messages={errors.work_date} />
               </div>
+
               <div className="space-y-2">
-                <Label htmlFor="end_date">Last day</Label>
-                <Input id="end_date" name="end_date" type="date" defaultValue={today} />
-                <FieldError messages={errors.end_date} />
+                <Label htmlFor="overtime_hours">How long</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="overtime_hours"
+                    name="overtime_hours"
+                    type="number"
+                    min="0"
+                    max={Math.floor(MAX_OVERTIME_MINUTES / 60)}
+                    inputMode="numeric"
+                    placeholder="0"
+                    aria-label="Overtime hours"
+                    className="w-20 text-center tabular-nums"
+                  />
+                  <span className="text-sm text-muted-foreground">h</span>
+                  <Input
+                    id="overtime_mins"
+                    name="overtime_mins"
+                    type="number"
+                    min="0"
+                    max="59"
+                    inputMode="numeric"
+                    placeholder="0"
+                    aria-label="Overtime minutes"
+                    className="w-20 text-center tabular-nums"
+                  />
+                  <span className="text-sm text-muted-foreground">m</span>
+                </div>
+                <FieldError messages={errors.overtime_minutes} />
               </div>
             </div>
           ) : null}
@@ -213,7 +316,9 @@ export function NewRequestDialog() {
               placeholder={
                 type === "LEAVE"
                   ? "Family matters, medical appointment…"
-                  : "What happened, briefly."
+                  : type === "OVERTIME"
+                    ? "What needed the extra hours."
+                    : "What happened, briefly."
               }
             />
             <FieldError messages={errors.reason} />

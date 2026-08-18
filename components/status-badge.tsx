@@ -18,7 +18,11 @@ import type {
   VizservePmsTaskStatus,
 } from "@/lib/database.types";
 import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
-import { TASK_STATUS_LABELS } from "@/lib/schemas/tasks";
+import {
+  TASK_PRIORITY_LABELS,
+  TASK_STATUS_LABELS,
+  type TaskPriority,
+} from "@/lib/schemas/tasks";
 
 /**
  * Every pill in the app is this shape. It lived in three places before —
@@ -316,4 +320,39 @@ export function InternalTypeBadge({
   className?: string;
 }) {
   return <Pill tone="neutral" label={INTERNAL_REQUEST_LABELS[type]} className={className} />;
+}
+
+/**
+ * P7-11 — priority.
+ *
+ * THE REFERENCE UI BREAKS THIS APP'S RULE and is not followed. ClickUp's picker
+ * is four flags distinguished only by colour: identical shapes, red / yellow /
+ * blue / grey. State is never conveyed by colour alone here, so priority gets
+ * the same labelled chip every other status uses, and the flag is decoration
+ * inside the picker rather than the carrier of the value anywhere else.
+ *
+ * `null` renders NOTHING, deliberately. Most tasks have no priority — that is
+ * the ordinary state, not a missing value — and a "None" chip on every
+ * unranked row would put a mark on everything, which is how a mark stops
+ * meaning anything.
+ */
+const TASK_PRIORITY_TONES: Record<TaskPriority, ChipTone> = {
+  URGENT: "danger",
+  HIGH: "warning",
+  NORMAL: "info",
+  LOW: "neutral",
+};
+
+export function TaskPriorityBadge({
+  priority,
+  className,
+}: {
+  priority: TaskPriority | null;
+  className?: string;
+}) {
+  if (!priority) return null;
+
+  return (
+    <Pill tone={TASK_PRIORITY_TONES[priority]} label={TASK_PRIORITY_LABELS[priority]} className={className} />
+  );
 }

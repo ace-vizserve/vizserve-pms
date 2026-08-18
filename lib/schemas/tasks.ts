@@ -355,7 +355,40 @@ export function availableTransitions(
 ): Transition[] {
   const category = taskCategory(task);
 
+  /*
+   * P7-13 — WORK WITH NO CLIENT MOVES FREELY, and the mirror has to say so or
+   * the buttons will not be there to press.
+   *
+   * `vizserve_pms_transition_task` does not consult the transition table at all
+   * for internal or personal work: any status to any status, no required
+   * fields, by anyone on the task. This branch is that rule, and it is the one
+   * place in this file that is NOT a copy of a table row.
+   *
+   * The single exclusion is `FOR_CLIENT_APPROVAL`, and it is not a gate — it is
+   * a dead end. `vizserve_pms_issue_approval_token` refuses a task with no
+   * request, so a task moved there could never be finished or moved back.
+   *
+   * Everyone on the task gets the same set. The QA seat means nothing here,
+   * because there is no reviewer gate left for it to guard.
+   */
+  if (category !== "request") {
+    if (!(viewer.isPic || viewer.isQa || viewer.leadsDepartment)) return [];
+
+    return TASK_STATUSES.filter(
+      (target) => target !== status && target !== "FOR_CLIENT_APPROVAL",
+    ).map((target) => ({
+      from: status,
+      to: target,
+      actor: "pic" as const,
+      requires: null,
+      appliesTo: "internal" as const,
+      label: TASK_STATUS_LABELS[target],
+    }));
+  }
+
   return transitionsFrom(status).filter((transition) => {
+    // A rule written for work without a client cannot be borrowed by work with
+    // one — the mirror of the server's own check.
     if (!scopeAllows(transition.appliesTo, category)) return false;
     if (transition.actor === "pic") return viewer.isPic || viewer.leadsDepartment;
     if (transition.actor === "qa") return viewer.isQa || viewer.leadsDepartment;
@@ -423,6 +456,18 @@ export const taskDetailsSchema = z.object({
    * INSIDE the column-level UPDATE grant and `status` does not.
    */
   priority: taskPrioritySchema.default(null),
+  /**
+   * P7-15. Minutes, like every other duration here — parse the field with
+   * `parseCellDuration` so `2h` means the same thing as it does in a timesheet
+   * cell. Null is "nobody estimated", which is most tasks.
+   */
+  estimate_minutes: z
+    .number()
+    .int("Give it in whole minutes.")
+    .positive("An estimate of nothing is not an estimate.")
+    .max(100_000, "That is more than ten working weeks — is it one task?")
+    .nullable()
+    .default(null),
 });
 
 export type TaskDetailsInput = z.infer<typeof taskDetailsSchema>;

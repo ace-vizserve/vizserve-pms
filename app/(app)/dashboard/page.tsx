@@ -4,6 +4,7 @@ import { ArrowRight, Bell, ClipboardCheck, ListChecks, ShieldCheck } from "lucid
 
 import { cn } from "@/lib/utils";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import { countWaitingOnYou } from "@/lib/approvals-queue-server";
 import { loadPunchState } from "@/lib/dtr-server";
 import { PageShell } from "@/components/page-shell";
 import { StatTile } from "@/components/stat-tile";
@@ -36,14 +37,14 @@ export default async function DashboardPage() {
   const isApprover = roleAtLeast(context.role, "team_leader");
   const firstName = context.fullName.trim().split(" ")[0] || "there";
 
-  const [punchState, pending, unread, myTasks, myQa] = await Promise.all([
+  const [punchState, waiting, unread, myTasks, myQa] = await Promise.all([
     loadPunchState(context.userId),
-    isApprover
-      ? supabase
-          .from("vizserve_pms_requests")
-          .select("id", { count: "exact", head: true })
-          .eq("status", "PENDING_REVIEW")
-      : Promise.resolve({ count: null }),
+
+    // Three queues, not one — see `countWaitingOnYou`. This tile counted client
+    // requests alone until 18 Aug 2026, so a lead with a full internal queue
+    // and no client work was told they had nothing to do.
+    countWaitingOnYou(supabase, context.userId, isApprover),
+
     supabase
       .from("vizserve_pms_notifications")
       .select("id", { count: "exact", head: true })
@@ -79,14 +80,20 @@ export default async function DashboardPage() {
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+        {/* One tile summing three queues, not three tiles. The QA tile below
+            already argues why: a permanent zero teaches people to stop looking,
+            and two of these three are empty most days. The breakdown is in the
+            hint; the link goes to the home page's "Waiting on you" list, which
+            is the only screen that shows all three together — sending it to one
+            of the three would make the tile pick a favourite. */}
         {isApprover ? (
           <StatTile
-            label="Pending approvals"
-            value={pending.count ?? 0}
-            hint="Requests awaiting your decision"
+            label="Waiting on you"
+            value={waiting.total}
+            hint={waiting.breakdown || "Nothing awaiting your decision"}
             icon={<ClipboardCheck />}
             tone="warning"
-            href="/requests?status=PENDING_REVIEW"
+            href="/"
             linkLabel="Open queue"
           />
         ) : null}

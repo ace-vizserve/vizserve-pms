@@ -112,15 +112,30 @@ export default async function ApprovalsPage() {
   const context = await requireAuthContext();
   const supabase = await createClient();
 
-  const { data, error: requestsError } = await supabase
-    .from("vizserve_pms_internal_requests")
-    .select("*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)")
-    .order("created_at", { ascending: false })
-    // One more than shown, so truncation is detectable. The list splits into
-    // "mine" and "pending on me" AFTER this, so a silent cap here does not just
-    // hide old rows — it can drop something out of somebody's approval queue
-    // with nothing on screen to say so.
-    .limit(APPROVALS_PAGE_SIZE + 1);
+  const [{ data, error: requestsError }, { data: leaveTypes }] = await Promise.all([
+    supabase
+      .from("vizserve_pms_internal_requests")
+      .select("*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)")
+      .order("created_at", { ascending: false })
+      // One more than shown, so truncation is detectable. The list splits into
+      // "mine" and "pending on me" AFTER this, so a silent cap here does not just
+      // hide old rows — it can drop something out of somebody's approval queue
+      // with nothing on screen to say so.
+      .limit(APPROVALS_PAGE_SIZE + 1),
+
+    // P7-12 — the picker's options.
+    //
+    // ACTIVE ONLY, and ordered by the list's own `sort_order` rather than
+    // alphabetically: a retired type stays valid on the requests that already
+    // reference it and must not be selectable for a new one, and the seeded
+    // order puts Vacation and Sick first because that is what almost everybody
+    // picks.
+    supabase
+      .from("vizserve_pms_leave_types")
+      .select("id, label")
+      .eq("is_active", true)
+      .order("sort_order"),
+  ]);
 
   const fetched = (data ?? []) as unknown as Row[];
   const truncated = fetched.length > APPROVALS_PAGE_SIZE;
@@ -140,7 +155,7 @@ export default async function ApprovalsPage() {
           Leave, time corrections and reimbursements. Leave balances are counted by HR — this is the
           record, not an entitlement check.
         </p>
-        <NewRequestDialog />
+        <NewRequestDialog leaveTypes={leaveTypes ?? []} />
       </div>
 
       {/* Approver queue first when there is one: it is the thing with somebody

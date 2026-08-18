@@ -56,8 +56,14 @@ export default async function TimesheetPage({
   const days = weekDates(monday);
   const sunday = days[6];
 
-  const [entriesResult, tasksResult, weekResult, departmentsResult, listsResult] =
-    await Promise.all([
+  const [
+    entriesResult,
+    tasksResult,
+    weekResult,
+    overtimeResult,
+    departmentsResult,
+    listsResult,
+  ] = await Promise.all([
     // NOTE: the third query is at the bottom of this array — the week row.
     supabase
       .from("vizserve_pms_timesheet_entries")
@@ -109,6 +115,31 @@ export default async function TimesheetPage({
       .eq("week_start", monday)
       .maybeSingle(),
 
+    /*
+     * P7-04 / slice D — overtime somebody's lead has already signed off.
+     *
+     * The eight-hour rule is `480 + approved overtime for that day`, so without
+     * this the grid marks a legitimately approved eleven-hour day as over —
+     * which trains people to ignore the marker, and the marker is the only
+     * thing the rule has.
+     *
+     * ADVISORY, NEVER ENFORCEMENT. The database caps a day at 1440 minutes and
+     * does not care about this figure at all; approved overtime is capped at
+     * 960 precisely so `480 + 960` cannot exceed what the trigger allows.
+     *
+     * `requester_id` narrows a policy result rather than replacing one — a lead
+     * can read their team's requests, and this screen is first-person. No RLS
+     * change, and no department filter.
+     */
+    supabase
+      .from("vizserve_pms_internal_requests")
+      .select("work_date, overtime_minutes")
+      .eq("requester_id", context.userId)
+      .eq("request_type", "OVERTIME")
+      .eq("status", "APPROVED")
+      .gte("work_date", monday)
+      .lte("work_date", days[days.length - 1]!),
+
     // Names for the location line under each task. Two small reference reads
     // rather than a deeper embed on the entries query: the entries embed is
     // already a LEFT join guarding against a task that left this person's
@@ -117,6 +148,24 @@ export default async function TimesheetPage({
     supabase.from("vizserve_pms_departments").select("id, name"),
     supabase.from("vizserve_pms_lists").select("id, name"),
   ]);
+
+  /**
+   * Approved overtime minutes per day.
+   *
+   * SUMMED, not last-one-wins: there is deliberately no unique constraint on
+   * (requester, work_date, OVERTIME), because two separate approvals for one
+   * day is a legitimate thing that happened and each needed a lead's signature.
+   * Taking one and discarding the other would quietly lower the threshold below
+   * what was actually granted.
+   */
+  const approvedOvertime = (overtimeResult.data ?? []).reduce<Record<string, number>>(
+    (byDay, row) => {
+      if (!row.work_date) return byDay;
+      byDay[row.work_date] = (byDay[row.work_date] ?? 0) + (row.overtime_minutes ?? 0);
+      return byDay;
+    },
+    {},
+  );
 
   const departmentName = new Map(
     (departmentsResult.data ?? []).map((row) => [row.id, row.name]),
@@ -310,6 +359,7 @@ export default async function TimesheetPage({
           // `vizserve_pms_timesheet_week_locked`, and RETURNED is absent from
           // both — which is the whole "unlock when sent back" mechanism.
           locked={isWeekLocked(week?.status ?? null)}
+          approvedOvertime={approvedOvertime}
         />
       )}
     </PageShell>

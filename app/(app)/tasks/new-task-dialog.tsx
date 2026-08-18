@@ -26,7 +26,10 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 
+import type { TaskPriority } from "@/lib/schemas/tasks";
+
 import { createTask } from "./actions";
+import { PriorityPicker } from "./priority-picker";
 
 /**
  * P3-12 — a task with no request behind it.
@@ -142,6 +145,7 @@ function TaskForm({
   const [qaAssigneeId, setQaAssigneeId] = useState<string>(NONE);
   const [dueDate, setDueDate] = useState("");
   const [listId, setListId] = useState<string>(NONE);
+  const [priority, setPriority] = useState<TaskPriority | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   // Narrowed to the chosen department, because the server refuses an assignee
@@ -177,6 +181,7 @@ function TaskForm({
         qa_assignee_id: qaAssigneeId === NONE ? null : qaAssigneeId,
         due_date: dueDate,
         list_id: listId === NONE ? null : listId,
+        priority,
       });
 
       if (!result.ok) {
@@ -310,6 +315,8 @@ function TaskForm({
             </Select>
           </div>
         ) : null}
+
+        <PriorityPicker value={priority} onChange={setPriority} disabled={pending} />
 
         {formError ? (
           <p

@@ -89,6 +89,11 @@ export async function submitInternalRequest(input: unknown): Promise<ActionResul
     // every overtime request with a null and let the shape CHECK reject it at
     // runtime. `tests/db/phase5.test.ts` is the guard, not the compiler.
     p_overtime_minutes: value.request_type === "OVERTIME" ? value.overtime_minutes : null,
+    // ⚠️ Optional to the compiler for the same reason, and with a sharper
+    // consequence: P7-12 made this REQUIRED on LEAVE at the constraint level, so
+    // omitting it here does not degrade leave requests — it stops them
+    // submitting at all.
+    p_leave_type_id: value.request_type === "LEAVE" ? value.leave_type_id : null,
   });
 
   if (error) return { ok: false, error: readableError(error) };

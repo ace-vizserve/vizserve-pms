@@ -7,7 +7,8 @@ import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { TASK_STATUS_LABELS, isTerminal } from "@/lib/schemas/tasks";
-import { Chip, TaskStatusBadge } from "@/components/status-badge";
+import { Chip, TaskPriorityBadge, TaskStatusBadge } from "@/components/status-badge";
+import { CommentThread } from "../comment-thread";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -36,7 +37,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const { data: task } = await supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, description, status, resolution, output_link, due_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, field_values, created_at",
+      "id, title, description, status, resolution, output_link, due_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, field_values, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -49,6 +50,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     { data: lists },
     { data: request },
     { data: outputs },
+    { data: commentRows },
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_task_status_history")
@@ -78,6 +80,12 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       .select("id, filename, mime_type, size_bytes, uploaded_by")
       .eq("task_id", id)
       .order("created_at"),
+    // P7-08. Oldest first, which is reading order for a conversation.
+    supabase
+      .from("vizserve_pms_task_comments")
+      .select("id, body, author_id, created_at, updated_at")
+      .eq("task_id", id)
+      .order("created_at", { ascending: true }),
   ]);
 
   // The originating form's fields, including archived ones — a historical answer
@@ -130,6 +138,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-xl font-semibold tracking-tight">{task.title}</h1>
             <TaskStatusBadge status={task.status} />
+            <TaskPriorityBadge priority={task.priority} />
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
             {request ? (
@@ -140,8 +149,10 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 {" · "}
                 {request.requester_name}
               </>
+            ) : task.is_personal ? (
+              "Your own task — you can close it yourself"
             ) : (
-              "Added by hand — no client request behind it"
+              "Assigned to you — it goes through review"
             )}
           </p>
         </div>
@@ -266,6 +277,30 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             }
             uploaderNames={nameOf}
           />
+
+          {/* P7-08. Above History and below the work itself: the conversation is
+              something people take part in, the trail is something they consult.
+              Same component the list's popover renders, so an edited comment
+              says so in both places. */}
+          <Card size="sm" className="mt-4">
+            <CardHeader>
+              <CardTitle>Comments</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <CommentThread
+                taskId={task.id}
+                viewerId={context.userId}
+                comments={(commentRows ?? []).map((row) => ({
+                  id: row.id,
+                  body: row.body,
+                  authorId: row.author_id,
+                  authorName: nameOf.get(row.author_id) ?? "Someone no longer active",
+                  createdAt: row.created_at,
+                  updatedAt: row.updated_at,
+                }))}
+              />
+            </CardContent>
+          </Card>
         </div>
 
         {/* History alone, deliberately unclamped — no sticky, no max-height. The

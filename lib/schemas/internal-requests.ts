@@ -164,3 +164,43 @@ export const internalDecisionSchema = z.discriminatedUnion("decision", [
 ]);
 
 export type InternalDecisionInput = z.infer<typeof internalDecisionSchema>;
+
+/**
+ * P7-F — the two query parameters the DTR shortcut hands to `/approvals`.
+ *
+ * Someone looking at a gap in their own DTR should not have to leave the screen
+ * showing the problem, open a dialog, choose the type and retype the date they
+ * were just looking at. Every one of those steps is a chance to file the
+ * correction against the wrong day. So the DTR row links here with the type and
+ * the date already chosen.
+ *
+ * PREFILL IS A CONVENIENCE, NEVER AN AUTHORITY. Nothing narrowed here is
+ * trusted server-side: `vizserve_pms_submit_internal_request` still resolves the
+ * department from the caller's own row and still refuses a future correction.
+ * This exists so a hand-edited URL opens the PLAIN dialog rather than erroring —
+ * the same posture `/timesheet` already takes with `?week=banana`.
+ *
+ * Returns undefined per field rather than throwing, because a bad parameter is
+ * not a failure state: it is a link somebody mangled, and the right response is
+ * the dialog they were trying to reach.
+ */
+export function narrowRequestPrefill(params: {
+  type?: string | string[] | null;
+  date?: string | string[] | null;
+}): { type?: InternalRequestType; date?: string } {
+  // Next hands back `string[]` when a parameter appears twice. Taking the first
+  // would silently honour `?type=LEAVE&type=OVERTIME`; a repeated parameter is
+  // not a choice, so neither is honoured.
+  const type = typeof params.type === "string" ? params.type : undefined;
+  const date = typeof params.date === "string" ? params.date : undefined;
+
+  return {
+    type: INTERNAL_REQUEST_TYPES.includes(type as InternalRequestType)
+      ? (type as InternalRequestType)
+      : undefined,
+    // Shape only. A real date still has to survive the schema and the function
+    // — `2026-02-31` matches this regex and is refused later, which is the
+    // right place for it: this is a URL guard, not a calendar.
+    date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
+  };
+}

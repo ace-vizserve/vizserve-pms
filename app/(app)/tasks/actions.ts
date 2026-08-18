@@ -425,6 +425,10 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
     p_qa_assignee_id: values.qa_assignee_id,
     p_due_date: values.due_date || null,
     p_list_id: values.list_id,
+    // ⚠️ P7-11. OPTIONAL to the compiler, because the SQL parameter has a
+    // default — so leaving it out is not a type error, it just files every task
+    // as unranked. `tests/db/tasks.test.ts` is the guard, not tsc.
+    p_priority: values.priority,
   });
 
   if (error) return { ok: false, error: readableError(error) };
@@ -467,6 +471,9 @@ export async function createPersonalTask(
     p_description: values.description,
     p_due_date: values.due_date || null,
     p_list_id: values.list_id,
+    // P7-11. Present here where department and assignee are not: how urgent
+    // your own work is IS yours to decide.
+    p_priority: values.priority,
   });
 
   if (error) return { ok: false, error: readableError(error) };
