@@ -15,7 +15,8 @@ import {
 
 import Image from "next/image";
 
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { buttonVariants } from "@/components/ui/button";
 import { MarketingNav } from "@/components/marketing/marketing-nav";
 import { ScrollLink } from "@/components/marketing/scroll-link";
 import { createClient } from "@/utils/supabase/server";
@@ -200,16 +201,25 @@ export default async function LandingPage() {
               </p>
 
               <div className="mt-7 flex flex-col items-center justify-center gap-2.5 sm:flex-row">
-                <Button
-                  size="lg"
-                  className="w-full rounded-full bg-brand text-brand-foreground hover:bg-brand/90 active:bg-brand/80 sm:w-auto" render={<Link href={signedIn ? "/dashboard" : "/login"} />}>
-                    {signedIn ? "Open dashboard" : "Sign in"}
-                    <ArrowRight className="size-4" />
-                  </Button>
-                <Button
-                  size="lg"
-                  variant="outline"
-                  className="w-full rounded-full sm:w-auto" render={<ScrollLink href="#lifecycle" />}>See how it works</Button>
+                <Link
+                  href={signedIn ? "/dashboard" : "/login"}
+                  className={cn(
+                    buttonVariants({ size: "lg" }),
+                    "w-full rounded-full bg-brand text-brand-foreground hover:bg-brand/90 active:bg-brand/80 sm:w-auto",
+                  )}
+                >
+                  {signedIn ? "Open dashboard" : "Sign in"}
+                  <ArrowRight className="size-4" />
+                </Link>
+                <ScrollLink
+                  href="#lifecycle"
+                  className={cn(
+                    buttonVariants({ size: "lg", variant: "outline" }),
+                    "w-full rounded-full sm:w-auto",
+                  )}
+                >
+                  See how it works
+                </ScrollLink>
               </div>
 
               <p className="mt-4 text-xs text-muted-foreground">
@@ -403,12 +413,16 @@ export default async function LandingPage() {
             <p className="mx-auto mt-3 max-w-xl text-sm text-pretty text-white/80">
               Sign in with your VizServe account to pick up what is waiting on you.
             </p>
-            <Button
-              size="lg"
-              className="mt-6 rounded-full bg-background text-foreground hover:bg-background/90 active:bg-background/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" render={<Link href={signedIn ? "/dashboard" : "/login"} />}>
-                {signedIn ? "Open dashboard" : "Sign in"}
-                <ArrowRight className="size-4" />
-              </Button>
+            <Link
+              href={signedIn ? "/dashboard" : "/login"}
+              className={cn(
+                buttonVariants({ size: "lg" }),
+                "mt-6 rounded-full bg-background text-foreground hover:bg-background/90 active:bg-background/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+              )}
+            >
+              {signedIn ? "Open dashboard" : "Sign in"}
+              <ArrowRight className="size-4" />
+            </Link>
           </div>
         </section>
       </main>

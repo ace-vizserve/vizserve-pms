@@ -5,7 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { Menu } from "lucide-react";
 
-import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { ScrollLink } from "./scroll-link";
 
@@ -74,9 +75,15 @@ export function MarketingNav({ signedIn }: { signedIn: boolean }) {
         <div className="ml-auto flex items-center gap-2">
           {/* White on brand blue is the same 6.54:1 pair as brand-on-white,
               just inverted — the only CTA treatment that stays legible here. */}
-          <Button
-            size="sm"
-            className="rounded-full bg-white text-brand-surface hover:bg-white/90 active:bg-white/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white" render={<Link href={ctaHref} />}>{ctaLabel}</Button>
+          <Link
+            href={ctaHref}
+            className={cn(
+              buttonVariants({ size: "sm" }),
+              "rounded-full bg-white text-brand-surface hover:bg-white/90 active:bg-white/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
+            )}
+          >
+            {ctaLabel}
+          </Link>
 
           <Sheet open={open} onOpenChange={setOpen}>
             <SheetTrigger render={<Button

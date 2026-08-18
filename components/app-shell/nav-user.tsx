@@ -5,6 +5,7 @@ import { ChevronsUpDown, LogOut } from "lucide-react";
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -71,29 +72,43 @@ export function NavUser({
             side={isMobile ? "bottom" : "right"}
             className="w-64"
           >
-            <DropdownMenuLabel className="font-normal">
-              <div className="space-y-1">
-                <p className="text-sm font-medium">{displayName}</p>
-                <p className="text-xs text-muted-foreground">{email}</p>
-                <p className="pt-1">
-                  <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
-                    {ROLE_LABELS[role] ?? role}
-                  </span>
-                </p>
-                {departments.length > 0 ? (
-                  <p className="pt-1 text-xs text-muted-foreground">
-                    Leads: {departments.join(", ")}
+            {/* The Group is required, not decoration. DropdownMenuLabel is
+                Base UI's Menu.GroupLabel, which reads MenuGroupContext to point
+                its group's aria-labelledby at itself — outside a Group that
+                context is missing and Base UI throws outright. This label was
+                sitting bare, so every authenticated page raised it. */}
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="font-normal">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">{displayName}</p>
+                  <p className="text-xs text-muted-foreground">{email}</p>
+                  <p className="pt-1">
+                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                      {ROLE_LABELS[role] ?? role}
+                    </span>
                   </p>
-                ) : null}
-              </div>
-            </DropdownMenuLabel>
+                  {departments.length > 0 ? (
+                    <p className="pt-1 text-xs text-muted-foreground">
+                      Leads: {departments.join(", ")}
+                    </p>
+                  ) : null}
+                </div>
+              </DropdownMenuLabel>
+            </DropdownMenuGroup>
 
             <DropdownMenuSeparator />
 
             {/* A form, not an onClick: sign-out is a server action and must
-                survive JavaScript being unavailable or still loading. */}
+                survive JavaScript being unavailable or still loading.
+
+                `nativeButton` is the other half of that decision. Menu.Item
+                defaults it to FALSE — a menu item is normally a div with
+                role="menuitem" — so handing it a real <button> makes Base UI
+                warn that it is about to add non-native attributes on top of
+                native behaviour. The button is deliberate here, so the honest
+                fix is to say so rather than to give up the form. */}
             <form action={signOut}>
-              <DropdownMenuItem render={<button type="submit" className="w-full" />}>
+              <DropdownMenuItem nativeButton render={<button type="submit" className="w-full" />}>
                 <LogOut />
                 Sign out
               </DropdownMenuItem>

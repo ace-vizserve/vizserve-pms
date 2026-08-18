@@ -2,13 +2,14 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Bell, ClipboardCheck, ListChecks, ShieldCheck } from "lucide-react";
 
+import { cn } from "@/lib/utils";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { loadPunchState } from "@/lib/dtr-server";
 import { PageShell } from "@/components/page-shell";
 import { StatTile } from "@/components/stat-tile";
 import { PunchPanel } from "../dtr/punch-panel";
 import { createClient } from "@/utils/supabase/server";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 export const metadata: Metadata = { title: "Dashboard" };
@@ -133,9 +134,12 @@ export default async function DashboardPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <PunchPanel initial={punchState} compact />
-          <Button variant="ghost" size="sm" className="-ml-2" render={<Link href="/dtr" />}>
+          <Link
+            href="/dtr"
+            className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-2")}
+          >
             Open my DTR <ArrowRight className="size-3.5" />
-          </Button>
+          </Link>
         </CardContent>
       </Card>
     </PageShell>

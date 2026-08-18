@@ -7,7 +7,7 @@ import { formatDate, isOverdue } from "@/lib/dates";
 import { TASK_STATUS_LABELS, TASK_STATUSES, isTerminal } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Board" };
 
@@ -69,10 +69,10 @@ export default async function TaskBoardPage({
           Live work by stage. Open a card to move it — the steps available depend on where it is and
           whether you are the PIC or the reviewer.
         </p>
-        <Button variant="outline" size="sm" render={<Link href="/tasks" />}>
+        <Link href="/tasks" className={buttonVariants({ variant: "outline", size: "sm" })}>
           <List />
           List view
-        </Button>
+        </Link>
       </div>
 
       <div className="overflow-x-auto pb-2">

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 import { signOut } from "@/app/login/actions";
 import { BrandLockup } from "@/components/brand-lockup";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import type { AuthDenial } from "@/lib/auth/authorization";
 
 export const metadata: Metadata = { title: "No access" };
@@ -73,9 +73,14 @@ export default async function NoAccessPage({
                 Sign out
               </Button>
             </form>
-            <Button variant="ghost" render={<a href="mailto:amier.vizbytes@vizserve.hfse.edu.sg?subject=VizServe%20PMS%20access" />}>
-                Request access
-              </Button>
+            {/* An anchor styled as a button, not a Button rendering an anchor —
+                Base UI's Button is a native <button> unless told otherwise. */}
+            <a
+              href="mailto:amier.vizbytes@vizserve.hfse.edu.sg?subject=VizServe%20PMS%20access"
+              className={buttonVariants({ variant: "ghost" })}
+            >
+              Request access
+            </a>
           </div>
         </div>
       </div>

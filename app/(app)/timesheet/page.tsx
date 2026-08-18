@@ -17,7 +17,7 @@ import { isTerminal } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { LogTimeForm } from "./log-time-form";
 import { WeekEntries } from "./week-entries";
 
@@ -156,10 +156,22 @@ export default async function TimesheetPage({
               week lives in the URL, so back and forward already work and there
               is no state to keep in step with it. */}
           <div className="flex items-center gap-2 rounded-xl bg-card p-2 ring-1 ring-foreground/10">
-            <Button variant="ghost" size="icon-sm" render={<Link href={weekHref(previousWeek)} />}>
+            {/* A LINK styled as a button, not a Button rendering a link.
+                Base UI's Button is a native <button> unless told otherwise, so
+                `render={<Link/>}` hands it an <a> and it warns that the native
+                button semantics it promised are gone. The repo already settled
+                this at the inbox's Clear filters: if it navigates, it is a
+                link, and `buttonVariants` is how a link borrows the styling.
+
+                aria-label rather than an sr-only span — the accessible name of
+                a link with no text belongs on the link itself. */}
+            <Link
+              href={weekHref(previousWeek)}
+              aria-label="Previous week"
+              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+            >
               <ChevronLeft />
-              <span className="sr-only">Previous week</span>
-            </Button>
+            </Link>
 
             <div className="min-w-0 flex-1 text-center">
               <p className="truncate text-sm font-medium">{formatWeekRange(monday)}</p>
@@ -172,10 +184,13 @@ export default async function TimesheetPage({
               )}
             </div>
 
-            <Button variant="ghost" size="icon-sm" render={<Link href={weekHref(nextWeek)} />}>
+            <Link
+              href={weekHref(nextWeek)}
+              aria-label="Next week"
+              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+            >
               <ChevronRight />
-              <span className="sr-only">Next week</span>
-            </Button>
+            </Link>
           </div>
 
           {entries.length === 0 ? (

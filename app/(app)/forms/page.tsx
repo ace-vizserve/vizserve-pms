@@ -7,7 +7,7 @@ import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 
 export const metadata: Metadata = { title: "Forms" };
 
@@ -107,10 +107,10 @@ export default async function FormsPage() {
   return (
     <PageShell>
       <div className="flex items-center justify-end">
-        <Button size="sm" render={<Link href="/forms/new" />}>
+        <Link href="/forms/new" className={buttonVariants({ size: "sm" })}>
           <Plus />
           New form
-        </Button>
+        </Link>
       </div>
 
       <DataTable
@@ -124,9 +124,12 @@ export default async function FormsPage() {
             title="No forms yet"
             description="A form defines what a client must tell you before the team will accept the work. Every required field is a question you will never have to chase."
             action={
-              <Button size="sm" variant="outline" render={<Link href="/forms/new" />}>
+              <Link
+                href="/forms/new"
+                className={buttonVariants({ size: "sm", variant: "outline" })}
+              >
                 Create the first form
-              </Button>
+              </Link>
             }
           />
         }

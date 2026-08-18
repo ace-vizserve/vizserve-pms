@@ -10,7 +10,7 @@ import { TaskStatusBadge, isTaskStatus } from "@/components/status-badge";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
-import { Button } from "@/components/ui/button";
+import { buttonVariants } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/server";
 
 import { TaskFilters } from "./filters";
@@ -147,10 +147,10 @@ export default async function TasksPage({
   return (
     <PageShell>
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <Button variant="outline" size="sm" render={<Link href="/tasks/board" />}>
+        <Link href="/tasks/board" className={buttonVariants({ variant: "outline", size: "sm" })}>
           <LayoutGrid />
           Board view
-        </Button>
+        </Link>
         <NewTaskButton />
       </div>
 
