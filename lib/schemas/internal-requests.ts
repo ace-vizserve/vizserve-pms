@@ -64,12 +64,44 @@ const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date.");
 /** `HH:MM`, 24-hour. Matches the Postgres `time` the submit function takes. */
 const timeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a 24-hour time, like 08:30.");
 
+/**
+ * P7-16 — which half of a day leave begins and ends in.
+ *
+ * DECLARED MORNING FIRST, and the order is load-bearing in the same way
+ * `TASK_PRIORITIES` is: the Postgres enum compares by declaration order, so the
+ * single-day rule is `start_half <= end_half` with no CASE on either side.
+ * Reversing this list silently inverts that rule.
+ */
+export const DAY_HALVES = ["MORNING", "AFTERNOON"] as const;
+
+export type DayHalf = (typeof DAY_HALVES)[number];
+
+export const dayHalfSchema = z.enum(DAY_HALVES);
+
+/**
+ * What each half MEANS, which is not symmetrical and is the part people get
+ * wrong. On the first day, MORNING means the whole day and AFTERNOON means half
+ * of it. On the last day it is the other way round.
+ */
+export const DAY_HALF_LABELS: Record<DayHalf, string> = {
+  MORNING: "Morning",
+  AFTERNOON: "Afternoon",
+};
+
 export const leaveRequestSchema = z
   .object({
     request_type: z.literal("LEAVE"),
     reason: internalReasonSchema,
     start_date: dateOnly,
     end_date: dateOnly,
+    /**
+     * Defaulted to a WHOLE span — morning of the first day to the afternoon of
+     * the last — because that is what "the 3rd to the 5th" has always meant and
+     * every row written before P7-16 means exactly that. Somebody who never
+     * touches these two controls gets the behaviour they had before.
+     */
+    start_half: dayHalfSchema.default("MORNING"),
+    end_half: dayHalfSchema.default("AFTERNOON"),
     /**
      * P7-12. Required, and an id rather than a code: the list is admin-editable
      * data in `vizserve_pms_leave_types`, not an enum, so there is no closed set
@@ -82,6 +114,18 @@ export const leaveRequestSchema = z
   })
   // Checked here so the user sees it on the field, and again as a CHECK
   // constraint in the migration so a direct API call cannot dodge it.
+  // A one-day request cannot start in the afternoon and end in the morning.
+  // Across two days or more every combination is legal — afternoon-to-morning is
+  // the ordinary "half a day either end" shape.
+  .refine(
+    (value) =>
+      value.start_date !== value.end_date ||
+      DAY_HALVES.indexOf(value.start_half) <= DAY_HALVES.indexOf(value.end_half),
+    {
+      message: "Leave on one day cannot start in the afternoon and end in the morning.",
+      path: ["end_half"],
+    },
+  )
   .refine((value) => value.end_date >= value.start_date, {
     message: "The last day cannot be before the first.",
     path: ["end_date"],
@@ -203,4 +247,40 @@ export function narrowRequestPrefill(params: {
     // right place for it: this is a URL guard, not a calendar.
     date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
   };
+}
+
+/**
+ * A leave span in words — "3 Sep (afternoon) – 5 Sep (morning)".
+ *
+ * One function, because the dialog, the approvals list and the request detail
+ * all have to say the same thing, and three copies of "when is this person
+ * away" is three chances to disagree about a half day.
+ *
+ * The halves are only mentioned when they are NOT the whole-span default:
+ * writing "(morning)" on the first day of every full-day request adds a word to
+ * every row and distinguishes nothing.
+ */
+export function describeLeaveSpan(
+  start: string,
+  end: string,
+  startHalf: DayHalf | null,
+  endHalf: DayHalf | null,
+  formatDay: (value: string) => string,
+): string {
+  const startsMidday = startHalf === "AFTERNOON";
+  const endsMidday = endHalf === "MORNING";
+
+  const from = `${formatDay(start)}${startsMidday ? " (afternoon)" : ""}`;
+  const to = `${formatDay(end)}${endsMidday ? " (morning)" : ""}`;
+
+  // A single day with both halves the same is "3 Sep (morning only)" rather than
+  // "3 Sep (morning) – 3 Sep (morning)", which reads as a range of nothing.
+  if (start === end) {
+    if (startsMidday && endsMidday) return `${formatDay(start)} — that half day`;
+    if (startsMidday) return `${formatDay(start)} (afternoon only)`;
+    if (endsMidday) return `${formatDay(start)} (morning only)`;
+    return formatDay(start);
+  }
+
+  return `${from} – ${to}`;
 }

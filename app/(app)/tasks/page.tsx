@@ -5,7 +5,7 @@ import { ListChecks, ListTree } from "lucide-react";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
-import { isOverdue } from "@/lib/dates";
+import { formatDate, isOverdue } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
   TASK_CATEGORY_LABELS,
@@ -24,8 +24,10 @@ import { LatestCommentCell } from "./latest-comment-cell";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
+import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
 
+import { AssigneePicker } from "./assignees";
 import { TaskFilters } from "./filters";
 import {
   InlineDate,
@@ -204,7 +206,13 @@ export default async function TasksPage({
    * pulled in through the back door — and each of the three has its own policy
    * underneath this anyway.
    */
-  const [{ data: commentRows }, { data: childRows }, { data: trackedRows }] = taskIds.length
+  const [
+    { data: commentRows },
+    { data: childRows },
+    { data: trackedRows },
+    { data: assigneeRows },
+    { data: closedRows },
+  ] = taskIds.length
     ? await Promise.all([
         /*
          * P7-08 / K5 — every comment on every visible task, in ONE query.
@@ -249,8 +257,41 @@ export default async function TasksPage({
          * as `vizserve_pms_leave_calendar`.
          */
         supabase.rpc("vizserve_pms_task_time_tracked", { p_task_ids: taskIds }),
+
+        /*
+         * P7-13 — everyone on the visible tasks, in one query.
+         *
+         * The row shows the accountable name and a `+n`, so it needs the join
+         * table as well as `assignee_id`. The table has its own policy; this is
+         * scoped by `.in()` on ids the tasks policy has already returned.
+         */
+        supabase
+          .from("vizserve_pms_task_assignees")
+          .select("task_id, user_id")
+          .in("task_id", taskIds),
+
+        /*
+         * K5 — DATE CLOSED, AND IT NEEDS NO COLUMN.
+         *
+         * `vizserve_pms_task_status_history` already records the move to
+         * COMPLETED / COMPLETED_NO_RESPONSE with its timestamp, so reading it
+         * from there is one query and cannot disagree with the trail — which a
+         * `completed_at` column eventually would.
+         *
+         * Ordered ASCENDING and reduced by last-write-wins below, so a REOPENED
+         * task (P7-06 lets internal work go COMPLETED → ONGOING) reports the
+         * date it was closed MOST RECENTLY rather than the first time. It is
+         * nullable in practice for exactly that reason: a task can be closed,
+         * reopened, and be live again with a closing date in its past.
+         */
+        supabase
+          .from("vizserve_pms_task_status_history")
+          .select("task_id, to_status, created_at")
+          .in("task_id", taskIds)
+          .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
+          .order("created_at", { ascending: true }),
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }];
+    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
   const listName = new Map((lists ?? []).map((list) => [list.id, list.name]));
@@ -283,6 +324,18 @@ export default async function TasksPage({
     if (isTerminal(child.status)) entry.done += 1;
     progress.set(child.parent_task_id, entry);
   }
+
+  /** Everyone on a task besides its PIC, named. */
+  const extraAssignees = new Map<string, { id: string; full_name: string }[]>();
+  for (const row of assigneeRows ?? []) {
+    const list = extraAssignees.get(row.task_id) ?? [];
+    list.push({ id: row.user_id, full_name: nameOf.get(row.user_id) ?? "Someone no longer active" });
+    extraAssignees.set(row.task_id, list);
+  }
+
+  /** The most recent close, from the trail. Ascending fetch, last one wins. */
+  const closedOn = new Map<string, string>();
+  for (const row of closedRows ?? []) closedOn.set(row.task_id, row.created_at);
 
   const tracked = new Map(
     ((trackedRows ?? []) as { task_id: string; minutes: number }[]).map((row) => [
@@ -352,6 +405,21 @@ export default async function TasksPage({
     )
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
+  /**
+   * People by department, for the assignee picker.
+   *
+   * The task's OWN department decides who may join it — `add_task_assignee`
+   * refuses anybody else — which is a different question from `assignable`
+   * above, where the CALLER's scope decides who they may create work for.
+   */
+  const byDepartment = new Map<string, { id: string; full_name: string }[]>();
+  for (const person of people ?? []) {
+    if (!person.is_active || !person.primary_department_id) continue;
+    const list = byDepartment.get(person.primary_department_id) ?? [];
+    list.push({ id: person.id, full_name: person.full_name });
+    byDepartment.set(person.primary_department_id, list);
+  }
+
   const isAdmin = roleAtLeast(context.role, "admin");
   function seat(task: TaskRow) {
     return {
@@ -363,14 +431,22 @@ export default async function TasksPage({
     };
   }
 
+  /*
+   * The columns, in the order Amier's reference sets them: name · progress ·
+   * assignee · priority · start · due · date closed · estimate · tracked ·
+   * latest comment.
+   *
+   * THE QA COLUMN IS GONE. It was a name repeated on every client row and empty
+   * on every internal one — internal work needs no reviewer at all since P7-13a,
+   * which is most of the list. The reviewer is on the task itself, where the
+   * decision to appoint one is made.
+   */
   const columns: Column<TaskRow>[] = [
     {
       key: "task",
       header: "Task",
       className: "max-w-sm whitespace-normal",
       cell: (task) => {
-        const bars = progress.get(task.id);
-
         return (
           // `group/task` is what the hover strip keys off. Named, because the
           // status group above is a group too and an unnamed one would make the
@@ -424,35 +500,73 @@ export default async function TasksPage({
                   subtask
                 </Link>
               ) : null}
-              {bars ? <SubtaskProgress done={bars.done} total={bars.total} /> : null}
             </div>
           </div>
         );
       },
     },
     {
-      key: "pic",
-      header: "PIC",
-      className: "hidden md:table-cell text-muted-foreground",
-      cell: (task) => (task.assignee_id ? (nameOf.get(task.assignee_id) ?? "—") : "Unassigned"),
+      /*
+       * K5 — PROGRESS, from the subtasks and nowhere else.
+       *
+       * A task with no children renders NOTHING rather than 0%: "no subtasks"
+       * and "no subtasks done" are different facts, and a permanent 0% is the
+       * same lie as a permanent zero on a dashboard tile.
+       */
+      key: "progress",
+      header: "Progress",
+      className: "hidden lg:table-cell",
+      cell: (task) => {
+        const bars = progress.get(task.id);
+        return bars ? <SubtaskProgress done={bars.done} total={bars.total} /> : null;
+      },
     },
     {
-      key: "qa",
-      header: "QA",
-      className: "hidden 2xl:table-cell text-muted-foreground",
-      cell: (task) => (task.qa_assignee_id ? (nameOf.get(task.qa_assignee_id) ?? "—") : "—"),
+      key: "assignee",
+      header: "Assignee",
+      className: "hidden md:table-cell text-muted-foreground",
+      cell: (task) => (
+        <AssigneePicker
+          taskId={task.id}
+          pic={
+            task.assignee_id
+              ? { id: task.assignee_id, full_name: nameOf.get(task.assignee_id) ?? "—" }
+              : null
+          }
+          // P7-13. The join table is the whole reason this is fetched: a row
+          // showing one name on a task three people are working on makes the
+          // second and third invisible.
+          others={(extraAssignees.get(task.id) ?? []).filter(
+            (person) => person.id !== task.assignee_id,
+          )}
+          // Scoped to the TASK'S department, not the viewer's — the join table's
+          // own function refuses anybody outside it, so offering a wider list
+          // would only produce an error after the click.
+          candidates={byDepartment.get(task.department_id) ?? []}
+          canEdit={seat(task).isPic || seat(task).isQa || seat(task).leadsDepartment}
+        />
+      ),
+    },
+    {
+      key: "priority",
+      header: "Priority",
+      className: "hidden lg:table-cell",
+      // Its own column now, and editable in place. It used to sit beside the
+      // title, which read well at one glance and badly at twenty — a column is
+      // what makes "what is urgent" answerable by scanning down.
+      cell: (task) => <InlinePriority taskId={task.id} value={task.priority} />,
     },
     {
       key: "start",
-      header: "Start",
-      className: "hidden lg:table-cell whitespace-nowrap",
+      header: "Start date",
+      className: "hidden xl:table-cell whitespace-nowrap",
       cell: (task) => (
         <InlineDate taskId={task.id} field="start_date" value={task.start_date} label="Start" />
       ),
     },
     {
       key: "due",
-      header: "Due",
+      header: "Due date",
       className: "hidden sm:table-cell whitespace-nowrap",
       cell: (task) => (
         <>
@@ -473,37 +587,65 @@ export default async function TasksPage({
       ),
     },
     {
-      key: "time",
-      // Two figures in one column, because they are only meaningful beside each
-      // other: an estimate with no hours against it is a guess nobody tested,
-      // and hours with no estimate are a number with nothing to judge them by.
-      header: "Tracked / est.",
-      className: "hidden lg:table-cell whitespace-nowrap",
+      /*
+       * Read from `vizserve_pms_task_status_history`, never from a column.
+       *
+       * A `completed_at` column can disagree with the trail; the trail cannot
+       * disagree with itself. It is also correctly EMPTY on a task that was
+       * closed and then reopened — which internal work can be (P7-06) — because
+       * what the column asks is "when was this closed", and a live task has no
+       * answer to that.
+       */
+      key: "closed",
+      header: "Date closed",
+      className: "hidden 2xl:table-cell whitespace-nowrap text-muted-foreground",
+      cell: (task) => {
+        const closed = isTerminal(task.status) ? closedOn.get(task.id) : null;
+        return closed ? (
+          formatDate(closed.slice(0, 10))
+        ) : (
+          <span className="text-foreground-faint">—</span>
+        );
+      },
+    },
+    {
+      key: "estimate",
+      header: "Time estimate",
+      className: "hidden xl:table-cell whitespace-nowrap",
+      align: "end",
+      cell: (task) => <InlineEstimate taskId={task.id} minutes={task.estimate_minutes} />,
+    },
+    {
+      /*
+       * P7-15 — TIME TRACKED CANNOT BE A PLAIN SUM, and this is the trap.
+       *
+       * The entries policy is owner-or-their-lead, so summing that table
+       * client-side shows each viewer only their own hours and calls it the task
+       * total. Two people on one task would read two different figures. The
+       * rollup is `SECURITY DEFINER` for exactly that reason.
+       */
+      key: "tracked",
+      header: "Time tracked",
+      className: "hidden xl:table-cell whitespace-nowrap",
       align: "end",
       cell: (task) => {
         const minutes = tracked.get(task.id) ?? 0;
         const over = task.estimate_minutes !== null && minutes > task.estimate_minutes;
 
+        if (minutes === 0) return <span className="text-foreground-faint">—</span>;
+
         return (
-          <span className="inline-flex items-center gap-1 tabular-nums">
-            <span
-              className={over ? "font-medium text-warning" : "text-muted-foreground"}
-              // Never colour alone — and this is the one place the word has to
-              // be in a tooltip rather than on screen, because a fourth glyph in
-              // a numeric column stops it scanning down.
-              title={
-                over
-                  ? `Over the estimate — ${formatCellDuration(minutes)} logged against ${formatCellDuration(task.estimate_minutes!)}`
-                  : `${formatCellDuration(minutes)} logged`
-              }
-            >
-              {minutes === 0 ? <span className="text-foreground-faint">—</span> : formatCellDuration(minutes)}
-              {over ? <span className="ml-0.5 text-2xs">over</span> : null}
-            </span>
-            <span className="text-foreground-faint" aria-hidden>
-              /
-            </span>
-            <InlineEstimate taskId={task.id} minutes={task.estimate_minutes} />
+          <span
+            className={cn("tabular-nums", over ? "font-medium text-warning" : "text-muted-foreground")}
+            title={
+              over
+                ? `Over the estimate — ${formatCellDuration(minutes)} against ${formatCellDuration(task.estimate_minutes!)}`
+                : `${formatCellDuration(minutes)} logged`
+            }
+          >
+            {formatCellDuration(minutes)}
+            {/* Never colour alone. */}
+            {over ? <span className="ml-0.5 text-2xs">over</span> : null}
           </span>
         );
       },
@@ -511,9 +653,9 @@ export default async function TasksPage({
     {
       key: "comment",
       header: "Latest comment",
-      // Last column, and the widest thing in the row. It is the only cell that
-      // is a control rather than a value, so it sits where the eye finishes.
-      className: "hidden xl:table-cell",
+      // Last, and the widest thing in the row. It is the only cell that is a
+      // control rather than a value, so it sits where the eye finishes.
+      className: "hidden 2xl:table-cell",
       cell: (task) => (
         <LatestCommentCell
           taskId={task.id}

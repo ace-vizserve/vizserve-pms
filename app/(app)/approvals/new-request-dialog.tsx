@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -19,6 +19,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { todayInAppZone } from "@/lib/dates";
 import {
+  DAY_HALF_LABELS,
+  DAY_HALVES,
   INTERNAL_REQUEST_BLURBS,
   INTERNAL_REQUEST_LABELS,
   INTERNAL_REQUEST_TYPES,
@@ -26,6 +28,7 @@ import {
   type InternalRequestType,
 } from "@/lib/schemas/internal-requests";
 import { toMinutes } from "@/lib/schemas/timesheet";
+import { cn } from "@/lib/utils";
 import { submitInternalRequest } from "./actions";
 
 /** Only what the picker needs. The server page selects the active ones, in order. */
@@ -104,6 +107,10 @@ export function NewRequestDialog({
             start_date: String(formData.get("start_date") ?? ""),
             end_date: String(formData.get("end_date") ?? ""),
             leave_type_id: String(formData.get("leave_type_id") ?? ""),
+            // P7-16. The defaults are a whole span, which is what every request
+            // meant before these two controls existed.
+            start_half: String(formData.get("start_half") ?? "MORNING"),
+            end_half: String(formData.get("end_half") ?? "AFTERNOON"),
           }
         : type === "REIMBURSEMENT"
           ? {
@@ -156,14 +163,13 @@ export function NewRequestDialog({
       onOpenChange={(next) => {
         setOpen(next);
         if (!next) setErrors({});
-      }}
-    >
+      }}>
       <DialogTrigger render={<Button />}>
-          <Plus className="size-4" />
-          New request
-        </DialogTrigger>
+        <Plus className="size-4" />
+        New request
+      </DialogTrigger>
 
-      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>New request</DialogTitle>
           <DialogDescription>{INTERNAL_REQUEST_BLURBS[type]}</DialogDescription>
@@ -192,8 +198,7 @@ export function NewRequestDialog({
                     type === option
                       ? "rounded-sm border border-primary bg-accent px-3 py-2 text-left text-sm font-medium text-accent-foreground"
                       : "rounded-sm border px-3 py-2 text-left text-sm hover:bg-accent/50"
-                  }
-                >
+                  }>
                   {INTERNAL_REQUEST_LABELS[option]}
                 </button>
               ))}
@@ -206,38 +211,104 @@ export function NewRequestDialog({
                   without one, so this is not an optional refinement: the whole
                   type stops submitting without it.
 
-                  A native select rather than the styled one, and a plain list
-                  rather than grouped: the list is admin-editable data, so any
-                  grouping here would be a second opinion about it that goes
-                  stale the first time HR adds a type. */}
+                  RADIO BUTTONS, NOT A SELECT. There are eight types and a person
+                  filing leave picks the same two or three most of the time; a
+                  closed select hides all eight behind a click and gives no sense
+                  of what is on offer. Real `<input type="radio">`s rather than
+                  the `aria-pressed` buttons the type switcher above uses,
+                  because this IS a single choice from a fixed set — which is
+                  exactly what a radio group is, and it gets arrow-key navigation
+                  and the "one of eight" announcement for free.
+
+                  A plain list rather than grouped: the list is admin-editable
+                  data, so any grouping here would be a second opinion about it
+                  that goes stale the first time HR adds a type. */}
               <div className="space-y-2">
-                <Label htmlFor="leave_type_id">Leave type</Label>
-                <select
-                  id="leave_type_id"
-                  name="leave_type_id"
-                  defaultValue=""
-                  className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-                >
-                  <option value="" disabled>
-                    Choose one…
-                  </option>
-                  {leaveTypes.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                <fieldset>
+                  <legend className="mb-2 text-sm font-medium">Leave type</legend>
+                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
+                    {leaveTypes.map((option) => (
+                      <label
+                        key={option.id}
+                        className={cn(
+                          "flex cursor-pointer items-center gap-2 rounded-sm border px-2.5 py-2 text-xs",
+                          "hover:bg-accent/50",
+                          // The checked ring comes from the input's own state, so
+                          // the selected look cannot drift from what is submitted.
+                          "has-[:checked]:border-primary has-[:checked]:bg-accent has-[:checked]:font-medium has-[:checked]:text-accent-foreground",
+                          "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                        )}>
+                        <input
+                          type="radio"
+                          name="leave_type_id"
+                          value={option.id}
+                          className="size-3.5 shrink-0 accent-primary"
+                        />
+                        {option.label}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
                 <FieldError messages={errors.leave_type_id} />
               </div>
 
+              {/*
+                P7-16 — A HALF AND A DATE, twice.
+                
+                The half sits BEFORE its date on each row, which is the order the
+                sentence runs in: "from the afternoon of the 3rd, to the morning
+                of the 5th". Putting the dates together and the halves together
+                would group by control type rather than by meaning, and the
+                second half would end up describing a date three fields away.
+
+                What they mean is not symmetrical, which is the part people get
+                wrong: on the FIRST day, Morning is the whole day and Afternoon is
+                half of it; on the LAST day it is the other way round. The hint
+                under each says so rather than leaving it to be worked out.
+              */}
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="start_date">First day</Label>
+                  <Label htmlFor="start_half">Leave start</Label>
+                  <select
+                    id="start_half"
+                    name="start_half"
+                    defaultValue="MORNING"
+                    className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                    {DAY_HALVES.map((half) => (
+                      <option key={half} value={half}>
+                        {DAY_HALF_LABELS[half]}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-2xs text-muted-foreground">Afternoon means you work the morning of that day.</p>
+                  <FieldError messages={errors.start_half} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="start_date">Start date</Label>
                   <Input id="start_date" name="start_date" type="date" defaultValue={today} />
                   <FieldError messages={errors.start_date} />
                 </div>
+
                 <div className="space-y-2">
-                  <Label htmlFor="end_date">Last day</Label>
+                  <Label htmlFor="end_half">Leave end</Label>
+                  <select
+                    id="end_half"
+                    name="end_half"
+                    defaultValue="AFTERNOON"
+                    className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
+                    {DAY_HALVES.map((half) => (
+                      <option key={half} value={half}>
+                        {DAY_HALF_LABELS[half]}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="text-2xs text-muted-foreground">Morning means you are back for the afternoon.</p>
+                  <FieldError messages={errors.end_half} />
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="end_date">End date</Label>
                   <Input id="end_date" name="end_date" type="date" defaultValue={today} />
                   <FieldError messages={errors.end_date} />
                 </div>
@@ -252,13 +323,7 @@ export function NewRequestDialog({
                 {/* Today is allowed and capped there. Asking at 17:00 for the
                     evening you are about to work is the ordinary case; the
                     submit function says so too. */}
-                <Input
-                  id="work_date"
-                  name="work_date"
-                  type="date"
-                  max={today}
-                  defaultValue={workDate}
-                />
+                <Input id="work_date" name="work_date" type="date" max={today} defaultValue={workDate} />
                 <FieldError messages={errors.work_date} />
               </div>
 
@@ -302,13 +367,7 @@ export function NewRequestDialog({
                 {/* Capped at today. A correction for a day that has not happened
                     is refused by the submit function anyway; stopping it in the
                     picker saves the round trip. */}
-                <Input
-                  id="work_date"
-                  name="work_date"
-                  type="date"
-                  max={today}
-                  defaultValue={workDate}
-                />
+                <Input id="work_date" name="work_date" type="date" max={today} defaultValue={workDate} />
                 <FieldError messages={errors.work_date} />
               </div>
               <div className="space-y-2">
@@ -324,14 +383,7 @@ export function NewRequestDialog({
           {type === "REIMBURSEMENT" ? (
             <div className="space-y-2">
               <Label htmlFor="amount">Amount (PHP)</Label>
-              <Input
-                id="amount"
-                name="amount"
-                type="number"
-                step="0.01"
-                min="0"
-                inputMode="decimal"
-              />
+              <Input id="amount" name="amount" type="number" step="0.01" min="0" inputMode="decimal" />
               <FieldError messages={errors.amount} />
             </div>
           ) : null}

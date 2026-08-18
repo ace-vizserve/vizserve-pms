@@ -1,15 +1,9 @@
 "use client";
 
-import { useState } from "react";
 import { MessageSquare } from "lucide-react";
+import { useState } from "react";
 
-import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover";
+import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 
 import { CommentThread, type TaskComment } from "./comment-thread";
@@ -48,8 +42,7 @@ export function LatestCommentCell({
           "w-full max-w-56 rounded-sm px-1.5 py-1 text-left text-xs",
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           latest ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
+        )}>
         {latest ? (
           <>
             {/* Two lines, then it stops. The cell is a pointer into the thread,
@@ -57,9 +50,7 @@ export function LatestCommentCell({
                 every other row down the page. */}
             <span className="line-clamp-2">{latest.body}</span>
             {comments.length > 1 ? (
-              <span className="mt-0.5 block text-2xs text-muted-foreground">
-                {comments.length} comments
-              </span>
+              <span className="mt-0.5 block text-2xs text-muted-foreground">{comments.length} comments</span>
             ) : null}
             <span className="sr-only">
               Latest comment on {taskTitle}. Open the thread to read all{" "}

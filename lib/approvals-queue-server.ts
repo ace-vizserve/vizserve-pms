@@ -2,7 +2,10 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
-import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
+import {
+  INTERNAL_REQUEST_LABELS,
+  describeLeaveSpan,
+} from "@/lib/schemas/internal-requests";
 
 /**
  * "Waiting on you" — the one definition of an approver's queue.
@@ -161,7 +164,9 @@ export async function listWaitingOnYou(
 
     supabase
       .from("vizserve_pms_internal_requests")
-      .select("id, request_type, requester_id, created_at, start_date, end_date, work_date")
+      .select(
+        "id, request_type, requester_id, created_at, start_date, end_date, work_date, start_half, end_half",
+      )
       .eq("status", "PENDING_REVIEW")
       .neq("requester_id", userId)
       .order("created_at", { ascending: true })
@@ -191,11 +196,19 @@ export async function listWaitingOnYou(
     start_date: string | null;
     end_date: string | null;
     work_date: string | null;
+    start_half?: "MORNING" | "AFTERNOON" | null;
+    end_half?: "MORNING" | "AFTERNOON" | null;
   }): string => {
     if (row.start_date && row.end_date) {
-      return row.start_date === row.end_date
-        ? formatDate(row.start_date)
-        : `${formatDate(row.start_date)} – ${formatDate(row.end_date)}`;
+      // P7-16, through the shared description so a half day reads the same here
+      // as it does on the request itself.
+      return describeLeaveSpan(
+        row.start_date,
+        row.end_date,
+        row.start_half ?? null,
+        row.end_half ?? null,
+        formatDate,
+      );
     }
     return formatDate(row.work_date);
   };

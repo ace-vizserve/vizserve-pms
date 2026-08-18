@@ -1,21 +1,16 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { ArrowRightLeft, Check, ChevronDown, Search } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { ArrowRightLeft, Check, ChevronDown } from "lucide-react";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import {
-  Popover,
-  PopoverContent,
-  PopoverHeader,
-  PopoverTitle,
-  PopoverTrigger,
-} from "@/components/ui/popover";
-import { Textarea } from "@/components/ui/textarea";
 import { TaskStatusBadge } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import { Textarea } from "@/components/ui/textarea";
 import {
   INITIAL_TASK_STATUS,
   TASK_STATUS_LABELS,
@@ -67,11 +62,18 @@ import { transitionTask } from "./actions";
  * `INITIAL_TASK_STATUS` is where work has not begun, `isTerminal` is where it
  * has finished, and everything between them is in flight.
  */
-const BANDS = ["Not started", "Active", "Done"] as const;
+const BANDS = ["Not started", "Active", "Done", "Closed"] as const;
 
 function band(status: TaskStatus): (typeof BANDS)[number] {
   if (status === INITIAL_TASK_STATUS) return "Not started";
-  return isTerminal(status) ? "Done" : "Active";
+  // CLOSED IS NOT THE SAME AS DONE, and the split is the enum's own.
+  // `COMPLETED` and `COMPLETED_NO_RESPONSE` are terminal — the work is over and
+  // nothing follows. `FOR_CLIENT_APPROVAL` is the last ACTIVE stage: the work is
+  // finished but the request is not, because somebody outside the company still
+  // has to answer. Filing it under "Done" would say the task was finished the
+  // moment it was sent, which is the reading Gate 3 exists to prevent.
+  if (isTerminal(status)) return "Closed";
+  return status === "FOR_CLIENT_APPROVAL" ? "Done" : "Active";
 }
 
 export function TaskStatusSelect({
@@ -120,13 +122,24 @@ export function TaskStatusSelect({
   const [comment, setComment] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  const [query, setQuery] = useState("");
+
   const transitions = availableTransitions(status, viewer, task);
   const category = taskCategory(task);
+
+  const matches = query.trim()
+    ? transitions.filter((transition) =>
+        // Matched on the LABEL, which is what is on screen — "Send for QA"
+        // should be findable by typing "send", not only by typing "QA".
+        transition.label.toLowerCase().includes(query.trim().toLowerCase()),
+      )
+    : transitions;
 
   function reset() {
     setPrompt(null);
     setComment("");
     setError(null);
+    setQuery("");
   }
 
   function commit(transition: Transition, withComment?: string) {
@@ -191,8 +204,7 @@ export function TaskStatusSelect({
         // Closing mid-comment throws the draft away deliberately: a half-typed
         // note reappearing next to a DIFFERENT chosen move would be worse.
         if (!next) reset();
-      }}
-    >
+      }}>
       <PopoverTrigger
         disabled={pending}
         title={variant === "compact" ? `Move — currently ${TASK_STATUS_LABELS[status]}` : undefined}
@@ -207,8 +219,7 @@ export function TaskStatusSelect({
           "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-60",
           className,
-        )}
-      >
+        )}>
         {variant === "compact" ? (
           <ArrowRightLeft className="size-3.5" aria-hidden />
         ) : (
@@ -221,7 +232,7 @@ export function TaskStatusSelect({
         )}
       </PopoverTrigger>
 
-      <PopoverContent align={align} className="w-72 p-0">
+      <PopoverContent align={align} className="w-72">
         {prompt ? (
           <div className="space-y-2.5 p-3">
             <div className="space-y-1.5">
@@ -253,8 +264,7 @@ export function TaskStatusSelect({
                 size="sm"
                 loading={pending}
                 disabled={comment.trim().length === 0}
-                onClick={() => commit(prompt, comment)}
-              >
+                onClick={() => commit(prompt, comment)}>
                 {prompt.label}
               </Button>
               <Button size="sm" variant="ghost" disabled={pending} onClick={() => setPrompt(null)}>
@@ -281,11 +291,45 @@ export function TaskStatusSelect({
               </p>
             </PopoverHeader>
 
+            {/*
+              A SEARCH BOX, and the plan said it was not needed at eight
+              statuses. It was right about eight and wrong about the list: with
+              free movement an internal task offers SEVEN moves at once, and
+              typing three letters beats reading four headings — which is why the
+              reference has one. It filters and never hides the current status,
+              and it does not appear on client work, where the list is one or two
+              rows and a search box over two rows is furniture.
+            */}
+            {transitions.length > 4 ? (
+              <div className="border-b p-2">
+                <div className="relative">
+                  <Search
+                    className="pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2 text-muted-foreground"
+                    aria-hidden
+                  />
+                  <Input
+                    autoFocus
+                    value={query}
+                    placeholder="Search stages"
+                    aria-label="Search stages"
+                    onChange={(event) => setQuery(event.target.value)}
+                    className="h-8 pl-7 text-xs"
+                  />
+                </div>
+              </div>
+            ) : null}
+
             <div className="max-h-80 overflow-y-auto py-1">
+              {matches.length === 0 ? (
+                <p className="px-3 py-3 text-2xs text-muted-foreground">No stage by that name.</p>
+              ) : null}
+
               {BANDS.map((label) => {
-                const inBand = transitions.filter((transition) => band(transition.to) === label);
+                const inBand = matches.filter((transition) => band(transition.to) === label);
                 // The current status' own band still draws its heading, because
                 // the ticked row lives in it. A band with neither is not drawn.
+                // The current status keeps its row whatever is typed: it is a
+                // statement of where the task IS, not one of the options.
                 const showsCurrent = band(status) === label;
                 if (inBand.length === 0 && !showsCurrent) return null;
 
@@ -318,8 +362,7 @@ export function TaskStatusSelect({
                             "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
                             "hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none",
                             "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent",
-                          )}
-                        >
+                          )}>
                           {/* Indented to sit under the tick rather than beside
                               it, so the current row reads as the odd one out. */}
                           <span className="size-3.5 shrink-0" aria-hidden />
@@ -331,13 +374,9 @@ export function TaskStatusSelect({
                             {transition.label}
                           </span>
                           {blocked ? (
-                            <span className="shrink-0 text-2xs text-muted-foreground">
-                              needs a resolution
-                            </span>
+                            <span className="shrink-0 text-2xs text-muted-foreground">needs a resolution</span>
                           ) : transition.requires === "comment" ? (
-                            <span className="shrink-0 text-2xs text-muted-foreground">
-                              needs a note
-                            </span>
+                            <span className="shrink-0 text-2xs text-muted-foreground">needs a note</span>
                           ) : null}
                         </button>
                       );

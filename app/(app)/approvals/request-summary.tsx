@@ -1,4 +1,5 @@
 import { formatDate, formatDateTime } from "@/lib/dates";
+import { describeLeaveSpan } from "@/lib/schemas/internal-requests";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import type { InternalRequestRow } from "@/lib/database.types";
 
@@ -13,14 +14,19 @@ import type { InternalRequestRow } from "@/lib/database.types";
 export function requestDetail(request: InternalRequestRow): string {
   switch (request.request_type) {
     case "LEAVE":
-      return request.start_date === request.end_date
-        ? formatDate(request.start_date)
-        : // An en dash, not an arrow. This is a SPAN — the 5th to the 7th — and
-          // an arrow claims a direction of travel it does not have. It also
-          // matches the board card, which already ranges its dates this way.
-          // (An arrow would have to be an icon here anyway, and this function
-          // returns a string.)
-          `${formatDate(request.start_date)} – ${formatDate(request.end_date)}`;
+      // P7-16. One shared description, because the dialog, the queue and the
+      // detail all have to say the same thing — three copies of "when is this
+      // person away" is three chances to disagree about a half day.
+      //
+      // An en dash, not an arrow. This is a SPAN — the 5th to the 7th — and an
+      // arrow claims a direction of travel it does not have.
+      return describeLeaveSpan(
+        request.start_date!,
+        request.end_date!,
+        request.start_half,
+        request.end_half,
+        formatDate,
+      );
     case "REIMBURSEMENT":
       // Grouped and 2dp, because an unformatted 1250.5 in a money column is
       // read wrong at a glance.

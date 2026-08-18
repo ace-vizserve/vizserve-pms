@@ -94,6 +94,10 @@ export async function submitInternalRequest(input: unknown): Promise<ActionResul
     // omitting it here does not degrade leave requests — it stops them
     // submitting at all.
     p_leave_type_id: value.request_type === "LEAVE" ? value.leave_type_id : null,
+    // P7-16. Null for every other type — the shape constraint refuses a half on
+    // a request that has no days, and the function coerces them anyway.
+    p_start_half: value.request_type === "LEAVE" ? value.start_half : null,
+    p_end_half: value.request_type === "LEAVE" ? value.end_half : null,
   });
 
   if (error) return { ok: false, error: readableError(error) };

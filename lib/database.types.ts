@@ -38,6 +38,15 @@ export type VizservePmsApprovalDecision = "approved" | "returned" | "rejected";
  * Adding a value here is only half the job — `vizserve_pms_internal_requests`
  * carries a per-type CHECK whose `else` branch used to swallow anything new.
  */
+/**
+ * P7-16. Which half of a day leave starts or ends in.
+ *
+ * MORNING is declared first in the Postgres enum, so `start_half <= end_half` is
+ * a direct comparison there. Keep this union in the same order for the same
+ * reason the priority one is kept in its order.
+ */
+export type VizservePmsDayHalf = "MORNING" | "AFTERNOON";
+
 export type VizservePmsInternalRequestType =
   | "LEAVE"
   | "NO_TIME_IN"
@@ -1175,6 +1184,9 @@ export type Database = {
            * nobody stated.
            */
           leave_type_id: string | null;
+          /** P7-16. LEAVE only, and null on every row written before it. */
+          start_half: VizservePmsDayHalf | null;
+          end_half: VizservePmsDayHalf | null;
           decision_reason: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
@@ -1195,6 +1207,8 @@ export type Database = {
           amount?: number | null;
           overtime_minutes?: number | null;
           leave_type_id?: string | null;
+          start_half?: VizservePmsDayHalf | null;
+          end_half?: VizservePmsDayHalf | null;
         };
         Update: Partial<{
           status: VizservePmsInternalRequestStatus;
@@ -1346,6 +1360,14 @@ export type Database = {
            * for LEAVE, covered by a db test rather than by types.
            */
           p_leave_type_id?: string | null;
+          /**
+           * ⚠️ P7-16. OPTIONAL to the compiler, because the SQL parameters have
+           * defaults — so leaving them out is not a type error, it just files
+           * every leave request as a whole span. `tests/db/phase5.test.ts` is the
+           * guard, not tsc.
+           */
+          p_start_half?: VizservePmsDayHalf | null;
+          p_end_half?: VizservePmsDayHalf | null;
         };
         Returns: Json;
       };

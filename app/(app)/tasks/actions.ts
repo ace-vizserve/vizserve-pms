@@ -626,6 +626,78 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
 }
 
 /**
+ * P7-13 — the OTHER people on a task.
+ *
+ * `assignee_id` stays the ACCOUNTABLE name: one person the task is filed under,
+ * what the board sorts by, what "assigned to you" in a notification means. This
+ * join table is who is WORKING on it, and every one of them is a full
+ * participant — the SELECT and UPDATE policies, `may_log_time` and the
+ * transition ownership guard all run through `vizserve_pms_is_on_task`, so a
+ * second assignee can see it, edit it, log time against it and move it.
+ *
+ * THE TABLE HAS NO INSERT OR DELETE POLICY. These two functions are the only way
+ * in or out, which is what makes "who is on this task" a decision with an
+ * `added_by` and an `added_at` on it rather than a row anybody can write.
+ *
+ * The functions have been applied since 18 Aug and NOTHING HAS EVER CALLED THEM.
+ * The whole several-assignees model was reachable only through the API.
+ */
+export async function addTaskAssignee(taskId: string, userId: string): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  if (!z.uuid().safeParse(taskId).success || !z.uuid().safeParse(userId).success) {
+    return { ok: false, error: "That task or person does not exist." };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("vizserve_pms_add_task_assignee", {
+    p_task_id: taskId,
+    p_user_id: userId,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  // A new participant needs telling, exactly as a new PIC does. Same type, same
+  // link — from their side, being added to a task IS being assigned to it.
+  const { data: detail } = await supabase
+    .from("vizserve_pms_tasks")
+    .select("title")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  await supabase.rpc("vizserve_pms_notify", {
+    p_user_id: userId,
+    p_type: "assigned",
+    p_title: `You are on: ${detail?.title ?? "a task"}`,
+    p_body: "",
+    p_entity_type: "task",
+    p_entity_id: taskId,
+    p_link_path: `/tasks/${taskId}`,
+  });
+
+  dispatchPendingEmailsInBackground();
+  refresh(taskId);
+  return { ok: true, data: undefined };
+}
+
+export async function removeTaskAssignee(taskId: string, userId: string): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("vizserve_pms_remove_task_assignee", {
+    p_task_id: taskId,
+    p_user_id: userId,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  // Deliberately no notification. Being taken off a task is not news somebody
+  // needs an email about, and the removal is visible on the task itself.
+  refresh(taskId);
+  return { ok: true, data: undefined };
+}
+
+/**
  * P7-14 — reassignment is no longer a Team Leader decision.
  *
  * IT USED TO BE `requireRole("team_leader")`, and that line outlived the rule it
