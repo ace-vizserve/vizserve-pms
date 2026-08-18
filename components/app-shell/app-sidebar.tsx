@@ -4,7 +4,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 
 import {
   Collapsible,
@@ -23,6 +23,9 @@ import {
   SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
+  SidebarMenuSub,
+  SidebarMenuSubButton,
+  SidebarMenuSubItem,
   SidebarRail,
 } from "@/components/ui/sidebar";
 import type { NavGroup, NavItem } from "@/lib/navigation";
@@ -49,6 +52,7 @@ export function AppSidebar({
   user,
   badges,
   folders = [],
+  canManageLists = false,
 }: {
   sections: SidebarSection[];
   user: { fullName: string; email: string; role: string; departments: string[] };
@@ -67,6 +71,8 @@ export function AppSidebar({
    * and an admin gets everything from the same query.
    */
   folders?: ProjectFolder[];
+  /** Whether `/tasks/lists` is reachable for this person — it is team_leader+. */
+  canManageLists?: boolean;
 }) {
   const pathname = usePathname();
 
@@ -132,7 +138,7 @@ export function AppSidebar({
         {/* Between the flow and the pinned sections: the modules are what you
             DO, the projects are where the work lives, and Admin stays at the
             foot. */}
-        <NavProjects folders={folders} />
+        <NavProjects folders={folders} canManageLists={canManageLists} />
 
         {pinned.map((section) => (
           <NavSection
@@ -233,6 +239,75 @@ function NavSection({
           }
 
           const badge = badges?.[item.href];
+
+          /*
+           * A PARENT WITH CHILDREN IS A DISCLOSURE, NOT A LINK.
+           *
+           * `/timesheet/team` used to sit beside `/timesheet` as a sibling while
+           * being its child in the URL — and because the active check is
+           * `startsWith`, standing on the team week lit both rows and the rail
+           * claimed you were in two places at once. Nesting fixes the structure;
+           * `activeChild` below fixes the highlight.
+           */
+          if (item.children) {
+            // MOST SPECIFIC WINS. `/tasks/board` matches both "/tasks" and
+            // "/tasks/board"; the longer href is the one you are actually on.
+            // Sorting rather than special-casing the index child means a third
+            // level would fall out correctly without touching this.
+            const activeChild = item.children
+              .filter(
+                (child) => pathname === child.href || pathname.startsWith(`${child.href}/`),
+              )
+              .sort((a, b) => b.href.length - a.href.length)[0];
+
+            return (
+              <Collapsible
+                key={item.href}
+                // Open when you are inside it. A tree that collapses the branch
+                // you are standing on loses you on every navigation.
+                defaultOpen={Boolean(activeChild)}
+                render={<SidebarMenuItem />}
+              >
+                <CollapsibleTrigger
+                  render={
+                    // `group/sub` on the BUTTON, which is what carries
+                    // `aria-expanded` — the compiled selector needs the class and
+                    // the attribute on one element. See the note on the group
+                    // label above.
+                    <SidebarMenuButton
+                      tooltip={item.label}
+                      // Marked when a child is active, because the parent row is
+                      // the only thing visible once the branch is collapsed.
+                      isActive={Boolean(activeChild)}
+                      className="group/sub"
+                    >
+                      <NavIcon name={item.icon} />
+                      <span className="flex-1 truncate">{item.label}</span>
+                      <ChevronRight
+                        aria-hidden
+                        className="size-4 shrink-0 text-muted-foreground transition-transform group-aria-expanded/sub:rotate-90"
+                      />
+                    </SidebarMenuButton>
+                  }
+                />
+
+                <CollapsibleContent>
+                  <SidebarMenuSub>
+                    {item.children.map((child) => (
+                      <SidebarMenuSubItem key={child.href}>
+                        <SidebarMenuSubButton
+                          isActive={child.href === activeChild?.href}
+                          render={<Link href={child.href} />}
+                        >
+                          <span className="truncate">{child.label}</span>
+                        </SidebarMenuSubButton>
+                      </SidebarMenuSubItem>
+                    ))}
+                  </SidebarMenuSub>
+                </CollapsibleContent>
+              </Collapsible>
+            );
+          }
 
           return (
             <SidebarMenuItem key={item.href}>

@@ -9,6 +9,25 @@ import type { Role } from "@/lib/auth/authorization";
  * plan. It also stops anyone quietly reinventing a module in the wrong place.
  */
 
+/**
+ * A route that lives UNDER another nav item.
+ *
+ * `/timesheet/team` was a top-level entry beside `/timesheet`, and the two were
+ * siblings in the rail while being parent and child in the URL. That is not only
+ * untidy: the active check is `startsWith`, so standing on `/timesheet/team` lit
+ * BOTH rows at once and the sidebar claimed you were in two places.
+ *
+ * Children carry their own `minRole`, because a parent everyone can reach can
+ * still hold a child they cannot — Tasks is for everybody and Lists is a team
+ * leader's screen.
+ */
+export type NavChild = {
+  label: string;
+  href: string;
+  /** Inclusive floor — `role >= minRole` (D15). Defaults to the parent's. */
+  minRole?: Role;
+};
+
 export type NavItem = {
   label: string;
   href: string;
@@ -19,6 +38,16 @@ export type NavItem = {
   /** Shown on the disabled state so the reason is obvious. */
   phase?: string;
   icon: NavIconName;
+  /**
+   * Sub-routes, rendered as a collapsible sub-menu.
+   *
+   * THE FIRST CHILD IS THE PARENT'S OWN ROUTE, deliberately. A parent whose
+   * label navigates AND whose children navigate gives two ways to reach the same
+   * screen with only one of them highlighted; making the index an explicit child
+   * ("List", "My week") means every destination in the tree is a row, and the
+   * parent is purely a disclosure.
+   */
+  children?: NavChild[];
 };
 
 export type NavIconName =
@@ -62,6 +91,15 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Tasks",
     href: "/tasks",
     minRole: "member",
+    children: [
+      { label: "List", href: "/tasks" },
+      { label: "Board", href: "/tasks/board" },
+      // The one child a member cannot reach: `/tasks/lists` calls
+      // `requireRole("team_leader")` and renders the forbidden page for anybody
+      // else. It was linked from the sidebar for everyone for about an hour,
+      // which is how that got found.
+      { label: "Lists", href: "/tasks/lists", minRole: "team_leader" },
+    ],
     enabled: true,
     icon: "tasks",
   },
@@ -83,36 +121,19 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Timesheet",
     href: "/timesheet",
     minRole: "member",
+    children: [
+      { label: "My week", href: "/timesheet" },
+      // P6-05 / slice E1. Team leaders and up: this is where submitted weeks are
+      // approved, and where the submit notification's `link_path` points
+      // (`20260818110000_p7_05_timesheet_weeks.sql:339`). A member has nobody to
+      // review, and the page says so rather than 404ing if they reach it.
+      { label: "Team week", href: "/timesheet/team", minRole: "team_leader" },
+    ],
     // Enabled with P6-02/P6-03. The route exists and the table behind it does
     // too; leaving it disabled would now be the nav lying in the other
     // direction, which is worse than the placeholder it replaced.
     enabled: true,
     icon: "timesheet",
-  },
-  {
-    // P6-05 / slice E1. Team leaders and up: this is where submitted weeks are
-    // approved, and it is where the submit notification's link_path points
-    // (`20260818110000_p7_05_timesheet_weeks.sql:339`). A member has nobody to
-    // review, and the page says so rather than 404ing if they reach it.
-    label: "Team week",
-    href: "/timesheet/team",
-    minRole: "team_leader",
-    enabled: true,
-    icon: "timesheet",
-  },
-  {
-    /*
-     * P6-05 / slice E2. Team leaders and up, and the gate is about the HOURS
-     * rather than about seniority: the timesheet entries policy is
-     * owner-or-their-lead, so a member opening this would see only their own
-     * hours under their own department's name and read it as the department's
-     * total. A wrong number on a report is worse than a missing report.
-     */
-    label: "Reports",
-    href: "/reports",
-    minRole: "team_leader",
-    enabled: true,
-    icon: "reports",
   },
   {
     label: "Inbox",
@@ -140,8 +161,26 @@ const ROLE_ORDER: Role[] = ["member", "team_leader", "manager", "admin"];
  * nobody — every route re-checks through lib/auth/authorization.ts, and RLS
  * re-checks under that.
  */
+export function roleAllows(role: Role, required: Role): boolean {
+  return ROLE_ORDER.indexOf(role) >= ROLE_ORDER.indexOf(required);
+}
+
 export function visibleNavItems(role: Role): NavItem[] {
-  return NAV_ITEMS.filter((item) => ROLE_ORDER.indexOf(role) >= ROLE_ORDER.indexOf(item.minRole));
+  return NAV_ITEMS.filter((item) => roleAllows(role, item.minRole)).map((item) => {
+    if (!item.children) return item;
+
+    // A child with no `minRole` inherits the parent's, which the filter above
+    // has already cleared — so only the ones that RAISE the floor are re-checked.
+    const children = item.children.filter(
+      (child) => !child.minRole || roleAllows(role, child.minRole),
+    );
+
+    // One child left means the sub-menu is the parent restated. Collapse it back
+    // to a plain row rather than drawing a disclosure that reveals a single
+    // link to where you already are — which is what a member would see under
+    // Timesheet once Team week is filtered out.
+    return children.length > 1 ? { ...item, children } : { ...item, children: undefined };
+  });
 }
 
 /**
@@ -159,7 +198,10 @@ export type NavGroup = { label: string; hrefs: string[]; pinBottom?: boolean };
 
 export const NAV_GROUPS: NavGroup[] = [
   { label: "Work", hrefs: ["/dashboard", "/requests", "/tasks", "/inbox"] },
-  { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet", "/timesheet/team"] },
+  // `/timesheet/team` is NOT here any more — it is a child of `/timesheet` and
+  // is reached through it. Listing a child href beside its parent is what put
+  // them side by side in the rail in the first place.
+  { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
   { label: "Manage", hrefs: ["/forms", "/reports"] },
   { label: "Admin", hrefs: ["/admin/users"], pinBottom: true },
 ];

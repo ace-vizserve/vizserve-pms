@@ -1,4 +1,4 @@
-import { requireAuthContext } from "@/lib/auth/authorization";
+import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { groupedNavItems } from "@/lib/navigation";
 import { formatUnreadBadge } from "@/lib/notifications";
 import { createClient } from "@/utils/supabase/server";
@@ -102,6 +102,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             sections={sections}
             badges={{ "/inbox": formatUnreadBadge(unread ?? 0) }}
             folders={folders}
+            canManageLists={roleAtLeast(context.role, "team_leader")}
             user={{
               fullName: context.fullName,
               email: context.email,

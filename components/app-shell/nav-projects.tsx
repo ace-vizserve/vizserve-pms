@@ -53,7 +53,23 @@ export type ProjectFolder = {
   lists: { id: string; name: string; openTasks: number }[];
 };
 
-export function NavProjects({ folders }: { folders: ProjectFolder[] }) {
+export function NavProjects({
+  folders,
+  canManageLists,
+}: {
+  folders: ProjectFolder[];
+  /**
+   * `/tasks/lists` calls `requireRole("team_leader")` and renders the forbidden
+   * page for anybody else.
+   *
+   * ⚠️ THIS ROW WAS SHIPPED UNGATED and sent every member to that error — the
+   * feature was meant to make lists discoverable and instead made a dead end
+   * discoverable. Hiding a link protects nobody (the page re-checks, and RLS
+   * re-checks under it); what it does is stop offering a door that does not
+   * open.
+   */
+  canManageLists: boolean;
+}) {
   const pathname = usePathname();
   const params = useSearchParams();
 
@@ -64,13 +80,15 @@ export function NavProjects({ folders }: { folders: ProjectFolder[] }) {
   const activeList = pathname === "/tasks" ? params.get("list") : null;
 
   /*
-   * The group renders even with NOTHING IN IT, and that is the point.
+   * The group renders with nothing but its "Create a list" row, and that is the
+   * point: an early cut returned null while no lists existed, which made the
+   * whole feature invisible including the only route to creating the first one.
    *
-   * There are no lists in this system yet, so an early cut of this returned null
-   * and the whole feature was invisible — including the only route to creating
-   * the first list. A tree that appears once somebody has already found the page
-   * that fills it is a tree nobody finds.
+   * But a member cannot create lists, so for THEM an empty tree is a heading
+   * over nothing. Nothing to navigate to and nothing to do about it.
    */
+  if (folders.length === 0 && !canManageLists) return null;
+
   return (
     // The group collapses like every other one in the rail, and the folders
     // inside collapse independently — two levels, which is the shape the
@@ -167,16 +185,18 @@ export function NavProjects({ folders }: { folders: ProjectFolder[] }) {
             `/tasks/lists` is where lists are created and archived; it already
             exists and enforces its own department scope, so this is a link to a
             screen rather than a second way to make one. */}
-        <SidebarMenuItem>
-          <SidebarMenuButton
-            tooltip={folders.length === 0 ? "Create your first list" : "Manage lists"}
-            className="text-muted-foreground"
-            render={<Link href="/tasks/lists" />}
-          >
-            <Plus />
-            <span>{folders.length === 0 ? "Create a list" : "Manage lists"}</span>
-          </SidebarMenuButton>
-        </SidebarMenuItem>
+        {canManageLists ? (
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={folders.length === 0 ? "Create your first list" : "Manage lists"}
+              className="text-muted-foreground"
+              render={<Link href="/tasks/lists" />}
+            >
+              <Plus />
+              <span>{folders.length === 0 ? "Create a list" : "Manage lists"}</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        ) : null}
       </SidebarMenu>
       </CollapsibleContent>
     </Collapsible>
