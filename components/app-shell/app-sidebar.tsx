@@ -4,11 +4,19 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
+import { ChevronDown } from "lucide-react";
+
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import {
   Sidebar,
   SidebarContent,
   SidebarFooter,
   SidebarGroup,
+  SidebarGroupContent,
   SidebarGroupLabel,
   SidebarHeader,
   SidebarMenu,
@@ -19,6 +27,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { NavGroup, NavItem } from "@/lib/navigation";
 import { NavIcon } from "./nav-icon";
+import { NavProjects, type ProjectFolder } from "./nav-projects";
 import { NavUser } from "./nav-user";
 
 export type SidebarSection = { group: NavGroup; items: NavItem[] };
@@ -39,6 +48,7 @@ export function AppSidebar({
   sections,
   user,
   badges,
+  folders = [],
 }: {
   sections: SidebarSection[];
   user: { fullName: string; email: string; role: string; departments: string[] };
@@ -50,6 +60,13 @@ export function AppSidebar({
    * count, and a sidebar badge is the wrong place to be doing arithmetic.
    */
   badges?: Record<string, string | null>;
+  /**
+   * The project tree — departments as folders, their lists inside.
+   *
+   * Already scoped by RLS in the layout, so a member gets their own department
+   * and an admin gets everything from the same query.
+   */
+  folders?: ProjectFolder[];
 }) {
   const pathname = usePathname();
 
@@ -112,6 +129,11 @@ export function AppSidebar({
           />
         ))}
 
+        {/* Between the flow and the pinned sections: the modules are what you
+            DO, the projects are where the work lives, and Admin stays at the
+            foot. */}
+        <NavProjects folders={folders} />
+
         {pinned.map((section) => (
           <NavSection
             key={section.group.label}
@@ -144,8 +166,47 @@ function NavSection({
   className?: string;
 }) {
   return (
-    <SidebarGroup className={className}>
-      <SidebarGroupLabel>{section.group.label}</SidebarGroupLabel>
+    /*
+     * COLLAPSIBLE AT THE GROUP LEVEL, per the shadcn pattern: the Collapsible
+     * wraps the whole SidebarGroup and the label IS the trigger.
+     *
+     * ⚠️ THE CHEVRON KEYS OFF `aria-expanded`, NOT `data-open`. The documented
+     * sample uses `group-data-open/collapsible:rotate-180`, and on this build
+     * that class never fires — Base UI's trigger emits `data-panel-open` and
+     * `aria-expanded`, and there is no `data-open` anywhere in the rendered
+     * markup. A dead Tailwind variant is invisible: the group would collapse
+     * correctly and the arrow would simply never turn. `aria-expanded` is what
+     * `status-group.tsx` already uses and it is the one that is guaranteed,
+     * because it is the accessibility contract rather than an implementation
+     * detail.
+     *
+     * `group/nav`, named — the sidebar nests collapsibles (the project folders
+     * are inside one of these), and an unnamed group would rotate every chevron
+     * in the rail at once.
+     */
+    <Collapsible defaultOpen render={<SidebarGroup className={className} />}>
+      {/*
+        ⚠️ `group/nav` GOES ON THE TRIGGER, not on the Collapsible root.
+        
+        Tailwind compiles `group-aria-expanded/nav:rotate-180` to
+        `:where(.group\/nav)[aria-expanded="true"] *` — one element carrying BOTH
+        the group class and the attribute. `aria-expanded` is set on the trigger,
+        so putting the class on the wrapper produces a selector that can never
+        match: the group collapses correctly and the arrow silently never turns.
+        `status-group.tsx` gets this right and is the working precedent.
+      */}
+      <SidebarGroupLabel
+        render={<CollapsibleTrigger />}
+        className="group/nav cursor-pointer hover:text-foreground"
+      >
+        {section.group.label}
+        <ChevronDown
+          aria-hidden
+          className="ml-auto size-4 shrink-0 transition-transform group-aria-expanded/nav:rotate-180"
+        />
+      </SidebarGroupLabel>
+
+      <CollapsibleContent render={<SidebarGroupContent />}>
       <SidebarMenu>
         {section.items.map((item) => {
           // startsWith, not equality: a detail route like /requests/<id> must
@@ -200,6 +261,7 @@ function NavSection({
           );
         })}
       </SidebarMenu>
-    </SidebarGroup>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }

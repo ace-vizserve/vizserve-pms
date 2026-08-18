@@ -178,29 +178,44 @@ export function NewRequestDialog({
         <form action={submit} className="space-y-4">
           <div className="space-y-2">
             <Label>Type</Label>
-            {/* Buttons rather than a select: the choice changes the rest of the
-                form, which is worth seeing all at once.
+            {/* REAL RADIOS, not `aria-pressed` buttons. This is one choice from
+                a fixed set of five, which is exactly what a radio group is — and
+                the semantics are worth having: arrow keys move between options,
+                and it announces as "one of five" rather than as five separate
+                toggles that happen to be mutually exclusive.
+
+                Still laid out as cards rather than a list, because the choice
+                changes the rest of the form and is worth seeing all at once.
 
                 Three columns, not two. P7-04 made this five types, and an odd
-                number in a two-column grid leaves the last button stranded on a
+                number in a two-column grid leaves the last option stranded on a
                 row of its own looking like a different kind of control. */}
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3" role="radiogroup">
               {INTERNAL_REQUEST_TYPES.map((option) => (
-                <button
+                <label
                   key={option}
-                  type="button"
-                  onClick={() => {
-                    setType(option);
-                    setErrors({});
-                  }}
-                  aria-pressed={type === option}
-                  className={
-                    type === option
-                      ? "rounded-sm border border-primary bg-accent px-3 py-2 text-left text-sm font-medium text-accent-foreground"
-                      : "rounded-sm border px-3 py-2 text-left text-sm hover:bg-accent/50"
-                  }>
+                  className={cn(
+                    "flex cursor-pointer items-center gap-2 rounded-sm border px-3 py-2 text-sm",
+                    "hover:bg-accent/50",
+                    // The selected look comes from the input's own `:checked`, so
+                    // it cannot drift from the value that gets submitted.
+                    "has-[:checked]:border-primary has-[:checked]:bg-accent has-[:checked]:font-medium has-[:checked]:text-accent-foreground",
+                    "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
+                  )}
+                >
+                  <input
+                    type="radio"
+                    name="request_type"
+                    value={option}
+                    checked={type === option}
+                    onChange={() => {
+                      setType(option);
+                      setErrors({});
+                    }}
+                    className="size-3.5 shrink-0 accent-primary"
+                  />
                   {INTERNAL_REQUEST_LABELS[option]}
-                </button>
+                </label>
               ))}
             </div>
           </div>
@@ -223,32 +238,35 @@ export function NewRequestDialog({
                   A plain list rather than grouped: the list is admin-editable
                   data, so any grouping here would be a second opinion about it
                   that goes stale the first time HR adds a type. */}
+              {/* A DROPDOWN, and it went back to being one. It was briefly a
+                  radio grid — a misreading of which control the radios were
+                  meant for. They belong on Type above: five options that change
+                  the whole form. This is eight rows of admin-editable data that
+                  change nothing else, and eight cards pushed the dates and the
+                  reason below the fold.
+
+                  A native select rather than the styled one, and a plain list
+                  rather than grouped: the list lives in
+                  `vizserve_pms_leave_types`, so any grouping here would be a
+                  second opinion about it that goes stale the first time HR adds
+                  a type. */}
               <div className="space-y-2">
-                <fieldset>
-                  <legend className="mb-2 text-sm font-medium">Leave type</legend>
-                  <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                    {leaveTypes.map((option) => (
-                      <label
-                        key={option.id}
-                        className={cn(
-                          "flex cursor-pointer items-center gap-2 rounded-sm border px-2.5 py-2 text-xs",
-                          "hover:bg-accent/50",
-                          // The checked ring comes from the input's own state, so
-                          // the selected look cannot drift from what is submitted.
-                          "has-[:checked]:border-primary has-[:checked]:bg-accent has-[:checked]:font-medium has-[:checked]:text-accent-foreground",
-                          "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
-                        )}>
-                        <input
-                          type="radio"
-                          name="leave_type_id"
-                          value={option.id}
-                          className="size-3.5 shrink-0 accent-primary"
-                        />
-                        {option.label}
-                      </label>
-                    ))}
-                  </div>
-                </fieldset>
+                <Label htmlFor="leave_type_id">Leave type</Label>
+                <select
+                  id="leave_type_id"
+                  name="leave_type_id"
+                  defaultValue=""
+                  className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                >
+                  <option value="" disabled>
+                    Choose one…
+                  </option>
+                  {leaveTypes.map((option) => (
+                    <option key={option.id} value={option.id}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
                 <FieldError messages={errors.leave_type_id} />
               </div>
 

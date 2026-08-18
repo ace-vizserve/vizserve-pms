@@ -41,6 +41,59 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .select("id", { count: "exact", head: true })
     .is("read_at", null);
 
+  /*
+   * The project tree — departments as folders, their lists inside.
+   *
+   * NO SCOPE FILTER ON EITHER QUERY. `vizserve_pms_lists` and
+   * `vizserve_pms_departments` both scope by policy, so a member gets their own
+   * department's folders and an admin gets every one from the same two queries —
+   * restating the rule here would imply the policy were optional.
+   *
+   * The task counts are a third query rather than a join, because PostgREST
+   * cannot aggregate a related table and a per-list count would be an N+1 in the
+   * SHELL — the one component on every single page in the app.
+   */
+  const [{ data: departments }, { data: lists }, { data: openTasks }] = await Promise.all([
+    supabase.from("vizserve_pms_departments").select("id, name").eq("is_active", true).order("name"),
+    supabase
+      .from("vizserve_pms_lists")
+      .select("id, name, department_id")
+      .eq("is_active", true)
+      .order("name"),
+    // Live work only. A count including everything ever finished would grow
+    // forever and stop meaning "how much is in here".
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("list_id")
+      .not("list_id", "is", null)
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+  ]);
+
+  const countByList = new Map<string, number>();
+  for (const task of openTasks ?? []) {
+    if (!task.list_id) continue;
+    countByList.set(task.list_id, (countByList.get(task.list_id) ?? 0) + 1);
+  }
+
+  const folders = (departments ?? [])
+    .map((department) => ({
+      departmentId: department.id,
+      departmentName: department.name,
+      lists: (lists ?? [])
+        .filter((list) => list.department_id === department.id)
+        .map((list) => ({
+          id: list.id,
+          name: list.name,
+          openTasks: countByList.get(list.id) ?? 0,
+        })),
+    }))
+    // A department with no lists is a folder that opens onto nothing. Dropped
+    // rather than shown empty — the tree is for navigating to work, and an
+    // admin sees every department in the company here. The group itself still
+    // renders, carrying the "Create a list" row, so the feature is reachable
+    // before anybody has made one.
+    .filter((folder) => folder.lists.length > 0);
+
   return (
     <TooltipProvider>
       <BreadcrumbLabelProvider>
@@ -48,6 +101,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <AppSidebar
             sections={sections}
             badges={{ "/inbox": formatUnreadBadge(unread ?? 0) }}
+            folders={folders}
             user={{
               fullName: context.fullName,
               email: context.email,
