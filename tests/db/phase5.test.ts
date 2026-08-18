@@ -127,6 +127,29 @@ async function clearDtr(userId: string) {
 
 afterAll(async () => {
   if (!run) return;
+
+  // NOTIFICATIONS FIRST, and they were missing entirely until 18 Aug 2026.
+  //
+  // Submitting a request notifies every lead of the department, and deciding it
+  // notifies the requester. This suite does both dozens of times, and it used to
+  // delete only the requests — so every run left a drift of notifications
+  // pointing at `internal_request` rows that no longer existed.
+  //
+  // They are not invisible. This project is shared with the running app, so they
+  // land in the inbox of whoever is signed in as a test account, outlive the
+  // data that explains them, and read as real events: an "OVERTIME request
+  // approved" that nobody asked for, attached to a request that cannot be
+  // opened. That is a bug report waiting to happen, and it happened.
+  //
+  // `tests/db/tasks.test.ts` has always done this correctly — the pattern is
+  // lifted from there.
+  if (createdRequests.length > 0) {
+    await adminClient()
+      .from("vizserve_pms_notifications")
+      .delete()
+      .in("entity_id", createdRequests);
+  }
+
   for (const id of createdRequests) {
     await adminClient().from("vizserve_pms_internal_requests").delete().eq("id", id);
   }
