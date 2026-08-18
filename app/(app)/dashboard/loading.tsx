@@ -11,7 +11,7 @@ export default function Loading() {
       </div>
       <StatRowSkeleton tiles={3} />
       <div
-        className="max-w-md space-y-4 rounded-xl bg-card py-4 ring-1 ring-foreground/10"
+        className="max-w-md space-y-4 rounded-lg border bg-card grade-surface py-4 shadow-raised-lg"
         aria-hidden
       >
         <div className="space-y-2 px-4">

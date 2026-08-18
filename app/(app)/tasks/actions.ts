@@ -12,10 +12,13 @@ import {
 import { issueAndSendApproval } from "@/lib/client-approval-server";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
 import {
+  createPersonalTaskSchema,
   createTaskSchema,
   listSchema,
   overridePayloadSchema,
+  taskCommentSchema,
   taskDetailsSchema,
+  taskParentSchema,
   transitionPayloadSchema,
 } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
@@ -56,6 +59,7 @@ function readableError(error: { message?: string } | null): string {
 
 function refresh(taskId?: string) {
   revalidatePath("/tasks");
+  revalidatePath("/");
   revalidatePath("/dashboard");
   if (taskId) revalidatePath(`/tasks/${taskId}`);
 }
@@ -182,11 +186,130 @@ export async function updateTaskDetails(taskId: string, input: unknown): Promise
       output_link: values.output_link || null,
       // "" from a cleared date input means "no date", not the epoch.
       due_date: values.due_date || null,
+      start_date: values.start_date || null,
       list_id: values.list_id,
     })
     .eq("id", taskId);
 
   if (error) return { ok: false, error: readableError(error) };
+
+  refresh(taskId);
+  return { ok: true, data: undefined };
+}
+
+// ---------------------------------------------------------------------------
+// P7-08 — the conversation on a task
+// ---------------------------------------------------------------------------
+
+/**
+ * No authorization beyond "signed in", and that is correct: the INSERT policy
+ * requires the author to be the caller AND to be on the task, so a comment on
+ * work somebody cannot see is refused by the database rather than by a check
+ * here that would eventually drift from it.
+ *
+ * The notification to the other people on the task is a trigger, not a call
+ * from here — a comment that only notifies when it arrives through the app is
+ * one that silently notifies nobody the first time anything else writes one.
+ */
+export async function addTaskComment(taskId: string, input: unknown): Promise<ActionResult> {
+  const context = await requireAuthContextOrThrow();
+
+  if (!z.uuid().safeParse(taskId).success) {
+    return { ok: false, error: "That task does not exist." };
+  }
+
+  const parsed = taskCommentSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Check the comment.", fieldErrors: flattenIssues(parsed.error) };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("vizserve_pms_task_comments").insert({
+    task_id: taskId,
+    // Written explicitly because the column is NOT NULL. The policy still has
+    // the final say — this value only ever equals auth.uid(), and a mismatched
+    // one is refused rather than trusted.
+    author_id: context.userId,
+    body: parsed.data.body,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  refresh(taskId);
+  return { ok: true, data: undefined };
+}
+
+export async function editTaskComment(commentId: string, input: unknown): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const parsed = taskCommentSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Check the comment.", fieldErrors: flattenIssues(parsed.error) };
+  }
+
+  const supabase = await createClient();
+  // `.select` because a policy-refused UPDATE is not an error — it is success
+  // with zero rows, and without this an attempt to edit somebody else's comment
+  // would report "Saved".
+  const { data, error } = await supabase
+    .from("vizserve_pms_task_comments")
+    .update({ body: parsed.data.body })
+    .eq("id", commentId)
+    .select("task_id");
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!data || data.length === 0) return { ok: false, error: "That comment is not yours to edit." };
+
+  refresh(data[0]!.task_id);
+  return { ok: true, data: undefined };
+}
+
+export async function deleteTaskComment(commentId: string): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vizserve_pms_task_comments")
+    .delete()
+    .eq("id", commentId)
+    .select("task_id");
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!data || data.length === 0) {
+    return { ok: false, error: "That comment is not yours to remove." };
+  }
+
+  refresh(data[0]!.task_id);
+  return { ok: true, data: undefined };
+}
+
+// ---------------------------------------------------------------------------
+// P7-09 — subtasks
+// ---------------------------------------------------------------------------
+
+/**
+ * Attach a task to a parent, or detach it with `null`.
+ *
+ * The two rules that make this safe — one level deep, and the same department
+ * as the parent — are a trigger, because both have to read the parent row.
+ * Nothing is re-checked here; the sentences the trigger raises are the ones
+ * worth showing.
+ */
+export async function setTaskParent(taskId: string, input: unknown): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const parsed = taskParentSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Pick a task to nest this under." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vizserve_pms_tasks")
+    .update({ parent_task_id: parsed.data.parent_task_id })
+    .eq("id", taskId)
+    .select("id");
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!data || data.length === 0) return { ok: false, error: "That task is not available." };
 
   refresh(taskId);
   return { ok: true, data: undefined };
@@ -307,6 +430,50 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
   if (error) return { ok: false, error: readableError(error) };
 
   dispatchPendingEmailsInBackground();
+  refresh();
+
+  return { ok: true, data: { taskId: (data as { task_id: string }).task_id } };
+}
+
+// ---------------------------------------------------------------------------
+// P7-01 — a task somebody records for themselves
+// ---------------------------------------------------------------------------
+
+/**
+ * `requireAuthContextOrThrow`, NOT `requireRole` — and that is the whole point
+ * of the slice. Creating work for somebody else stays at team_leader (see
+ * `createTask` above); recording your own does not.
+ *
+ * There is no department check here and no assignee to validate, because
+ * neither is in the payload. `vizserve_pms_create_personal_task` reads both off
+ * the caller's own user row, so the only thing this action can get wrong is the
+ * title.
+ */
+export async function createPersonalTask(
+  input: unknown,
+): Promise<ActionResult<{ taskId: string }>> {
+  await requireAuthContextOrThrow();
+
+  const parsed = createPersonalTaskSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Check the highlighted fields.", fieldErrors: flattenIssues(parsed.error) };
+  }
+
+  const values = parsed.data;
+  const supabase = await createClient();
+
+  const { data, error } = await supabase.rpc("vizserve_pms_create_personal_task", {
+    p_title: values.title,
+    p_description: values.description,
+    p_due_date: values.due_date || null,
+    p_list_id: values.list_id,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  // No `dispatchPendingEmailsInBackground` — nothing was sent. The create
+  // function deliberately notifies nobody, because the only person involved is
+  // the one who just pressed the button.
   refresh();
 
   return { ok: true, data: { taskId: (data as { task_id: string }).task_id } };

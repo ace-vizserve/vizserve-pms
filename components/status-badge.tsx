@@ -1,3 +1,15 @@
+import type { LucideIcon } from "lucide-react";
+import {
+  CircleDashed,
+  CirclePause,
+  CirclePlay,
+  CircleCheckBig,
+  CircleSlash,
+  ClipboardCheck,
+  ScanSearch,
+  SendHorizontal,
+} from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import type {
   VizservePmsInternalRequestStatus,
@@ -13,9 +25,86 @@ import { TASK_STATUS_LABELS } from "@/lib/schemas/tasks";
  * `app/(app)/approvals/request-summary.tsx` had a second, near-identical copy
  * that had already drifted to `font-semibold` — which is exactly how two badges
  * for the same idea end up different heights on the same screen.
+ *
+ * The refresh makes it a chip rather than a full pill: 21px tall, on the radius
+ * scale, with a hairline border, the `grade-chip` wash for a lit top edge, and a
+ * leading dot. The border and the wash are what stop a neutral chip vanishing
+ * into a white card, which the old flat fill did.
  */
 const PILL =
-  "inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-2xs font-medium whitespace-nowrap";
+  "inline-flex h-7 shrink-0 items-center gap-2 rounded-md border grade-chip px-2.5 text-2xs font-semibold whitespace-nowrap";
+
+/**
+ * The tones. Each is a subtle fill, its own border, and a solid for the text
+ * and the dot — so a status reads at a glance without the colour ever being the
+ * only thing carrying it.
+ */
+const TONE = {
+  neutral: "border-border bg-muted text-foreground-muted",
+  brand: "border-accent-border bg-accent text-accent-foreground",
+  info: "border-info-border bg-info-subtle text-info",
+  success: "border-success-border bg-success-subtle text-success",
+  warning: "border-warning-border bg-warning-subtle text-warning",
+  danger: "border-destructive-border bg-destructive-subtle text-destructive",
+} as const;
+
+type Tone = keyof typeof TONE;
+
+/**
+ * The dot is a SECOND non-colour carrier of state, not decoration: it inherits
+ * `currentColor`, so in greyscale the chips still differ from one another by
+ * fill and border weight, and the label always says which is which.
+ *
+ * `aria-hidden` because it duplicates the label for anyone reading the text.
+ */
+export type ChipTone = Tone;
+
+/**
+ * The chip shape, for a labelled state that is NOT one of the canonical enums —
+ * the landing page's module build status ("Live" / "Phase 5") and its approval
+ * gate markers.
+ *
+ * Exported so those call sites stop hand-rolling their own. There were three
+ * before: a `rounded-full bg-success-subtle` roadmap pill, a `rounded-full
+ * bg-muted` one beside it, and a `rounded-full bg-brand` gate marker — each a
+ * slightly different height and radius from the chips in the product, on the
+ * one page a new hire sees first.
+ *
+ * A DATABASE status must still go through the typed badges below, which own the
+ * status→tone maps. This is for the labels that have no enum behind them.
+ */
+export function Chip(props: { tone: Tone; label: string; icon?: LucideIcon; className?: string }) {
+  return <Pill {...props} />;
+}
+
+function Pill({
+  tone,
+  label,
+  icon: Icon,
+  className,
+}: {
+  tone: Tone;
+  label: string;
+  /**
+   * Replaces the dot rather than joining it. An icon is the same second
+   * non-colour carrier the dot is, only a stronger one — a board column reading
+   * "pause" beside its label survives greyscale better than a tinted circle
+   * does. Two markers on one chip would just be noise.
+   */
+  icon?: LucideIcon;
+  className?: string;
+}) {
+  return (
+    <span className={cn(PILL, TONE[tone], className)}>
+      {Icon ? (
+        <Icon aria-hidden className="size-3.5 shrink-0" />
+      ) : (
+        <span aria-hidden className="size-1.25 shrink-0 rounded-full bg-current" />
+      )}
+      {label}
+    </span>
+  );
+}
 
 /**
  * Status pills for the canonical status sets (docs/01-updated-workflow.md §3).
@@ -29,16 +118,13 @@ const PILL =
  *      The enum stays canonical underneath and is never invented around.
  */
 
-const REQUEST_STATUS: Record<
-  VizservePmsRequestStatus,
-  { label: string; className: string }
-> = {
-  DRAFT: { label: "Draft", className: "bg-muted text-muted-foreground" },
-  SUBMITTED: { label: "Submitted", className: "bg-muted text-muted-foreground" },
-  PENDING_REVIEW: { label: "Awaiting review", className: "bg-warning-subtle text-warning" },
-  APPROVED: { label: "Approved", className: "bg-success-subtle text-success" },
-  RETURNED: { label: "Returned", className: "bg-info-subtle text-info" },
-  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive" },
+const REQUEST_STATUS: Record<VizservePmsRequestStatus, { label: string; tone: Tone }> = {
+  DRAFT: { label: "Draft", tone: "neutral" },
+  SUBMITTED: { label: "Submitted", tone: "neutral" },
+  PENDING_REVIEW: { label: "Awaiting review", tone: "warning" },
+  APPROVED: { label: "Approved", tone: "success" },
+  RETURNED: { label: "Returned", tone: "info" },
+  REJECTED: { label: "Rejected", tone: "danger" },
 };
 
 export function RequestStatusBadge({
@@ -50,20 +136,10 @@ export function RequestStatusBadge({
 }) {
   const config = REQUEST_STATUS[status] ?? {
     label: status,
-    className: "bg-muted text-muted-foreground",
+    tone: "neutral" as const,
   };
 
-  return (
-    <span
-      className={cn(
-        PILL,
-        config.className,
-        className,
-      )}
-    >
-      {config.label}
-    </span>
-  );
+  return <Pill tone={config.tone} label={config.label} className={className} />;
 }
 
 export const REQUEST_STATUS_OPTIONS = (
@@ -94,48 +170,112 @@ export function isRequestStatus(value: string | undefined): value is VizservePms
  * nobody looked. Phase 6 reports the split, and a queue that renders them
  * identically hides the thing worth reporting.
  */
-const TASK_STATUS_CLASSES: Record<VizservePmsTaskStatus, string> = {
-  OPEN: "bg-muted text-muted-foreground",
-  ONGOING: "bg-info-subtle text-info",
-  WAITING_FOR_INFO: "bg-warning-subtle text-warning",
+const TASK_STATUS_TONES: Record<VizservePmsTaskStatus, Tone> = {
+  OPEN: "neutral",
+  ONGOING: "brand",
+  WAITING_FOR_INFO: "warning",
   // The two QA states use the brand tint (`--accent` / `--accent-foreground`),
-  // not `--secondary`. Secondary is a near-white neutral, so a 25% wash of it
-  // was an invisible pill on a white card — the label carried the state and the
-  // fill did nothing. `--accent` is #EEF1F9 with brand text at 5.79:1, and it
-  // flips correctly in dark mode.
-  FOR_QA: "bg-accent text-accent-foreground",
-  QA_IN_PROGRESS: "bg-accent text-accent-foreground",
-  FOR_CLIENT_APPROVAL: "bg-warning-subtle text-warning",
-  COMPLETED: "bg-success-subtle text-success",
-  COMPLETED_NO_RESPONSE: "bg-muted text-muted-foreground",
+  // not `--secondary`. Secondary is a near-white neutral, so a wash of it was an
+  // invisible pill on a white card — the label carried the state and the fill
+  // did nothing. `--accent` is #EDF0F8 with brand text at 5.79:1, and it flips
+  // correctly in dark mode.
+  FOR_QA: "brand",
+  QA_IN_PROGRESS: "brand",
+  FOR_CLIENT_APPROVAL: "warning",
+  COMPLETED: "success",
+  COMPLETED_NO_RESPONSE: "neutral",
 };
+
+/**
+ * The glyph for each stage, used where a chip is a heading rather than a note —
+ * the board's column headers (P3-04).
+ *
+ * It lives HERE, beside the tone map, for the same reason the tones do: a status
+ * has one identity, and an icon picked at a call site is the second copy that
+ * drifts. The shapes read as a sequence when the columns are seen side by side —
+ * dashed outline, play, pause, clipboard, magnifier, send — so the board says
+ * which way work flows before anyone reads a word of it.
+ */
+export const TASK_STATUS_ICONS: Record<VizservePmsTaskStatus, LucideIcon> = {
+  OPEN: CircleDashed,
+  ONGOING: CirclePlay,
+  WAITING_FOR_INFO: CirclePause,
+  FOR_QA: ClipboardCheck,
+  QA_IN_PROGRESS: ScanSearch,
+  FOR_CLIENT_APPROVAL: SendHorizontal,
+  COMPLETED: CircleCheckBig,
+  // Distinct from COMPLETED here too — same rule as the tones. The clock ran
+  // out; nobody signed anything off.
+  COMPLETED_NO_RESPONSE: CircleSlash,
+};
+
+/**
+ * A status as a SURFACE rather than as a chip — the board column the chip heads.
+ *
+ * The wash is the same tone the pill uses, thinned so a card still reads as
+ * raised against it. It is a class string rather than a colour so the mapping
+ * stays in this file, which is the only place a status is allowed to become a
+ * colour (§4.1).
+ *
+ * TWO ALPHAS, and the second one is not a taste call. The dark `-subtle` fills
+ * sit at almost exactly `--card`'s luminance, so a 45% wash in dark measured
+ * 1.00–1.04:1 against a card laid on it — the cards and their column collapsed
+ * into one field, held apart by a hairline alone. At 20% the column reads as a
+ * HUE rather than as a lightness step and the card contrast comes back to
+ * 1.04–1.06:1, level with the plain `bg-muted` column this replaced (1.08:1).
+ * Light needs no such care: white on a 45% wash is 1.09–1.11:1, which is what
+ * the old column measured too.
+ *
+ * Borders are full strength, not thinned. At 1.34–1.44:1 (light) and
+ * 1.46–1.83:1 (dark) against the page they are a firmer edge than the default
+ * `--border` hairline (1.16 / 1.30) — right for a column, which is a container
+ * rather than a rule between rows.
+ *
+ * `--muted-foreground` holds 4.55–4.82:1 on every one of these in light and
+ * 5.9–6.2:1 in dark, so the count beside the chip stays body-legal.
+ *
+ * Never the sole carrier of anything: the column is headed by a full chip with
+ * its own icon and label, and this only tells the eye where one column stops.
+ */
+const TONE_SURFACE: Record<Tone, string> = {
+  neutral: "border-border bg-muted",
+  brand: "border-accent-border bg-accent/60 dark:bg-accent/30",
+  info: "border-info-border bg-info-subtle/45 dark:bg-info-subtle/20",
+  success: "border-success-border bg-success-subtle/45 dark:bg-success-subtle/20",
+  warning: "border-warning-border bg-warning-subtle/45 dark:bg-warning-subtle/20",
+  danger: "border-destructive-border bg-destructive-subtle/45 dark:bg-destructive-subtle/20",
+};
+
+export function taskStatusSurface(status: VizservePmsTaskStatus): string {
+  return TONE_SURFACE[TASK_STATUS_TONES[status] ?? "neutral"];
+}
 
 export function TaskStatusBadge({
   status,
+  icon = false,
   className,
 }: {
   status: VizservePmsTaskStatus;
+  /** Swap the dot for the stage's glyph. Board column headings; not table cells. */
+  icon?: boolean;
   className?: string;
 }) {
   return (
-    <span
-      className={cn(
-        PILL,
-        TASK_STATUS_CLASSES[status] ?? "bg-muted text-muted-foreground",
-        className,
-      )}
-    >
-      {TASK_STATUS_LABELS[status] ?? status}
-    </span>
+    <Pill
+      tone={TASK_STATUS_TONES[status] ?? "neutral"}
+      label={TASK_STATUS_LABELS[status] ?? status}
+      icon={icon ? TASK_STATUS_ICONS[status] : undefined}
+      className={className}
+    />
   );
 }
 
-export const TASK_STATUS_OPTIONS = (
-  Object.keys(TASK_STATUS_CLASSES) as VizservePmsTaskStatus[]
-).map((value) => ({ value, label: TASK_STATUS_LABELS[value] }));
+export const TASK_STATUS_OPTIONS = (Object.keys(TASK_STATUS_TONES) as VizservePmsTaskStatus[]).map(
+  (value) => ({ value, label: TASK_STATUS_LABELS[value] }),
+);
 
 export function isTaskStatus(value: string | undefined): value is VizservePmsTaskStatus {
-  return typeof value === "string" && value in TASK_STATUS_CLASSES;
+  return typeof value === "string" && value in TASK_STATUS_TONES;
 }
 
 /**
@@ -146,13 +286,10 @@ export function isTaskStatus(value: string | undefined): value is VizservePmsTas
  * review" at a Team Leader's gate, while your own leave request reads "Pending"
  * to you. Merging them would force one label onto both screens.
  */
-const INTERNAL_STATUS: Record<
-  VizservePmsInternalRequestStatus,
-  { label: string; className: string }
-> = {
-  PENDING_REVIEW: { label: "Pending", className: "bg-warning-subtle text-warning" },
-  APPROVED: { label: "Approved", className: "bg-success-subtle text-success" },
-  REJECTED: { label: "Rejected", className: "bg-destructive/10 text-destructive" },
+const INTERNAL_STATUS: Record<VizservePmsInternalRequestStatus, { label: string; tone: Tone }> = {
+  PENDING_REVIEW: { label: "Pending", tone: "warning" },
+  APPROVED: { label: "Approved", tone: "success" },
+  REJECTED: { label: "Rejected", tone: "danger" },
 };
 
 export function InternalStatusBadge({
@@ -164,10 +301,10 @@ export function InternalStatusBadge({
 }) {
   const config = INTERNAL_STATUS[status] ?? {
     label: status,
-    className: "bg-muted text-muted-foreground",
+    tone: "neutral" as const,
   };
 
-  return <span className={cn(PILL, config.className, className)}>{config.label}</span>;
+  return <Pill tone={config.tone} label={config.label} className={className} />;
 }
 
 /** Which kind of internal request it is. Neutral — the status carries the state. */
@@ -178,9 +315,5 @@ export function InternalTypeBadge({
   type: VizservePmsInternalRequestType;
   className?: string;
 }) {
-  return (
-    <span className={cn(PILL, "bg-muted text-muted-foreground", className)}>
-      {INTERNAL_REQUEST_LABELS[type]}
-    </span>
-  );
+  return <Pill tone="neutral" label={INTERNAL_REQUEST_LABELS[type]} className={className} />;
 }

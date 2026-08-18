@@ -2,6 +2,7 @@
 
 import { useActionState } from "react";
 import { useFormStatus } from "react-dom";
+import Link from "next/link";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,15 +18,22 @@ function FieldError({ id, message }: { id: string; message?: string }) {
   );
 }
 
+/**
+ * No fill override any more.
+ *
+ * `--primary` IS the brand blue (Q15, settled), so `bg-brand text-brand-foreground`
+ * repainted the button in its own colour — and in doing so threw away the
+ * `grade-primary` face and the hover/active states the variant carries. The
+ * default variant is the same colour and a lit one.
+ *
+ * `loading` is not optional on a submit: it sets `aria-busy` and disables the
+ * button together, so the visual and the assistive-tech signal cannot drift (§4.2).
+ */
 function SubmitButton() {
   const { pending } = useFormStatus();
   return (
-    <Button
-      type="submit"
-      className="h-11 w-full bg-brand text-base text-brand-foreground hover:bg-brand/90 active:bg-brand/80"
-      loading={pending}
-    >
-      {pending ? "Signing in" : "Sign In"}
+    <Button type="submit" size="lg" className="w-full" loading={pending}>
+      {pending ? "Signing in" : "Sign in"}
     </Button>
   );
 }
@@ -33,7 +41,7 @@ function SubmitButton() {
 function SsoButton() {
   const { pending } = useFormStatus();
   return (
-    <Button type="submit" variant="outline" className="h-11 w-full bg-background" loading={pending}>
+    <Button type="submit" variant="outline" size="lg" className="w-full" loading={pending}>
       {pending ? null : (
         <svg viewBox="0 0 23 23" aria-hidden className="size-4">
           <path fill="#f35325" d="M1 1h10v10H1z" />
@@ -73,16 +81,16 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
 
         <div className="space-y-2">
           <Label htmlFor="email">Email address</Label>
-          {/* bg-background, not the Input default of transparent: the panel
-              behind this form is muted, and a transparent field would dissolve
-              into it. */}
+          {/* No height or fill override. Both existed to survive the muted panel
+              this form used to sit on; it sits on a card now, so the primitive's
+              own 40px and its own fill are correct and stay on the control
+              scale (§1.3) with every other field in the product. */}
           <Input
             id="email"
             name="email"
             type="email"
             autoComplete="email"
             placeholder="name@vizserve.com"
-            className="h-11 bg-background"
             aria-invalid={Boolean(emailError)}
             aria-describedby={emailError ? "email-error" : undefined}
           />
@@ -96,25 +104,31 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
             name="password"
             type="password"
             autoComplete="current-password"
-            className="h-11 bg-background"
             aria-invalid={Boolean(passwordError)}
             aria-describedby={passwordError ? "password-error" : undefined}
           />
           <FieldError id="password-error" message={passwordError} />
           <div className="flex justify-end">
-            <a
+            {/* next/link, not a bare <a>: this is an internal route, and an
+                anchor here threw away the client router and reloaded the whole
+                application to reach a page one hop away. */}
+            <Link
               href="/forgot-password"
               className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
             >
               Forgot password?
-            </a>
+            </Link>
           </div>
         </div>
 
         {state.error ? (
           <p
             role="alert"
-            className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
+            // The destructive TRIPLE (§1.2) — solid for text, `-subtle` fill,
+            // `-border` hairline. `border-destructive/30 bg-destructive/5` was an
+            // alpha of the solid, which is a different colour in dark mode and
+            // measured nowhere.
+            className="rounded-md border border-destructive-border bg-destructive-subtle px-3 py-2 text-xs text-destructive"
           >
             {state.error}
           </p>

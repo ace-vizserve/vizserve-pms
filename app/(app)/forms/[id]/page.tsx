@@ -130,7 +130,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold">Settings</h2>
-        <div className="rounded-xl bg-card p-6 ring-1 ring-foreground/10">
+        <div className="rounded-lg border bg-card grade-surface p-6 shadow-raised-lg">
           <FormSettings
             departments={departments ?? []}
             lists={lists ?? []}

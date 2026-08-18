@@ -25,9 +25,20 @@ import {
  * column virtualisation and pinning — neither of which we need. It was removed
  * from package.json for the same reason.
  */
-export function DataTableShell({ className, children }: { className?: string; children: React.ReactNode }) {
+export function DataTableShell({
+  className,
+  children,
+}: {
+  className?: string;
+  children: React.ReactNode;
+}) {
   return (
-    <div className={cn("overflow-hidden rounded-xl ring-1 ring-foreground/10", className)}>
+    <div
+      className={cn(
+        "overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg",
+        className,
+      )}
+    >
       <div className="overflow-x-auto">{children}</div>
     </div>
   );
@@ -59,6 +70,7 @@ export function DataTable<T>({
   empty,
   footer,
   onRowHref,
+  bare = false,
   className,
 }: {
   columns: Column<T>[];
@@ -74,29 +86,37 @@ export function DataTable<T>({
   footer?: React.ReactNode;
   /** When set, the whole row becomes a link target for pointer users. */
   onRowHref?: (row: T) => string | undefined;
+  /**
+   * Drop the shell.
+   *
+   * For a table that is already inside a bounded surface — the status groups on
+   * the task list, where the group IS the panel. Nesting DataTableShell inside
+   * one draws a second border a hairline in from the first, which reads as a
+   * rendering fault rather than as structure.
+   */
+  bare?: boolean;
   className?: string;
 }) {
-  return (
-    <DataTableShell className={className}>
-      <Table>
-        <TableHeader>
-          <TableRow>
-            {columns.map((column) => (
-              <TableHead
-                key={column.key}
-                scope="col"
-                className={cn(column.align === "end" && "text-right", column.className)}
-              >
-                {column.header}
-              </TableHead>
-            ))}
-          </TableRow>
-        </TableHeader>
+  const table = (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          {columns.map((column) => (
+            <TableHead
+              key={column.key}
+              scope="col"
+              className={cn(column.align === "end" && "text-right", column.className)}
+            >
+              {column.header}
+            </TableHead>
+          ))}
+        </TableRow>
+      </TableHeader>
 
-        <TableBody>
-          {rows.length === 0 ? (
-            <TableRow className="hover:bg-transparent">
-              {/* `whitespace-normal` undoes TableCell's `whitespace-nowrap`,
+      <TableBody>
+        {rows.length === 0 ? (
+          <TableRow className="hover:bg-transparent">
+            {/* `whitespace-normal` undoes TableCell's `whitespace-nowrap`,
                   which is right for a time or a reference number and very wrong
                   for a paragraph. Without it the empty state's description was
                   laid out on a single unbreakable line, which set the table's
@@ -105,35 +125,38 @@ export function DataTable<T>({
                   view, and every empty list in the app grew a horizontal
                   scrollbar. EmptyState's own `max-w-xs` could not fight it:
                   a max-width cannot shrink content that refuses to wrap. */}
-              <TableCell colSpan={columns.length} className="p-0 whitespace-normal">
-                {empty ?? <EmptyRow />}
-              </TableCell>
+            <TableCell colSpan={columns.length} className="p-0 whitespace-normal">
+              {empty ?? <EmptyRow />}
+            </TableCell>
+          </TableRow>
+        ) : (
+          rows.map((row, index) => (
+            <TableRow
+              key={getRowKey(row, index)}
+              className={cn("align-top", onRowHref?.(row) && "cursor-pointer")}
+            >
+              {columns.map((column) => (
+                <TableCell
+                  key={column.key}
+                  className={cn(column.align === "end" && "text-right", column.className)}
+                >
+                  {column.cell(row, index)}
+                </TableCell>
+              ))}
             </TableRow>
-          ) : (
-            rows.map((row, index) => (
-              <TableRow
-                key={getRowKey(row, index)}
-                className={cn("align-top", onRowHref?.(row) && "cursor-pointer")}
-              >
-                {columns.map((column) => (
-                  <TableCell
-                    key={column.key}
-                    className={cn(column.align === "end" && "text-right", column.className)}
-                  >
-                    {column.cell(row, index)}
-                  </TableCell>
-                ))}
-              </TableRow>
-            ))
-          )}
-        </TableBody>
+          ))
+        )}
+      </TableBody>
 
-        {footer && rows.length > 0 ? <TableFooter>{footer}</TableFooter> : null}
-      </Table>
-    </DataTableShell>
+      {footer && rows.length > 0 ? <TableFooter>{footer}</TableFooter> : null}
+    </Table>
   );
+
+  if (bare) return table;
+
+  return <DataTableShell className={className}>{table}</DataTableShell>;
 }
 
 function EmptyRow() {
-  return <p className="py-10 text-center text-xs text-muted-foreground">Nothing to show.</p>;
+  return <p className="py-9 text-center text-xs text-muted-foreground">Nothing to show.</p>;
 }

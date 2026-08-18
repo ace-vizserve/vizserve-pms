@@ -37,7 +37,7 @@ Rough effort, phase against phase, so nobody is surprised by which ones are heav
 | 5 DTR + Internal Approvals | ▓▓ medium | Reuses the Phase 2 engine; DTR date logic is the hard part |
 | 6 Timesheet + Reporting | ▓▓ medium | Mostly reads over data that already exists |
 
-**The ClickUp subscription runs until Phase 6.** If cancelling it is the goal, that is five phases away. Worth knowing when the renewal lands — it may change how Phase 6 is prioritised, or justify an interim partial migration.
+**The ClickUp subscription runs until Phase 6.** If cancelling it is the goal, that is five phases away. Worth knowing when the renewal lands — it may change how Phase 6 is prioritised. It cannot justify an interim partial migration: `D21` rules out moving data at all, in either direction.
 
 ---
 
@@ -235,18 +235,19 @@ Signed-token email, public approval page, approve/reject with comment and attach
 
 **Retires:** ClickUp. This is the phase that lets the subscription be cancelled (56:30).
 
+**No data comes across (D21).** No sync, no export/import, no parallel run — `P6-10` is withdrawn. ClickUp is a *feature* reference from here on: copy the interactions the team already knows, starting with the timesheet week grid. The subscription is switched off, not migrated.
+
 | Ace | Kurt |
 |---|---|
-| P6-01 migration · P6-04 turnaround reporting · P6-06 negotiation + auto-complete splits · P6-08 archive · P6-09 exports | P6-02 timesheet entry UI · P6-03 week view · P6-05 dashboards · P6-07 feedback report |
-
-**Joint:** P6-10, ClickUp migration and cutover.
+| P6-01 migration · P6-04 turnaround reporting · P6-06 negotiation + auto-complete splits · P6-08 archive · P6-09 exports | P6-02 timesheet grid · P6-03 week navigation and totals · P6-05 dashboards · P6-07 feedback report |
 
 **Exit criteria**
 
 - [ ] Time cannot be logged without a task.
+- [ ] A week of one member's work can be entered from the grid without leaving it.
 - [ ] All seven metrics in `09-later-phases.md` are reportable with a date range.
 - [ ] Archived requests remain queryable.
-- [ ] A written cutover plan exists and ClickUp can be cancelled without data loss.
+- [ ] Every report the team currently reads in ClickUp has an equivalent here.
 
 ---
 

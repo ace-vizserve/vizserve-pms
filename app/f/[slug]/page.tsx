@@ -42,13 +42,13 @@ export default async function PublicFormPage({ params }: { params: Promise<{ slu
   return (
     // py-10 flat, matching /approve and /feedback. The sm:py-14 I had put here
     // was adding to an already-airy logo block.
-    <main className="min-h-svh bg-muted/40 px-4 py-10">
+    <main className="client-surface min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-2xl">
         <div className="mb-5">
           <BrandLockup align="stacked" subtitle="Request form" />
         </div>
 
-        <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
+        <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
           {/* A titled header band rather than a heading floating above the
               fields. On a page a client sees once, the boundary between "what
               this is" and "what you have to do" is worth drawing. */}

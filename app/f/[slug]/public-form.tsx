@@ -192,7 +192,7 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
 
   if (submitted) {
     return (
-      <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-8 text-center">
+      <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-8 text-center">
         <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded-full bg-success-subtle text-success">
           ✓
         </div>

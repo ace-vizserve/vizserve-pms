@@ -216,6 +216,10 @@ Leave balances are **deliberately out of scope for v1** — HR / Sir Joel counts
 
 Amier, 33:20. Time is logged **against a task selected from the list** — free-text logging is not allowed. *"mamap niya yung item mo sa list... hindi ka rin pwede-pwede mag-log ng gusto mo."*
 
+The screen is a **week grid** — tasks down the side, the seven days across the top, a duration typed into the cell. ClickUp's shape, deliberately (`D21`), and the rule above survives it because every row *is* a task: there is no cell not attached to real work. Detail in [09-later-phases.md](09-later-phases.md) §Timesheet shape.
+
+Not every task comes from a client request. Tasks created by hand (`P3-12`, `request_id` null — see §4.5 above) are logged against exactly the same way, which is how internal work that never touched a form still shows up in the week.
+
 ### Inbox / Notifications
 
 Amier, 20:30–21:30. One place showing: requests pending *your* approval, and status changes on requests *you* submitted. Unread count is a nice-to-have he explicitly deferred: *"kahit wala muna, mga improvement na yun."*

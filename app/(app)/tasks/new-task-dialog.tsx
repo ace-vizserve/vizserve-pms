@@ -37,30 +37,71 @@ import { createTask } from "./actions";
  */
 
 type Department = { id: string; name: string };
-type Person = { id: string; full_name: string; primary_department_id: string | null };
+type Person = {
+  id: string;
+  full_name: string;
+  primary_department_id: string | null;
+};
 type List = { id: string; name: string; department_id: string };
 
 const NONE = "__none__";
+
+/**
+ * Three shapes, one dialog.
+ *
+ * `toolbar` is the page action. `column` and `row` are the in-place adds on the
+ * board and on the list's Open group — quiet, full-width, ghosted, so the
+ * affordance sits where the task will appear without competing with the cards
+ * above it. All three open the same form; nothing about what gets created
+ * changes with the look.
+ */
+const TRIGGER: Record<"toolbar" | "column" | "row", { label: string; button: React.ReactElement }> =
+  {
+    toolbar: { label: "New task", button: <Button size="sm" /> },
+    column: {
+      label: "Add task",
+      button: (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start text-muted-foreground hover:text-foreground"
+        />
+      ),
+    },
+    row: {
+      label: "Add task",
+      button: (
+        <Button
+          variant="ghost"
+          size="xs"
+          className="w-full justify-start text-muted-foreground hover:text-foreground"
+        />
+      ),
+    },
+  };
 
 export function NewTaskDialog({
   departments,
   people,
   lists,
   defaultDepartmentId,
+  trigger = "toolbar",
 }: {
   departments: Department[];
   people: Person[];
   lists: List[];
   defaultDepartmentId: string;
+  trigger?: "toolbar" | "column" | "row";
 }) {
   const [open, setOpen] = useState(false);
+  const shape = TRIGGER[trigger];
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={<Button size="sm" />}>
-          <Plus />
-          New task
-        </DialogTrigger>
+      <DialogTrigger render={shape.button}>
+        <Plus />
+        {shape.label}
+      </DialogTrigger>
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
         {/* Unmounted while closed, so the fields are seeded on open rather than
             synced by an effect — the same reason as the user editor. */}
@@ -209,7 +250,10 @@ function TaskForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="assignee">Person in charge</Label>
-            <Select value={assigneeId} onValueChange={(v) => v !== null && (v)}>
+            <Select
+              value={assigneeId}
+              onValueChange={(value) => value !== null && setAssigneeId(value)}
+            >
               <SelectTrigger id="assignee">
                 <SelectValue />
               </SelectTrigger>
@@ -229,7 +273,10 @@ function TaskForm({
 
           <div className="space-y-2">
             <Label htmlFor="qa">QA reviewer</Label>
-            <Select value={qaAssigneeId} onValueChange={(v) => v !== null && (v)}>
+            <Select
+              value={qaAssigneeId}
+              onValueChange={(value) => value !== null && setQaAssigneeId(value)}
+            >
               <SelectTrigger id="qa">
                 <SelectValue />
               </SelectTrigger>
@@ -248,7 +295,7 @@ function TaskForm({
         {departmentLists.length > 0 ? (
           <div className="space-y-2">
             <Label htmlFor="list">List</Label>
-            <Select value={listId} onValueChange={(v) => v !== null && (v)}>
+            <Select value={listId} onValueChange={(value) => value !== null && setListId(value)}>
               <SelectTrigger id="list">
                 <SelectValue />
               </SelectTrigger>

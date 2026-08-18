@@ -34,6 +34,9 @@ export type NavIconName =
 
 export const NAV_ITEMS: NavItem[] = [
   {
+    // NO "Home" ENTRY. "/" is a standalone page outside the (app) shell — it
+    // has no sidebar to appear in. The lockup at the top of the sidebar is the
+    // way back to it.
     label: "Dashboard",
     href: "/dashboard",
     minRole: "member",

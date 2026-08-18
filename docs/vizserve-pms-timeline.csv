@@ -14,8 +14,7 @@ Email & Domain Configuration,2026-08-05,2026-08-07,Blocked,Amier,BLOCKER. Resend
 Testing and Bug Fixing,2026-08-05,2026-08-14,To Do,Ace + Kurt,Browser smoke test, Entra verification, placeholder forms through the builder, fixes.
 DTR Module,2026-08-17,2026-08-28,To Do,Ace,Punch in/out rules, DTR list view, payroll export.
 Internal Approvals Module,2026-08-31,2026-09-11,To Do,Ace + Kurt,Leave, no time-in, no time-out, reimbursement. Reuses the existing approval engine.
-Timesheet & Reporting Module,2026-09-14,2026-09-25,To Do,Ace + Kurt,Time logged against tasks, turnaround and feedback reporting, dashboards.
-ClickUp Data Migration,2026-09-28,2026-10-02,To Do,Ace + Kurt,Export, map and import live ClickUp data.
+Timesheet & Reporting Module,2026-09-14,2026-09-25,To Do,Ace + Kurt,Time logged against tasks in a week grid, turnaround and feedback reporting, dashboards.
 Web Hosting & DNS Configuration,2026-10-05,2026-10-07,To Do,Ace,Vercel production, domain, cron schedules.
 Deployment of Live Environment,2026-10-08,2026-10-09,To Do,Ace,Production deploy, real accounts, first live client request.
-Parallel Run & Cutover,2026-10-12,2026-10-23,To Do,Amier,Both systems for two weeks, then cancel the ClickUp subscription.
+Cutover & ClickUp Cancellation,2026-10-12,2026-10-23,To Do,Amier,Team moves over and the subscription is cancelled. No data is migrated (D21); any overlap is dual entry.

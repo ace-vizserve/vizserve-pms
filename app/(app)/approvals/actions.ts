@@ -42,6 +42,7 @@ function readableError(error: { message?: string } | null): string {
 
 function refresh(id?: string) {
   revalidatePath("/approvals");
+  revalidatePath("/");
   revalidatePath("/dashboard");
   revalidatePath("/inbox");
   if (id) revalidatePath(`/approvals/${id}`);
@@ -69,8 +70,13 @@ export async function submitInternalRequest(input: unknown): Promise<ActionResul
     p_reason: value.reason,
     p_start_date: value.request_type === "LEAVE" ? value.start_date : null,
     p_end_date: value.request_type === "LEAVE" ? value.end_date : null,
+    // OVERTIME carries a work_date too, so this branch is not the correction
+    // pair alone — a mistake that would submit an overtime request with a null
+    // date and get it refused by the shape CHECK.
     p_work_date:
-      value.request_type === "NO_TIME_IN" || value.request_type === "NO_TIME_OUT"
+      value.request_type === "NO_TIME_IN" ||
+      value.request_type === "NO_TIME_OUT" ||
+      value.request_type === "OVERTIME"
         ? value.work_date
         : null,
     p_correction_time:
@@ -78,6 +84,11 @@ export async function submitInternalRequest(input: unknown): Promise<ActionResul
         ? value.correction_time
         : null,
     p_amount: value.request_type === "REIMBURSEMENT" ? value.amount : null,
+    // ⚠️ The Args type makes this OPTIONAL, because the SQL parameter has a
+    // default — so omitting it would NOT be a compile error. It would submit
+    // every overtime request with a null and let the shape CHECK reject it at
+    // runtime. `tests/db/phase5.test.ts` is the guard, not the compiler.
+    p_overtime_minutes: value.request_type === "OVERTIME" ? value.overtime_minutes : null,
   });
 
   if (error) return { ok: false, error: readableError(error) };

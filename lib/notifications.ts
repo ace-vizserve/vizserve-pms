@@ -15,6 +15,7 @@ export const NOTIFICATION_TYPES = [
   "qa_requested",
   "client_decision",
   "internal_decision",
+  "commented",
   "status_changed",
 ] as const;
 
@@ -29,6 +30,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<VizservePmsNotificationType, strin
   qa_requested: "Your QA",
   client_decision: "Client decision",
   internal_decision: "Your requests",
+  commented: "Comments",
   status_changed: "Status changes",
 };
 

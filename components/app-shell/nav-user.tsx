@@ -56,12 +56,19 @@ export function NavUser({
     <SidebarMenu>
       <SidebarMenuItem>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<SidebarMenuButton size="lg" />}>
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-xs font-medium text-sidebar-primary-foreground">
+          <DropdownMenuTrigger
+            render={
+              <SidebarMenuButton
+                size="lg"
+                className="h-13 border bg-card grade-raised shadow-raised hover:bg-card"
+              />
+            }
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-accent-border bg-accent grade-chip text-xs font-semibold text-accent-foreground shadow-raised">
               {initials}
             </span>
             <span className="grid flex-1 text-left leading-tight">
-              <span className="truncate font-medium">{displayName}</span>
+              <span className="truncate text-sm font-semibold tracking-[-0.014em]">{displayName}</span>
               <span className="truncate text-xs text-muted-foreground">{email}</span>
             </span>
             <ChevronsUpDown className="ml-auto size-4" />
@@ -83,7 +90,7 @@ export function NavUser({
                   <p className="text-sm font-medium">{displayName}</p>
                   <p className="text-xs text-muted-foreground">{email}</p>
                   <p className="pt-1">
-                    <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
+                    <span className="inline-flex h-5.25 items-center rounded-sm border bg-muted grade-chip px-2 text-2xs font-semibold text-foreground-muted">
                       {ROLE_LABELS[role] ?? role}
                     </span>
                   </p>

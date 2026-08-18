@@ -37,14 +37,30 @@ export function RequestFilters({ forms }: { forms: { id: string; name: string }[
 
   const hasFilters = ["status", "form", "from", "to"].some((k) => params.get(k));
 
+  // Base UI renders the RAW VALUE in <SelectValue> unless the root is handed an
+  // items map — otherwise the trigger shows the "__all__" sentinel and the bare
+  // enum instead of the human labels the dropdown lists.
+  const statusItems: Record<string, string> = {
+    [ALL]: "All statuses",
+    ...Object.fromEntries(REQUEST_STATUS_OPTIONS.map((option) => [option.value, option.label])),
+  };
+  const formItems: Record<string, string> = {
+    [ALL]: "All forms",
+    ...Object.fromEntries(forms.map((form) => [form.id, form.name])),
+  };
+
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
+    <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
       <div className="space-y-1.5">
         <Label htmlFor="status" className="text-xs text-muted-foreground">
           Status
         </Label>
-        <Select value={params.get("status") ?? ALL} onValueChange={(v) => setParam("status", v)}>
-          <SelectTrigger id="status" className="h-8 w-44">
+        <Select
+          items={statusItems}
+          value={params.get("status") ?? ALL}
+          onValueChange={(v) => setParam("status", v)}
+        >
+          <SelectTrigger id="status" className="w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -62,8 +78,12 @@ export function RequestFilters({ forms }: { forms: { id: string; name: string }[
         <Label htmlFor="form" className="text-xs text-muted-foreground">
           Form
         </Label>
-        <Select value={params.get("form") ?? ALL} onValueChange={(v) => setParam("form", v)}>
-          <SelectTrigger id="form" className="h-8 w-48">
+        <Select
+          items={formItems}
+          value={params.get("form") ?? ALL}
+          onValueChange={(v) => setParam("form", v)}
+        >
+          <SelectTrigger id="form" className="w-52">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -84,7 +104,7 @@ export function RequestFilters({ forms }: { forms: { id: string; name: string }[
         <Input
           id="from"
           type="date"
-          className="h-8 w-40"
+          className="w-44"
           defaultValue={params.get("from") ?? ""}
           onChange={(e) => setParam("from", e.target.value)}
         />
@@ -97,7 +117,7 @@ export function RequestFilters({ forms }: { forms: { id: string; name: string }[
         <Input
           id="to"
           type="date"
-          className="h-8 w-40"
+          className="w-44"
           defaultValue={params.get("to") ?? ""}
           onChange={(e) => setParam("to", e.target.value)}
         />

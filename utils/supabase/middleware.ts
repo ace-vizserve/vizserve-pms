@@ -32,10 +32,16 @@ const PUBLIC_PREFIXES = [
  * every path starts with "/", so adding it there would make the entire
  * authenticated app anonymously reachable. Anything rooted at "/" belongs
  * here instead.
+ *
+ * THE SET IS EMPTY, and that is the point. "/" used to be a public marketing
+ * page arguing for the product. It is a staff home now — this platform is for
+ * people who already work here, and nobody who does needs to be sold it — so
+ * the root is gated like everything else and an anonymous visitor is sent to
+ * sign in. The pages a CLIENT sees are `/f/[slug]`, `/approve/[token]` and
+ * `/feedback/[token]`, which are prefixes below and reach the database only
+ * through SECURITY DEFINER functions.
  */
-const PUBLIC_EXACT = new Set([
-  "/", // marketing landing page
-]);
+const PUBLIC_EXACT = new Set<string>();
 
 export function isPublicPath(pathname: string) {
   if (PUBLIC_EXACT.has(pathname)) return true;
@@ -93,7 +99,7 @@ export async function updateSession(request: NextRequest) {
 
   if (user && pathname === "/login") {
     const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
+    url.pathname = "/";
     url.search = "";
     return NextResponse.redirect(url);
   }

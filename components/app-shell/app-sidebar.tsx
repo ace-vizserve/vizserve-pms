@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -56,16 +57,44 @@ export function AppSidebar({
   const pinned = sections.filter(({ group }) => group.pinBottom);
 
   return (
-    <Sidebar variant="inset">
+    <Sidebar variant="sidebar">
       <SidebarHeader>
         <SidebarMenu>
           <SidebarMenuItem>
-            <SidebarMenuButton size="lg" render={<Link href="/dashboard" />}>
-              <span className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sm font-semibold text-sidebar-primary-foreground">
-                V
+            <SidebarMenuButton
+              size="lg"
+              render={<Link href="/" />}
+              className="h-13 border bg-card grade-raised shadow-raised hover:bg-card"
+            >
+              {/*
+                The real mark, not the letterform placeholder that used to sit
+                here — the same objection brand-lockup.tsx already records for
+                the client-facing pages.
+
+                The tile is `bg-white` and deliberately does NOT flip with the
+                theme: this is the BLUE logo, so it needs a light ground in both
+                modes. The white-on-brand-surface asset is the other half of the
+                same rule, and BrandLockup uses that one.
+
+                `alt=""` because the wordmark beside it already names the thing;
+                a screen reader announcing "VizServe VizServe PMS" is worse than
+                one that just reads the text.
+              */}
+              <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md border border-border bg-white p-1 shadow-raised">
+                <Image
+                  src="/assets/vizserve-logo-blue.png"
+                  alt=""
+                  width={130}
+                  height={130}
+                  sizes="32px"
+                  priority
+                  className="h-full w-auto"
+                />
               </span>
               <span className="grid flex-1 text-left leading-tight">
-                <span className="truncate font-semibold">VizServe PMS</span>
+                <span className="truncate text-sm font-semibold tracking-[-0.014em]">
+                  VizServe PMS
+                </span>
                 <span className="truncate text-xs text-muted-foreground">Operations</span>
               </span>
             </SidebarMenuButton>

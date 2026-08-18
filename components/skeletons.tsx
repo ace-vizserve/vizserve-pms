@@ -53,7 +53,7 @@ export function TableSkeleton({ columns = 4, rows = 6 }: { columns?: number; row
 export function FilterBarSkeleton({ fields = 3 }: { fields?: number }) {
   return (
     <div
-      className="flex flex-wrap items-end gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10"
+      className="flex flex-wrap items-end gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg"
       aria-hidden
     >
       {Array.from({ length: fields }, (_, index) => (
@@ -73,7 +73,7 @@ export function StatRowSkeleton({ tiles = 3 }: { tiles?: number }) {
       {Array.from({ length: tiles }, (_, index) => (
         <div
           key={index}
-          className="flex items-start gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10"
+          className="flex items-start gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg"
         >
           <Skeleton className="size-9 shrink-0 rounded-full" />
           <div className="flex-1 space-y-2">
@@ -90,7 +90,7 @@ export function StatRowSkeleton({ tiles = 3 }: { tiles?: number }) {
 /** A titled card with a body — the detail-page unit. */
 export function CardSkeleton({ lines = 4 }: { lines?: number }) {
   return (
-    <div className="space-y-4 rounded-xl bg-card py-4 ring-1 ring-foreground/10" aria-hidden>
+    <div className="space-y-4 rounded-lg border bg-card grade-surface py-4 shadow-raised-lg" aria-hidden>
       <div className="px-4">
         <Skeleton className="h-4 w-32" />
       </div>

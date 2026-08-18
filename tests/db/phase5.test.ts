@@ -49,6 +49,70 @@ if (dbTestsEnabled && !migrationApplied) {
 }
 
 const run = dbTestsEnabled && migrationApplied;
+
+/**
+ * P7-04 lands in its own pair of migrations, so it gets its own probe. Testing
+ * for the COLUMN rather than the enum value: `overtime_minutes` only exists once
+ * the second file has run, and the second file is the one that also rewrites the
+ * shape constraint. The enum on its own would let these cases run against a
+ * database that cannot store the thing they submit.
+ */
+const overtimeApplied =
+  run
+    ? !(await adminClient().from("vizserve_pms_internal_requests").select("overtime_minutes").limit(1))
+        .error
+    : false;
+
+if (run && !overtimeApplied) {
+  announce(
+    "phase5.test.ts — P7-04 overtime cases SKIPPED." +
+      " supabase/migrations/20260818100100_p7_04_overtime_request.sql is not applied.",
+  );
+}
+
+/**
+ * P7-12 — leave types.
+ *
+ * Probed on the COLUMN rather than the table, for the same reason the overtime
+ * probe above is: the column and the rewritten shape constraint arrive in the
+ * same file, and a database with the table but not the constraint would run
+ * these cases against rules that are not there yet.
+ */
+const leaveTypesApplied = run
+  ? !(await adminClient().from("vizserve_pms_internal_requests").select("leave_type_id").limit(1))
+      .error
+  : false;
+
+if (run && !leaveTypesApplied) {
+  announce(
+    "phase5.test.ts — P7-12 leave-type cases SKIPPED." +
+      " supabase/migrations/20260818150000_p7_12_leave_types.sql is not applied.",
+  );
+}
+
+/**
+ * A leave type to file against, resolved once.
+ *
+ * EVERY EXISTING LEAVE FIXTURE IN THIS FILE NEEDS ONE once P7-12 is applied —
+ * the shape constraint makes it required, so a submit without it is refused.
+ * That is the whole fixture cost of this slice, and it is test work rather than
+ * product work.
+ *
+ * Null before the migration, and the call sites spread it, so the same fixtures
+ * keep working against a database that does not have the column yet.
+ */
+const leaveType: { p_leave_type_id?: string } = {};
+
+if (leaveTypesApplied) {
+  const { data } = await adminClient()
+    .from("vizserve_pms_leave_types")
+    .select("id")
+    .eq("code", "VACATION")
+    .single();
+
+  if (data) leaveType.p_leave_type_id = data.id;
+}
+
 const today = todayInAppZone();
 const yesterday = yesterdayInAppZone();
 
@@ -63,6 +127,29 @@ async function clearDtr(userId: string) {
 
 afterAll(async () => {
   if (!run) return;
+
+  // NOTIFICATIONS FIRST, and they were missing entirely until 18 Aug 2026.
+  //
+  // Submitting a request notifies every lead of the department, and deciding it
+  // notifies the requester. This suite does both dozens of times, and it used to
+  // delete only the requests — so every run left a drift of notifications
+  // pointing at `internal_request` rows that no longer existed.
+  //
+  // They are not invisible. This project is shared with the running app, so they
+  // land in the inbox of whoever is signed in as a test account, outlive the
+  // data that explains them, and read as real events: an "OVERTIME request
+  // approved" that nobody asked for, attached to a request that cannot be
+  // opened. That is a bug report waiting to happen, and it happened.
+  //
+  // `tests/db/tasks.test.ts` has always done this correctly — the pattern is
+  // lifted from there.
+  if (createdRequests.length > 0) {
+    await adminClient()
+      .from("vizserve_pms_notifications")
+      .delete()
+      .in("entity_id", createdRequests);
+  }
+
   for (const id of createdRequests) {
     await adminClient().from("vizserve_pms_internal_requests").delete().eq("id", id);
   }
@@ -249,6 +336,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
         p_reason: "Family matters.",
         p_start_date: today,
         p_end_date: today,
+        ...leaveType,
       }),
       submit(client, {
         p_request_type: "NO_TIME_IN",
@@ -297,6 +385,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
       p_reason: "Scoping the queue test.",
       p_start_date: today,
       p_end_date: today,
+      ...leaveType,
     });
 
     const tl = await signIn("tlVizBytes");
@@ -337,6 +426,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
       p_reason: "Self-approval attempt.",
       p_start_date: today,
       p_end_date: today,
+      ...leaveType,
     });
 
     const { error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
@@ -353,6 +443,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
       p_reason: "Reason-required test.",
       p_start_date: today,
       p_end_date: today,
+      ...leaveType,
     });
 
     const tl = await signIn("tlVizBytes");
@@ -554,5 +645,434 @@ describe.skipIf(!run)("P5-01 — the DTR cannot be hand-edited", () => {
       .eq("user_id", owner.userId);
 
     expect((data ?? []).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P7-04 — OVERTIME, the fifth type.
+//
+// The first type added since launch, so these cases carry a second job beyond
+// "does overtime work": they prove the per-type CHECK actually discriminates
+// now. Its old `else` branch swallowed any new enum value into the time
+// correction shape, which would have made this type quietly unusable.
+// ---------------------------------------------------------------------------
+describe.skipIf(!overtimeApplied)("P7-04 — overtime requests", () => {
+  it("submits and routes like every other type", async () => {
+    const { client, userId } = await signIn("member1VizBytes");
+
+    const id = await submit(client, {
+      p_request_type: "OVERTIME",
+      p_reason: "Client deadline moved to Friday.",
+      p_work_date: yesterday,
+      p_overtime_minutes: 120,
+    });
+
+    const { data: row } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("request_type, status, department_id, work_date, overtime_minutes, amount")
+      .eq("id", id)
+      .single();
+
+    const { data: user } = await adminClient()
+      .from("vizserve_pms_users")
+      .select("primary_department_id")
+      .eq("id", userId)
+      .single();
+
+    expect(row!.request_type).toBe("OVERTIME");
+    expect(row!.status).toBe("PENDING_REVIEW");
+    expect(row!.department_id).toBe(user!.primary_department_id);
+    expect(row!.overtime_minutes).toBe(120);
+    expect(row!.amount).toBeNull();
+  });
+
+  it("accepts today, because you ask before you work the evening", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const id = await submit(client, {
+      p_request_type: "OVERTIME",
+      p_reason: "Staying late to finish the deck.",
+      p_work_date: today,
+      p_overtime_minutes: 90,
+    });
+
+    expect(id).toBeTruthy();
+  });
+
+  it("refuses a future day", async () => {
+    const { client } = await signIn("member1VizBytes");
+    const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "Planning ahead a little too far.",
+        p_work_date: tomorrow,
+        p_overtime_minutes: 60,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a day or a length that is missing", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "No day given.",
+        p_overtime_minutes: 60,
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "No length given.",
+        p_work_date: yesterday,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("refuses more overtime than a day can hold", async () => {
+    // 960 is not arbitrary: 480 + 960 is exactly the 1440-minute day cap the
+    // timesheet trigger enforces. Above it, an approved request would describe
+    // a day the database will not accept entries for.
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "A very long evening indeed.",
+        p_work_date: yesterday,
+        p_overtime_minutes: 961,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("refuses fields that belong to another type", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "Overtime is not a reimbursement.",
+        p_work_date: yesterday,
+        p_overtime_minutes: 60,
+        p_amount: 500,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("keeps overtime_minutes off the other types", async () => {
+    // The other half of the constraint rewrite. If this passes, the branches
+    // are discriminating rather than falling through to a common shape.
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "NO_TIME_IN",
+        p_reason: "A correction carrying overtime it has no use for.",
+        p_work_date: yesterday,
+        p_correction_time: "08:00",
+        p_overtime_minutes: 60,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("approving one writes nothing into the DTR", async () => {
+    // Deliberate. An approved OT row is a fact the timesheet and payroll READ.
+    // Copying it into the DTR would be a second source of truth for the same
+    // hours, and the two would disagree the first time somebody worked less
+    // overtime than they asked for.
+    const { client } = await signIn("member1VizBytes");
+    const id = await submit(client, {
+      p_request_type: "OVERTIME",
+      p_reason: "Checking the side effects, of which there are none.",
+      p_work_date: yesterday,
+      p_overtime_minutes: 60,
+    });
+
+    const tl = await signIn("tlVizBytes");
+    const { data, error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+      p_reason: null,
+    });
+
+    expect(error).toBeNull();
+    expect((data as unknown as { dtr_entry_id: string | null }).dtr_entry_id).toBeNull();
+
+    // And the engine was used rather than reimplemented.
+    const { data: approvals } = await adminClient()
+      .from("vizserve_pms_approvals")
+      .select("decision, entity_type")
+      .eq("entity_id", id);
+
+    expect(approvals).toHaveLength(1);
+    expect(approvals![0]!.entity_type).toBe("internal_request");
+    expect(approvals![0]!.decision).toBe("approved");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The queries the DTR screens actually send.
+//
+// These assert something the rest of the suite never did: that the SELECT
+// STRING PARSES. `vizserve_pms_dtr_entries` has two foreign keys to
+// `vizserve_pms_users` — `user_id` and `corrected_by` — so an unqualified
+// embed is ambiguous and PostgREST refuses the entire query.
+//
+// That is not a hypothetical. The list page and the payroll export both shipped
+// with the ambiguous form. The page read `data ?? []` and rendered "No entries
+// in this range", so a total failure was indistinguishable from an empty record
+// and it went unnoticed until the error was put on screen.
+//
+// Row counts are deliberately not asserted — the point is that the shape is
+// accepted, which is the part that was broken and the part no other test
+// covers.
+// ---------------------------------------------------------------------------
+describe.skipIf(!run)("the DTR queries parse", () => {
+  const USER_FK = "vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey";
+
+  it("the list page's select is unambiguous", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client
+      .from("vizserve_pms_dtr_entries")
+      .select(`id, work_date, time_in, time_out, corrected_at, user_id, ${USER_FK}(full_name)`)
+      .gte("work_date", "2026-01-01")
+      .lte("work_date", today)
+      .limit(1);
+
+    expect(error).toBeNull();
+  });
+
+  it("the payroll export's select is unambiguous", async () => {
+    const { client } = await signIn("tlVizBytes");
+
+    const { error } = await client
+      .from("vizserve_pms_dtr_entries")
+      .select(`work_date, time_in, time_out, corrected_at, user_id, ${USER_FK}(full_name, email)`)
+      .gte("work_date", "2026-01-01")
+      .lte("work_date", today)
+      .limit(1);
+
+    expect(error).toBeNull();
+  });
+
+  it("proves the unqualified embed is genuinely refused", async () => {
+    // Pins WHY the constraint has to be named. If a future migration drops
+    // `corrected_by`, this starts passing and the hint becomes optional — but
+    // the hint is still correct, so this test failing is information, not an
+    // instruction to remove anything.
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client
+      .from("vizserve_pms_dtr_entries")
+      .select("id, vizserve_pms_users(full_name)")
+      .limit(1);
+
+    expect(error).not.toBeNull();
+    expect(error!.message).toContain("more than one relationship");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P7-12 — leave types.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!leaveTypesApplied)("P7-12 — leave types", () => {
+  it("seeded Amier's list, active and ordered", async () => {
+    const { data } = await adminClient()
+      .from("vizserve_pms_leave_types")
+      .select("code, label, is_active")
+      .order("sort_order");
+
+    expect(data!.map((row) => row.code)).toEqual([
+      "VACATION",
+      "SICK",
+      "SERVICE_INCENTIVE",
+      "BIRTHDAY",
+      "MATERNITY",
+      "PATERNITY",
+      "SOLO_PARENT",
+      "SPECIAL_WOMEN",
+    ]);
+
+    // Order is by usage, not alphabet. Vacation and Sick are what almost
+    // everybody picks, and alphabetically Sick lands seventh.
+    expect(data![0]!.label).toBe("Vacation Leave");
+    expect(data!.every((row) => row.is_active)).toBe(true);
+  });
+
+  it("refuses a leave request with no type", async () => {
+    // The constraint is the authority, not the zod schema a direct API call
+    // never runs.
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "LEAVE",
+      p_reason: "No type supplied.",
+      p_start_date: today,
+      p_end_date: today,
+    } as never);
+
+    expect(error).not.toBeNull();
+  });
+
+  it("records the type it was filed under", async () => {
+    const { client } = await signIn("member1VizBytes");
+    const { data: sick } = await adminClient()
+      .from("vizserve_pms_leave_types")
+      .select("id")
+      .eq("code", "SICK")
+      .single();
+
+    const id = await submit(client, {
+      p_request_type: "LEAVE",
+      p_reason: "Down with something.",
+      p_start_date: today,
+      p_end_date: today,
+      p_leave_type_id: sick!.id,
+    });
+
+    const { data: request } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("leave_type_id")
+      .eq("id", id)
+      .single();
+
+    expect(request!.leave_type_id).toBe(sick!.id);
+  });
+
+  it("refuses a retired type on a NEW request but keeps it on old ones", async () => {
+    // The entire reason this is a table and not an enum: a type can stop being
+    // offered without orphaning the requests that already used it.
+    const admin = adminClient();
+    const { data: type } = await admin
+      .from("vizserve_pms_leave_types")
+      .insert({ code: `TEMP_${Math.random().toString(36).slice(2, 8)}`, label: "Temporary" })
+      .select("id")
+      .single();
+
+    const { client } = await signIn("member1VizBytes");
+    const existing = await submit(client, {
+      p_request_type: "LEAVE",
+      p_reason: "Filed while the type was live.",
+      p_start_date: today,
+      p_end_date: today,
+      p_leave_type_id: type!.id,
+    });
+
+    await admin.from("vizserve_pms_leave_types").update({ is_active: false }).eq("id", type!.id);
+
+    const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "LEAVE",
+      p_reason: "Filed after it was retired.",
+      p_start_date: today,
+      p_end_date: today,
+      p_leave_type_id: type!.id,
+    } as never);
+
+    expect(error?.message ?? "").toContain("no longer available");
+
+    // The old one is untouched and still points at the retired type.
+    const { data: kept } = await admin
+      .from("vizserve_pms_internal_requests")
+      .select("leave_type_id")
+      .eq("id", existing)
+      .single();
+
+    expect(kept!.leave_type_id).toBe(type!.id);
+
+    await admin.from("vizserve_pms_internal_requests").delete().eq("id", existing);
+    await admin.from("vizserve_pms_leave_types").delete().eq("id", type!.id);
+  });
+
+  it("refuses to delete a type that is in use", async () => {
+    // `on delete restrict`. A cascade here would silently rewrite history the
+    // first time an admin tidied the list.
+    const { client } = await signIn("member1VizBytes");
+    const id = await submit(client, {
+      p_request_type: "LEAVE",
+      p_reason: "Holding a reference.",
+      p_start_date: today,
+      p_end_date: today,
+      ...leaveType,
+    });
+
+    const { error } = await adminClient()
+      .from("vizserve_pms_leave_types")
+      .delete()
+      .eq("id", leaveType.p_leave_type_id!);
+
+    expect(error).not.toBeNull();
+    expect(await Promise.resolve(id)).toBeTruthy();
+  });
+
+  it("forbids a type on every other request kind", async () => {
+    // The shape constraint's other half. A reimbursement carrying a leave type
+    // is a row nobody can interpret.
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "REIMBURSEMENT",
+      p_reason: "Taxi to the client site.",
+      p_amount: 450,
+      p_leave_type_id: leaveType.p_leave_type_id,
+    } as never);
+
+    // The function coerces it to null rather than refusing, so this SUCCEEDS —
+    // and the row must come back with no type on it. Refusing would give a
+    // worse message for a field the client had no business sending.
+    expect(error).toBeNull();
+
+    const { data: row } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("id, leave_type_id")
+      .eq("requester_id", (await signIn("member1VizBytes")).userId)
+      .eq("request_type", "REIMBURSEMENT")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    expect(row!.leave_type_id).toBeNull();
+    createdRequests.push(row!.id);
+  });
+
+  it("is readable by any signed-in user and writable by none of them", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const { data, error } = await client.from("vizserve_pms_leave_types").select("id, label");
+    expect(error).toBeNull();
+    expect(data!.length).toBeGreaterThan(0);
+
+    // Admin-only writes, the same shape as vizserve_pms_holidays.
+    const { data: written } = await client
+      .from("vizserve_pms_leave_types")
+      .update({ label: "Hijacked" })
+      .eq("code", "VACATION")
+      .select("id");
+
+    expect(written ?? []).toHaveLength(0);
+  });
+
+  it("does not leak the type through the leave calendar", async () => {
+    // P7-10 withholds the reason because a reason is medical or personal. Four
+    // of the eight types are disclosures in their own right — Sick, Maternity,
+    // Solo Parent and Special Leave for Women. The calendar returns four
+    // columns and this is the test that keeps it at four.
+    const { client } = await signIn("member1VizBytes");
+
+    const { data } = await client.rpc("vizserve_pms_leave_calendar", {
+      p_from: today,
+      p_to: today,
+    });
+
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      expect(Object.keys(row).sort()).toEqual(["end_date", "full_name", "start_date", "user_id"]);
+    }
   });
 });

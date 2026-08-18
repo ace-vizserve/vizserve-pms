@@ -1,537 +1,554 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import {
-  ArrowRight,
-  CalendarClock,
-  CheckCircle2,
-  ClipboardCheck,
-  Clock,
-  FileText,
-  LayoutDashboard,
-  ListChecks,
-  Send,
-  ShieldCheck,
-} from "lucide-react";
-
-import Image from "next/image";
+import { ArrowRight, Clock, LayoutDashboard, LogOut, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { buttonVariants } from "@/components/ui/button";
-import { MarketingNav } from "@/components/marketing/marketing-nav";
-import { ScrollLink } from "@/components/marketing/scroll-link";
+import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import { loadPunchState } from "@/lib/dtr-server";
+import {
+  addMonths,
+  formatAppTime,
+  formatDate,
+  isOverdue,
+  relativeDays,
+  todayInAppZone,
+} from "@/lib/dates";
+import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
+import { BrandLockup } from "@/components/brand-lockup";
+import { PageShell } from "@/components/page-shell";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { Chip, TaskStatusBadge } from "@/components/status-badge";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/server";
+import { signOut } from "@/app/login/actions";
 
-export const metadata: Metadata = {
-  title: "VizServe PMS — one platform for every request",
-  description:
-    "The internal operations platform for VizServe. Client intake, team-leader review, QA, and client sign-off — tracked end to end, behind one login.",
-};
+import { PunchPanel } from "@/app/(app)/dtr/punch-panel";
+import { LeaveCalendar, type LeaveSpan } from "./_home/leave-calendar";
+import { Cell, CellBody, CellHead, StatStrip, initials } from "./_home/home-widgets";
+
+export const metadata: Metadata = { title: "Home" };
 
 /**
- * Public landing page (`/`).
+ * P0-08 / P7-10 — the staff home.
  *
- * Deliberately the only route rooted at "/" that anonymous visitors can reach —
- * see PUBLIC_EXACT in utils/supabase/middleware.ts for why it could not simply
- * be added to the prefix list.
+ * THIS IS `/`, AND IT IS NOT IN THE `(app)` SHELL. No sidebar, no breadcrumb —
+ * it is a page in its own right, which is why it lives at `app/page.tsx` rather
+ * than inside the route group. It carries its own greeting and its own sign-out
+ * because there is no nav around it to carry them.
  *
- * Design: VizServe brand (D11 #4359A5 / #5BC0DE) over the shadcn base, with
- * ClickUp's density instinct and pill CTAs — the two borrowings
- * docs/12-ui-and-notifications.md §2 explicitly sanctions. Nothing here repaints
- * the product UI; the brand tokens are additive while Q15 is open.
+ * It is not the dashboard. `/dashboard` is untouched and still its own route:
+ * that page is the NUMBERS. This one is the day's shape — am I timed in, what
+ * is waiting on me, who is out, what can I start in one click.
  *
- * Every phase label below is honest against docs/13-implementation-status.md. A
- * landing page that claims a module works before it does is a support ticket.
+ * `/` used to be a public marketing page arguing the product's case to someone
+ * deciding whether to adopt it. Nobody who works at VizServe is that person, so
+ * the root is now the first screen of the tool and `PUBLIC_EXACT` is empty —
+ * the proxy sends an anonymous visitor to /login before this file runs. The old
+ * landing page is kept verbatim under docs/archive/landing-page/.
+ *
+ * Its parts live in `_home/`: the underscore opts that folder out of routing,
+ * so they sit beside the page they belong to without `/leave-calendar`
+ * becoming a URL.
+ *
+ * A BENTO, and the two rules that make it one rather than a grid of floating
+ * cards:
+ *
+ *   1. Every row's spans sum to six. A cell with nothing beside it leaves half
+ *      a row of nothing, which is what the first pass shipped.
+ *   2. Cells are paired by CONTENT VOLUME. Grid rows stretch, so a three-line
+ *      cell next to a ten-line cell has to invent seven lines of white space —
+ *      no amount of alignment fixes that, only pairing does.
+ *
+ * The layout collapses to one column below `sm` and to three at `sm`, so the
+ * same cells reflow rather than a second layout existing for phones.
+ *
+ * What a MEMBER sees is a subset, not a different page: no "Waiting on you"
+ * cell at all, because they approve nothing and a permanent zero teaches people
+ * to stop reading a tile.
  */
 
-const SERVICE_LINES = ["VizAssists", "VizBooks", "VizBytes", "VizMedia"];
+/** A row in "Waiting on you", from whichever of the three queues it came from. */
+type PendingItem = {
+  key: string;
+  kind: string;
+  tone: "info" | "warning" | "brand" | "neutral";
+  title: string;
+  who: string;
+  since: string;
+  href: string;
+};
 
-const VALUE_PROPS = [
-  {
-    icon: Send,
-    title: "Clients never sign in",
-    body: "Requests arrive through a public form link. Approvals go out as an emailed link. No account, no password reset, no chasing.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "Rules live in the database",
-    body: "Required fields, the resolution gate, and every status transition are enforced as constraints and triggers — not as front-end validation somebody can bypass.",
-  },
-  {
-    icon: ClipboardCheck,
-    title: "Scope is automatic",
-    body: "What you see is decided by your role and the departments you lead, applied at the row level. Nobody has to remember to filter a list.",
-  },
-];
-
-const LIFECYCLE = [
-  {
-    step: "01",
-    title: "Client submits",
-    body: "A public form, built in the app and shared by URL. No login by design.",
-  },
-  {
-    step: "02",
-    title: "Gate 1 — Team Leader",
-    body: "Review, request more information, return, or reject. Nothing becomes work until someone owns it.",
-    gate: true,
-  },
-  {
-    step: "03",
-    title: "Task created",
-    body: "PIC and QA assigned, target date negotiated against real workload.",
-  },
-  {
-    step: "04",
-    title: "Gate 2 — Internal QA",
-    body: "Work is checked before it ever reaches the client.",
-    gate: true,
-  },
-  {
-    step: "05",
-    title: "Gate 3 — Client sign-off",
-    body: "An emailed approval link, two reminders, and a decision on the record.",
-    gate: true,
-  },
-  {
-    step: "06",
-    title: "Completed",
-    body: "Approved, or auto-completed when the reminders run out — the two stay distinct.",
-  },
-];
-
-const MODULES = [
-  {
-    icon: LayoutDashboard,
-    title: "Dashboard",
-    body: "What is waiting on you, first.",
-    status: "Live",
-  },
-  {
-    icon: FileText,
-    title: "Client Forms",
-    body: "Build a form, share the link, triage what comes back.",
-    status: "Live",
-  },
-  {
-    icon: ListChecks,
-    title: "Tasks & Tickets",
-    body: "PIC, QA, target dates, and the eight-status board.",
-    status: "Phase 3",
-  },
-  {
-    icon: CheckCircle2,
-    title: "Internal Approvals",
-    body: "Leave, purchases, and HR requests on the same engine.",
-    status: "Phase 5",
-  },
-  {
-    icon: Clock,
-    title: "DTR",
-    body: "Time in and out, without leaving the dashboard.",
-    status: "Phase 5",
-  },
-  {
-    icon: CalendarClock,
-    title: "Timesheet",
-    body: "Hours rolled up from work that already happened.",
-    status: "Phase 6",
-  },
-];
-
-const STATS = [
-  { value: "6", label: "modules, one login" },
-  { value: "3", label: "approval gates" },
-  { value: "2", label: "tools replaced" },
-  { value: "0", label: "client accounts needed" },
-];
-
-const FAQ = [
-  {
-    q: "Do clients need an account?",
-    a: "No. Requests come in through a public form link, and the final approval is an emailed link that carries its own token. A client never creates a password.",
-  },
-  {
-    q: "Who can see which requests?",
-    a: "Roles are inclusive — admin covers manager, which covers team leader, which covers member — and a separate list decides which departments you lead. Both are enforced at the row level in the database, not just hidden in the UI.",
-  },
-  {
-    q: "Is the whole platform live?",
-    a: "Not yet, and the navigation says so. Dashboard and Client Forms are built. Tasks, Internal Approvals, DTR, and Timesheet are labelled with the phase that delivers them, so the shape of the product is visible before it is finished.",
-  },
-  {
-    q: "What is it replacing?",
-    a: "ClickUp and Microsoft Teams Approvals. One system means a request stops being re-keyed between a board, a chat thread, and an inbox.",
-  },
-  {
-    q: "How do I get access?",
-    a: "Ask your Team Leader or an admin to add you. Sign-in is your VizServe account through single sign-on.",
-  },
-];
-
-export default async function LandingPage() {
-  // Presentation only — this decides whether the CTA reads "Sign in" or "Open
-  // dashboard", nothing more. Every real scope decision goes through
-  // lib/auth/authorization.ts, and RLS re-checks under that.
+export default async function DashboardPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ month?: string }>;
+}) {
+  const context = await requireAuthContext();
+  const params = await searchParams;
   const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const signedIn = Boolean(user);
+
+  const isApprover = roleAtLeast(context.role, "team_leader");
+  const firstName = context.fullName.trim().split(" ")[0] || "there";
+  const today = todayInAppZone();
+
+  // The month the calendar is showing. Validated rather than trusted — it comes
+  // from the URL, and an unparseable value would otherwise reach Postgres as a
+  // date literal and turn a mistyped link into a 500.
+  const month = /^\d{4}-\d{2}-\d{2}$/.test(params.month ?? "") ? params.month! : today;
+  const gridFrom = addMonths(month, -1) ?? month;
+  const gridTo = addMonths(month, 1) ?? month;
+
+  const [
+    punchState,
+    pendingClient,
+    pendingInternal,
+    pendingWeeks,
+    unread,
+    myTasks,
+    myQa,
+    myOpenTasks,
+    approvedLeave,
+    myPendingLeave,
+    people,
+  ] = await Promise.all([
+    loadPunchState(context.userId),
+
+    /*
+     * THREE QUEUES, NOT ONE — and rows now, not counts.
+     *
+     * The tile used to be a single number, which told a lead there were seven
+     * things without telling them what any of them were; the only way to find
+     * out was to open Approvals, which is the click the tile was supposed to
+     * save. These fetch the top few of each queue instead.
+     *
+     * None carries a department filter: all three tables scope by policy
+     * through `vizserve_pms_manages_department`, and restating it here would
+     * imply the policy is optional.
+     */
+    isApprover
+      ? supabase
+          .from("vizserve_pms_requests")
+          .select("id, reference_no, title, requester_org, submitted_at")
+          .eq("status", "PENDING_REVIEW")
+          .order("submitted_at", { ascending: true })
+          .limit(5)
+      : Promise.resolve({ data: null }),
+
+    // Excluding their own, mirroring the approvals list: a lead files leave like
+    // everybody else, and `vizserve_pms_decide_internal_request` refuses a
+    // self-decision. Listing it would put a row here that cannot be worked off.
+    isApprover
+      ? supabase
+          .from("vizserve_pms_internal_requests")
+          .select("id, request_type, requester_id, created_at, start_date, end_date, work_date")
+          .eq("status", "PENDING_REVIEW")
+          .neq("requester_id", context.userId)
+          .order("created_at", { ascending: true })
+          .limit(5)
+      : Promise.resolve({ data: null }),
+
+    // SUBMITTED only. RETURNED is back with the member and APPROVED is finished.
+    isApprover
+      ? supabase
+          .from("vizserve_pms_timesheet_weeks")
+          .select("id, user_id, week_start, submitted_at")
+          .eq("status", "SUBMITTED")
+          .neq("user_id", context.userId)
+          .order("week_start", { ascending: true })
+          .limit(5)
+      : Promise.resolve({ data: null }),
+
+    supabase
+      .from("vizserve_pms_notifications")
+      .select("id", { count: "exact", head: true })
+      .is("read_at", null),
+
+    // "Not finished" rather than a list of active statuses, so a status added
+    // later is counted without anyone remembering to come back here.
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("assignee_id", context.userId)
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("qa_assignee_id", context.userId)
+      .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
+
+    // The member's own open work, as ROWS. The cell that used to sit here held
+    // a count and a sentence telling you to go and look somewhere else, which
+    // is a cell that has not earned its half of the row.
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id, title, status, due_date")
+      .eq("assignee_id", context.userId)
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .limit(5),
+
+    /*
+     * P7-10 — everyone's approved leave, through the SECURITY DEFINER function.
+     *
+     * NOT a select on `vizserve_pms_internal_requests`: that table's policy
+     * scopes rows to the requester and to leads of the department, so a member
+     * reading it directly would see a calendar containing only themselves. The
+     * function returns name and dates and withholds the reason, which is the
+     * one thing RLS cannot express — a policy grants a row, not a column.
+     *
+     * A month either side, so a span that starts in July and ends in August
+     * still paints its August days.
+     */
+    supabase.rpc("vizserve_pms_leave_calendar", { p_from: gridFrom, p_to: gridTo }),
+
+    // Your OWN pending leave, through the ordinary policy. Nobody else's
+    // pending appears anywhere: a request that has not been decided is not yet
+    // a fact, and broadcasting it tells the company you asked for time off
+    // before your own lead has seen it.
+    supabase
+      .from("vizserve_pms_internal_requests")
+      .select("id, start_date, end_date")
+      .eq("requester_id", context.userId)
+      .eq("request_type", "LEAVE")
+      .eq("status", "PENDING_REVIEW"),
+
+    supabase.from("vizserve_pms_users").select("id, full_name"),
+  ]);
+
+  const nameOf = new Map((people.data ?? []).map((person) => [person.id, person.full_name]));
+
+  // ---------------------------------------------------------------- waiting
+  const waiting: PendingItem[] = [
+    ...(pendingClient.data ?? []).map((request) => ({
+      key: `req-${request.id}`,
+      kind: "Client",
+      tone: "brand" as const,
+      title: request.title || request.reference_no,
+      who: request.requester_org || "Client request",
+      since: relativeDays(request.submitted_at.slice(0, 10)),
+      href: `/requests/${request.id}`,
+    })),
+    ...(pendingInternal.data ?? []).map((request) => ({
+      key: `int-${request.id}`,
+      kind: INTERNAL_REQUEST_LABELS[request.request_type] ?? "Request",
+      tone: "warning" as const,
+      title:
+        request.start_date && request.end_date
+          ? request.start_date === request.end_date
+            ? formatDate(request.start_date)
+            : `${formatDate(request.start_date)} – ${formatDate(request.end_date)}`
+          : formatDate(request.work_date),
+      who: nameOf.get(request.requester_id) ?? "A colleague",
+      since: relativeDays(request.created_at.slice(0, 10)),
+      href: `/approvals/${request.id}`,
+    })),
+    ...(pendingWeeks.data ?? []).map((week) => ({
+      key: `wk-${week.id}`,
+      kind: "Timesheet",
+      tone: "neutral" as const,
+      title: `Week of ${formatDate(week.week_start)}`,
+      who: nameOf.get(week.user_id) ?? "A colleague",
+      since: relativeDays((week.submitted_at ?? week.week_start).slice(0, 10)),
+      href: "/timesheet",
+    })),
+  ].slice(0, 6);
+
+  const waitingTotal =
+    (pendingClient.data?.length ?? 0) +
+    (pendingInternal.data?.length ?? 0) +
+    (pendingWeeks.data?.length ?? 0);
+
+  // ----------------------------------------------------------------- leave
+  const spans: LeaveSpan[] = [
+    ...(
+      (approvedLeave.data ?? []) as {
+        user_id: string;
+        full_name: string;
+        start_date: string;
+        end_date: string;
+      }[]
+    ).map((row) => ({
+      userId: row.user_id,
+      name: row.full_name,
+      start: row.start_date,
+      end: row.end_date,
+    })),
+    ...(myPendingLeave.data ?? [])
+      .filter((row) => row.start_date && row.end_date)
+      .map((row) => ({
+        userId: context.userId,
+        name: context.fullName,
+        start: row.start_date!,
+        end: row.end_date!,
+        pending: true,
+      })),
+  ];
+
+  // Out today comes from the SAME spans the calendar paints, so the widget and
+  // the grid can never disagree about who is away.
+  const outToday = spans.filter(
+    (span) => !span.pending && span.start <= today && span.end >= today,
+  );
+
+  const timeIn = punchState.today?.time_in ?? null;
+
+  const QUICK = [
+    { label: "New task", href: "/tasks" },
+    { label: "File leave", href: "/approvals?new=LEAVE" },
+    { label: "Log overtime", href: "/approvals?new=OVERTIME" },
+    { label: "Time correction", href: "/approvals?new=NO_TIME_IN" },
+    { label: "Reimbursement", href: "/approvals?new=REIMBURSEMENT" },
+    { label: "My timesheet", href: "/timesheet" },
+  ];
 
   return (
-    <div className="flex min-h-svh flex-col">
-      <MarketingNav signedIn={signedIn} />
+    <div className="flex min-h-svh flex-col grade-ambient bg-background bg-no-repeat">
+      {/*
+        ITS OWN HEADER, because there is no shell around this page to supply one.
 
-      <main className="flex-1">
-        {/* ---------------------------------------------------------------- hero */}
-        <section className="border-b">
-          <div className="mx-auto max-w-6xl px-4 py-14 sm:py-20">
-            <div className="mx-auto max-w-3xl text-center">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-tint px-3 py-1 text-2xs font-semibold tracking-wide text-brand-ink uppercase">
-                Internal operations platform
-              </span>
+        Same object as the app’s top bar: 56px, frosted `bg-panel` behind a
+        blur with `shadow-chrome` and a hairline, so cells visibly pass UNDER it
+        rather than being hidden by it. Sticky for the same reason — the way out
+        of the page should not scroll away with the calendar.
 
-              <h1 className="mt-5 font-display text-3xl leading-[1.1] font-extrabold tracking-tight text-balance sm:text-5xl">
-                One platform for every <span className="text-brand">VizServe request</span>.
-              </h1>
+        The lockup is the shared `BrandLockup` (§3), not a fourth hand-built copy.
+        Sign-out lives here rather than beside the greeting: there is no user
+        menu on this page, and a way out belongs in the chrome, not in the
+        content.
+      */}
+      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-panel px-5 shadow-chrome backdrop-blur-md backdrop-saturate-150">
+        <BrandLockup subtitle="Project Management System" className="min-w-0" />
 
-              <p className="mx-auto mt-4 max-w-2xl text-sm text-pretty text-muted-foreground sm:text-base">
-                Client intake, team-leader review, internal QA, and client sign-off — tracked end to
-                end, behind one login. Replacing ClickUp and Microsoft Teams Approvals.
-              </p>
-
-              <div className="mt-7 flex flex-col items-center justify-center gap-2.5 sm:flex-row">
-                <Link
-                  href={signedIn ? "/dashboard" : "/login"}
-                  className={cn(
-                    buttonVariants({ size: "lg" }),
-                    "w-full rounded-full bg-brand text-brand-foreground hover:bg-brand/90 active:bg-brand/80 sm:w-auto",
-                  )}
-                >
-                  {signedIn ? "Open dashboard" : "Sign in"}
-                  <ArrowRight className="size-4" />
-                </Link>
-                <ScrollLink
-                  href="#lifecycle"
-                  className={cn(
-                    buttonVariants({ size: "lg", variant: "outline" }),
-                    "w-full rounded-full sm:w-auto",
-                  )}
-                >
-                  See how it works
-                </ScrollLink>
-              </div>
-
-              <p className="mt-4 text-xs text-muted-foreground">
-                VizServe staff sign in with single sign-on. Clients never need an account.
-              </p>
-            </div>
-          </div>
-        </section>
-
-        {/* ------------------------------------------------------- service lines */}
-        <section className="border-b bg-muted/40">
-          <div className="mx-auto max-w-6xl px-4 py-6">
-            <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-center sm:gap-8">
-              <p className="text-2xs font-semibold tracking-wider text-muted-foreground uppercase">
-                Built for every service line
-              </p>
-              <ul className="flex flex-wrap items-center justify-center gap-x-6 gap-y-2">
-                {SERVICE_LINES.map((line) => (
-                  <li key={line} className="text-sm font-semibold tracking-tight">
-                    {line}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
-        </section>
-
-        {/* ----------------------------------------------------------- platform */}
-        <section id="platform" tabIndex={-1} className="scroll-mt-16 border-b">
-          <div className="mx-auto max-w-6xl px-4 py-14 sm:py-20">
-            <div className="max-w-2xl">
-              <h2 className="font-display text-2xl font-bold tracking-tight text-balance sm:text-3xl">
-                Built for the way requests actually move
-              </h2>
-              <p className="mt-3 text-sm text-pretty text-muted-foreground">
-                Not a board someone remembers to update. A lifecycle with owners, gates, and a
-                record of who decided what.
-              </p>
-            </div>
-
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {VALUE_PROPS.map((prop) => (
-                <div key={prop.title} className="rounded-lg border bg-card p-5 shadow-ring">
-                  <span className="flex size-9 items-center justify-center rounded-sm bg-brand-tint text-brand-ink">
-                    <prop.icon className="size-4.5" aria-hidden />
-                  </span>
-                  <h3 className="mt-4 text-sm font-semibold">{prop.title}</h3>
-                  <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{prop.body}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ---------------------------------------------------------- lifecycle */}
-        <section id="lifecycle" tabIndex={-1} className="scroll-mt-16 border-b bg-muted/40">
-          <div className="mx-auto max-w-6xl px-4 py-14 sm:py-20">
-            <div className="max-w-2xl">
-              <h2 className="font-display text-2xl font-bold tracking-tight text-balance sm:text-3xl">
-                Three gates, from request to sign-off
-              </h2>
-              <p className="mt-3 text-sm text-pretty text-muted-foreground">
-                Every client request crosses the same three approval gates. Nothing skips a gate,
-                and every decision keeps its author and its timestamp.
-              </p>
-            </div>
-
-            <ol className="mt-8 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-              {LIFECYCLE.map((stage) => (
-                <li key={stage.step} className="relative rounded-lg border bg-card p-5 shadow-ring">
-                  {/* The gate marker is a label as well as a colour — a bar alone
-                      would convey state by colour only. */}
-                  {stage.gate ? (
-                    <span className="absolute top-0 right-5 -translate-y-1/2 rounded-full bg-brand px-2 py-0.5 text-2xs font-semibold tracking-wide text-brand-foreground uppercase">
-                      Approval gate
-                    </span>
-                  ) : null}
-                  <span className="font-mono text-2xs font-semibold tracking-widest text-muted-foreground">
-                    {stage.step}
-                  </span>
-                  <h3 className="mt-2 text-sm font-semibold">{stage.title}</h3>
-                  <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{stage.body}</p>
-                </li>
-              ))}
-            </ol>
-          </div>
-        </section>
-
-        {/* ------------------------------------------------------------ modules */}
-        <section id="modules" tabIndex={-1} className="scroll-mt-16 border-b">
-          <div className="mx-auto max-w-6xl px-4 py-14 sm:py-20">
-            <div className="max-w-2xl">
-              <h2 className="font-display text-2xl font-bold tracking-tight text-balance sm:text-3xl">
-                Six modules behind one login
-              </h2>
-              <p className="mt-3 text-sm text-pretty text-muted-foreground">
-                Modules that are not built yet are still listed, with the phase that delivers them.
-                A tool that grows a new section every month reads as unfinished; one that shows the
-                whole shape and fills it in reads as a plan.
-              </p>
-            </div>
-
-            <div className="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {MODULES.map((module) => {
-                const isLive = module.status === "Live";
-                return (
-                  <div key={module.title} className="rounded-lg border bg-card p-5 shadow-ring">
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="flex size-9 items-center justify-center rounded-sm bg-muted text-foreground">
-                        <module.icon className="size-4.5" aria-hidden />
-                      </span>
-                      <span
-                        className={
-                          isLive
-                            ? "shrink-0 rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-semibold text-success"
-                            : "shrink-0 rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground"
-                        }
-                      >
-                        {module.status}
-                      </span>
-                    </div>
-                    <h3 className="mt-4 text-sm font-semibold">{module.title}</h3>
-                    <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{module.body}</p>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        </section>
-
-        {/* -------------------------------------------------------------- stats */}
-        <section className="border-b bg-muted/40">
-          <div className="mx-auto max-w-6xl px-4 py-10">
-            <dl className="grid grid-cols-2 gap-6 lg:grid-cols-4">
-              {STATS.map((stat) => (
-                <div key={stat.label}>
-                  <dt className="sr-only">{stat.label}</dt>
-                  <dd>
-                    <span className="font-display block text-3xl font-extrabold tracking-tight tabular-nums text-brand">
-                      {stat.value}
-                    </span>
-                    <span className="mt-1 block text-xs text-muted-foreground">{stat.label}</span>
-                  </dd>
-                </div>
-              ))}
-            </dl>
-          </div>
-        </section>
-
-        {/* ---------------------------------------------------------------- faq */}
-        <section id="faq" tabIndex={-1} className="scroll-mt-16 border-b">
-          <div className="mx-auto max-w-3xl px-4 py-14 sm:py-20">
-            <h2 className="font-display text-2xl font-bold tracking-tight text-balance sm:text-3xl">
-              Questions
-            </h2>
-
-            {/* Native <details> — an accordion with no client JS, keyboard
-                operable and expandable by find-in-page for free. */}
-            <div className="mt-8 divide-y border-y">
-              {FAQ.map((item) => (
-                <details key={item.q} className="group py-4">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-4 text-sm font-medium">
-                    {item.q}
-                    <span
-                      aria-hidden
-                      className="shrink-0 text-muted-foreground transition-transform group-open:rotate-45"
-                    >
-                      +
-                    </span>
-                  </summary>
-                  <p className="mt-2.5 text-xs leading-5 text-muted-foreground">{item.a}</p>
-                </details>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* ---------------------------------------------------------------- cta
-            Switched from --brand to --brand-surface so it is the *same* blue as
-            the footer directly beneath it. Two adjacent bands of near-but-not-
-            quite-equal blue reads as a rendering fault, and --brand lightens in
-            dark mode while --brand-surface does not — so they would visibly
-            diverge there. */}
-        <section className="bg-brand-surface">
-          <div className="mx-auto max-w-6xl px-4 py-14 text-center sm:py-16">
-            <h2 className="font-display text-2xl font-bold tracking-tight text-balance text-brand-surface-foreground sm:text-3xl">
-              Be served with excellence.
-            </h2>
-            {/* white/80 is the floor on this blue — /75 measures 4.49:1, which
-                misses the 4.5:1 normal-text threshold by a hundredth. */}
-            <p className="mx-auto mt-3 max-w-xl text-sm text-pretty text-white/80">
-              Sign in with your VizServe account to pick up what is waiting on you.
-            </p>
-            <Link
-              href={signedIn ? "/dashboard" : "/login"}
-              className={cn(
-                buttonVariants({ size: "lg" }),
-                "mt-6 rounded-full bg-background text-foreground hover:bg-background/90 active:bg-background/80 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white",
-              )}
-            >
-              {signedIn ? "Open dashboard" : "Sign in"}
-              <ArrowRight className="size-4" />
-            </Link>
-          </div>
-        </section>
-      </main>
-
-      {/* ------------------------------------------------------------- footer */}
-      {/* The CTA above is the same blue, so a hairline is what keeps the two
-          bands legible as separate things rather than one long slab. */}
-      {/* The global focus ring is --ring, a mid grey that all but vanishes on
-          this blue. Overridden once here rather than on twelve links. */}
-      <footer className="border-t border-white/15 bg-brand-surface text-brand-surface-foreground [&_a:focus-visible]:outline-white">
-        <div className="mx-auto max-w-6xl px-4 py-10">
-          <div className="flex flex-col gap-8 sm:flex-row sm:justify-between">
-            <div className="max-w-xs">
-              {/* Now that the footer is brand blue the white asset sits on it
-                  directly — the tile it used to need is gone. */}
-              <div className="flex items-center gap-2.5">
-                <Image
-                  src="/assets/VizServeWhite.png"
-                  alt="VizServe"
-                  width={960}
-                  height={882}
-                  sizes="40px"
-                  className="h-9 w-auto"
-                />
-                <span className="border-l border-white/25 pl-2.5 text-sm font-semibold tracking-tight">
-                  PMS
-                </span>
-              </div>
-              <p className="mt-3 text-xs leading-5 text-white/80">
-                The internal operations platform for VizServe. Remote outsourcing across assistance,
-                books, bytes, and media.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-8 sm:gap-14">
-              <div>
-                <h3 className="text-2xs font-semibold tracking-wider text-white/80 uppercase">
-                  Platform
-                </h3>
-                <ul className="mt-3 space-y-2 text-xs">
-                  <li>
-                    <ScrollLink
-                      href="#lifecycle"
-                      className="text-white/80 transition-colors hover:text-white"
-                    >
-                      How it works
-                    </ScrollLink>
-                  </li>
-                  <li>
-                    <ScrollLink
-                      href="#modules"
-                      className="text-white/80 transition-colors hover:text-white"
-                    >
-                      Modules
-                    </ScrollLink>
-                  </li>
-                  <li>
-                    <ScrollLink
-                      href="#faq"
-                      className="text-white/80 transition-colors hover:text-white"
-                    >
-                      FAQ
-                    </ScrollLink>
-                  </li>
-                  <li>
-                    <Link
-                      href="/login"
-                      className="text-white/80 transition-colors hover:text-white"
-                    >
-                      Sign in
-                    </Link>
-                  </li>
-                </ul>
-              </div>
-
-              <div>
-                <h3 className="text-2xs font-semibold tracking-wider text-white/80 uppercase">
-                  VizServe
-                </h3>
-                <ul className="mt-3 space-y-2 text-xs">
-                  <li>
-                    <a
-                      href="https://vizserve.com"
-                      className="text-white/80 transition-colors hover:text-white"
-                    >
-                      vizserve.com
-                    </a>
-                  </li>
-                  <li>
-                    <a
-                      href="https://careers.vizserve.com"
-                      className="text-white/80 transition-colors hover:text-white"
-                    >
-                      Careers
-                    </a>
-                  </li>
-                </ul>
-              </div>
-            </div>
-          </div>
-
-          <div className="mt-8 border-t border-white/15 pt-6">
-            <p className="text-2xs text-white/80">
-              © {new Date().getFullYear()} VizServe. Internal platform — access is limited to
-              authorised staff.
-            </p>
-          </div>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          <Link href="/dashboard" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <LayoutDashboard />
+            <span className="hidden sm:inline">Dashboard</span>
+          </Link>
+          <ThemeToggle />
+          <form action={signOut}>
+            <Button type="submit" variant="outline" size="sm">
+              <LogOut />
+              <span className="hidden sm:inline">Log out</span>
+            </Button>
+          </form>
         </div>
-      </footer>
+      </header>
+
+      {/*
+        CAPPED, unlike the pages inside the shell.
+
+        `PageShell` is full width on purpose there, because a sidebar already
+        eats 304px and the content has somewhere to sit. This page has no
+        sidebar, so the same content on a 27-inch monitor would stretch a
+        six-column bento to 2000px and leave the calendar cells wider than they
+        are tall. `cn` is tailwind-merge, so the cap here replaces nothing and
+        simply applies.
+      */}
+      <PageShell className="mx-auto w-full max-w-7xl gap-3">
+        {/* A greeting, not a page label — there is no breadcrumb to repeat. */}
+        <div className="min-w-0">
+          <h1 className="text-xl font-semibold tracking-[-0.022em]">Hello, {firstName}</h1>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {formatDate(today)}
+            {timeIn ? ` · timed in at ${formatAppTime(timeIn)}` : " · not timed in yet"}
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
+          {/* ------------------------------------------------------ row 1 · 3+3 */}
+          <Cell span="sm:col-span-3" label="Daily time record">
+            <CellHead title="Daily time record">
+              <Chip
+                tone={timeIn ? "success" : "neutral"}
+                label={timeIn ? "Timed in" : "Not timed in"}
+                className="ml-auto"
+              />
+            </CellHead>
+            <CellBody className="gap-3 p-3.5">
+              <PunchPanel initial={punchState} compact />
+              <Link
+                href="/dtr"
+                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-auto w-fit")}
+              >
+                <Clock />
+                My DTR
+              </Link>
+            </CellBody>
+          </Cell>
+
+          {isApprover ? (
+            <Cell span="sm:col-span-3" label="Waiting on you">
+              <CellHead
+                title="Waiting on you"
+                count={waitingTotal}
+                tone="warning"
+                action={
+                  <Link
+                    href="/approvals"
+                    aria-label="Open approvals"
+                    className={buttonVariants({ variant: "outline", size: "icon-sm" })}
+                  >
+                    <ArrowRight />
+                  </Link>
+                }
+              />
+              <CellBody>
+                {waiting.length === 0 ? (
+                  <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                    Nothing awaiting your decision. Requests appear here the moment somebody files
+                    one.
+                  </p>
+                ) : (
+                  waiting.map((item) => (
+                    <Link
+                      key={item.key}
+                      href={item.href}
+                      className="flex flex-1 items-center gap-2.5 border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
+                    >
+                      <Chip tone={item.tone} label={item.kind} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium">{item.title}</span>
+                        <span className="block truncate text-2xs text-muted-foreground">
+                          {item.who}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
+                        {item.since}
+                      </span>
+                    </Link>
+                  ))
+                )}
+              </CellBody>
+            </Cell>
+          ) : (
+            /* A member gets their own queue in the same slot — same weight, same
+             shape, and never an empty "Waiting on you" they can do nothing
+             about. */
+            <Cell span="sm:col-span-3" label="Your work">
+              <CellHead
+                title="Yours to move"
+                count={myTasks.count ?? 0}
+                tone="brand"
+                action={
+                  <Link
+                    href="/tasks?view=mine"
+                    aria-label="Open my tasks"
+                    className={buttonVariants({ variant: "outline", size: "icon-sm" })}
+                  >
+                    <ArrowRight />
+                  </Link>
+                }
+              />
+              <CellBody>
+                {(myOpenTasks.data ?? []).length === 0 ? (
+                  <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                    Nothing is assigned to you right now. Work lands here when a Team Leader
+                    approves a request or hands you something directly.
+                  </p>
+                ) : (
+                  (myOpenTasks.data ?? []).map((task) => {
+                    // Overdue matters on live work only, and every one of these
+                    // is live by construction — the query excludes both
+                    // terminal statuses.
+                    const late = isOverdue(task.due_date);
+
+                    return (
+                      <Link
+                        key={task.id}
+                        href={`/tasks/${task.id}`}
+                        className="flex flex-1 items-center gap-2.5 border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
+                      >
+                        <TaskStatusBadge status={task.status} />
+                        <span className="min-w-0 flex-1 truncate text-sm font-medium">
+                          {task.title}
+                        </span>
+                        <span
+                          className={cn(
+                            "shrink-0 text-2xs tabular-nums",
+                            late ? "font-semibold text-destructive" : "text-muted-foreground",
+                          )}
+                        >
+                          {/* Never colour alone. */}
+                          {task.due_date ? formatDate(task.due_date) : "No date"}
+                          {late ? " · overdue" : null}
+                        </span>
+                      </Link>
+                    );
+                  })
+                )}
+              </CellBody>
+            </Cell>
+          )}
+
+          {/* ---------------------------------------------------- row 2 · 2+2+2 */}
+          <StatStrip
+            span="sm:col-span-2"
+            stats={[
+              { label: "My tasks", value: myTasks.count ?? 0, href: "/tasks?view=mine" },
+              { label: "On my QA", value: myQa.count ?? 0, href: "/tasks?view=qa" },
+              { label: "Unread", value: unread.count ?? 0, href: "/inbox" },
+            ]}
+          />
+
+          <Cell span="sm:col-span-2" label="Quick actions">
+            <CellHead title="Quick actions" />
+            <CellBody className="grid grid-cols-2 content-stretch gap-1.5 p-2.5">
+              {QUICK.map((action) => (
+                <Link
+                  key={action.label}
+                  href={action.href}
+                  className={cn(
+                    buttonVariants({ variant: "outline", size: "sm" }),
+                    "h-auto min-h-9 justify-start",
+                  )}
+                >
+                  <Plus />
+                  {action.label}
+                </Link>
+              ))}
+            </CellBody>
+          </Cell>
+
+          <Cell span="sm:col-span-2" label="Out of office today">
+            <CellHead title="Out today" count={outToday.length} tone="info" />
+            <CellBody>
+              {outToday.length === 0 ? (
+                <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                  Everybody is in today.
+                </p>
+              ) : (
+                outToday.slice(0, 4).map((span) => (
+                  <div
+                    key={`${span.userId}-${span.start}`}
+                    className="flex flex-1 items-center gap-2.5 border-b px-3.5 py-2 last:border-b-0"
+                  >
+                    <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-accent-border bg-accent text-2xs font-semibold text-accent-foreground grade-chip">
+                      {initials(span.name)}
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block truncate text-sm font-medium">{span.name}</span>
+                      <span className="block truncate text-2xs text-muted-foreground">
+                        {span.start === span.end
+                          ? "Today only"
+                          : `${formatDate(span.start)} – ${formatDate(span.end)}`}
+                      </span>
+                    </span>
+                  </div>
+                ))
+              )}
+              {outToday.length > 4 ? (
+                <p className="border-t px-3.5 py-1.5 text-2xs text-muted-foreground">
+                  +{outToday.length - 4} more on the calendar below
+                </p>
+              ) : null}
+            </CellBody>
+          </Cell>
+
+          {/* ------------------------------------------------------- row 3 · 6 */}
+          <LeaveCalendar month={month} today={today} spans={spans} className="sm:col-span-6" />
+        </div>
+      </PageShell>
     </div>
   );
 }

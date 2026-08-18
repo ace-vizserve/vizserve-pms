@@ -44,7 +44,7 @@ describe.skipIf(!recipient)("P0-11 deliverability", () => {
           { label: "Mode", value: emailMode() },
           { label: "Backlog item", value: "P0-11" },
         ],
-        button: { label: "Open VizServe PMS", path: "/dashboard" },
+        button: { label: "Open VizServe PMS", path: "/" },
         footnote:
           "Check the sender reputation and the spam score before Phase 4 — one client email is what that whole phase rests on.",
       },

@@ -235,6 +235,40 @@ describe.skipIf(!run)("P6-01 — writes are first person only", () => {
     expect(error).not.toBeNull();
   });
 
+  it("does NOT let a department lead edit one — zero rows, not an error", async () => {
+    // Different shape of refusal from the insert above, and the one the lead's
+    // team view (P6-05) depends on: an UPDATE refused by a policy is reported
+    // as SUCCESS with zero rows affected. A screen that trusted `error` here
+    // would tell a lead they had corrected somebody's hours when they had not.
+    const lead = await signIn("tlVizBytes");
+
+    const { data: mine } = await adminClient()
+      .from("vizserve_pms_timesheet_entries")
+      .select("id, minutes")
+      .eq("user_id", picId)
+      .limit(1)
+      .maybeSingle();
+
+    if (!mine) return;
+
+    const { data, error } = await lead.client
+      .from("vizserve_pms_timesheet_entries")
+      .update({ minutes: 1 })
+      .eq("id", mine.id)
+      .select("id");
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(0);
+
+    const { data: after } = await adminClient()
+      .from("vizserve_pms_timesheet_entries")
+      .select("minutes")
+      .eq("id", mine.id)
+      .single();
+
+    expect(after!.minutes).toBe(mine.minutes);
+  });
+
   it("does not leak a member's entries to another department's member", async () => {
     const outsider = await signIn("member1VizAssists");
 
@@ -348,5 +382,87 @@ describe.skipIf(!run)("P6-01 — anon is locked out", () => {
     // `permission denied` is the RIGHT answer here — anon holds no table
     // privileges, which is a GRANT fact, not a policy one.
     expect(isPermissionDenied(error) || (data ?? []).length === 0).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Your hours are yours, whatever happens to the task afterwards.
+//
+// The entries policy returns a row on `user_id = auth.uid()` and says nothing
+// about the task. The TASKS policy is narrower — PIC, QA, or department lead —
+// so the two diverge the moment a task is reassigned away from somebody who
+// already logged time against it.
+//
+// That divergence is invisible until a query joins the two. `!inner` turns "I
+// cannot see that task" into "that row does not exist", and the hours disappear
+// from the person's own timesheet, from their day and week totals, and from any
+// figure derived from them.
+// ---------------------------------------------------------------------------
+describe.skipIf(!run)("entries survive losing sight of their task", () => {
+  it("keeps returning the entry after the task is reassigned away", async () => {
+    const { client } = await signIn("member1VizBytes");
+    const qa = await signIn("member2VizBytes");
+    await clearEntries(picId);
+
+    const taskId = await makeTask(picId, null);
+
+    const { error: logged } = await client.from("vizserve_pms_timesheet_entries").insert({
+      user_id: picId,
+      task_id: taskId,
+      work_date: today,
+      minutes: 120,
+    });
+    expect(logged).toBeNull();
+
+    // The lead moves the work to somebody else. Ordinary, and nothing about it
+    // should touch hours that were already spent.
+    const lead = await signIn("tlVizBytes");
+    const { error: reassigned } = await lead.client
+      .from("vizserve_pms_tasks")
+      .update({ assignee_id: qa.userId })
+      .eq("id", taskId);
+    expect(reassigned).toBeNull();
+
+    // The task itself is now out of scope for the original PIC. Expected.
+    const { data: taskRows } = await client
+      .from("vizserve_pms_tasks")
+      .select("id")
+      .eq("id", taskId);
+    expect(taskRows).toHaveLength(0);
+
+    // The ENTRY must still be theirs. This is the policy doing its job.
+    const { data: plain } = await client
+      .from("vizserve_pms_timesheet_entries")
+      .select("id, minutes")
+      .eq("user_id", picId)
+      .eq("work_date", today);
+
+    expect(plain).toHaveLength(1);
+    expect(plain![0]!.minutes).toBe(120);
+
+    // THIS IS THE BUG, pinned so nobody reintroduces it. An inner join to a
+    // table with a narrower policy does not return a row with a null embed —
+    // it drops the row entirely. Two hours of somebody's week, gone from their
+    // own screen, with no error anywhere to explain it.
+    const { data: innerJoined } = await client
+      .from("vizserve_pms_timesheet_entries")
+      .select("id, minutes, vizserve_pms_tasks!inner(title, status)")
+      .eq("user_id", picId)
+      .eq("work_date", today);
+
+    expect(innerJoined).toHaveLength(0);
+
+    // The shape the page must use instead. A left embed keeps the row and
+    // returns null for the task, which the screen already renders as a
+    // placeholder title — the hours are the part that must not vanish.
+    const { data: joined } = await client
+      .from("vizserve_pms_timesheet_entries")
+      .select("id, minutes, vizserve_pms_tasks(title, status)")
+      .eq("user_id", picId)
+      .eq("work_date", today);
+
+    expect(joined).toHaveLength(1);
+    expect(joined![0]!.minutes).toBe(120);
+    expect(joined![0]!.vizserve_pms_tasks).toBeNull();
   });
 });

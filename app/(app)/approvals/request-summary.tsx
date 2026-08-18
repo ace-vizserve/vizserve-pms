@@ -14,7 +14,12 @@ export function requestDetail(request: InternalRequestRow): string {
     case "LEAVE":
       return request.start_date === request.end_date
         ? formatDate(request.start_date)
-        : `${formatDate(request.start_date)} → ${formatDate(request.end_date)}`;
+        : // An en dash, not an arrow. This is a SPAN — the 5th to the 7th — and
+          // an arrow claims a direction of travel it does not have. It also
+          // matches the board card, which already ranges its dates this way.
+          // (An arrow would have to be an icon here anyway, and this function
+          // returns a string.)
+          `${formatDate(request.start_date)} – ${formatDate(request.end_date)}`;
     case "REIMBURSEMENT":
       // Grouped and 2dp, because an unformatted 1250.5 in a money column is
       // read wrong at a glance.

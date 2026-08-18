@@ -30,6 +30,23 @@ if (dbTestsEnabled && !migrationApplied) {
   );
 }
 
+/**
+ * How far into the past to push a timestamp when a test needs it to have
+ * already passed.
+ *
+ * AN HOUR, NOT A SECOND. These assertions are about "this has expired", not
+ * about the precision of the boundary — and the boundary is compared against
+ * the DATABASE's clock, which is not this machine's. Measured on this project:
+ * the server ran 1.13 seconds behind the test runner, so a one-second margin
+ * put the "aged" timestamp in the server's FUTURE and every expiry check
+ * silently passed the token as still valid.
+ *
+ * That failure is worse than flaky — it reads as "an expired token was
+ * accepted", which is a security regression, and it appears and disappears with
+ * clock drift rather than with anything in the code.
+ */
+const WELL_IN_THE_PAST = () => new Date(Date.now() - 3_600_000).toISOString();
+
 const SLUG = `p4-fixture-${Math.random().toString(36).slice(2, 10)}`;
 const PREFIX = `Q${Math.random().toString(36).slice(2, 5).toUpperCase()}`;
 
@@ -297,7 +314,7 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
         .from("vizserve_pms_approval_tokens")
         // @ts-expect-error tokens are function-managed by design; the test is
         // deliberately doing what the app cannot, to age one.
-        .update({ expires_at: new Date(Date.now() - 1000).toISOString() })
+        .update({ expires_at: WELL_IN_THE_PAST() })
         .eq("task_id", taskId);
 
       const { data } = await decide(token, "APPROVED");
@@ -437,7 +454,7 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
         await adminClient()
           .from("vizserve_pms_approval_tokens")
           // @ts-expect-error deliberately ageing a function-managed row.
-          .update({ auto_complete_at: new Date(Date.now() - 1000).toISOString() })
+          .update({ auto_complete_at: WELL_IN_THE_PAST() })
           .eq("task_id", taskId);
 
         const { data: closed } = await adminClient().rpc("vizserve_pms_auto_complete_approvals");
@@ -460,7 +477,7 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
       await adminClient()
         .from("vizserve_pms_approval_tokens")
         // @ts-expect-error deliberately ageing a function-managed row.
-        .update({ auto_complete_at: new Date(Date.now() - 1000).toISOString() })
+        .update({ auto_complete_at: WELL_IN_THE_PAST() })
         .eq("task_id", taskId);
 
       await adminClient().rpc("vizserve_pms_auto_complete_approvals");

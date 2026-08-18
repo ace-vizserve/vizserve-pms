@@ -21,6 +21,7 @@ export const INTERNAL_REQUEST_TYPES = [
   "NO_TIME_IN",
   "NO_TIME_OUT",
   "REIMBURSEMENT",
+  "OVERTIME",
 ] as const;
 
 export type InternalRequestType = (typeof INTERNAL_REQUEST_TYPES)[number];
@@ -30,6 +31,7 @@ export const INTERNAL_REQUEST_LABELS: Record<InternalRequestType, string> = {
   NO_TIME_IN: "No time-in",
   NO_TIME_OUT: "No time-out",
   REIMBURSEMENT: "Reimbursement",
+  OVERTIME: "Overtime",
 };
 
 export const INTERNAL_REQUEST_BLURBS: Record<InternalRequestType, string> = {
@@ -39,6 +41,8 @@ export const INTERNAL_REQUEST_BLURBS: Record<InternalRequestType, string> = {
     "You worked but no time-in was captured. Approval writes the corrected time into your DTR.",
   NO_TIME_OUT: "You forgot to time out, or the shift ran past the 18-hour cut-off.",
   REIMBURSEMENT: "Money you spent on the company's behalf.",
+  OVERTIME:
+    "Extra hours on a given day, agreed before you work them. Approval is what stops that day reading as over-logged on your timesheet.",
 };
 
 /**
@@ -66,6 +70,15 @@ export const leaveRequestSchema = z
     reason: internalReasonSchema,
     start_date: dateOnly,
     end_date: dateOnly,
+    /**
+     * P7-12. Required, and an id rather than a code: the list is admin-editable
+     * data in `vizserve_pms_leave_types`, not an enum, so there is no closed set
+     * to validate against here. The server checks it exists AND is still active
+     * — a retired type stays valid on the rows that already reference it and
+     * must not be selectable for a new one, which is a rule no zod schema can
+     * express.
+     */
+    leave_type_id: z.uuid("Choose what kind of leave this is."),
   })
   // Checked here so the user sees it on the field, and again as a CHECK
   // constraint in the migration so a direct API call cannot dodge it.
@@ -97,10 +110,37 @@ export const reimbursementSchema = z.object({
     .max(1_000_000, "That is too large for a reimbursement — raise it with finance directly."),
 });
 
+/**
+ * P7-04 — overtime, approved per day.
+ *
+ * A day and a length, nothing else. It is deliberately not tied to a task: the
+ * person asking usually does not yet know which task the extra hours will land
+ * on, and a day's overage split across two tasks would otherwise need two
+ * requests. The timesheet reads this by date.
+ *
+ * The 960-minute ceiling is arithmetic, not taste. The timesheet's day rule is
+ * `8 hours + approved overtime`, and the database refuses more than 1440 minutes
+ * against one day — so 480 + 960 is exactly the point where the advisory rule
+ * would start contradicting the enforced one.
+ */
+export const MAX_OVERTIME_MINUTES = 960;
+
+export const overtimeRequestSchema = z.object({
+  request_type: z.literal("OVERTIME"),
+  reason: internalReasonSchema,
+  work_date: dateOnly,
+  overtime_minutes: z
+    .number({ error: "How much overtime?" })
+    .int("Give it in whole minutes.")
+    .min(1, "That has to be more than nothing.")
+    .max(MAX_OVERTIME_MINUTES, "That is more than 16 hours of overtime on one day."),
+});
+
 export const internalRequestSchema = z.discriminatedUnion("request_type", [
   leaveRequestSchema,
   timeCorrectionSchema,
   reimbursementSchema,
+  overtimeRequestSchema,
 ]);
 
 export type InternalRequestInput = z.infer<typeof internalRequestSchema>;
