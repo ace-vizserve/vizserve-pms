@@ -5,6 +5,7 @@ import { Inbox } from "lucide-react";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
+import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
@@ -108,9 +109,21 @@ function Section({
   );
 }
 
-export default async function ApprovalsPage() {
+export default async function ApprovalsPage({
+  searchParams,
+}: {
+  /**
+   * F — `?type=` and `?date=`, handed over by the DTR shortcut.
+   *
+   * Narrowed by `narrowRequestPrefill`, which returns undefined per field rather
+   * than throwing: a mangled link should open the plain dialog, not an error
+   * page. Same posture `/timesheet` takes with `?week=banana`.
+   */
+  searchParams: Promise<{ type?: string | string[]; date?: string | string[] }>;
+}) {
   const context = await requireAuthContext();
   const supabase = await createClient();
+  const prefill = narrowRequestPrefill(await searchParams);
 
   const [{ data, error: requestsError }, { data: leaveTypes }] = await Promise.all([
     supabase
@@ -155,7 +168,16 @@ export default async function ApprovalsPage() {
           Leave, time corrections and reimbursements. Leave balances are counted by HR — this is the
           record, not an entitlement check.
         </p>
-        <NewRequestDialog leaveTypes={leaveTypes ?? []} />
+        <NewRequestDialog
+          leaveTypes={leaveTypes ?? []}
+          prefill={{
+            ...prefill,
+            // Opened only when something survived narrowing. Landing on
+            // /approvals with no parameters must not pop a dialog over the queue
+            // somebody came to read.
+            openOnMount: Boolean(prefill.type || prefill.date),
+          }}
+        />
       </div>
 
       {/* Approver queue first when there is one: it is the thing with somebody

@@ -51,14 +51,43 @@ function FieldError({ messages }: { messages?: string[] }) {
   );
 }
 
-export function NewRequestDialog({ leaveTypes = [] }: { leaveTypes?: PickableLeaveType[] }) {
+export function NewRequestDialog({
+  leaveTypes = [],
+  prefill,
+}: {
+  leaveTypes?: PickableLeaveType[];
+  /**
+   * F — where the DTR shortcut lands.
+   *
+   * Already narrowed by `narrowRequestPrefill` on the server, so a hand-edited
+   * URL arrives here as `undefined` rather than as a bad type. PREFILL IS A
+   * CONVENIENCE, NEVER AN AUTHORITY: nothing here is trusted server-side,
+   * because `vizserve_pms_submit_internal_request` resolves the department from
+   * the caller's own row and refuses a future correction whatever this says.
+   *
+   * `openOnMount` is what makes it a shortcut rather than a hint. Somebody who
+   * clicked "Time-in missing?" on a DTR row has already decided; making them
+   * press "New request" again on arrival would leave the whole trip pointless.
+   */
+  prefill?: { type?: InternalRequestType; date?: string; openOnMount?: boolean };
+}) {
   const router = useRouter();
-  const [open, setOpen] = useState(false);
-  const [type, setType] = useState<InternalRequestType>("LEAVE");
+  const [open, setOpen] = useState(Boolean(prefill?.openOnMount));
+  const [type, setType] = useState<InternalRequestType>(prefill?.type ?? "LEAVE");
   const [errors, setErrors] = useState<Record<string, string[]>>({});
   const [pending, startTransition] = useTransition();
 
   const today = todayInAppZone();
+
+  /**
+   * The day the correction is about.
+   *
+   * `prefill.date` is a date from the past — the row somebody was looking at —
+   * and `today` is the fallback. It is applied only to the two correction types
+   * and to overtime, all of which ask "which day": seeding a LEAVE request's
+   * first day with a past date would be filing leave for a day already worked.
+   */
+  const workDate = prefill?.date ?? today;
 
   function submit(formData: FormData) {
     setErrors({});
@@ -228,7 +257,7 @@ export function NewRequestDialog({ leaveTypes = [] }: { leaveTypes?: PickableLea
                   name="work_date"
                   type="date"
                   max={today}
-                  defaultValue={today}
+                  defaultValue={workDate}
                 />
                 <FieldError messages={errors.work_date} />
               </div>
@@ -278,7 +307,7 @@ export function NewRequestDialog({ leaveTypes = [] }: { leaveTypes?: PickableLea
                   name="work_date"
                   type="date"
                   max={today}
-                  defaultValue={today}
+                  defaultValue={workDate}
                 />
                 <FieldError messages={errors.work_date} />
               </div>

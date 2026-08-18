@@ -154,6 +154,18 @@ export default async function DtrPage({
   const stillOpen = entries.filter((entry) => entry.time_in && !entry.time_out).length;
   const averageMinutes = closed.length > 0 ? Math.round(totalMinutes / closed.length) : null;
 
+  /**
+   * F — whose record is this row?
+   *
+   * A lead reading their team's DTR must NOT be offered these links. The
+   * correction would be filed against their own record, because
+   * `vizserve_pms_submit_internal_request` resolves the requester from the
+   * caller — so a lead clicking "Time-in missing?" on somebody else's gap would
+   * silently raise a request about their own day. Correcting for somebody else
+   * is not a thing this system does, and the honest response is to not offer it.
+   */
+  const isMine = (entry: Entry) => entry.user_id === context.userId;
+
   const columns: Column<Entry>[] = [
     {
       key: "date",
@@ -186,7 +198,16 @@ export default async function DtrPage({
       key: "in",
       header: "Time in",
       className: "tabular-nums whitespace-nowrap",
-      cell: (entry) => formatAppTime(entry.time_in),
+      cell: (entry) => (
+        <>
+          {formatAppTime(entry.time_in)}
+          {/* F — the route to the correction, from the row showing the problem.
+              A row with no time-in is exactly the case NO_TIME_IN exists for. */}
+          {!entry.time_in && isMine(entry) ? (
+            <CorrectionLink type="NO_TIME_IN" date={entry.work_date} label="Time-in missing?" />
+          ) : null}
+        </>
+      ),
     },
     {
       key: "out",
@@ -196,7 +217,19 @@ export default async function DtrPage({
         <>
           {formatAppTime(entry.time_out)}
           {Boolean(entry.time_in) && !entry.time_out ? (
-            <p className="mt-0.5 text-2xs font-medium text-warning">Still open</p>
+            <>
+              <p className="mt-0.5 text-2xs font-medium text-warning">Still open</p>
+              {/* This is the case the 18-hour stale-shift refusal already tells
+                  people to fix, and until now it told them without giving them
+                  any way to do it. */}
+              {isMine(entry) ? (
+                <CorrectionLink
+                  type="NO_TIME_OUT"
+                  date={entry.work_date}
+                  label="Never timed out?"
+                />
+              ) : null}
+            </>
           ) : null}
         </>
       ),
@@ -391,7 +424,20 @@ export default async function DtrPage({
               className="py-10"
               icon={<Clock />}
               title="No entries in this range"
-              description="Days with no punch have no row at all. Widen the date range first; if a day is genuinely missing that should not be, raise a No Time-In request from Approvals."
+              description="Days with no punch have no row at all. Widen the date range first — if a day is genuinely missing that should not be, raise the correction from here."
+              action={
+                // F. It carries `from`, the first day of the range being looked
+                // at, because that is the only day this screen can name — an
+                // empty range has no row to take a date off. The dialog opens on
+                // it and the person changes it if they meant another day, which
+                // is still one field instead of four steps.
+                <Link
+                  href={`/approvals?type=NO_TIME_IN&date=${from}`}
+                  className={buttonVariants({ variant: "outline", size: "sm" })}
+                >
+                  Raise a No Time-In request
+                </Link>
+              }
             />
             )
           }
@@ -408,5 +454,48 @@ export default async function DtrPage({
         />
       </div>
     </PageShell>
+  );
+}
+
+/**
+ * F — a link from a gap in the DTR to the request that fixes it.
+ *
+ * NOT a new request type, a new table or a new approval path. Phase 5 already
+ * shipped `NO_TIME_IN` and `NO_TIME_OUT`, and
+ * `vizserve_pms_decide_internal_request` is the only path allowed to overwrite an
+ * earliest time-in on approval — which is what makes an un-overwritable punch
+ * safe to insist on. Building a second route would mean building the one without
+ * the DTR write-back.
+ *
+ * What was missing was the way in. Somebody looking at the gap was told to
+ * "raise a No Time-In request from Approvals", so they left the screen showing
+ * the problem, opened a dialog, chose the type and retyped the date they had
+ * just been reading. Every one of those steps is a chance to file the correction
+ * against the wrong day.
+ *
+ * A LINK, not a button — it navigates (§2.1). The two parameters are narrowed
+ * again on arrival by `narrowRequestPrefill`, so this and a hand-typed URL are
+ * treated identically.
+ */
+function CorrectionLink({
+  type,
+  date,
+  label,
+}: {
+  type: "NO_TIME_IN" | "NO_TIME_OUT";
+  date: string;
+  label: string;
+}) {
+  return (
+    <Link
+      href={`/approvals?type=${type}&date=${date}`}
+      className="mt-0.5 block text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+    >
+      {label}
+      {/* The visible label is deliberately short enough to sit in a numeric
+          column; the full sentence is here for anyone who cannot see which row
+          it belongs to. */}
+      <span className="sr-only"> Raise a correction for {formatDate(date)}.</span>
+    </Link>
   );
 }

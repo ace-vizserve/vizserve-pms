@@ -4,6 +4,7 @@ import { ArrowRight, Clock, LayoutDashboard, LogOut, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import { listWaitingOnYou } from "@/lib/approvals-queue-server";
 import { loadPunchState } from "@/lib/dtr-server";
 import {
   addMonths,
@@ -13,7 +14,6 @@ import {
   relativeDays,
   todayInAppZone,
 } from "@/lib/dates";
-import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
 import { BrandLockup } from "@/components/brand-lockup";
 import { PageShell } from "@/components/page-shell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -67,17 +67,6 @@ export const metadata: Metadata = { title: "Home" };
  * to stop reading a tile.
  */
 
-/** A row in "Waiting on you", from whichever of the three queues it came from. */
-type PendingItem = {
-  key: string;
-  kind: string;
-  tone: "info" | "warning" | "brand" | "neutral";
-  title: string;
-  who: string;
-  since: string;
-  href: string;
-};
-
 export default async function DashboardPage({
   searchParams,
 }: {
@@ -100,63 +89,29 @@ export default async function DashboardPage({
 
   const [
     punchState,
-    pendingClient,
-    pendingInternal,
-    pendingWeeks,
+    waiting,
     unread,
     myTasks,
     myQa,
     myOpenTasks,
     approvedLeave,
     myPendingLeave,
-    people,
   ] = await Promise.all([
     loadPunchState(context.userId),
 
     /*
-     * THREE QUEUES, NOT ONE — and rows now, not counts.
+     * THREE QUEUES, NOT ONE — and the mapping lives in ONE place now.
      *
-     * The tile used to be a single number, which told a lead there were seven
-     * things without telling them what any of them were; the only way to find
-     * out was to open Approvals, which is the click the tile was supposed to
-     * save. These fetch the top few of each queue instead.
+     * This was forty lines of inline query-and-map here, and slice I's dashboard
+     * needed the same rows. Two copies of "what is in a lead's queue" is the
+     * divergence `lib/approvals-queue-server.ts` was extracted to stop, so the
+     * listing moved in beside the counting.
      *
-     * None carries a department filter: all three tables scope by policy
-     * through `vizserve_pms_manages_department`, and restating it here would
+     * None of the three carries a department filter: all three tables scope by
+     * policy through `vizserve_pms_manages_department`, and restating it would
      * imply the policy is optional.
      */
-    isApprover
-      ? supabase
-          .from("vizserve_pms_requests")
-          .select("id, reference_no, title, requester_org, submitted_at")
-          .eq("status", "PENDING_REVIEW")
-          .order("submitted_at", { ascending: true })
-          .limit(5)
-      : Promise.resolve({ data: null }),
-
-    // Excluding their own, mirroring the approvals list: a lead files leave like
-    // everybody else, and `vizserve_pms_decide_internal_request` refuses a
-    // self-decision. Listing it would put a row here that cannot be worked off.
-    isApprover
-      ? supabase
-          .from("vizserve_pms_internal_requests")
-          .select("id, request_type, requester_id, created_at, start_date, end_date, work_date")
-          .eq("status", "PENDING_REVIEW")
-          .neq("requester_id", context.userId)
-          .order("created_at", { ascending: true })
-          .limit(5)
-      : Promise.resolve({ data: null }),
-
-    // SUBMITTED only. RETURNED is back with the member and APPROVED is finished.
-    isApprover
-      ? supabase
-          .from("vizserve_pms_timesheet_weeks")
-          .select("id, user_id, week_start, submitted_at")
-          .eq("status", "SUBMITTED")
-          .neq("user_id", context.userId)
-          .order("week_start", { ascending: true })
-          .limit(5)
-      : Promise.resolve({ data: null }),
+    listWaitingOnYou(supabase, context.userId, isApprover, 5),
 
     supabase
       .from("vizserve_pms_notifications")
@@ -212,52 +167,12 @@ export default async function DashboardPage({
       .eq("requester_id", context.userId)
       .eq("request_type", "LEAVE")
       .eq("status", "PENDING_REVIEW"),
-
-    supabase.from("vizserve_pms_users").select("id, full_name"),
   ]);
 
-  const nameOf = new Map((people.data ?? []).map((person) => [person.id, person.full_name]));
-
   // ---------------------------------------------------------------- waiting
-  const waiting: PendingItem[] = [
-    ...(pendingClient.data ?? []).map((request) => ({
-      key: `req-${request.id}`,
-      kind: "Client",
-      tone: "brand" as const,
-      title: request.title || request.reference_no,
-      who: request.requester_org || "Client request",
-      since: relativeDays(request.submitted_at.slice(0, 10)),
-      href: `/requests/${request.id}`,
-    })),
-    ...(pendingInternal.data ?? []).map((request) => ({
-      key: `int-${request.id}`,
-      kind: INTERNAL_REQUEST_LABELS[request.request_type] ?? "Request",
-      tone: "warning" as const,
-      title:
-        request.start_date && request.end_date
-          ? request.start_date === request.end_date
-            ? formatDate(request.start_date)
-            : `${formatDate(request.start_date)} – ${formatDate(request.end_date)}`
-          : formatDate(request.work_date),
-      who: nameOf.get(request.requester_id) ?? "A colleague",
-      since: relativeDays(request.created_at.slice(0, 10)),
-      href: `/approvals/${request.id}`,
-    })),
-    ...(pendingWeeks.data ?? []).map((week) => ({
-      key: `wk-${week.id}`,
-      kind: "Timesheet",
-      tone: "neutral" as const,
-      title: `Week of ${formatDate(week.week_start)}`,
-      who: nameOf.get(week.user_id) ?? "A colleague",
-      since: relativeDays((week.submitted_at ?? week.week_start).slice(0, 10)),
-      href: "/timesheet",
-    })),
-  ].slice(0, 6);
-
-  const waitingTotal =
-    (pendingClient.data?.length ?? 0) +
-    (pendingInternal.data?.length ?? 0) +
-    (pendingWeeks.data?.length ?? 0);
+  // Built by `listWaitingOnYou`. Nothing left to do here but count it — the
+  // shaping that used to live in this block is shared with /dashboard.
+  const waitingTotal = waiting.length;
 
   // ----------------------------------------------------------------- leave
   const spans: LeaveSpan[] = [
@@ -295,10 +210,17 @@ export default async function DashboardPage({
 
   const QUICK = [
     { label: "New task", href: "/tasks" },
-    { label: "File leave", href: "/approvals?new=LEAVE" },
-    { label: "Log overtime", href: "/approvals?new=OVERTIME" },
-    { label: "Time correction", href: "/approvals?new=NO_TIME_IN" },
-    { label: "Reimbursement", href: "/approvals?new=REIMBURSEMENT" },
+    /*
+      `?type=`, not `?new=`. These four were written against a parameter nothing
+      ever read, so every one of them landed on /approvals with the dialog shut —
+      four quick actions that were four ordinary links to the same page. Slice F
+      gave `/approvals` a real prefill contract (`narrowRequestPrefill`) and these
+      now use it.
+    */
+    { label: "File leave", href: "/approvals?type=LEAVE" },
+    { label: "Log overtime", href: "/approvals?type=OVERTIME" },
+    { label: "Time correction", href: "/approvals?type=NO_TIME_IN" },
+    { label: "Reimbursement", href: "/approvals?type=REIMBURSEMENT" },
     { label: "My timesheet", href: "/timesheet" },
   ];
 
@@ -402,7 +324,7 @@ export default async function DashboardPage({
                 ) : (
                   waiting.map((item) => (
                     <Link
-                      key={item.key}
+                      key={item.id}
                       href={item.href}
                       className="flex flex-1 items-center gap-2.5 border-b px-4 py-2 last:border-b-0 hover:bg-muted/50"
                     >
@@ -414,7 +336,9 @@ export default async function DashboardPage({
                         </span>
                       </span>
                       <span className="shrink-0 text-2xs tabular-nums text-muted-foreground">
-                        {item.since}
+                        {/* The module returns a DATE; the tense is this page's
+                            choice. "3 days ago" is what a queue wants. */}
+                        {relativeDays(item.since)}
                       </span>
                     </Link>
                   ))
