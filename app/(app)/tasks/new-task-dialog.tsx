@@ -29,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import type { TaskPriority } from "@/lib/schemas/tasks";
 
 import { createTask } from "./actions";
+import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
 
 /**
@@ -144,6 +145,8 @@ function TaskForm({
   const [assigneeId, setAssigneeId] = useState<string>(NONE);
   const [qaAssigneeId, setQaAssigneeId] = useState<string>(NONE);
   const [dueDate, setDueDate] = useState("");
+  const [startDate, setStartDate] = useState("");
+  const [estimate, setEstimate] = useState<number | null>(null);
   const [listId, setListId] = useState<string>(NONE);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -180,8 +183,12 @@ function TaskForm({
         assignee_id: assigneeId === NONE ? null : assigneeId,
         qa_assignee_id: qaAssigneeId === NONE ? null : qaAssigneeId,
         due_date: dueDate,
+        start_date: startDate,
         list_id: listId === NONE ? null : listId,
         priority,
+        // K5 — captured here so a task arrives complete rather than needing four
+        // edits on the row afterwards.
+        estimate_minutes: estimate,
       });
 
       if (!result.ok) {
@@ -242,6 +249,18 @@ function TaskForm({
           </div>
 
           <div className="space-y-2">
+            <Label htmlFor="start">Start date</Label>
+            <Input
+              id="start"
+              type="date"
+              value={startDate}
+              onChange={(event) => setStartDate(event.target.value)}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
             <Label htmlFor="due">Due date</Label>
             <Input
               id="due"
@@ -250,6 +269,8 @@ function TaskForm({
               onChange={(event) => setDueDate(event.target.value)}
             />
           </div>
+
+          <EstimateField value={estimate} onChange={setEstimate} disabled={pending} />
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

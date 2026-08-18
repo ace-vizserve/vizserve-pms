@@ -11,15 +11,21 @@ import { NewTaskDialog } from "./new-task-dialog";
  * A server component so the department, people and list options are fetched
  * once with the page rather than by the dialog on every open.
  *
- * TWO DIALOGS, ONE BUTTON (P7-01). Creating work for other people is still a
- * Team Leader decision — but a member creating work for THEMSELVES is not the
- * same act, and until P7-01 there was no way to do it: this component returned
- * null and the entire personal-task path was unreachable from the UI.
+ * TWO DIALOGS, ONE BUTTON (P7-01). Until P7-01 this component returned null for
+ * a member and the entire personal-task path was unreachable from the UI.
+ *
+ * P7-14 MOVED THE LINE, and it is worth being exact about where it now sits.
+ * Creating work for a colleague is no longer a Team Leader decision — a member
+ * may do it inside their own department. What a lead still has that a member does
+ * not is the CHOICE OF DEPARTMENT (any they lead) and the appointment of a QA
+ * reviewer. That is the whole difference between the two dialogs now, and it is
+ * why they are still two.
  *
  * The branch is on role, and the two dialogs post to two different functions
  * with two different parameter lists. A member cannot reach the TL one by
- * changing anything client-side, because `vizserve_pms_create_task` checks
- * `vizserve_pms_manages_department` itself.
+ * changing anything client-side, because `vizserve_pms_create_task` reads their
+ * department off their own row and checks `vizserve_pms_manages_department`
+ * itself.
  *
  * `trigger` is the SHAPE, never the permission. The board column and the list
  * group ask for their own quiet in-place version; the role check above still
@@ -42,17 +48,49 @@ export async function NewTaskButton({
    * after either of them is how "members can create their own tasks" ships as
    * a button that never appears.
    *
-   * Only lists are needed: department and assignee are resolved server-side
-   * from the caller's own row, so there is nothing else to offer.
+   * P7-14 CHANGED WHAT THIS BRANCH NEEDS. It used to fetch only lists, because
+   * department and assignee were both resolved server-side and neither was the
+   * member's to choose. A member may now assign work to a colleague in their own
+   * department, so the dialog needs that department and the people in it.
+   *
+   * THE DEPARTMENT IS READ HERE, ON THE SERVER, from the caller's own row — never
+   * sent up as something the browser picked. `vizserve_pms_create_task` re-reads
+   * it and refuses any other, so this is the convenient copy rather than the
+   * enforcement.
    */
   if (!roleAtLeast(context.role, "team_leader")) {
-    const { data: myLists } = await supabase
-      .from("vizserve_pms_lists")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name");
+    const { data: me } = await supabase
+      .from("vizserve_pms_users")
+      .select("primary_department_id")
+      .eq("id", context.userId)
+      .maybeSingle();
 
-    const dialog = <NewPersonalTaskDialog lists={myLists ?? []} trigger={trigger} />;
+    const myDepartment = me?.primary_department_id ?? null;
+
+    const [{ data: myLists }, { data: colleagues }] = await Promise.all([
+      supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
+      // `.neq` on themselves: "Myself" is the dialog's default, not a row in the
+      // list, because the two choices call two different functions and produce
+      // two different `is_personal` values.
+      myDepartment
+        ? supabase
+            .from("vizserve_pms_users")
+            .select("id, full_name")
+            .eq("primary_department_id", myDepartment)
+            .eq("is_active", true)
+            .neq("id", context.userId)
+            .order("full_name")
+        : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
+    ]);
+
+    const dialog = (
+      <NewPersonalTaskDialog
+        lists={myLists ?? []}
+        colleagues={colleagues ?? []}
+        departmentId={myDepartment}
+        trigger={trigger}
+      />
+    );
 
     if (trigger === "column") return <div className="shrink-0 px-2 pb-2">{dialog}</div>;
     if (trigger === "row") return <div className="border-t px-2 py-1.5">{dialog}</div>;

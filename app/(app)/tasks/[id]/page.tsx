@@ -37,7 +37,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const { data: task } = await supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, description, status, resolution, output_link, due_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, field_values, created_at",
+      "id, title, description, status, resolution, output_link, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, field_values, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -254,7 +254,10 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             resolution={task.resolution ?? ""}
             outputLink={task.output_link ?? ""}
             dueDate={task.due_date ?? ""}
+            startDate={task.start_date ?? ""}
             listId={task.list_id}
+            priority={task.priority}
+            estimateMinutes={task.estimate_minutes}
             assigneeId={task.assignee_id}
             qaAssigneeId={task.qa_assignee_id}
             lists={lists ?? []}

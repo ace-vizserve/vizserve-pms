@@ -472,6 +472,53 @@ export const taskDetailsSchema = z.object({
 
 export type TaskDetailsInput = z.infer<typeof taskDetailsSchema>;
 
+/**
+ * K3 — ONE FIELD AT A TIME, for editing in place on a list row or a board card.
+ *
+ * Separate from `taskDetailsSchema` rather than a `.partial()` of it, and the
+ * difference is not cosmetic. That schema is a whole FORM: every key has a
+ * default, so `.partial()` would still let an absent `title` arrive as `""` and
+ * a `.default(null)` priority silently clear a priority nobody touched. A patch
+ * has to be able to say "this key was not in the payload" — which is what
+ * omitting the defaults buys.
+ *
+ * `.strict()` so a typo'd key is a validation error rather than a silent no-op,
+ * and `status` is absent because it is not a writable column: it moves through
+ * `vizserve_pms_transition_task` and nowhere else. A patch that accepted it
+ * would compile, pass zod, and be dropped by Postgres privileges — which reads
+ * as "the edit did not save" with no reason given.
+ */
+export const taskPatchSchema = z
+  .object({
+    title: z.string().trim().min(1, "A task needs a title.").max(300),
+    // "" from a cleared date input means "no date", never the epoch. Both dates
+    // stay nullable rather than required, because most internal work has one or
+    // neither.
+    due_date: z
+      .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+      .nullable(),
+    start_date: z
+      .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+      .nullable(),
+    list_id: z.uuid().nullable(),
+    priority: taskPrioritySchema,
+    estimate_minutes: z
+      .number()
+      .int("Give it in whole minutes.")
+      .positive("An estimate of nothing is not an estimate.")
+      .max(100_000, "That is more than ten working weeks — is it one task?")
+      .nullable(),
+  })
+  .partial()
+  .strict()
+  // An empty patch is a bug at the call site, not a no-op to be swallowed: the
+  // UPDATE would return a row and the caller would be told it saved.
+  .refine((value) => Object.keys(value).length > 0, {
+    message: "Nothing to change.",
+  });
+
+export type TaskPatchInput = z.infer<typeof taskPatchSchema>;
+
 export const createTaskSchema = z.object({
   department_id: z.uuid("Choose the department this belongs to."),
   title: z.string().trim().min(1, "A task needs a title.").max(300),
@@ -483,6 +530,24 @@ export const createTaskSchema = z.object({
     .default(""),
   list_id: z.uuid().nullable().default(null),
   priority: taskPrioritySchema.default(null),
+  /**
+   * P7-06 / P7-15 — captured AT CREATION, not left for four edits afterwards.
+   *
+   * Neither is a parameter of `vizserve_pms_create_task`, so the action writes
+   * them as a follow-up patch on the row it just made. That is a second write
+   * and it is the honest cost of not changing an applied function's signature —
+   * which would mean a drop and a regrant (trap 3) for two nullable columns.
+   */
+  start_date: z
+    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+    .default(""),
+  estimate_minutes: z
+    .number()
+    .int("Give it in whole minutes.")
+    .positive("An estimate of nothing is not an estimate.")
+    .max(100_000, "That is more than ten working weeks — is it one task?")
+    .nullable()
+    .default(null),
 });
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
@@ -507,6 +572,24 @@ export const createPersonalTaskSchema = z.object({
   // Present here, unlike `department_id` and `assignee_id`: how urgent your own
   // work is IS yours to decide, which is exactly what those two are not.
   priority: taskPrioritySchema.default(null),
+  /**
+   * P7-06 / P7-15 — captured AT CREATION, not left for four edits afterwards.
+   *
+   * Neither is a parameter of `vizserve_pms_create_task`, so the action writes
+   * them as a follow-up patch on the row it just made. That is a second write
+   * and it is the honest cost of not changing an applied function's signature —
+   * which would mean a drop and a regrant (trap 3) for two nullable columns.
+   */
+  start_date: z
+    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+    .default(""),
+  estimate_minutes: z
+    .number()
+    .int("Give it in whole minutes.")
+    .positive("An estimate of nothing is not an estimate.")
+    .max(100_000, "That is more than ten working weeks — is it one task?")
+    .nullable()
+    .default(null),
 });
 
 export type CreatePersonalTaskInput = z.infer<typeof createPersonalTaskSchema>;

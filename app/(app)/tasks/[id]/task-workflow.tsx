@@ -22,11 +22,14 @@ import {
   TASK_STATUS_LABELS,
   availableTransitions,
   isTerminal,
+  type TaskPriority,
   type TaskStatus,
-  type Transition,
 } from "@/lib/schemas/tasks";
 
-import { overrideTaskStatus, reassignTask, transitionTask, updateTaskDetails } from "../actions";
+import { overrideTaskStatus, reassignTask, updateTaskDetails } from "../actions";
+import { EstimateField } from "../estimate-field";
+import { PriorityPicker } from "../priority-picker";
+import { TaskStatusSelect } from "../status-select";
 
 /**
  * P3-05 / P3-06 / P3-07 — the working half of the task page.
@@ -37,9 +40,17 @@ import { overrideTaskStatus, reassignTask, transitionTask, updateTaskDetails } f
  * button people learn to distrust. Here the disabled state and the field that
  * causes it are in the same glance.
  *
- * Which buttons appear is decided by `availableTransitions` — a mirror of the
+ * Which moves appear is decided by `availableTransitions` — a mirror of the
  * database's transition table. Hiding one protects nobody; the server re-checks
  * every rule. It just stops people clicking things that cannot work.
+ *
+ * K3 — the moves are a DROPDOWN now, not a row of buttons, and `TaskStatusSelect`
+ * owns the whole interaction. P7-13a made internal work reach every status
+ * except `FOR_CLIENT_APPROVAL`, so this card was drawing seven primary buttons
+ * side by side. The control lives here rather than on the header chip on
+ * purpose: the resolution gate is the reason half of these moves refuse, and a
+ * control that fails for a reason living on another part of the screen is one
+ * people learn to distrust.
  */
 
 type Person = { id: string; full_name: string; primary_department_id: string | null };
@@ -55,7 +66,10 @@ export function TaskWorkflow({
   resolution: initialResolution,
   outputLink: initialOutputLink,
   dueDate: initialDueDate,
+  startDate: initialStartDate,
   listId: initialListId,
+  priority: initialPriority,
+  estimateMinutes: initialEstimate,
   assigneeId,
   qaAssigneeId,
   lists,
@@ -70,7 +84,16 @@ export function TaskWorkflow({
   resolution: string;
   outputLink: string;
   dueDate: string;
+  startDate: string;
   listId: string | null;
+  /**
+   * P7-11 / P7-15. BOTH ARE REQUIRED PROPS, not optional with a null default,
+   * and that is load-bearing: `taskDetailsSchema` defaults each to null, so a
+   * Save that did not send them would silently clear a priority and an estimate
+   * somebody set from a row.
+   */
+  priority: TaskPriority | null;
+  estimateMinutes: number | null;
   assigneeId: string | null;
   qaAssigneeId: string | null;
   lists: List[];
@@ -89,10 +112,11 @@ export function TaskWorkflow({
   const [resolution, setResolution] = useState(initialResolution);
   const [outputLink, setOutputLink] = useState(initialOutputLink);
   const [dueDate, setDueDate] = useState(initialDueDate);
+  const [startDate, setStartDate] = useState(initialStartDate);
   const [listId, setListId] = useState(initialListId ?? NONE);
+  const [priority, setPriority] = useState<TaskPriority | null>(initialPriority);
+  const [estimate, setEstimate] = useState<number | null>(initialEstimate);
 
-  const [prompt, setPrompt] = useState<Transition | null>(null);
-  const [comment, setComment] = useState("");
   const [overrideOpen, setOverrideOpen] = useState(false);
   const [overrideStatus, setOverrideStatus] = useState<TaskStatus>(status);
   const [overrideReason, setOverrideReason] = useState("");
@@ -100,7 +124,16 @@ export function TaskWorkflow({
 
   const transitions = availableTransitions(status, viewer, task);
   const canEdit = viewer.isPic || viewer.isQa || viewer.leadsDepartment;
-  const resolutionMissing = resolution.trim().length === 0;
+  /**
+   * The SAVED resolution, not the draft in the box.
+   *
+   * The database checks the stored column, so offering "Send for QA" because
+   * somebody has typed into the textarea would offer a move the server then
+   * refuses. `unsavedResolution` below is what closes the gap — it says to press
+   * Save rather than leaving the move mysteriously unavailable.
+   */
+  const resolutionMissing = initialResolution.trim().length === 0;
+  const unsavedResolution = resolution !== initialResolution;
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
     setError(null);
@@ -111,8 +144,6 @@ export function TaskWorkflow({
         return;
       }
       toast.success(success);
-      setPrompt(null);
-      setComment("");
       setOverrideOpen(false);
       setOverrideReason("");
       router.refresh();
@@ -128,28 +159,12 @@ export function TaskWorkflow({
           resolution,
           output_link: outputLink,
           due_date: dueDate,
+          start_date: startDate,
           list_id: listId === NONE ? null : listId,
+          priority,
+          estimate_minutes: estimate,
         }),
       "Saved",
-    );
-  }
-
-  function move(transition: Transition) {
-    // A transition needing a comment opens the box first; the rest go straight
-    // through. Prompting for a comment nobody has to give is friction that
-    // teaches people to type "ok".
-    if (transition.requires === "comment") {
-      setPrompt(transition);
-      return;
-    }
-    run(() => transitionTask(taskId, { to_status: transition.to }), transition.label);
-  }
-
-  function confirmWithComment() {
-    if (!prompt) return;
-    run(
-      () => transitionTask(taskId, { to_status: prompt.to, comment }),
-      prompt.label,
     );
   }
 
@@ -204,6 +219,17 @@ export function TaskWorkflow({
           </div>
 
           <div className="space-y-1.5">
+            <Label htmlFor="start">Start date</Label>
+            <Input
+              id="start"
+              type="date"
+              value={startDate}
+              disabled={!canEdit || pending}
+              onChange={(event) => setStartDate(event.target.value)}
+            />
+          </div>
+
+          <div className="space-y-1.5">
             <Label htmlFor="due">Due date</Label>
             <Input
               id="due"
@@ -213,7 +239,16 @@ export function TaskWorkflow({
               onChange={(event) => setDueDate(event.target.value)}
             />
           </div>
+
+          <EstimateField
+            value={estimate}
+            onChange={setEstimate}
+            disabled={!canEdit || pending}
+            id="estimate_minutes"
+          />
         </div>
+
+        <PriorityPicker value={priority} onChange={setPriority} disabled={!canEdit || pending} />
 
         {lists.length > 0 ? (
           <div className="space-y-1.5">
@@ -244,65 +279,27 @@ export function TaskWorkflow({
         {/* -------------------------------------------------------------- */}
         {/* Transitions                                                     */}
         {/* -------------------------------------------------------------- */}
-        {prompt ? (
-          <div className="space-y-2.5 border-t pt-3">
-            <div className="space-y-1.5">
-              <Label htmlFor="comment">
-                {prompt.to === "WAITING_FOR_INFO"
-                  ? "What are you waiting for?"
-                  : prompt.to === "ONGOING"
-                    ? "What needs changing?"
-                    : "Add a comment"}
-              </Label>
-              <Textarea
-                id="comment"
-                rows={3}
-                value={comment}
-                onChange={(event) => setComment(event.target.value)}
-                placeholder={
-                  prompt.to === "ONGOING"
-                    ? "e.g. The logo is the old one — please use the 2026 mark."
-                    : "e.g. Waiting on the client to confirm which of the two headlines."
-                }
+        {transitions.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-3">
+            <div className="flex items-center gap-2">
+              <Label className="text-xs text-muted-foreground">Status</Label>
+              <TaskStatusSelect
+                taskId={taskId}
+                status={status}
+                viewer={viewer}
+                task={task}
+                resolutionMissing={resolutionMissing}
               />
-              <p className="text-xs text-muted-foreground">
-                {prompt.to === "ONGOING"
-                  ? "The PIC is notified with this comment attached."
-                  : "Recorded on the task, and counted toward how long this spent waiting."}
-              </p>
             </div>
-            <div className="flex gap-2">
-              <Button
-                onClick={confirmWithComment}
-                loading={pending}
-                disabled={comment.trim().length === 0}
-              >
-                {prompt.label}
-              </Button>
-              <Button variant="ghost" onClick={() => setPrompt(null)} disabled={pending}>
-                Cancel
-              </Button>
-            </div>
-          </div>
-        ) : transitions.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-2 border-t pt-3">
-            {transitions.map((transition) => {
-              const blocked = transition.requires === "resolution" && resolutionMissing;
 
-              return (
-                <Button
-                  key={`${transition.from}-${transition.to}`}
-                  variant={transition.to === "ONGOING" && status === "QA_IN_PROGRESS" ? "outline" : "default"}
-                  onClick={() => move(transition)}
-                  disabled={pending || blocked}
-                  title={blocked ? "Fill in the resolution first." : undefined}
-                >
-                  {transition.label}
-                </Button>
-              );
-            })}
-
-            {transitions.some((t) => t.requires === "resolution") && resolutionMissing ? (
+            {/* Two different sentences for two different situations, and the
+                order matters: an unsaved draft is the more actionable of the
+                two, because pressing Save is what unblocks the move. */}
+            {unsavedResolution ? (
+              <span className="text-xs text-muted-foreground">
+                The resolution has unsaved changes — Save before moving this.
+              </span>
+            ) : transitions.some((t) => t.requires === "resolution") && resolutionMissing ? (
               <span className="text-xs text-muted-foreground">
                 Fill in the resolution above to send this for QA.
               </span>

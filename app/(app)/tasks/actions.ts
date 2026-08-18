@@ -19,6 +19,7 @@ import {
   taskCommentSchema,
   taskDetailsSchema,
   taskParentSchema,
+  taskPatchSchema,
   transitionPayloadSchema,
 } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
@@ -177,7 +178,10 @@ export async function updateTaskDetails(taskId: string, input: unknown): Promise
   const values = parsed.data;
   const supabase = await createClient();
 
-  const { error } = await supabase
+  // `.select()` because a policy-refused UPDATE is not an error — it is success
+  // with zero rows (trap 9). Without it, somebody editing a task they are no
+  // longer on is told "Saved".
+  const { data, error } = await supabase
     .from("vizserve_pms_tasks")
     .update({
       title: values.title,
@@ -188,10 +192,72 @@ export async function updateTaskDetails(taskId: string, input: unknown): Promise
       due_date: values.due_date || null,
       start_date: values.start_date || null,
       list_id: values.list_id,
+      // P7-11 / P7-15. Both were in `taskDetailsSchema` from the day their
+      // migrations landed and neither was ever written here, so the detail form
+      // parsed a priority and an estimate and then dropped them.
+      priority: values.priority,
+      estimate_minutes: values.estimate_minutes,
     })
-    .eq("id", taskId);
+    .eq("id", taskId)
+    .select("id");
 
   if (error) return { ok: false, error: readableError(error) };
+  if (!data || data.length === 0) return { ok: false, error: "That task is not yours to edit." };
+
+  refresh(taskId);
+  return { ok: true, data: undefined };
+}
+
+/**
+ * K3 — one field, edited in place on a list row or a board card.
+ *
+ * Every column this can write is already inside the column-level UPDATE grant
+ * (`p7_11a` restated the list) and already scoped by the UPDATE policy, so there
+ * is no backend behind this — which is exactly why it is worth having. What it
+ * adds over `updateTaskDetails` is that it does not need the whole form: a row
+ * that only knows the new due date cannot send a title and a description it
+ * never displayed.
+ *
+ * `status` is deliberately unreachable here. See `taskPatchSchema`.
+ */
+export async function updateTaskField(taskId: string, input: unknown): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const parsed = taskPatchSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: parsed.error.issues[0]?.message ?? "That change is not valid.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
+  }
+
+  const patch = parsed.data;
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("vizserve_pms_tasks")
+    .update({
+      // Only the keys that arrived. Spreading conditionally rather than writing
+      // `?? null` for each keeps "not sent" and "cleared" distinct — a row that
+      // never showed the estimate must not be able to erase it.
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.due_date !== undefined ? { due_date: patch.due_date || null } : {}),
+      ...(patch.start_date !== undefined ? { start_date: patch.start_date || null } : {}),
+      ...(patch.list_id !== undefined ? { list_id: patch.list_id } : {}),
+      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+      ...(patch.estimate_minutes !== undefined
+        ? { estimate_minutes: patch.estimate_minutes }
+        : {}),
+    })
+    .eq("id", taskId)
+    .select("id");
+
+  if (error) return { ok: false, error: readableError(error) };
+  // Trap 9 again, and this is the bug the timesheet already shipped twice: zero
+  // rows is a REFUSAL reported as success. Every inline editor depends on this
+  // line to tell the difference.
+  if (!data || data.length === 0) return { ok: false, error: "That task is not yours to edit." };
 
   refresh(taskId);
   return { ok: true, data: undefined };
@@ -316,17 +382,29 @@ export async function setTaskParent(taskId: string, input: unknown): Promise<Act
 }
 
 /**
- * Reassigning is a Team Leader decision, not a self-service one.
+ * P7-14 — reassignment is no longer a Team Leader decision.
  *
- * Split from `updateTaskDetails` because RLS lets the PIC update their own task,
- * and without the split a member could hand their work to somebody else — or
- * quietly make themselves the QA on it.
+ * IT USED TO BE `requireRole("team_leader")`, and that line outlived the rule it
+ * enforced. `p7_14` widened the tasks UPDATE policy's WITH CHECK to accept any
+ * active member of the task's department precisely so a member could hand work
+ * to a colleague without a lead — and while this action kept the role gate, the
+ * applied migration was unreachable from the app. A rule the database allows and
+ * the action refuses is worse than either alone, because the tests pass.
+ *
+ * The department boundary is the guard that remains, and it is enforced twice on
+ * purpose: the check below turns it into a sentence somebody can read, and the
+ * policy's WITH CHECK is what makes it true. This function being the polite copy
+ * is the reason it may be relaxed safely.
+ *
+ * Note what is NOT relaxed: `USING` still requires the caller to be a
+ * participant or lead the department, so a member cannot reassign work they were
+ * never part of.
  */
 export async function reassignTask(
   taskId: string,
   input: unknown,
 ): Promise<ActionResult> {
-  await requireRole("team_leader");
+  await requireAuthContextOrThrow();
 
   const schema = z.object({
     assignee_id: z.uuid().nullable(),
@@ -367,15 +445,23 @@ export async function reassignTask(
     }
   }
 
-  const { error } = await supabase
+  const { data: updated, error } = await supabase
     .from("vizserve_pms_tasks")
     .update({
       assignee_id: parsed.data.assignee_id,
       qa_assignee_id: parsed.data.qa_assignee_id,
     })
-    .eq("id", taskId);
+    .eq("id", taskId)
+    .select("id");
 
   if (error) return { ok: false, error: readableError(error) };
+  // Trap 9. Now that this is open to members, the policy is the thing actually
+  // deciding — and a refusal arrives as zero rows, not as an error. Without this
+  // line a member reassigning outside their scope is told "Reassigned" and then
+  // watches the page refresh unchanged.
+  if (!updated || updated.length === 0) {
+    return { ok: false, error: "That task is not yours to reassign." };
+  }
 
   // A new PIC needs telling; the old one already knows they handed it over.
   if (parsed.data.assignee_id && parsed.data.assignee_id !== task.assignee_id) {
@@ -406,8 +492,22 @@ export async function reassignTask(
 // P3-12 — a task with no request behind it
 // ---------------------------------------------------------------------------
 
+/**
+ * P7-14 — a member creates work for a colleague in their OWN department.
+ *
+ * The role gate came off for the same reason it came off `reassignTask`: the
+ * applied migration resolves the caller's department from their own row and
+ * raises *"That department is outside your scope."* for anything else, so the
+ * boundary is in the function that a `curl` cannot skip. Keeping
+ * `requireRole("team_leader")` here left P7-14 applied and unreachable.
+ *
+ * `p_department_id` IS still a parameter, and that looks like the hole. It is
+ * not: `vizserve_pms_create_task` admits it only when the caller leads that
+ * department or it is their own. A member passing somebody else's department id
+ * gets the exception, which is why this action can pass it through untrusted.
+ */
 export async function createTask(input: unknown): Promise<ActionResult<{ taskId: string }>> {
-  await requireRole("team_leader");
+  await requireAuthContextOrThrow();
 
   const parsed = createTaskSchema.safeParse(input);
   if (!parsed.success) {
@@ -433,10 +533,64 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
 
   if (error) return { ok: false, error: readableError(error) };
 
+  const taskId = (data as { task_id: string }).task_id;
+  const extras = await writeCreationExtras(supabase, taskId, values);
+
   dispatchPendingEmailsInBackground();
   refresh();
 
-  return { ok: true, data: { taskId: (data as { task_id: string }).task_id } };
+  // The task EXISTS either way — say which part failed rather than implying
+  // nothing happened, which is the same rule `transitionTask` follows when the
+  // client email fails after the move committed.
+  if (!extras.ok) return { ok: false, error: extras.error };
+
+  return { ok: true, data: { taskId } };
+}
+
+/**
+ * The start date and the estimate, written after the row exists.
+ *
+ * `vizserve_pms_create_task` and `vizserve_pms_create_personal_task` have neither
+ * parameter, and widening an applied function's argument list means a drop and a
+ * regrant with PostgREST resolving overloads by argument NAME (trap 3) — too
+ * much ceremony for two nullable columns that the column-level UPDATE grant
+ * already permits.
+ *
+ * Returns ok when there was nothing to write, so the ordinary case costs no
+ * round trip at all.
+ */
+async function writeCreationExtras(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  taskId: string,
+  values: { start_date: string; estimate_minutes: number | null },
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  if (!values.start_date && values.estimate_minutes === null) return { ok: true };
+
+  const { data, error } = await supabase
+    .from("vizserve_pms_tasks")
+    .update({
+      ...(values.start_date ? { start_date: values.start_date } : {}),
+      ...(values.estimate_minutes !== null
+        ? { estimate_minutes: values.estimate_minutes }
+        : {}),
+    })
+    .eq("id", taskId)
+    .select("id");
+
+  if (error) {
+    return { ok: false, error: `The task was created, but ${readableError(error).toLowerCase()}` };
+  }
+  // Trap 9. Reachable in one real case: a lead files work into a department they
+  // lead but are not a participant in, so `create_task` succeeds inside its
+  // SECURITY DEFINER and the follow-up UPDATE is judged by the policy instead.
+  if (!data || data.length === 0) {
+    return {
+      ok: false,
+      error: "The task was created, but the start date and estimate could not be saved to it.",
+    };
+  }
+
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -478,12 +632,17 @@ export async function createPersonalTask(
 
   if (error) return { ok: false, error: readableError(error) };
 
+  const taskId = (data as { task_id: string }).task_id;
+  const extras = await writeCreationExtras(supabase, taskId, values);
+
   // No `dispatchPendingEmailsInBackground` — nothing was sent. The create
   // function deliberately notifies nobody, because the only person involved is
   // the one who just pressed the button.
   refresh();
 
-  return { ok: true, data: { taskId: (data as { task_id: string }).task_id } };
+  if (!extras.ok) return { ok: false, error: extras.error };
+
+  return { ok: true, data: { taskId } };
 }
 
 // ---------------------------------------------------------------------------
