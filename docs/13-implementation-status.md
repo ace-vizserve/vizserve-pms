@@ -247,20 +247,30 @@ All six green as of 17 Aug 2026: `tests/db/phase5.test.ts` runs its 20 cases aga
 
 ## Phase 6 — Timesheet, Reporting, Archive
 
-**The timesheet is built and VERIFIED against the linked project.** `tests/db/timesheet.test.ts` — 13 cases, run as genuinely signed-in users through RLS — passes, as do the 19 unit cases in `tests/unit/timesheet.test.ts` covering the week maths and the schema.
+**The timesheet is built and VERIFIED against the linked project.** `tests/db/timesheet.test.ts` — 13 cases, run as genuinely signed-in users through RLS — passes, as do the 27 unit cases in `tests/unit/timesheet.test.ts` covering the week maths, the cell parser and the schema.
 
 | ID | Item | State |
 |----|------|-------|
 | P6-01 | `vizserve_pms_timesheet_entries` migration, `task_id NOT NULL` | ✅ Plus RLS, grants, the day-total trigger |
-| P6-02 | Timesheet entry UI, task picker scoped to assigned tasks | ✅ `/timesheet` — select only, no free text |
-| P6-03 | Timesheet table / week view | ✅ Monday-start, week in the URL, edit in place |
+| P6-02 | Timesheet week grid, add-task picker scoped to assigned tasks | ✅ `/timesheet` — task rows × day columns, picker only, no free text |
+| P6-03 | Week navigation, totals, per-cell notes and splits | ✅ Monday-start, week in the URL, typed in the cell |
 | P6-04 | Turnaround time reporting | ⛔ Not started |
 | P6-05 | Status/volume dashboards per department | ⛔ Not started |
 | P6-06 | Negotiation and auto-complete split reports | ⛔ Not started |
 | P6-07 | Feedback results report | ⛔ Not started |
 | P6-08 | Archive | ⛔ Not started |
 | P6-09 | CSV export across reports | ⛔ Not started |
-| P6-10 | ClickUp migration + cutover | ⛔ Not started |
+| ~~P6-10~~ | ~~ClickUp migration + cutover~~ | ❌ **Withdrawn 18 Aug 2026 (D21)** — no sync, no import, nothing to build |
+
+### The timesheet is a week grid (18 Aug 2026)
+
+Rebuilt from a rail-plus-day-list into ClickUp's shape: tasks down the side, days across the top, a duration typed into the cell, totals on both axes. `D21` is the reason — ClickUp is a *feature* reference now, and this is the interaction the team already knows.
+
+Three things worth knowing before changing it:
+
+- **A cell is a sum.** Several entries per task per day are allowed by the migration *because their notes differ*. A cell holding more than one goes **read-only** and defers to its popover — one typed number cannot honestly replace two entries with two notes.
+- **A bare number in a cell is HOURS.** `1.5` → 90 minutes. That is the ambiguity `toMinutes` was split into two fields to avoid, accepted here because a grid has one field per day and reversed by feedback: the cell re-renders as `1:30` on save, so the reading it got is visible where it was typed. `parseCellDuration` in `lib/schemas/timesheet.ts` is the only place this is decided, and it is unit-tested.
+- **Empty rows live in `sessionStorage`, not the database.** A task pulled into a week with no time on it yet is not a fact worth a table. Read through `useSyncExternalStore` — an effect that setStates on mount trips `react-hooks/set-state-in-effect`, which is an error in this repo, not a warning.
 
 **This migration does not depend on Phase 5.** It references `vizserve_pms_tasks`, `vizserve_pms_users`, `vizserve_pms_manages_department` and `vizserve_pms_set_updated_at` — all Phase 0–3.
 
@@ -288,9 +298,10 @@ All six green as of 17 Aug 2026: `tests/db/phase5.test.ts` runs its 20 cases aga
 ### Exit criteria
 
 - [x] Time cannot be logged without a task — asserted in `tests/unit/timesheet.test.ts` and, against the live database, in `tests/db/timesheet.test.ts`
+- [x] A week of one member's work can be entered from the grid without leaving it
 - [ ] All seven metrics reportable with a date range — P6-04/06/07 not started
 - [ ] Archived requests remain queryable — P6-08 not started
-- [ ] A written cutover plan exists — P6-10 not started
+- [ ] Every report the team reads in ClickUp has an equivalent here — waits on P6-04/05/07. No cutover plan is owed; `D21` withdrew it
 
 ### `lib/database.types.ts` was hand-edited
 
@@ -369,8 +380,10 @@ is a change to one function.
 **Phase 6 has started.** The timesheet is built and its migration —
 `20260817090000_p6_01_timesheet.sql` — is unapplied like the Phase 5 three. It
 does not depend on them, so it can go in the same paste or on its own; apply it
-and 16 more assertions stop skipping. Reporting, archive and the ClickUp cutover
-(P6-04 onward) are the rest of the phase and have not been started.
+and 16 more assertions stop skipping. Reporting and archive (P6-04 onward) are
+the rest of the phase and have not been started. There is no migration work left
+after them — `P6-10` was withdrawn with `D21`, so what stands between here and
+cancelling ClickUp is reports, not records.
 
 Two things still need a human and neither blocks Phase 6:
 

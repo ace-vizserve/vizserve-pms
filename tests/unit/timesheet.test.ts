@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { formatWeekRange, formatWeekday, startOfWeek, weekDates } from "@/lib/dates";
-import { fromMinutes, timesheetEntrySchema, toMinutes } from "@/lib/schemas/timesheet";
+import {
+  formatCellDuration,
+  fromMinutes,
+  parseCellDuration,
+  timesheetEntrySchema,
+  toMinutes,
+} from "@/lib/schemas/timesheet";
 
 /**
  * P6-01 / P6-02 — the timesheet's pure logic.
@@ -101,6 +107,61 @@ describe("toMinutes — hours and minutes, never a decimal", () => {
       const parts = fromMinutes(total);
       expect(toMinutes(parts.hours, parts.minutes)).toBe(total);
     }
+  });
+});
+
+describe("parseCellDuration — one field, in a grid", () => {
+  it("reads h:mm", () => {
+    expect(parseCellDuration("1:30")).toBe(90);
+    expect(parseCellDuration("0:45")).toBe(45);
+    expect(parseCellDuration("12:00")).toBe(720);
+  });
+
+  it("reads a bare number as HOURS, which is the whole ambiguity", () => {
+    expect(parseCellDuration("2")).toBe(120);
+    expect(parseCellDuration("1.5")).toBe(90);
+    expect(parseCellDuration("0.25")).toBe(15);
+  });
+
+  it("reads explicit units", () => {
+    expect(parseCellDuration("90m")).toBe(90);
+    expect(parseCellDuration("2h")).toBe(120);
+    expect(parseCellDuration("1h30m")).toBe(90);
+    expect(parseCellDuration("1h30")).toBe(90);
+    expect(parseCellDuration("1h 30m")).toBe(90);
+    expect(parseCellDuration("1.5h")).toBe(90);
+  });
+
+  it("treats empty as zero — clearing a cell is an instruction, not a mistake", () => {
+    expect(parseCellDuration("")).toBe(0);
+    expect(parseCellDuration("   ")).toBe(0);
+    expect(parseCellDuration("0")).toBe(0);
+  });
+
+  it("returns null for input that means nothing, so the cell can say so", () => {
+    expect(parseCellDuration("banana")).toBeNull();
+    expect(parseCellDuration("h")).toBeNull();
+    expect(parseCellDuration("-1")).toBeNull();
+    expect(parseCellDuration("1:75")).toBeNull();
+    expect(parseCellDuration("::")).toBeNull();
+  });
+
+  it("refuses more than a day, which the CHECK constraint would refuse anyway", () => {
+    expect(parseCellDuration("24:00")).toBe(1440);
+    expect(parseCellDuration("24:01")).toBeNull();
+    expect(parseCellDuration("25")).toBeNull();
+  });
+
+  it("round-trips through formatCellDuration", () => {
+    for (const total of [1, 45, 60, 90, 150, 480, 1440]) {
+      expect(parseCellDuration(formatCellDuration(total))).toBe(total);
+    }
+  });
+
+  it("formats zero-padded so a column lines up", () => {
+    expect(formatCellDuration(45)).toBe("0:45");
+    expect(formatCellDuration(60)).toBe("1:00");
+    expect(formatCellDuration(150)).toBe("2:30");
   });
 });
 

@@ -75,12 +75,14 @@ Three structural points that are easy to get wrong:
 
 ## Document map
 
-[docs/00-README.md](docs/00-README.md) is the index and carries decisions **D1–D20**, settled and not to be relitigated.
+[docs/00-README.md](docs/00-README.md) is the index and carries decisions **D1–D21**, settled and not to be relitigated.
+
+**`D21`: ClickUp is a feature reference, not a system to exchange data with.** No sync, no export/import, no migration — nothing here reads from or writes to ClickUp. What carries over is the *shape* of features the team already knows (the timesheet week grid is the first). This app is the internal ClickUp. `P6-10` is withdrawn.
 
 | Doc | Why you'd open it |
 |---|---|
 | [13-implementation-status.md](docs/13-implementation-status.md) | **What is actually built.** Read first |
-| [00-README.md](docs/00-README.md) | Decision register D1–D20 |
+| [00-README.md](docs/00-README.md) | Decision register D1–D21 |
 | [01-updated-workflow.md](docs/01-updated-workflow.md) | Canonical flow, six modules, **canonical status enums** |
 | [02-data-model.md](docs/02-data-model.md) | Tables, RLS strategy, auth-metadata security rule |
 | [03-roadmap.md](docs/03-roadmap.md) | **Plan of record.** Phase order, track split, exit criteria |

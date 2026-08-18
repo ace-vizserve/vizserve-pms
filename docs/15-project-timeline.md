@@ -28,12 +28,14 @@ Formatted for the ClickUp Gantt, in the same shape as **01 Online Admission Plan
 | 14 | DTR Module | 17 Aug 2026 | 28 Aug 2026 | 🟡 code done, migrations unapplied |
 | 15 | Internal Approvals Module | 31 Aug 2026 | 11 Sep 2026 | 🟡 code done, migrations unapplied |
 | 16 | Timesheet & Reporting Module | 14 Sep 2026 | 25 Sep 2026 | ⏳ |
-| 17 | ClickUp Data Migration | 28 Sep 2026 | 2 Oct 2026 | ⏳ |
+| ~~17~~ | ~~ClickUp Data Migration~~ | — | — | ❌ **withdrawn (D21)** |
 | 18 | Web Hosting & DNS Configuration | 5 Oct 2026 | 7 Oct 2026 | ⏳ |
 | 19 | Deployment of Live Environment | 8 Oct 2026 | 9 Oct 2026 | ⏳ |
-| 20 | Parallel Run & Cutover | 12 Oct 2026 | 23 Oct 2026 | ⏳ |
+| 20 | Cutover & ClickUp Cancellation | 12 Oct 2026 | 23 Oct 2026 | ⏳ |
 
 **Target: ClickUp cancelled by end of October 2026.**
+
+Task 17 is gone — **no ClickUp data is migrated (D21)**. Numbering is left alone so the Gantt, the CSV and every doc that cites a task number still line up; 17 is a hole, not a renumbering. Its week of 28 Sep – 2 Oct is now free, and nothing after it was pulled forward — whether to bring 18–20 a week earlier or keep the slack is a scheduling call, not a consequence of the decision.
 
 ---
 
@@ -58,11 +60,11 @@ Only worth reading when a bar needs breaking into subtasks.
 | 13 | Testing and Bug Fixing | Browser smoke test ([14-smoke-test.md](14-smoke-test.md)), Entra verification, fixes |
 | 14 | DTR Module | Punch in/out rules, DTR list view, payroll export |
 | 15 | Internal Approvals Module | Leave, no time-in, no time-out, reimbursement — on the existing engine |
-| 16 | Timesheet & Reporting Module | Time logged against tasks, turnaround and feedback reporting, dashboards |
-| 17 | ClickUp Data Migration | Export, map and import live ClickUp data |
+| 16 | Timesheet & Reporting Module | Time logged against tasks in a week grid, turnaround and feedback reporting, dashboards |
+| ~~17~~ | ~~ClickUp Data Migration~~ | **Withdrawn (D21).** Nothing is exported, mapped or imported |
 | 18 | Web Hosting & DNS Configuration | Vercel production, domain, cron schedules |
 | 19 | Deployment of Live Environment | Production deploy, real accounts, first live request |
-| 20 | Parallel Run & Cutover | Both systems for two weeks, then cancel ClickUp |
+| 20 | Cutover & ClickUp Cancellation | The team moves over and the subscription is cancelled. Any overlap is people working in both places for a fortnight — dual entry, not a data transfer (D21) |
 
 ---
 
@@ -83,7 +85,7 @@ Two smaller items, neither blocking: **Entra SSO has never been exercised** (ide
 - **12 → 19.** No live deployment is meaningful without email working.
 - **9 → 10.** Client approval sits entirely on the task status machine. Already satisfied, and it is why Task Management was the worst place in the plan to stall.
 - **8 → 15.** Internal approvals reuse the Phase 2 engine unchanged. If task 15 finds itself rebuilding approve/reject, the abstraction failed and that is the bug to fix.
-- **16 → 17 → 20.** Nothing can be migrated off ClickUp until reporting replaces what people currently read there.
+- **16 → 20.** Nobody moves off ClickUp until reporting replaces what they currently read there. That, not data, is the dependency — `D21` withdrew the migration in between, so what task 20 is waiting for is the last *report*, not the last record.
 
 ---
 

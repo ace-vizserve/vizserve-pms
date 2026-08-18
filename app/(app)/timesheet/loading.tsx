@@ -1,30 +1,37 @@
 import { PageShell } from "@/components/page-shell";
-import { CardSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Loading() {
   return (
-    // The same two-column shape the loaded page uses — rail left, week right.
-    <PageShell className="gap-3">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] lg:items-start">
-        <div className="flex flex-col gap-3" aria-hidden>
-          <div className="flex flex-col gap-2 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-            <Skeleton className="h-8 w-full" />
-          </div>
-          <div className="rounded-xl bg-card p-3 ring-1 ring-foreground/10">
-            <Skeleton className="h-8 w-32" />
+    // The same shape the loaded page uses — week bar, then the grid.
+    <PageShell className="gap-3" aria-hidden>
+      <div className="rounded-xl bg-card p-2 ring-1 ring-foreground/10">
+        <Skeleton className="mx-auto h-5 w-40" />
+      </div>
+
+      <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
+        <div className="flex items-center gap-2 border-b px-3 py-2">
+          <Skeleton className="h-4 w-16" />
+          <div className="ml-auto flex gap-2">
+            {Array.from({ length: 7 }, (_, day) => (
+              <Skeleton key={day} className="h-4 w-8" />
+            ))}
           </div>
         </div>
 
-        <div className="flex flex-col gap-3">
-          <div className="rounded-xl bg-card p-2 ring-1 ring-foreground/10" aria-hidden>
-            <Skeleton className="mx-auto h-5 w-40" />
+        {Array.from({ length: 4 }, (_, row) => (
+          <div key={row} className="flex items-center gap-2 border-b px-3 py-2.5">
+            <Skeleton className="h-4 w-40" />
+            <div className="ml-auto flex gap-2">
+              {Array.from({ length: 7 }, (_, day) => (
+                <Skeleton key={day} className="h-4 w-8" />
+              ))}
+            </div>
           </div>
-          <CardSkeleton lines={3} />
-          <CardSkeleton lines={2} />
+        ))}
+
+        <div className="px-3 py-2.5">
+          <Skeleton className="h-4 w-24" />
         </div>
       </div>
     </PageShell>

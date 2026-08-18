@@ -82,19 +82,35 @@ This is the single easiest place for scope to explode. Accrual rules, carry-over
 
 **Retires:** ClickUp. This is the phase that lets Amier cancel the subscription (56:30: *"Di na tayo magbabayad nung ano"*). **Relative size:** medium — mostly reads over data that already exists.
 
-## Track split
+## ClickUp is a reference, not an integration (D21)
 
-| Ace | Kurt |
-|---|---|
-| P6-01 migration · P6-04 turnaround reporting · P6-06 negotiation + auto-complete splits · P6-08 archive · P6-09 exports | P6-02 timesheet entry UI · P6-03 week view · P6-05 dashboards · P6-07 feedback report |
+Settled 18 Aug 2026. **Nothing is synced, exported, imported, or run in parallel.** There is no ClickUp API client in this repo and there will not be one. The subscription is switched off when this phase lands, and whatever sits in ClickUp on that day stays there — read-only in ClickUp's own trial window if anyone needs it, then gone.
 
-**Joint:** P6-10, ClickUp migration and cutover.
+What *does* carry over is the shape of the features. This app is the team's internal ClickUp, so where ClickUp already taught these people an interaction, copy the interaction: the timesheet week grid below is the first and clearest case. Copy the affordance, never the data.
+
+The old `P6-10` (migration + cutover plan) is withdrawn. If a specific ClickUp record turns out to matter, somebody retypes it — which is cheaper than an importer that has to reconcile two status vocabularies, and it was never more than a few live tickets.
 
 ## Timesheet rule
 
 Amier, 33:20–34:40: time is logged **against a task chosen from a list**. Free-text logging is forbidden. *"mamap niya yung item mo sa list... hindi ka rin pwede-pwede mag-log ng gusto mo."*
 
 `vizserve_pms_timesheet_entries.task_id` is `NOT NULL`. That single constraint is the whole feature.
+
+## Timesheet shape — a week grid
+
+Tasks down the side, the seven days across the top, a duration in the cell, totals on both axes. ClickUp's shape, per D21, and the rule above survives it intact: **every row is a task**, so there is no cell that is not attached to real work. The "+ Add task" picker offers only tasks `vizserve_pms_may_log_time` would accept — a row nobody can legitimately fill should not be on the page.
+
+Three things the grid has to get right, all of which are about the sum in the cell:
+
+- **A cell is a sum, not a row.** The migration allows several entries per task per day *because their notes differ*. The cell shows their total and goes read-only when there is more than one — a single typed number cannot honestly be applied to two entries with two notes. Editing them is a per-cell popover.
+- **One field, so `1.5` will be typed.** A bare number is **hours**. The documented hazard is that nobody finds out which reading they got; the cell answers it by re-rendering as `1:30` the instant it saves, in the place it was typed.
+- **Empty rows are not facts.** A task pulled into a week but not yet logged against lives in `sessionStorage`, not the database. Persisting it would mean a table and a migration to remember that somebody opened a dropdown.
+
+## Track split
+
+| Ace | Kurt |
+|---|---|
+| P6-01 migration · P6-04 turnaround reporting · P6-06 negotiation + auto-complete splits · P6-08 archive · P6-09 exports | P6-02 timesheet grid · P6-03 week navigation and totals · P6-05 dashboards · P6-07 feedback report |
 
 ## Reporting — what Amier actually asked to see
 
@@ -117,19 +133,20 @@ The third and fourth rows are the ones nobody asks for and everybody needs. They
 | ID | Item | Owner |
 |----|------|-------|
 | P6-01 | `vizserve_pms_timesheet_entries` migration, `task_id NOT NULL` | Ace |
-| P6-02 | Timesheet entry UI with task picker scoped to the user's assigned tasks | Kurt |
-| P6-03 | Timesheet table/week view | Kurt |
+| P6-02 | Timesheet week grid — task rows, day columns, in-cell durations, add-task picker scoped to the user's own tasks | Kurt |
+| P6-03 | Week navigation, row/day/week totals, per-cell notes and split entries | Kurt |
 | P6-04 | Turnaround time reporting with date-range filter | Ace |
 | P6-05 | Status/volume dashboards per department | Kurt |
 | P6-06 | Negotiation and auto-complete split reports | Ace |
 | P6-07 | Feedback results report | Kurt |
 | P6-08 | Archive: closed requests + audit logs, still queryable | Ace |
 | P6-09 | CSV export across reports | Ace |
-| P6-10 | ClickUp migration + cutover plan | Ace + Kurt |
+| ~~P6-10~~ | ~~ClickUp migration + cutover plan~~ — **withdrawn 18 Aug 2026 (D21).** Nothing is migrated | — |
 
 ## Exit criteria
 
 - [ ] Time cannot be logged without a task.
+- [ ] A week of one member's work can be entered from the grid without leaving it.
 - [ ] All seven metrics above are reportable with a date range.
 - [ ] Archived requests remain queryable.
-- [ ] A written cutover plan exists and ClickUp can be cancelled without data loss.
+- [ ] Every report the team currently reads in ClickUp has an equivalent here — that, and nothing about data, is what lets the subscription be cancelled (D21).

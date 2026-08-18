@@ -1,25 +1,20 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ChevronLeft, ChevronRight, Timer } from "lucide-react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import {
   addDays,
-  formatDate,
-  formatDuration,
   formatWeekRange,
-  formatWeekday,
   startOfWeek,
   todayInAppZone,
   weekDates,
 } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
-import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
-import { LogTimeForm } from "./log-time-form";
-import { WeekEntries } from "./week-entries";
+import { WeekGrid, type TaskRow } from "./week-grid";
 
 export const metadata: Metadata = { title: "Timesheet" };
 
@@ -27,19 +22,19 @@ export const metadata: Metadata = { title: "Timesheet" };
  * P6-02 / P6-03 — the timesheet.
  *
  * Time is logged against a task picked from a list, never free text (Amier,
- * 33:20). The picker below is that list, and it is not the enforcement: the
- * INSERT policy calls `vizserve_pms_may_log_time`, so a crafted request cannot
- * book hours to somebody else's task by skipping this page.
+ * 33:20). The grid's rows ARE that list: there is no row without a task behind
+ * it, and the picker that adds one offers only tasks the INSERT policy would
+ * accept. None of that is the enforcement — `vizserve_pms_may_log_time` runs
+ * inside the policy, so a crafted request cannot book hours to somebody else's
+ * task by skipping this page.
  *
  * FIRST PERSON ONLY. The RLS policy also lets a department lead READ their
  * team's entries, but there is no person picker here — reading a team's week is
- * a reporting question (P6-05), and answering half of it inside the entry
- * screen is how you end up with a report nobody trusts because it is also an
- * editor.
+ * a reporting question (P6-05), and answering half of it inside the entry screen
+ * is how you end up with a report nobody trusts because it is also an editor.
  *
  * The week is a URL parameter, like every other filter in the app: a week
- * someone is looking at should survive a refresh and be pasteable into a
- * message.
+ * someone is looking at should survive a refresh and be pasteable into a message.
  */
 export default async function TimesheetPage({
   searchParams,
@@ -52,8 +47,8 @@ export default async function TimesheetPage({
 
   const today = todayInAppZone();
   // Anything in the week works as an anchor — startOfWeek normalises it. A
-  // hand-edited ?week=banana falls back to this week rather than erroring: a
-  // bad filter should be ignored, not fatal.
+  // hand-edited ?week=banana falls back to this week rather than erroring: a bad
+  // filter should be ignored, not fatal.
   const monday = startOfWeek(params.week ?? today) ?? startOfWeek(today)!;
   const days = weekDates(monday);
   const sunday = days[6];
@@ -62,9 +57,10 @@ export default async function TimesheetPage({
     supabase
       .from("vizserve_pms_timesheet_entries")
       .select("id, task_id, work_date, minutes, note, vizserve_pms_tasks!inner(title, status)")
-      // No `user_id` filter — the SELECT policy returns the caller's own rows
-      // plus their team's, and this page shows only their own, which is what
-      // the eq below is for. It narrows a policy result; it does not replace it.
+      // No `user_id` filter would still be correct — the SELECT policy returns
+      // the caller's own rows plus their team's — and this page shows only their
+      // own, which is what the eq is for. It narrows a policy result; it does
+      // not replace it.
       .eq("user_id", context.userId)
       .gte("work_date", monday)
       .lte("work_date", sunday)
@@ -76,7 +72,7 @@ export default async function TimesheetPage({
     // offer something the insert would then refuse.
     supabase
       .from("vizserve_pms_tasks")
-      .select("id, title, status, due_date")
+      .select("id, title, status")
       .or(`assignee_id.eq.${context.userId},qa_assignee_id.eq.${context.userId}`)
       .order("due_date", { ascending: true, nullsFirst: false }),
   ]);
@@ -92,20 +88,43 @@ export default async function TimesheetPage({
 
   const entries = (entriesResult.data ?? []) as unknown as Entry[];
 
-  // Finished tasks are dropped from the PICKER but never from the entries
-  // already logged against them — an hour spent on something that has since
-  // completed is still an hour that was spent.
-  const openTasks = (tasksResult.data ?? []).filter(
-    (task) => !isTerminal(task.status as Parameters<typeof isTerminal>[0]),
-  );
+  // Entries into grid rows. A task appears once, however many days it spans —
+  // that collapse is the difference between a week grid and a list of entries,
+  // and it is the reason the shape was asked for.
+  const rows = new Map<string, TaskRow>();
 
-  const weekMinutes = entries.reduce((sum, entry) => sum + entry.minutes, 0);
+  for (const entry of entries) {
+    let row = rows.get(entry.task_id);
 
-  const byDay = new Map<string, Entry[]>(days.map((day) => [day, []]));
-  for (const entry of entries) byDay.get(entry.work_date)?.push(entry);
+    if (!row) {
+      row = {
+        taskId: entry.task_id,
+        title: entry.vizserve_pms_tasks?.title ?? "Task",
+        // A finished task is dropped from the PICKER but never from the rows
+        // already carrying hours — an hour spent on something since completed is
+        // still an hour that was spent.
+        finished: isTerminal(
+          (entry.vizserve_pms_tasks?.status ?? "OPEN") as Parameters<typeof isTerminal>[0],
+        ),
+        cells: {},
+      };
+      rows.set(entry.task_id, row);
+    }
 
-  const minutesFor = (day: string) =>
-    (byDay.get(day) ?? []).reduce((sum, entry) => sum + entry.minutes, 0);
+    (row.cells[entry.work_date] ??= []).push({
+      id: entry.id,
+      minutes: entry.minutes,
+      note: entry.note,
+    });
+  }
+
+  // Alphabetical. The alternative — first-logged-first — reorders the grid under
+  // the cursor as soon as somebody fills a cell on a row that had none.
+  const taskRows = [...rows.values()].sort((a, b) => a.title.localeCompare(b.title));
+
+  const openTasks = (tasksResult.data ?? [])
+    .filter((task) => !isTerminal(task.status as Parameters<typeof isTerminal>[0]))
+    .map((task) => ({ id: task.id, title: task.title }));
 
   const previousWeek = addDays(monday, -7);
   const nextWeek = addDays(monday, 7);
@@ -117,140 +136,49 @@ export default async function TimesheetPage({
   }
 
   return (
-    // Same shape as the DTR: a rail you work from, a wide column you read. The
-    // two screens answer "when was I here" and "where did it go", and having
-    // them laid out differently makes them feel like different products.
     <PageShell className="gap-3">
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,19rem)_minmax(0,1fr)] lg:items-start">
-        <div className="flex flex-col gap-3">
-          <LogTimeForm
-            tasks={openTasks.map((task) => ({ id: task.id, title: task.title }))}
-            // Today, unless today is outside the week being viewed — then the
-            // week's Monday, because a form that silently defaults to a date
-            // the user cannot see on screen is a form that logs to the wrong day.
-            defaultDate={days.includes(today) ? today : monday}
-            maxDate={today}
-          />
+      {/* Week navigation. Plain links rather than a client-side picker: the week
+          lives in the URL, so back and forward already work and there is no
+          state to keep in step with it. */}
+      <div className="flex items-center gap-2 rounded-xl bg-card p-2 ring-1 ring-foreground/10">
+        {/* A LINK styled as a button, not a Button rendering a link. Base UI's
+            Button is a native <button> unless told otherwise, so
+            `render={<Link/>}` hands it an <a> and it warns that the native
+            button semantics it promised are gone. The repo settled this at the
+            inbox's Clear filters: if it navigates, it is a link, and
+            `buttonVariants` is how a link borrows the styling.
 
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
-            <div>
-              <dt className="text-2xs tracking-wide text-muted-foreground uppercase">This week</dt>
-              <dd className="mt-0.5 text-sm font-semibold tabular-nums">
-                {formatDuration(weekMinutes)}
-              </dd>
-            </div>
-            <div>
-              <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Entries</dt>
-              <dd className="mt-0.5 text-sm font-semibold tabular-nums">{entries.length}</dd>
-            </div>
-          </dl>
+            aria-label rather than an sr-only span — the accessible name of a
+            link with no text belongs on the link itself. */}
+        <Link
+          href={weekHref(previousWeek)}
+          aria-label="Previous week"
+          className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+        >
+          <ChevronLeft />
+        </Link>
 
-          <p className="px-1 text-xs text-muted-foreground">
-            Time is logged against a task, never free text. If the task is not in the list, it is
-            either finished or somebody else is on it.
-          </p>
-        </div>
-
-        <div className="flex min-w-0 flex-col gap-3">
-          {/* Week navigation. Plain links rather than a client-side picker: the
-              week lives in the URL, so back and forward already work and there
-              is no state to keep in step with it. */}
-          <div className="flex items-center gap-2 rounded-xl bg-card p-2 ring-1 ring-foreground/10">
-            {/* A LINK styled as a button, not a Button rendering a link.
-                Base UI's Button is a native <button> unless told otherwise, so
-                `render={<Link/>}` hands it an <a> and it warns that the native
-                button semantics it promised are gone. The repo already settled
-                this at the inbox's Clear filters: if it navigates, it is a
-                link, and `buttonVariants` is how a link borrows the styling.
-
-                aria-label rather than an sr-only span — the accessible name of
-                a link with no text belongs on the link itself. */}
-            <Link
-              href={weekHref(previousWeek)}
-              aria-label="Previous week"
-              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-            >
-              <ChevronLeft />
+        <div className="min-w-0 flex-1 text-center">
+          <p className="truncate text-sm font-medium">{formatWeekRange(monday)}</p>
+          {!isCurrentWeek ? (
+            <Link href="/timesheet" className="text-2xs text-muted-foreground hover:underline">
+              Back to this week
             </Link>
-
-            <div className="min-w-0 flex-1 text-center">
-              <p className="truncate text-sm font-medium">{formatWeekRange(monday)}</p>
-              {!isCurrentWeek ? (
-                <Link href="/timesheet" className="text-2xs text-muted-foreground hover:underline">
-                  Back to this week
-                </Link>
-              ) : (
-                <p className="text-2xs text-muted-foreground">This week</p>
-              )}
-            </div>
-
-            <Link
-              href={weekHref(nextWeek)}
-              aria-label="Next week"
-              className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
-            >
-              <ChevronRight />
-            </Link>
-          </div>
-
-          {entries.length === 0 ? (
-            <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
-              <EmptyState
-                className="py-10"
-                icon={<Timer />}
-                title="Nothing logged this week"
-                description="Pick a task on the left and log the time it took. Hours here are what turn a finished task into a real measure of the week."
-              />
-            </div>
           ) : (
-            <div className="flex flex-col gap-3">
-              {days.map((day) => {
-                const dayEntries = byDay.get(day) ?? [];
-                const dayMinutes = minutesFor(day);
-
-                // Empty days are dropped rather than rendered as seven headings
-                // with nothing under them. The week total above already says
-                // what the week came to; a row of zeroes adds nothing but
-                // height, and a weekend of them reads as a fault.
-                if (dayEntries.length === 0) return null;
-
-                return (
-                  <section
-                    key={day}
-                    className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10"
-                  >
-                    <header className="flex items-baseline justify-between gap-3 border-b px-3 py-2">
-                      <h2 className="text-sm font-medium">
-                        {formatWeekday(day)}
-                        <span className="ml-2 text-xs font-normal text-muted-foreground">
-                          {formatDate(day)}
-                          {day === today ? " · today" : null}
-                        </span>
-                      </h2>
-                      <span className="text-xs font-semibold tabular-nums">
-                        {formatDuration(dayMinutes)}
-                      </span>
-                    </header>
-
-                    <WeekEntries
-                      entries={dayEntries.map((entry) => ({
-                        id: entry.id,
-                        task_id: entry.task_id,
-                        work_date: entry.work_date,
-                        minutes: entry.minutes,
-                        note: entry.note,
-                        taskTitle: entry.vizserve_pms_tasks?.title ?? "Task",
-                      }))}
-                      tasks={openTasks.map((task) => ({ id: task.id, title: task.title }))}
-                      maxDate={today}
-                    />
-                  </section>
-                );
-              })}
-            </div>
+            <p className="text-2xs text-muted-foreground">This week</p>
           )}
         </div>
+
+        <Link
+          href={weekHref(nextWeek)}
+          aria-label="Next week"
+          className={buttonVariants({ variant: "ghost", size: "icon-sm" })}
+        >
+          <ChevronRight />
+        </Link>
       </div>
+
+      <WeekGrid monday={monday} days={days} today={today} rows={taskRows} tasks={openTasks} />
     </PageShell>
   );
 }

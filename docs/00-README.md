@@ -60,6 +60,7 @@ These came from the user (VizBytes) and are treated as settled:
 | D18 | Every user carries `{"app_access": ["vizserve-pms"], "role": …}` in **`raw_user_meta_data`**, for display and app routing only. Because that field is user-writable via Supabase's auth endpoint, **nothing in the authorization path reads it** — RLS and server actions read `vizserve_pms_users.role`. Enforced by a CI grep. See `02-data-model.md` §Auth metadata | User, 29 Jul |
 | D19 | Repo: `vizserve-pms`, already initialised at `github.com/ace-vizserve/vizserve-pms`. Docs live in `docs/` | User, 29 Jul |
 | D20 | **Forms are dynamic.** VizServe builds them in the app and shares them by public URL — the field list is *configuration*, not schema, and no field list is agreed up front. Phase 1 seeds placeholders derived from the flow. Consequence: `field_key` is immutable and fields are soft-archived, never hard-deleted (`R5`) | User, 29 Jul (answers Q9) |
+| D21 | **ClickUp is a feature reference, not a system to exchange data with.** No sync, no export/import, no parallel run — nothing in this codebase reads from or writes to ClickUp, ever. What carries over is the *shape* of the features people already know, the timesheet week grid first among them. This app is the internal ClickUp; the old one is switched off, not migrated. Supersedes `P6-10` | User, 18 Aug 2026 |
 
 ### A note on "starting with the approval module"
 

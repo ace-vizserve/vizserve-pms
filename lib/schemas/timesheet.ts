@@ -87,3 +87,64 @@ export function fromMinutes(total: number): { hours: string; minutes: string } {
     minutes: String(total % 60),
   };
 }
+
+// ---------------------------------------------------------------------------
+// The week grid — one cell, one field
+// ---------------------------------------------------------------------------
+
+/** `1:30` — h:mm. */
+const CELL_COLON = /^(\d{1,2}):([0-5]?\d)$/;
+/** `90`, `1.5` — a number on its own. */
+const CELL_BARE = /^\d+(?:\.\d+)?$/;
+/** `1h30m`, `1h30`, `1h`, `30m`. Both halves optional, so the caller must reject an empty match. */
+const CELL_UNITS = /^(?:(\d+(?:\.\d+)?)\s*h)?\s*(?:(\d+(?:\.\d+)?)\s*m?)?$/;
+
+/**
+ * A grid cell as typed, into minutes.
+ *
+ * The two-field hours/minutes form above could refuse decimals outright. A grid
+ * cannot: the whole point of the shape is one keystroke-cheap field per day, and
+ * a person moving off ClickUp will type `1.5` into it on the first day.
+ *
+ * So a bare number is HOURS — `1.5` is 90 minutes, not an hour and five. The
+ * documented hazard (docs/09, and the two-field comment above) is that nobody
+ * finds out which reading they got. Here they do: the cell re-renders as `1:30`
+ * the moment it saves, so a wrong reading is visible in the place it was typed
+ * and costs one correction rather than going unnoticed into a report.
+ *
+ * Returns 0 for empty — "clear this cell" is a real instruction, and the caller
+ * turns it into a delete. Returns null only for input that means nothing.
+ */
+export function parseCellDuration(raw: string): number | null {
+  const value = raw.trim().toLowerCase();
+  if (!value) return 0;
+
+  let minutes: number;
+
+  const colon = CELL_COLON.exec(value);
+  if (colon) {
+    minutes = Number(colon[1]) * 60 + Number(colon[2]);
+  } else if (CELL_BARE.test(value)) {
+    minutes = Math.round(Number(value) * 60);
+  } else {
+    const units = CELL_UNITS.exec(value);
+    // `CELL_UNITS` matches the empty string, and a stray `h` leaves nothing in
+    // either group — both are input that parsed to no quantity at all.
+    if (!units || (units[1] === undefined && units[2] === undefined)) return null;
+    minutes = Math.round(Number(units[1] ?? 0) * 60 + Number(units[2] ?? 0));
+  }
+
+  if (!Number.isFinite(minutes) || minutes < 0 || minutes > MAX_ENTRY_MINUTES) return null;
+  return minutes;
+}
+
+/**
+ * Minutes as a cell reads them — `2:30`, never `2h 30m`.
+ *
+ * Zero-padded and colon-separated so seven of them in a row line up under each
+ * other. `formatDuration` in lib/dates is the prose form and stays that way; a
+ * grid is scanned down a column, and "45m" next to "2h 30m" does not scan.
+ */
+export function formatCellDuration(minutes: number): string {
+  return `${Math.floor(minutes / 60)}:${String(minutes % 60).padStart(2, "0")}`;
+}
