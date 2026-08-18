@@ -284,6 +284,59 @@ export const submitTimesheetWeekSchema = z.object({
 // ---------------------------------------------------------------------------
 
 /** What a day's total is telling you. `over` is the only one that is a problem. */
+/**
+ * SLICE H — what a typed cell means, decided outside the component.
+ *
+ * The grid already saves on blur and on Enter; what it could not do was survive a
+ * cell being typed into and then abandoned — a tab closed, a phone rotated, the
+ * row scrolled away. Committing on unmount and on `visibilitychange` fixes that,
+ * and both of those fire in places where React state is no longer readable. So
+ * the DECISION moves here, where it is a pure function of the typed string and
+ * the cell's current contents, and the component is left holding only the call.
+ *
+ * That it is now unit-testable is the second benefit rather than the first. The
+ * branches below are the ones that used to be four early `return`s inside an
+ * event handler, which is not a place a rule about deleting somebody's timesheet
+ * entry should live.
+ *
+ * `noop` is a first-class answer and there are two ways to reach it: the number
+ * did not change, or an empty cell was left empty. Neither is an error and
+ * neither may write — a no-change UPDATE still bumps `updated_at` and would make
+ * every tab through a week look like an edit in the audit trail.
+ */
+export type CellCommit =
+  /** Not a length of time. The caller shows the sentence and keeps the draft. */
+  | { kind: "invalid"; typed: string }
+  /** Nothing to write. */
+  | { kind: "noop" }
+  /** No entry existed and a duration was given. */
+  | { kind: "insert"; minutes: number }
+  /** An entry existed and its length changed. */
+  | { kind: "update"; minutes: number }
+  /** An entry existed and the cell was cleared. Zero means "remove it". */
+  | { kind: "delete" };
+
+export function cellCommit(
+  typed: string,
+  cell: { total: number; entryCount: number },
+): CellCommit {
+  const minutes = parseCellDuration(typed);
+
+  // null is "means nothing" — an empty string is 0, which is a real instruction.
+  if (minutes === null) return { kind: "invalid", typed };
+
+  // Unchanged. Checked before the empty case, so clearing an already-empty cell
+  // lands here rather than in `delete` with no entry to delete.
+  if (minutes === cell.total) return { kind: "noop" };
+
+  if (cell.entryCount === 0) {
+    // Nothing there and nothing typed.
+    return minutes === 0 ? { kind: "noop" } : { kind: "insert", minutes };
+  }
+
+  return minutes === 0 ? { kind: "delete" } : { kind: "update", minutes };
+}
+
 export type DayState = "empty" | "normal" | "overtime" | "over";
 
 /**

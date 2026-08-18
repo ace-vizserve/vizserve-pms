@@ -1,9 +1,16 @@
 "use client";
 
-import { Plus, X } from "lucide-react";
+import { Check, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  useTransition,
+} from "react";
 import { toast } from "sonner";
 
 import { TaskStatusBadge } from "@/components/status-badge";
@@ -12,7 +19,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { STANDARD_DAY_MINUTES, formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
-import { dayState, formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
+import {
+  type CellCommit,
+  cellCommit,
+  dayState,
+  formatCellDuration,
+} from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
 import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
@@ -599,51 +611,200 @@ function TimeCell({
   // lingers on screen as though it had been accepted.
   const display = draft ?? (total > 0 ? formatCellDuration(total) : "");
 
+  /*
+   * SLICE H — the draft, in a ref as well as in state.
+   *
+   * `flush` below runs from an unmount cleanup and from a `visibilitychange`
+   * listener. Neither can read `draft` from the closure it was created in without
+   * being recreated on every keystroke, and a listener that re-registers on every
+   * keystroke is a listener that misses the keystroke it was registered for. The
+   * ref is the copy those two read.
+   */
+  const draftRef = useRef<string | null>(null);
+
+  /*
+   * Everything `flush` needs about the cell, kept current the same way.
+   *
+   * Read at flush time rather than captured, because a cell can be re-rendered
+   * with different entries (somebody else logged against the same task and day)
+   * between the keystroke and the tab closing.
+   */
+  const cellRef = useRef({ taskId, day, entries, total });
+
+  /*
+   * Both refs are written in an EFFECT, not during render.
+   *
+   * Assigning during render is a lint error and a real hazard under concurrent
+   * rendering: a render that is thrown away would still have moved the ref, so a
+   * flush could write a draft from a render React discarded. The effect runs after
+   * every commit, which is before any listener or cleanup can fire.
+   */
+  useEffect(() => {
+    draftRef.current = draft;
+    cellRef.current = { taskId, day, entries, total };
+  }, [draft, taskId, day, entries, total]);
+
+  /** H — "saved", on the cell, for a moment. See `showSaved`. */
+  const [saved, setSaved] = useState(false);
+
+  /**
+   * The write itself, with no React state in it.
+   *
+   * Shared by the ordinary blur path and by `flush`. Keeping it state-free is
+   * what makes it safe to call from a cleanup: a `setState` after unmount is a
+   * no-op, but a `startTransition` wrapping an await that then calls
+   * `router.refresh()` on a torn-down tree is not something to rely on.
+   */
+  const persist = useCallback(async (plan: CellCommit) => {
+    const cell = cellRef.current;
+
+    if (plan.kind === "insert") {
+      return logTime({
+        task_id: cell.taskId,
+        work_date: cell.day,
+        minutes: plan.minutes,
+        note: null,
+      });
+    }
+
+    if (plan.kind === "delete") {
+      return deleteTimeEntry(cell.entries[0]!.id);
+    }
+
+    if (plan.kind === "update") {
+      return updateTimeEntry({
+        id: cell.entries[0]!.id,
+        task_id: cell.taskId,
+        work_date: cell.day,
+        minutes: plan.minutes,
+        // The note survives a change of length. They answer different questions,
+        // and retyping the note to correct the hours is the reason people stop
+        // writing notes.
+        note: cell.entries[0]!.note,
+      });
+    }
+
+    return { ok: true as const, data: undefined };
+  }, []);
+
   function commit() {
     if (draft === null) return;
 
     const typed = draft;
-    setDraft(null);
+    const plan = cellCommit(typed, { total, entryCount: entries.length });
 
-    const minutes = parseCellDuration(typed);
-
-    if (minutes === null) {
-      toast.error(`"${typed}" is not a length of time. Try 1h 30m, 90m or 1.5.`);
+    if (plan.kind === "invalid") {
+      // The draft STAYS on an invalid entry, unlike every other branch. Clearing
+      // it would replace what somebody typed with the old number and leave the
+      // toast explaining a value no longer on screen.
+      toast.error(`"${plan.typed}" is not a length of time. Try 1h 30m, 90m or 1.5.`);
       return;
     }
 
-    if (minutes === total) return;
-    if (entries.length === 0 && minutes === 0) return;
+    // Back to showing the server from here on, so a value it rejected or
+    // reinterpreted never lingers as though it had been accepted.
+    setDraft(null);
+
+    if (plan.kind === "noop") return;
 
     startTransition(async () => {
-      const result =
-        entries.length === 0
-          ? await logTime({ task_id: taskId, work_date: day, minutes, note: null })
-          : minutes === 0
-            ? await deleteTimeEntry(entries[0].id)
-            : await updateTimeEntry({
-                id: entries[0].id,
-                task_id: taskId,
-                work_date: day,
-                minutes,
-                // The note survives a change of length. They answer different
-                // questions, and retyping the note to correct the hours is the
-                // reason people stop writing notes.
-                note: entries[0].note,
-              });
+      const result = await persist(plan);
 
       if (!result.ok) {
+        // The failure stays LOUD. A refused write is worth interrupting for; a
+        // successful one is not, which is the whole shape of this slice.
         toast.error(result.error);
         return;
       }
 
-      if (minutes === 0) onEmptied();
+      // Not a toast. A toast per cell makes filling in a week feel like an alarm
+      // going off, and it appears in the corner rather than on the number that
+      // changed.
+      setSaved(true);
+
+      if (plan.kind === "delete") onEmptied();
       router.refresh();
     });
   }
 
+  /*
+   * H — DO NOT LOSE AN UNCOMMITTED DRAFT.
+   *
+   * Blur is the trigger, so a cell typed into and then abandoned never committed:
+   * tab closed, browser navigated, row scrolled off on a phone. This is the part
+   * of the slice that was genuinely missing rather than merely quiet.
+   *
+   * `visibilitychange` covers the phone and the closed tab; the cleanup covers
+   * navigation and the row unmounting. Both go through `persist`, which touches
+   * no state — by the time the cleanup runs there is nothing left to render into.
+   *
+   * NOT `beforeunload`. It is unreliable on mobile Safari, it cannot await, and it
+   * is the hook that produces "leave site?" dialogues — which would be a prompt
+   * on the way out of a page whose whole point is that saving is invisible.
+   */
+  useEffect(() => {
+    function flush() {
+      const typed = draftRef.current;
+      if (typed === null) return;
+
+      const cell = cellRef.current;
+      const plan = cellCommit(typed, { total: cell.total, entryCount: cell.entries.length });
+
+      // Invalid and noop both drop the draft on the floor, and that is right: a
+      // cell abandoned mid-word must not become a write nobody reviewed.
+      if (plan.kind === "invalid" || plan.kind === "noop") return;
+
+      draftRef.current = null;
+      void persist(plan);
+    }
+
+    function onVisibility() {
+      if (document.visibilityState === "hidden") flush();
+    }
+
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      flush();
+    };
+  }, [persist]);
+
+  /** The tick fades after a beat. Long enough to notice, short enough to ignore. */
+  useEffect(() => {
+    if (!saved) return;
+    const timer = setTimeout(() => setSaved(false), 1600);
+    return () => clearTimeout(timer);
+  }, [saved]);
+
   return (
     <td className={cn("group/cell relative border-l p-0", future && "bg-muted/30", pending && "opacity-60")}>
+      {/*
+        H — the cell says it saved, on itself.
+
+        Two states, and they are the same mark: `pending` while the write is in
+        flight (the cell is already dimmed by the opacity above) and a tick for a
+        moment afterwards. Absolutely positioned so it cannot shift the number it
+        is about — a grid whose columns jump on save is worse than one that says
+        nothing.
+
+        `aria-live="polite"` rather than a visual-only tick. Somebody using a
+        screen reader gets the same confirmation, once, without the focus moving.
+      */}
+      <span
+        aria-live="polite"
+        className="pointer-events-none absolute top-0.5 right-0.5 flex items-center"
+      >
+        {pending ? (
+          <span className="text-2xs text-muted-foreground">···</span>
+        ) : saved ? (
+          <>
+            <Check className="size-3 text-success" aria-hidden />
+            <span className="sr-only">Saved</span>
+          </>
+        ) : null}
+      </span>
+
       <input
         type="text"
         inputMode="decimal"

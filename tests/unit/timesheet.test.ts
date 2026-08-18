@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { formatWeekRange, formatWeekday, startOfWeek, weekDates } from "@/lib/dates";
 import {
+  cellCommit,
   dayState,
   formatCellDuration,
   fromMinutes,
@@ -296,5 +297,88 @@ describe("timesheetWeekDecisionSchema — approve or send back, never reject", (
     expect(
       timesheetWeekDecisionSchema.safeParse({ decision: "rejected", reason: "no thanks" }).success,
     ).toBe(false);
+  });
+});
+
+/**
+ * SLICE H — the commit decision, lifted out of the cell so it can be tested.
+ *
+ * These branches used to be four early `return`s inside a blur handler, which is
+ * not where a rule about deleting somebody's timesheet entry belongs. They are
+ * also what the unmount and `visibilitychange` flushes call, and neither of those
+ * can read component state — so this being pure is a requirement, not a tidy-up.
+ */
+describe("cellCommit — what a typed cell means", () => {
+  it("inserts when the cell was empty and a duration was typed", () => {
+    expect(cellCommit("2h", { total: 0, entryCount: 0 })).toEqual({
+      kind: "insert",
+      minutes: 120,
+    });
+  });
+
+  it("updates when an entry exists and the length changed", () => {
+    expect(cellCommit("90m", { total: 120, entryCount: 1 })).toEqual({
+      kind: "update",
+      minutes: 90,
+    });
+  });
+
+  it("deletes when an existing entry is cleared", () => {
+    // Empty parses as 0, and 0 against an existing entry means "remove it" —
+    // which is why `parseCellDuration` returns 0 for empty rather than null.
+    expect(cellCommit("", { total: 120, entryCount: 1 })).toEqual({ kind: "delete" });
+  });
+
+  it("is a noop when the number did not change", () => {
+    // A no-change UPDATE still bumps `updated_at`, so every tab through a week
+    // would look like an edit in the audit trail.
+    expect(cellCommit("2h", { total: 120, entryCount: 1 })).toEqual({ kind: "noop" });
+  });
+
+  it("is a noop when an empty cell is left empty", () => {
+    expect(cellCommit("", { total: 0, entryCount: 0 })).toEqual({ kind: "noop" });
+  });
+
+  it("never reaches `delete` with nothing to delete", () => {
+    // The unchanged check runs before the empty case, so clearing an
+    // already-empty cell cannot produce a delete against `entries[0]`.
+    expect(cellCommit("0m", { total: 0, entryCount: 0 }).kind).not.toBe("delete");
+  });
+
+  it("reports invalid input and hands the typed string back", () => {
+    // Handed back because the caller keeps the draft on screen — a toast
+    // explaining a value the cell no longer shows explains nothing.
+    expect(cellCommit("1:30", { total: 0, entryCount: 0 })).toEqual({
+      kind: "invalid",
+      typed: "1:30",
+    });
+    expect(cellCommit("lunch", { total: 0, entryCount: 0 }).kind).toBe("invalid");
+  });
+
+  it("reads a bare number as hours, like the cell it came from", () => {
+    // The whole reason the estimate field and this share a parser: `1.5` has to
+    // mean the same 90 minutes in both places.
+    expect(cellCommit("1.5", { total: 0, entryCount: 0 })).toEqual({
+      kind: "insert",
+      minutes: 90,
+    });
+  });
+
+  it("treats an abandoned draft that means nothing as nothing to write", () => {
+    // The draft-safety rule: a flush on unmount asks this same question, and
+    // `invalid` and `noop` are both "drop it". A cell abandoned mid-word must not
+    // become a write nobody reviewed — `1:` is half of `1:30`, and a parser that
+    // guessed at it would write an hour somebody never confirmed.
+    for (const typed of ["1:", "h", "1h 3x"]) {
+      expect(cellCommit(typed, { total: 60, entryCount: 1 }).kind).toBe("invalid");
+    }
+  });
+
+  it("reads whitespace as a deliberate clear, not as an abandoned draft", () => {
+    // `parseCellDuration` trims and returns 0 for empty, because "clear this
+    // cell" is a real instruction. So spaces against an existing entry ARE a
+    // delete, and that is worth pinning down rather than leaving to be
+    // discovered: a flush treats it the same way blur always has.
+    expect(cellCommit("   ", { total: 60, entryCount: 1 })).toEqual({ kind: "delete" });
   });
 });

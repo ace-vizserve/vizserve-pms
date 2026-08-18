@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   CheckSquare,
   ClipboardList,
   Clock,
@@ -20,6 +21,7 @@ const ICONS = {
   "inbox-stack": ClipboardList,
   tasks: ListChecks,
   timesheet: Timer,
+  reports: BarChart3,
   inbox: Inbox,
   users: Users,
 } satisfies Record<NavIconName, React.ComponentType<{ className?: string }>>;

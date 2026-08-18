@@ -29,6 +29,7 @@ export type NavIconName =
   | "inbox-stack"
   | "tasks"
   | "timesheet"
+  | "reports"
   | "inbox"
   | "users";
 
@@ -100,6 +101,20 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "timesheet",
   },
   {
+    /*
+     * P6-05 / slice E2. Team leaders and up, and the gate is about the HOURS
+     * rather than about seniority: the timesheet entries policy is
+     * owner-or-their-lead, so a member opening this would see only their own
+     * hours under their own department's name and read it as the department's
+     * total. A wrong number on a report is worse than a missing report.
+     */
+    label: "Reports",
+    href: "/reports",
+    minRole: "team_leader",
+    enabled: true,
+    icon: "reports",
+  },
+  {
     label: "Inbox",
     href: "/inbox",
     minRole: "member",
@@ -145,7 +160,7 @@ export type NavGroup = { label: string; hrefs: string[]; pinBottom?: boolean };
 export const NAV_GROUPS: NavGroup[] = [
   { label: "Work", hrefs: ["/dashboard", "/requests", "/tasks", "/inbox"] },
   { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet", "/timesheet/team"] },
-  { label: "Manage", hrefs: ["/forms"] },
+  { label: "Manage", hrefs: ["/forms", "/reports"] },
   { label: "Admin", hrefs: ["/admin/users"], pinBottom: true },
 ];
 

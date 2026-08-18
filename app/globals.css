@@ -204,15 +204,36 @@
   --ring: #4359a5;
 
   /* --- chart palette -----------------------------------------------------
-     Brand-anchored: chart-1 is #4359A5 and chart-2 is the info teal, which
-     holds 3:1 as a mark. The remaining three are hue-spaced far enough apart
-     to stay separable, including for the common forms of colour blindness.
-     Charts must still label their series; hue is never the only carrier. */
-  --chart-1: oklch(0.44 0.13 268);
-  --chart-2: oklch(0.55 0.08 220);
-  --chart-3: oklch(0.55 0.13 155);
-  --chart-4: oklch(0.62 0.13 60);
-  --chart-5: oklch(0.55 0.16 330);
+     RE-STEPPED 19 Aug 2026, and the old comment was wrong on the measurement
+     it claimed. It said the five hues were "spaced far enough apart to stay
+     separable, including for the common forms of colour blindness"; run through
+     the dataviz validator against a white surface, the previous set FAILED four
+     of five checks — chart-2 sat under the chroma floor and read as grey, the
+     worst adjacent pair separated by ΔE 4.2 under protanopia, and worst of all
+     chart-3 vs chart-2 measured ΔE 12.2 for NORMAL colour vision, which is the
+     validator's hard floor of 15. A palette full-colour readers cannot tell
+     apart is not a colour-blindness problem, it is a broken palette.
+
+     Nothing rendered these tokens before /reports, so the fix cost nothing.
+
+     Slot 1 stays the brand. #4359A5 itself is in the light band, so it is used
+     verbatim. Slots 2–5 are the dataviz reference theme's next four hues in its
+     order — that order is what the adjacent-pair checks are computed on, so
+     rearranging them re-opens the checks.
+
+     All five checks PASS in light; three slots WARN below 3:1 against white,
+     which obligates relief rather than being dismissable — /reports carries a
+     visible label on every series AND a table view underneath, which is the
+     relief the validator asks for.
+
+     ASSIGN IN ORDER, NEVER CYCLED. A ninth series is not a generated hue; it
+     folds into "Other" or the chart becomes small multiples. And hue is never
+     the only carrier — every series is labelled, here as everywhere else. */
+  --chart-1: #4359a5;
+  --chart-2: #eb6834;
+  --chart-3: #1baf7a;
+  --chart-4: #eda100;
+  --chart-5: #e87ba4;
 
   /* The refresh sets radius=10px. */
   --radius: 0.625rem;
@@ -353,11 +374,20 @@
   --ring: #8098de;
 
   /* Same hues, lifted so every mark holds 3:1 against the dark ground. */
-  --chart-1: oklch(0.7 0.12 268);
-  --chart-2: oklch(0.75 0.08 220);
-  --chart-3: oklch(0.75 0.14 155);
-  --chart-4: oklch(0.8 0.13 70);
-  --chart-5: oklch(0.72 0.15 330);
+  /* Dark is SELECTED, not an automatic lightening of the light set — its own
+     steps, validated against the dark card #181C25 rather than against white.
+     The previous five were all outside the dark lightness band (0.48–0.67).
+
+     Slot 1 is NOT --primary's #8098DE: that measures L 0.689, just over the
+     band's ceiling, so it is stepped down to a blue that still reads as the
+     brand family. The other four are the reference theme's dark steps.
+
+     All five checks PASS on this surface, contrast included. */
+  --chart-1: #6b83d0;
+  --chart-2: #d95926;
+  --chart-3: #199e70;
+  --chart-4: #c98500;
+  --chart-5: #d55181;
 
   /* Depth, inverted. The highlight thins to a rim of light — a 0.9-alpha white
      edge on a dark face reads as a scratch, not a lit edge — and the shadows
