@@ -464,6 +464,44 @@ Supabase SQL editor in filename order — **not** recorded in
 | P7-13/13a | Several assignees; internal work moves freely | ✅ `FOR_CLIENT_APPROVAL` is a dead end, not a gate. Every move still writes history |
 | P7-14 | A member creates and reassigns inside their own department | ✅ The **actions** caught up on 19 Aug — both still carried `requireRole("team_leader")`, so the applied migration was unreachable from the app |
 | P7-15 | `estimate_minutes` + `vizserve_pms_task_time_tracked()` | ✅ The rollup is `SECURITY DEFINER` because the timesheet policy is per-person |
+| P7-16 | Half-day leave — `start_half` / `end_half` | ✅ applied. MORNING declared first so the single-day rule is a direct enum comparison. Rows written before it keep null halves and read as whole spans |
+| P7-17 | A department can see itself | ✅ applied and verified live — see below |
+
+### 🐛 P7-17 — a member could not see their own colleagues
+
+Worth recording as a bug rather than a feature, because it is the third of the
+same shape found in two days.
+
+`vizserve_pms_users` was readable as *yourself, or anyone in a department you
+**manage**, or everything if admin* (P0-06). A member manages nothing, so they
+read exactly one row: their own. **P7-14 then gave members the right to create
+and reassign work to a colleague in their own department and never widened
+this** — so the assignee picker was empty for exactly the people that migration
+was written for. The capability was real and unusable.
+
+The same migration lets a department see its own work. Verified live, as real
+member accounts, with the probe rows deleted afterwards:
+
+| | |
+|---|---|
+| a member sees their department's colleagues | ✅ and only their own department's |
+| a member sees shared work they are not on | ✅ |
+| a member sees another department's work | ✅ no |
+| a colleague sees somebody's **personal** task | ✅ no |
+| the owner and the department lead see it | ✅ yes, unchanged |
+| a member EDITS work they are not on | ✅ refused, zero rows |
+
+**Personal tasks are the deliberate exception.** `is_personal` means "work I
+recorded for myself" (P7-01); publishing it department-wide would turn a private
+to-do list into a public one. The UPDATE policy is untouched — seeing your
+department's work is not editing it, and widening both together would have made
+every member an editor of everything in their department.
+
+**The first paste of P7-17 failed** on `42704: policy ... does not exist` — the
+file said `tasks visible by…` and the policy is `tasks readable by…`. That was
+the lucky outcome: a DROP that silently matches nothing leaves the old policy
+alive beside the new one, and two permissive policies are OR-ed into something
+wider than either was meant to be. Both drops are now `if exists`.
 
 ### Screens (19 Aug 2026)
 
@@ -478,6 +516,9 @@ Supabase SQL editor in filename order — **not** recorded in
 | F | The missed-punch shortcut from a DTR row into `/approvals?type=&date=` |
 | I2/I3/I4 | The dashboard: timesheet strip, "Needs you" as rows ordered by urgency, the lead's band |
 | E1/E2 | `/timesheet/team` and **`/reports`** |
+| K1 | **Several assignees have a screen at last** — the join table, `is_on_task` and its four policy sites shipped 18 Aug and nothing had ever called them. Monogram stack + searchable picker |
+| — | The task list's columns are Amier's reference set: name · progress · assignee · priority · start · due · date closed · estimate · tracked · latest comment. Date closed is read from the status history, never a column |
+| — | Sidebar groups collapse; a **project tree** (departments as folders, lists inside) replaces the filter panel as the way to reach a list |
 | H | The timesheet cell says it saved, and no longer loses an abandoned draft |
 
 **The board's cards are `<div>`s, not `<Link>`s.** An interactive control inside an
