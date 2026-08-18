@@ -18,9 +18,9 @@ import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import { TaskPriorityBadge, TaskStatusBadge, taskStatusSurface } from "@/components/status-badge";
 
+import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
 import { NewTaskButton } from "../new-task-button";
-import { QuickAddTask } from "../quick-add";
 import { TaskStatusSelect } from "../status-select";
 import { TaskToolbar } from "../toolbar";
 
@@ -107,7 +107,7 @@ export default async function TaskBoardPage({
 
   const [{ data: tasks }, { data: people }] = await Promise.all([
     query,
-    supabase.from("vizserve_pms_users").select("id, full_name"),
+    supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
   ]);
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
@@ -163,6 +163,23 @@ export default async function TaskBoardPage({
    * Not an authorization decision: `vizserve_pms_transition_task` re-checks all
    * of it. It only decides which moves are worth offering.
    */
+  /** Who the composer may assign to — P7-14's rule, same as the list's. */
+  const assignableScope = new Set(
+    [context.primaryDepartmentId, ...context.managedDepartmentIds].filter(
+      (id): id is string => Boolean(id),
+    ),
+  );
+
+  const assignable = (people ?? [])
+    .filter(
+      (person) =>
+        person.is_active &&
+        person.id !== context.userId &&
+        person.primary_department_id !== null &&
+        (context.role === "admin" || assignableScope.has(person.primary_department_id)),
+    )
+    .map((person) => ({ id: person.id, full_name: person.full_name }));
+
   const isAdmin = roleAtLeast(context.role, "admin");
   function seat(task: { assignee_id: string | null; qa_assignee_id: string | null; department_id: string }) {
     return {
@@ -283,6 +300,7 @@ export default async function TaskBoardPage({
                               taskId={task.id}
                               title={task.title}
                               priority={task.priority as TaskPriority | null}
+                              assignable={assignable}
                             >
                               {/* The glyph, not the chip: this card sits IN the
                                   column whose heading is its status. */}
@@ -381,18 +399,24 @@ export default async function TaskBoardPage({
                     people is a Team Leader decision, and the button settles that
                     for itself rather than the board guessing at the role. */}
                 {/*
-                  Only the first column, and that is a database constraint rather
-                  than a layout choice: `status` is not a writable column and both
-                  create functions open every task at OPEN, so an add control
-                  under Ongoing would promise a stage it cannot produce. See
-                  `quickAddTask`.
+                  EVERY column but one, reversed from first-only on 19 Aug — this
+                  is the board's half of the same change. A card dragged between
+                  columns is still not a thing (see the note at the top of this
+                  file), but typing a task straight into the column it belongs in
+                  is, and for internal work the move it implies is always legal.
+
+                  `FOR_CLIENT_APPROVAL` is dropped: a task with no client that
+                  landed there could never be finished or moved back.
+
+                  The two terminal columns are not drawn on this board at all, so
+                  there is nothing to exclude for them here.
                 */}
-                {status === INITIAL_TASK_STATUS ? (
+                {status === "FOR_CLIENT_APPROVAL" ? null : (
                   <>
-                    <QuickAddTask shape="column" />
-                    <NewTaskButton trigger="column" />
+                    <BoardComposer status={status} assignable={assignable} />
+                    {status === INITIAL_TASK_STATUS ? <NewTaskButton trigger="column" /> : null}
                   </>
-                ) : null}
+                )}
               </section>
             );
           })}

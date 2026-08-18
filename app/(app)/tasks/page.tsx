@@ -34,8 +34,8 @@ import {
   SubtaskProgress,
   TaskRowActions,
 } from "./inline";
+import { GroupComposer } from "./add-task";
 import { NewTaskButton } from "./new-task-button";
-import { QuickAddTask } from "./quick-add";
 import { TaskStatusGroup } from "./status-group";
 import { TaskStatusSelect } from "./status-select";
 import { TaskToolbar } from "./toolbar";
@@ -188,7 +188,7 @@ export default async function TasksPage({
   const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }] = await Promise.all(
     [
       query,
-      supabase.from("vizserve_pms_users").select("id, full_name"),
+      supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
       supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
     ],
   );
@@ -322,6 +322,36 @@ export default async function TasksPage({
    * decision — `vizserve_pms_transition_task` re-checks every part of it — it
    * only decides which moves are worth offering.
    */
+  /**
+   * Who the composer may assign to.
+   *
+   * P7-14's rule, mirrored: a member may create work for somebody in their OWN
+   * department, and a lead may do it in any department they lead. Themselves
+   * excluded, because "Myself" is the composer's default rather than a row in
+   * the list — picking yourself calls `create_personal_task` and produces a
+   * different KIND of task, so the two must not look like the same choice.
+   *
+   * The server re-derives the department from whoever is picked and
+   * `vizserve_pms_create_task` refuses one outside the caller's scope, so this
+   * list is a convenience. Offering somebody unassignable would only produce an
+   * error message after the fact.
+   */
+  const assignableScope = new Set(
+    [context.primaryDepartmentId, ...context.managedDepartmentIds].filter(
+      (id): id is string => Boolean(id),
+    ),
+  );
+
+  const assignable = (people ?? [])
+    .filter(
+      (person) =>
+        person.is_active &&
+        person.id !== context.userId &&
+        person.primary_department_id !== null &&
+        (context.role === "admin" || assignableScope.has(person.primary_department_id)),
+    )
+    .map((person) => ({ id: person.id, full_name: person.full_name }));
+
   const isAdmin = roleAtLeast(context.role, "admin");
   function seat(task: TaskRow) {
     return {
@@ -356,7 +386,12 @@ export default async function TasksPage({
                   everything marks nothing. */}
               <InlinePriority taskId={task.id} value={task.priority} />
 
-              <TaskRowActions taskId={task.id} title={task.title} priority={task.priority}>
+              <TaskRowActions
+                taskId={task.id}
+                title={task.title}
+                priority={task.priority}
+                assignable={assignable}
+              >
                 {/* The glyph, not the chip: the group heading right above this
                     row already says the status in words. */}
                 <TaskStatusSelect
@@ -551,34 +586,47 @@ export default async function TasksPage({
                 // default would hide the only thing it has to say.
                 defaultOpen
               >
-                {group.length === 0 ? (
-                  <p className="px-3.5 py-4 text-xs text-muted-foreground">
-                    {status === INITIAL_TASK_STATUS
-                      ? "Nothing waiting to be picked up."
-                      : "Nothing at this stage. Work reaches it from the stage before."}
-                  </p>
-                ) : (
-                  <DataTable bare columns={columns} rows={group} getRowKey={(task) => task.id} />
-                )}
+                {/*
+                  THE TABLE IS ALWAYS RENDERED, even for an empty stage, because
+                  the composer is a `<tr>` inside it — a stage with nothing in it
+                  is exactly where somebody wants to add the first task, and a
+                  paragraph cannot hold a row. The empty sentence moves into the
+                  table as its `empty` state.
+                */}
+                <DataTable
+                  bare
+                  columns={columns}
+                  rows={group}
+                  getRowKey={(task) => task.id}
+                  empty={
+                    <p className="px-3.5 py-4 text-xs text-muted-foreground">
+                      {status === INITIAL_TASK_STATUS
+                        ? "Nothing waiting to be picked up."
+                        : "Nothing at this stage. Work reaches it from the stage before."}
+                    </p>
+                  }
+                  appendRow={
+                    status === "FOR_CLIENT_APPROVAL" ? null : (
+                      <GroupComposer
+                        status={status}
+                        assignable={assignable}
+                        columnCount={columns.length}
+                      />
+                    )
+                  }
+                />
 
                 {/*
-                  Only under the first heading, and that is a database constraint
-                  rather than a layout preference: `status` is not a writable
-                  column and both create functions open every task at OPEN, so
-                  this control under any other heading would promise a stage it
-                  cannot produce. See `quickAddTask`.
+                  The dialog, under the first heading only.
 
-                  The dialog stays beside it for the case where somebody wants
-                  dates, an assignee and a priority in one pass — it renders
-                  nothing at all for a member who has nobody to assign to, and
-                  settles that for itself rather than the page guessing.
+                  The composer above now covers everything it does except a
+                  description, a list and a QA reviewer — so repeating it under
+                  eight headings would be eight controls that mostly duplicate the
+                  row directly above them. It renders nothing at all for a member
+                  with nobody to assign to, and settles that for itself rather
+                  than the page guessing.
                 */}
-                {status === INITIAL_TASK_STATUS ? (
-                  <>
-                    <QuickAddTask />
-                    <NewTaskButton trigger="row" />
-                  </>
-                ) : null}
+                {status === INITIAL_TASK_STATUS ? <NewTaskButton trigger="row" /> : null}
               </TaskStatusGroup>
             );
           })}

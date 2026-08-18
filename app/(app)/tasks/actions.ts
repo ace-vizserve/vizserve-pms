@@ -20,7 +20,11 @@ import {
   taskDetailsSchema,
   taskParentSchema,
   taskPatchSchema,
+  taskPrioritySchema,
+  taskStatusSchema,
   transitionPayloadSchema,
+  INITIAL_TASK_STATUS,
+  TASK_STATUS_LABELS,
 } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
 
@@ -382,128 +386,45 @@ export async function setTaskParent(taskId: string, input: unknown): Promise<Act
 }
 
 /**
- * K3 — `+` on a row: create a task and nest it under this one, in one call.
+ * K3 — inline creation. The one action behind every "+ Add" in the tasks views.
  *
- * P7-09 shipped `vizserve_pms_set_task_parent`, a one-level trigger and a
- * same-department rule, and nothing has ever called it — the board only
- * displayed a count. This is that caller.
+ * The foot of a status group, the foot of a board column, and the `+` on a row
+ * that nests the result under a parent. THERE WAS A SECOND ACTION for that last
+ * one — `createSubtask`, with its own title-only form — and it is gone: a subtask
+ * is just another task with a parent, and two actions for "make a task" is how
+ * the subtask one ends up without the fields the other one grew. `parent_task_id`
+ * is one more optional field here.
  *
- * TWO WRITES, and they live here rather than in the component so a child created
- * but not nested is reported as exactly that, instead of appearing as a stray
- * top-level task nobody meant to make. There is no create-with-parent function
- * and adding one would mean changing an applied signature (trap 3).
+ * P7-09's rules are untouched by the merge. One level deep and same-department
+ * are both a trigger, so the nesting UPDATE below re-checks nothing; and a
+ * personal parent produces a personal child because the assignee defaults to the
+ * caller, which is the branch that sets `is_personal`.
  *
- * The parent decides both things this cannot ask about:
+ * IT ADDS AT ANY STAGE, and this REVERSES the plan's original call (19 Aug, at
+ * Amier's instruction). That call was "first group only", on the grounds that
+ * creating at OPEN and immediately transitioning writes two history rows for one
+ * button press.
  *
- *   department  the trigger requires them to match, so it is read off the parent
- *   is_personal a subtask of your own work is your own work — so a personal
- *               parent goes through `create_personal_task` and inherits `true`
+ * Two things make the reversal right rather than a concession:
  *
- * That second one matters more than it looks. Routing a personal parent's child
- * through `create_task` would produce a subtask its owner could not close
- * without a QA reviewer, hanging off a parent they can.
- */
-export async function createSubtask(
-  parentId: string,
-  input: unknown,
-): Promise<ActionResult<{ taskId: string }>> {
-  await requireAuthContextOrThrow();
-
-  const parsed = z
-    .object({ title: z.string().trim().min(1, "A subtask needs a title.").max(300) })
-    .safeParse(input);
-
-  if (!parsed.success) {
-    return { ok: false, error: parsed.error.issues[0]?.message ?? "A subtask needs a title." };
-  }
-
-  const supabase = await createClient();
-
-  // Read through the caller's own client, so RLS decides whether they may see
-  // the parent at all. A parent they cannot read is not one they may nest work
-  // under, and this is the check that says so first.
-  const { data: parent } = await supabase
-    .from("vizserve_pms_tasks")
-    .select("id, department_id, is_personal, assignee_id, parent_task_id")
-    .eq("id", parentId)
-    .maybeSingle();
-
-  if (!parent) return { ok: false, error: "That task is not available." };
-
-  // The trigger refuses this too. Saying it here costs nothing and names the
-  // rule, rather than surfacing a constraint message about depth.
-  if (parent.parent_task_id) {
-    return { ok: false, error: "Subtasks go one level deep — this is already a subtask." };
-  }
-
-  const created = parent.is_personal
-    ? await supabase.rpc("vizserve_pms_create_personal_task", {
-        p_title: parsed.data.title,
-        p_description: "",
-        p_due_date: null,
-        p_list_id: null,
-        p_priority: null,
-      })
-    : await supabase.rpc("vizserve_pms_create_task", {
-        p_department_id: parent.department_id,
-        p_title: parsed.data.title,
-        p_description: "",
-        // Inherits the parent's PIC. A subtask that lands unassigned is one
-        // nobody sees on their own list, which is where subtasks go to die.
-        p_assignee_id: parent.assignee_id,
-        p_qa_assignee_id: null,
-        p_due_date: null,
-        p_list_id: null,
-        p_priority: null,
-      });
-
-  if (created.error) return { ok: false, error: readableError(created.error) };
-
-  const taskId = (created.data as { task_id: string }).task_id;
-
-  const { data: nested, error: nestError } = await supabase
-    .from("vizserve_pms_tasks")
-    .update({ parent_task_id: parentId })
-    .eq("id", taskId)
-    .select("id");
-
-  // The child EXISTS at this point. Both branches say so rather than implying
-  // nothing happened — it is a real task on somebody's list, just not nested.
-  if (nestError) {
-    refresh(parentId);
-    return {
-      ok: false,
-      error: `The task was created but not nested: ${readableError(nestError).toLowerCase()}`,
-    };
-  }
-  if (!nested || nested.length === 0) {
-    refresh(parentId);
-    return {
-      ok: false,
-      error: "The task was created, but it could not be nested under this one.",
-    };
-  }
-
-  dispatchPendingEmailsInBackground();
-  refresh(parentId);
-  return { ok: true, data: { taskId } };
-}
-
-/**
- * K3 — "+ Add Task" at the foot of a status group or a board column.
+ *   1. Everything this creates is INTERNAL OR PERSONAL work — there is no
+ *      `request_id`, because a client task is only ever born from an approved
+ *      request at Gate 1. So P7-13a's free movement always applies to it: any
+ *      status to any status, no required fields, by anyone on the task. The
+ *      transition below can never hit a gate, because the only work that has
+ *      gates is the work this cannot create.
+ *   2. The two history rows are not a lie. Somebody DID create the task and DID
+ *      put it in that stage, and the trail saying so in two rows a second apart
+ *      is a more complete record than one row claiming it was born there. The
+ *      original objection assumed the trail would misrepresent one action; on
+ *      re-reading, it represents it exactly.
  *
- * A title, Enter, done. It replaces the dialog for the common case; the dialog
- * stays for the time somebody wants to fill in everything at once.
- *
- * IT CAN ONLY EVER CREATE AT `OPEN`, and the callers are built around that
- * rather than around a parameter. `status` is not a writable column and both
- * create functions open every task at `INITIAL_TASK_STATUS`, so an "+ Add Task"
- * under the *In progress* heading could not make a task in progress. The two
- * honest options were to offer it in the first group only, or to create at OPEN
- * and immediately transition — and the second writes two history rows for one
- * button press, so the trail would show a task opened and started in the same
- * second by somebody who did one thing. The history is what this app protects
- * hardest, so: first group only.
+ * `FOR_CLIENT_APPROVAL` IS STILL REFUSED, and that is not the same rule. It is
+ * a dead end rather than a gate: `vizserve_pms_issue_approval_token` refuses a
+ * task with no request, so work moved there could never be finished or moved
+ * back. `availableTransitions` excludes it from free movement for the same
+ * reason, and this refuses it in the same words rather than letting the create
+ * succeed and the move strand the task.
  *
  * Which function it calls is the same `is_personal` decision the dialog makes. A
  * member adding a line to their own list is recording their own work.
@@ -515,12 +436,48 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
     .object({
       title: z.string().trim().min(1, "A task needs a title.").max(300),
       /**
-       * Only ever the caller's own department or one they lead — and it is not
-       * trusted from here: `vizserve_pms_create_task` re-reads the caller's row
-       * and refuses anything else. Null means "file it as my own".
+       * WHO IT IS FOR, and it is the only thing that decides the department.
+       *
+       * There is deliberately no `department_id` parameter any more. It was one,
+       * and a caller could pass a department that disagreed with the assignee —
+       * `vizserve_pms_create_task` would have refused the pair, but only after
+       * the composer had already offered it. Deriving the department from the
+       * person removes the disagreement instead of validating it.
+       *
+       * Null, or the caller themselves, means personal work.
        */
-      department_id: z.uuid().nullable().default(null),
       assignee_id: z.uuid().nullable().default(null),
+      /**
+       * The stage the group or column this was typed into represents.
+       *
+       * Defaults to `INITIAL_TASK_STATUS`, so an omitted stage costs no second
+       * write at all — the ordinary "add to Open" case is exactly one insert,
+       * as it was before.
+       */
+      status: taskStatusSchema.default(INITIAL_TASK_STATUS),
+      // The rest of the row. Every one of these is optional, because the fast
+      // path is still a title and Enter — the fields are there for the times
+      // somebody already knows the answer and would otherwise have to come back
+      // and edit the row four times.
+      priority: taskPrioritySchema.default(null),
+      due_date: z
+        .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+        .default(""),
+      start_date: z
+        .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+        .default(""),
+      estimate_minutes: z
+        .number()
+        .int("Give it in whole minutes.")
+        .positive("An estimate of nothing is not an estimate.")
+        .max(100_000, "That is more than ten working weeks — is it one task?")
+        .nullable()
+        .default(null),
+      /**
+       * P7-09. Set when the composer was opened from a task's `+` rather than
+       * from the foot of a group — a subtask IS just another task, nested.
+       */
+      parent_task_id: z.uuid().nullable().default(null),
     })
     .safeParse(input);
 
@@ -529,33 +486,143 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
   }
 
   const values = parsed.data;
+
+  // Checked before anything is written. Creating the task and then discovering
+  // the move is impossible would leave a stray task at OPEN that nobody asked
+  // for — see `availableTransitions` for why this status is excluded.
+  if (values.status === "FOR_CLIENT_APPROVAL") {
+    return {
+      ok: false,
+      error:
+        "Work with no client cannot sit at For client approval — there would be no client to approve it.",
+    };
+  }
+
   const supabase = await createClient();
 
-  const created = values.department_id
+  /*
+   * PERSONAL OR ASSIGNED, decided exactly as the dialog decides it (P7-01).
+   *
+   * Assigned to me, or to nobody, is my own work: `create_personal_task` sets
+   * `is_personal = true` and I can close it myself. Assigned to a colleague is
+   * not personal, whoever typed it. The choice is recorded in a column that sits
+   * outside the UPDATE grant and can never change again, which is why it has to
+   * be made correctly here and not derived later (correction 1).
+   */
+  const forSomebodyElse = values.assignee_id !== null && values.assignee_id !== context.userId;
+
+  let departmentId: string | null = null;
+
+  if (forSomebodyElse) {
+    // The DEPARTMENT COMES FROM THE PERSON. Read through the caller's own client
+    // so RLS decides whether they can see that colleague at all — and
+    // `vizserve_pms_create_task` re-checks the department against the caller's
+    // own row afterwards, so this is the convenient half, never the enforcing
+    // one.
+    const { data: assignee } = await supabase
+      .from("vizserve_pms_users")
+      .select("primary_department_id")
+      .eq("id", values.assignee_id!)
+      .eq("is_active", true)
+      .maybeSingle();
+
+    if (!assignee?.primary_department_id) {
+      return { ok: false, error: "That person is not an active member of any department." };
+    }
+
+    departmentId = assignee.primary_department_id;
+  }
+
+  const created = departmentId
     ? await supabase.rpc("vizserve_pms_create_task", {
-        p_department_id: values.department_id,
+        p_department_id: departmentId,
         p_title: values.title,
         p_description: "",
-        p_assignee_id: values.assignee_id ?? context.userId,
+        p_assignee_id: values.assignee_id,
         p_qa_assignee_id: null,
-        p_due_date: null,
+        p_due_date: values.due_date || null,
         p_list_id: null,
-        p_priority: null,
+        p_priority: values.priority,
       })
     : await supabase.rpc("vizserve_pms_create_personal_task", {
         p_title: values.title,
         p_description: "",
-        p_due_date: null,
+        p_due_date: values.due_date || null,
         p_list_id: null,
-        p_priority: null,
+        p_priority: values.priority,
       });
 
   if (created.error) return { ok: false, error: readableError(created.error) };
 
+  const taskId = (created.data as { task_id: string }).task_id;
+
+  // Neither create function takes a start date or an estimate, so they are a
+  // follow-up patch on the row that now exists — the same helper the dialogs
+  // use, and the same reason (trap 3: widening an applied signature means a drop
+  // and a regrant for two nullable columns).
+  const extras = await writeCreationExtras(supabase, taskId, values);
+  if (!extras.ok) {
+    refresh();
+    return { ok: false, error: extras.error };
+  }
+
+  /*
+   * P7-09 — nesting, when this was opened from a task's `+`.
+   *
+   * A subtask IS just another task with a parent, which is why it comes through
+   * the same composer and the same action rather than a second path that would
+   * drift from it. The one-level rule and the same-department rule are both a
+   * trigger, so nothing is re-checked here.
+   */
+  if (values.parent_task_id) {
+    const { data: nested, error: nestError } = await supabase
+      .from("vizserve_pms_tasks")
+      .update({ parent_task_id: values.parent_task_id })
+      .eq("id", taskId)
+      .select("id");
+
+    if (nestError || !nested || nested.length === 0) {
+      refresh();
+      return {
+        ok: false,
+        error: nestError
+          ? `The task was created but not nested: ${readableError(nestError).toLowerCase()}`
+          : "The task was created, but it could not be nested under that one.",
+      };
+    }
+  }
+
+  /*
+   * The second write, and only when there is one to make.
+   *
+   * `vizserve_pms_transition_task` is the ONLY path that changes a status —
+   * `status` stays outside the column UPDATE grant — so this goes through it
+   * like every other move and writes its history row like every other move.
+   * Free movement means no gates; it has never meant no record.
+   */
+  if (values.status !== INITIAL_TASK_STATUS) {
+    const moved = await supabase.rpc("vizserve_pms_transition_task", {
+      p_task_id: taskId,
+      p_to_status: values.status,
+      p_comment: null,
+    });
+
+    if (moved.error) {
+      // The task EXISTS at OPEN. Say which half worked rather than implying
+      // nothing happened — the same rule `transitionTask` follows when the
+      // client email fails after the move has committed.
+      refresh();
+      return {
+        ok: false,
+        error: `Added, but it stayed in ${TASK_STATUS_LABELS[INITIAL_TASK_STATUS]}: ${readableError(moved.error).toLowerCase()}`,
+      };
+    }
+  }
+
   dispatchPendingEmailsInBackground();
   refresh();
 
-  return { ok: true, data: { taskId: (created.data as { task_id: string }).task_id } };
+  return { ok: true, data: { taskId } };
 }
 
 /**

@@ -11,14 +11,17 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { TaskPriorityBadge } from "@/components/status-badge";
 import { formatDate } from "@/lib/dates";
 import {
+  INITIAL_TASK_STATUS,
   TASK_PRIORITIES,
   TASK_PRIORITY_LABELS,
+  TASK_STATUS_LABELS,
   type TaskPriority,
 } from "@/lib/schemas/tasks";
 import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
-import { createSubtask, updateTaskField } from "./actions";
+import { updateTaskField } from "./actions";
+import { ComposerCard, type Assignable } from "./task-composer";
 
 /**
  * K3 — editing a task without opening it.
@@ -77,25 +80,45 @@ function usePatch(taskId: string) {
  * `opacity` on hover AND focus-within, never hover alone: a keyboard user
  * tabbing into an invisible button is the accessibility failure this pattern
  * usually ships with.
+ *
+ * AND THE WHOLE REVEAL IS INSIDE `any-hover: hover`, which is the OTHER half of
+ * that failure and the one this shipped with. A touch device has no hover, so
+ * `opacity-0` with a `group-hover` reveal left these controls permanently
+ * invisible on a tablet — the subtask `+`, the rename and the priority flag,
+ * unreachable on every row. Wrapping the hide and the reveal in the same query
+ * means a pointer that cannot hover never gets either, and the strip is simply
+ * always visible there.
  */
 export function TaskRowActions({
   taskId,
   title,
   priority,
+  assignable = [],
   children,
 }: {
   taskId: string;
   title: string;
   priority: TaskPriority | null;
+  /** Passed through to the subtask composer. */
+  assignable?: Assignable[];
   /** Anything view-specific — the status control on a board card. */
   children?: ReactNode;
 }) {
   return (
-    <span className="inline-flex items-center gap-0.5 opacity-0 transition-opacity group-hover/task:opacity-100 focus-within:opacity-100">
+    <span
+      className={cn(
+        "inline-flex items-center gap-0.5 transition-opacity",
+        "[@media(any-hover:hover)]:opacity-0",
+        "[@media(any-hover:hover)]:group-hover/task:opacity-100",
+        // Focus stays outside the query: a keyboard is a fine pointer's
+        // companion, but a tabbed-to control must appear on any device.
+        "focus-within:opacity-100",
+      )}
+    >
       {children}
       <InlineTitle taskId={taskId} title={title} />
       <InlinePriority taskId={taskId} value={priority} iconOnly />
-      <AddSubtask parentId={taskId} />
+      <AddSubtask parentId={taskId} assignable={assignable} />
     </span>
   );
 }
@@ -453,83 +476,51 @@ export function InlineEstimate({
 /**
  * `+` — a subtask, one level deep.
  *
- * P7-09 built `vizserve_pms_set_task_parent`, the one-level trigger and the
- * same-department rule, and NO UI HAS EVER CALLED IT: the board only displayed a
- * count. This is that call.
+ * A SUBTASK IS JUST ANOTHER TASK, NESTED, so this opens the SAME composer the
+ * foot of a group opens, with `parentId` set. It used to be a title-only box and
+ * a `createSubtask` action of its own; two forms for "make a task" is how the
+ * subtask one ends up without the fields the other one grew.
  *
- * Two writes, and `createSubtask` owns both so a half-made subtask is reported
- * rather than left lying around — the child is created and then nested, because
- * there is no create-with-parent function and adding one would mean changing an
- * applied signature (trap 3).
+ * P7-09 built `vizserve_pms_set_task_parent`, the one-level trigger and the
+ * same-department rule, and no UI had ever called any of it — the board only
+ * displayed a count.
+ *
+ * The parent decides two things the composer does not ask about: the department
+ * (the trigger requires them to match) and, when the parent is personal work,
+ * that the child is personal too — a subtask its owner could not close, hanging
+ * off a parent they can, would be the wrong half of the P7-01 split. Both are
+ * settled server-side in `quickAddTask`.
  */
-export function AddSubtask({ parentId }: { parentId: string }) {
-  const router = useRouter();
+export function AddSubtask({
+  parentId,
+  assignable = [],
+}: {
+  parentId: string;
+  /** Empty is fine — the composer falls back to "Myself", which is most subtasks. */
+  assignable?: Assignable[];
+}) {
   const [open, setOpen] = useState(false);
-  const [title, setTitle] = useState("");
-  const [pending, startTransition] = useTransition();
-
-  function submit() {
-    const next = title.trim();
-    if (!next) return;
-
-    startTransition(async () => {
-      const result = await createSubtask(parentId, { title: next });
-
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      toast.success("Subtask added");
-      setTitle("");
-      setOpen(false);
-      router.refresh();
-    });
-  }
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (!next) setTitle("");
-      }}
-    >
-      <PopoverTrigger aria-label="Add a subtask" title="Add a subtask" className={ICON_BUTTON} disabled={pending}>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger aria-label="Add a subtask" title="Add a subtask" className={ICON_BUTTON}>
         <Plus className="size-3.5" aria-hidden />
       </PopoverTrigger>
 
-      <PopoverContent align="start" className="w-72 p-2">
+      <PopoverContent align="start" className="w-80 p-2">
         <div className="space-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <Input
-              autoFocus
-              value={title}
-              disabled={pending}
-              placeholder="What is the next piece?"
-              aria-label="Subtask title"
-              onChange={(event) => setTitle(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  submit();
-                }
-                if (event.key === "Escape") setOpen(false);
-              }}
-            />
-            <Button
-              size="icon"
-              variant="ghost"
-              onClick={submit}
-              loading={pending}
-              disabled={title.trim().length === 0}
-              aria-label="Add"
-            >
-              <Check />
-            </Button>
-          </div>
-          <p className="text-2xs text-muted-foreground">
-            One level only — a subtask cannot have subtasks of its own.
+          {/* The card shape rather than the row: a popover has no columns to line
+              up under, and the stacked form is the one built for that. */}
+          <ComposerCard
+            status={INITIAL_TASK_STATUS}
+            parentId={parentId}
+            assignable={assignable}
+            onCancel={() => setOpen(false)}
+          />
+          <p className="px-0.5 text-2xs text-muted-foreground">
+            {/* Said out loud because the composer is otherwise identical to the
+                one that adds a task at any stage, and this one cannot. */}
+            Subtasks start in {TASK_STATUS_LABELS[INITIAL_TASK_STATUS]}, one level deep.
           </p>
         </div>
       </PopoverContent>

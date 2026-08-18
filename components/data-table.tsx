@@ -71,6 +71,7 @@ export function DataTable<T>({
   footer,
   onRowHref,
   bare = false,
+  appendRow,
   className,
 }: {
   columns: Column<T>[];
@@ -95,6 +96,17 @@ export function DataTable<T>({
    * rendering fault rather than as structure.
    */
   bare?: boolean;
+  /**
+   * A `<tr>` appended inside `<tbody>`, after the rows and regardless of how many
+   * there are.
+   *
+   * For the task list's inline composer, which has to line up under the columns
+   * — a form rendered in a div beneath the table cannot, because it has no way to
+   * know the column widths the browser just computed. `footer` is not the same
+   * thing: it lands in `<tfoot>` and is suppressed when the list is empty, which
+   * is exactly when somebody most wants to add the first row.
+   */
+  appendRow?: React.ReactNode;
   className?: string;
 }) {
   const table = (
@@ -114,6 +126,14 @@ export function DataTable<T>({
       </TableHeader>
 
       <TableBody>
+        {/*
+          The empty state still renders when there is an `appendRow`, and that is
+          the whole point of the pair: an empty stage shows BOTH the sentence
+          saying why it is empty AND the control for adding the first task. An
+          earlier cut suppressed the sentence whenever a composer was present,
+          which silently removed "Nothing at this stage" from seven of the eight
+          groups on the task list.
+        */}
         {rows.length === 0 ? (
           <TableRow className="hover:bg-transparent">
             {/* `whitespace-normal` undoes TableCell's `whitespace-nowrap`,
@@ -146,6 +166,8 @@ export function DataTable<T>({
             </TableRow>
           ))
         )}
+
+        {appendRow}
       </TableBody>
 
       {footer && rows.length > 0 ? <TableFooter>{footer}</TableFooter> : null}
