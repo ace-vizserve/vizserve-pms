@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Plus, X } from "lucide-react";
 import { toast } from "sonner";
@@ -13,20 +14,40 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
-import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
+import {
+  STANDARD_DAY_MINUTES,
+  formatDate,
+  formatDuration,
+  formatWeekday,
+} from "@/lib/dates";
+import { isTerminal } from "@/lib/schemas/tasks";
+import { dayState, formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
+import type { VizservePmsTaskStatus } from "@/lib/database.types";
+import { TaskStatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 
 import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
 import { CellDetail } from "./cell-detail";
 
-export type PickableTask = { id: string; title: string };
+export type PickableTask = {
+  id: string;
+  title: string;
+  status: VizservePmsTaskStatus;
+  where: string;
+};
 
 export type CellEntry = { id: string; minutes: number; note: string | null };
 
 export type TaskRow = {
   taskId: string;
   title: string;
+  /**
+   * Null when the task has left this person's scope — the hours stay, the name
+   * of the work does not. Same reason `title` falls back to a placeholder.
+   */
+  status: VizservePmsTaskStatus | null;
+  /** `Department / List`, or empty when neither is set or visible. */
+  where: string;
   /** Finished tasks keep their rows. An hour spent is still an hour spent. */
   finished: boolean;
   /** `YYYY-MM-DD` → what was logged against this task that day. */
@@ -140,7 +161,17 @@ export function WeekGrid({
     .filter((id) => !logged.has(id))
     .map((id) => byId.get(id))
     .filter((task): task is PickableTask => Boolean(task))
-    .map((task) => ({ taskId: task.id, title: task.title, finished: false, cells: {} }));
+    .map((task) => ({
+      taskId: task.id,
+      title: task.title,
+      status: task.status,
+      where: task.where,
+      // Derived, not hardcoded false. The picker offers finished tasks now — a
+      // Friday task logged on Monday — so a row added from it can be finished
+      // the moment it appears.
+      finished: isTerminal(task.status),
+      cells: {},
+    }));
 
   // Sorted as one list rather than logged-rows-then-added-rows. An added row put
   // at the bottom would leap into alphabetical position the moment its first
@@ -166,12 +197,40 @@ export function WeekGrid({
     [extraTaskIds, remember],
   );
 
+  /**
+   * The day bar, scaled against the standard eight-hour day.
+   *
+   * An earlier version scaled against the busiest day of the week, on the
+   * assumption that no expected-hours figure existed. `STANDARD_DAY_MINUTES`
+   * does exist (P7-06), so the bar can mean something absolute: how full the
+   * day is, not merely how it compares with Tuesday.
+   *
+   * `dayState` colours it, and it is the same function the lead's view uses —
+   * extracted precisely so a member's week and a lead's team week cannot
+   * disagree about what counts as a long day. Advisory, never enforcement.
+   */
+  function dayBar(day: string) {
+    const total = dayTotal(day);
+    const state = dayState(total);
+
+    return {
+      state,
+      width: `${Math.min(100, Math.round((total / STANDARD_DAY_MINUTES) * 100))}%`,
+      fill:
+        state === "over"
+          ? "bg-destructive"
+          : state === "overtime"
+            ? "bg-warning"
+            : "bg-primary grade-primary",
+    };
+  }
+
   return (
-    <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
+    <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
       {/* The grid is 8 columns wide before it is readable, so it scrolls inside
           its own box rather than pushing the page sideways. */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-184 border-collapse text-sm">
+        <table className="w-full min-w-232 border-collapse text-sm">
           <caption className="sr-only">
             Time logged per task per day, for the week beginning {formatDate(monday)}
           </caption>
@@ -190,28 +249,57 @@ export function WeekGrid({
                   key={day}
                   scope="col"
                   className={cn(
-                    "w-19 border-l px-1 py-2 text-center text-xs font-medium",
+                    "w-[8%] border-l px-2 py-2 text-left align-bottom text-xs font-medium",
                     day === today ? "text-foreground" : "text-muted-foreground",
                   )}
                 >
-                  <span className="block">{formatWeekday(day)}</span>
-                  <span
-                    className={cn(
-                      "mt-0.5 block text-2xs font-normal tabular-nums",
-                      day === today ? "text-primary" : "text-muted-foreground",
-                    )}
-                  >
-                    {day.slice(8)}
-                    {day === today ? " · today" : null}
+                  <span className="block whitespace-nowrap">
+                    {formatWeekday(day)}
+                    <span className="font-normal"> {day.slice(8)}</span>
+                    {day === today ? (
+                      <span className="font-normal text-primary"> · today</span>
+                    ) : null}
                   </span>
+
+                  {/* The day total belongs in the header, where the week is read.
+                      It stays in the footer too — that row is what a screen
+                      reader lands on after the figures, and it is the one a
+                      printed timesheet needs. */}
+                  <span className="mt-1 block text-sm font-semibold tabular-nums text-foreground">
+                    {dayTotal(day) > 0 ? formatCellDuration(dayTotal(day)) : "—"}
+                  </span>
+
+                  {/* How full the day is against the standard eight hours, and
+                      `dayState` decides the colour. Hidden from assistive tech
+                      because the figure above already states it — but the
+                      colour is NOT the only carrier: a long day is spelled out
+                      in the footer note.
+
+                      Only once the week has something in it. Seven empty
+                      grooves above seven em-dashes is the screen shouting that
+                      it is empty, which it has already said. */}
+                  {weekTotal > 0 ? (
+                    <span className="mt-1 block h-1 rounded-full bg-track" aria-hidden>
+                      <span
+                        className={cn("block h-full rounded-full", dayBar(day).fill)}
+                        style={{ width: dayBar(day).width }}
+                      />
+                    </span>
+                  ) : null}
                 </th>
               ))}
 
               <th
                 scope="col"
-                className="w-19 border-l px-2 py-2 text-right text-xs font-medium text-muted-foreground"
+                className="w-[10%] border-l px-2 py-2 text-right align-bottom text-xs font-medium text-muted-foreground"
               >
-                Total
+                <span className="block">Total</span>
+                <span className="mt-1 block text-sm font-semibold tabular-nums text-foreground">
+                  {weekTotal > 0 ? formatCellDuration(weekTotal) : "—"}
+                </span>
+                {/* Keeps this cell the same height as the day columns, which
+                    carry a bar. Dropped with them on an empty week. */}
+                {weekTotal > 0 ? <span className="mt-1 block h-1" aria-hidden /> : null}
               </th>
             </tr>
           </thead>
@@ -219,16 +307,43 @@ export function WeekGrid({
           <tbody>
             {allRows.map((row) => (
               <tr key={row.taskId} className="border-b last:border-b-0">
-                {/* `w-full max-w-0` is the pair that makes a table cell truncate:
-                    the width claims whatever the seven fixed day columns leave,
-                    the max-width stops a long title forcing the column wider. */}
+                {/*
+                  `max-w-0` is what makes a table cell truncate at all; the
+                  percentage is what stops it eating the week.
+
+                  This carried `w-full`, which claims every pixel the fixed day
+                  columns leave. That was survivable while the page was capped at
+                  1440px — once PageShell went full width it took ~830px on a
+                  1600px screen and crushed the seven days into 77px each.
+                  Percentages hold the proportions at any width; the table's
+                  `min-w` is still the floor before it scrolls.
+                */}
                 <th
                   scope="row"
-                  className="sticky left-0 z-10 w-full max-w-0 bg-card px-3 py-1.5 text-left font-normal"
+                  className="sticky left-0 z-10 w-[34%] max-w-0 bg-card px-3 py-2 text-left font-normal"
                 >
                   <span className="flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1 truncate" title={row.title}>
-                      {row.title}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate font-medium" title={row.title}>
+                        {row.title}
+                      </span>
+
+                      {/* The second line: what state the work is in and where it
+                          lives. Both come from the task, so both go quiet when
+                          the task has left this person's scope — the hours are
+                          still theirs, the context is not. */}
+                      {row.status || row.where ? (
+                        <span className="mt-0.5 flex min-w-0 items-center gap-2">
+                          {row.status ? (
+                            <TaskStatusBadge status={row.status} className="h-5 px-1.5" />
+                          ) : null}
+                          {row.where ? (
+                            <span className="truncate text-xs text-muted-foreground" title={row.where}>
+                              {row.where}
+                            </span>
+                          ) : null}
+                        </span>
+                      ) : null}
                     </span>
 
                     {row.finished ? (
@@ -318,7 +433,7 @@ export function WeekGrid({
             week ·{" "}
           </>
         ) : null}
-        Type <span className="font-medium text-foreground">1:30</span>,{" "}
+        Type <span className="font-medium text-foreground">1h 30m</span>,{" "}
         <span className="font-medium text-foreground">90m</span> or{" "}
         <span className="font-medium text-foreground">1.5</span> into a cell. A bare number is
         hours.
@@ -332,7 +447,7 @@ export function WeekGrid({
  *
  * Typing is the whole interaction — no dialogue, no save button. The cell resets
  * to whatever the server returns rather than keeping what was typed, so the
- * reading it was given (`1.5` → `1:30`) is visible immediately in the place it
+ * reading it was given (`1.5` → `1h 30m`) is visible immediately in the place it
  * was entered.
  *
  * A cell holding more than one entry is read-only and opens `CellDetail`. Two
@@ -377,7 +492,7 @@ function TimeCell({
     const minutes = parseCellDuration(typed);
 
     if (minutes === null) {
-      toast.error(`"${typed}" is not a length of time. Try 1:30, 90m or 1.5.`);
+      toast.error(`"${typed}" is not a length of time. Try 1h 30m, 90m or 1.5.`);
       return;
     }
 
@@ -478,12 +593,30 @@ function AddTaskRow({
     tasks.map((task) => [task.id, task.title]),
   );
 
+  // Two ways to be empty, two different next steps — a dead end that only says
+  // "nothing here" is the thing the design system calls out.
   if (tasks.length === 0) {
     return (
       <span className="text-xs text-muted-foreground">
-        {hasRows
-          ? "Every open task you are on is already on this week."
-          : "You are not the PIC or the QA reviewer on any open task, so there is nothing to log against yet."}
+        {hasRows ? (
+          <>
+            Every task you can log against is already on this week. Take one off to
+            re-add it, or{" "}
+            <Link href="/tasks" className="font-medium text-primary hover:underline">
+              open your tasks
+            </Link>
+            .
+          </>
+        ) : (
+          <>
+            You are not the PIC or the QA reviewer on any task, so there is nothing to
+            log against yet. Ask your team leader to assign you, or{" "}
+            <Link href="/tasks" className="font-medium text-primary hover:underline">
+              see what is on your queue
+            </Link>
+            .
+          </>
+        )}
       </span>
     );
   }
@@ -507,13 +640,26 @@ function AddTaskRow({
         setOpen(false);
       }}
     >
-      <SelectTrigger className="h-8 w-full" autoFocus>
+      <SelectTrigger className="h-9 w-full" autoFocus>
         <SelectValue placeholder="Which task?" />
       </SelectTrigger>
       <SelectContent>
+        {/* Two lines per option, as in the picker the team already uses: the
+            task, then its state and where it lives. Several open tasks can share
+            a name across departments, and the title alone is not enough to pick
+            between them. `items` above still maps id → title, because the
+            TRIGGER shows one line. */}
         {tasks.map((task) => (
           <SelectItem key={task.id} value={task.id}>
-            {task.title}
+            <span className="flex min-w-0 flex-col gap-0.5">
+              <span className="truncate font-medium">{task.title}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <TaskStatusBadge status={task.status} className="h-5 px-1.5" />
+                {task.where ? (
+                  <span className="truncate text-xs text-muted-foreground">{task.where}</span>
+                ) : null}
+              </span>
+            </span>
           </SelectItem>
         ))}
       </SelectContent>

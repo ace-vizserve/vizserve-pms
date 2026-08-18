@@ -61,6 +61,7 @@ export function TaskWorkflow({
   lists,
   candidates,
   viewer,
+  task,
 }: {
   taskId: string;
   status: TaskStatus;
@@ -75,6 +76,12 @@ export function TaskWorkflow({
   lists: List[];
   candidates: Person[];
   viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
+  /**
+   * Where the task came from. Decides which endings are legal: a client request
+   * finishes at Gate 3, internal work is closed by its QA reviewer, and a
+   * personal task is closed by the person who made it.
+   */
+  task: { request_id: string | null; is_personal: boolean };
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -91,7 +98,7 @@ export function TaskWorkflow({
   const [overrideReason, setOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  const transitions = availableTransitions(status, viewer);
+  const transitions = availableTransitions(status, viewer, task);
   const canEdit = viewer.isPic || viewer.isQa || viewer.leadsDepartment;
   const resolutionMissing = resolution.trim().length === 0;
 

@@ -13,8 +13,10 @@ import {
 import { isTerminal } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
+import { QueryError } from "@/components/query-error";
 import { buttonVariants } from "@/components/ui/button";
 import { WeekGrid, type TaskRow } from "./week-grid";
+import { WeekStatusBar, type WeekState } from "./week-status-bar";
 
 export const metadata: Metadata = { title: "Timesheet" };
 
@@ -53,10 +55,25 @@ export default async function TimesheetPage({
   const days = weekDates(monday);
   const sunday = days[6];
 
-  const [entriesResult, tasksResult] = await Promise.all([
+  const [entriesResult, tasksResult, weekResult, departmentsResult, listsResult] =
+    await Promise.all([
+    // NOTE: the third query is at the bottom of this array — the week row.
     supabase
       .from("vizserve_pms_timesheet_entries")
-      .select("id, task_id, work_date, minutes, note, vizserve_pms_tasks!inner(title, status)")
+      // A LEFT embed, deliberately not `!inner`.
+      //
+      // The entries policy returns a row on `user_id = auth.uid()`. The TASKS
+      // policy is narrower — PIC, QA, or department lead — so the two diverge
+      // the moment a task is reassigned away from somebody who already logged
+      // time against it. An inner join turns "I cannot see that task" into
+      // "that row does not exist", and their hours disappear from their own
+      // week, from the day totals, and from anything derived from them.
+      //
+      // Pinned by a test: tests/db/timesheet.test.ts, "entries survive losing
+      // sight of their task".
+      .select(
+        "id, task_id, work_date, minutes, note, vizserve_pms_tasks(title, status, list_id, department_id)",
+      )
       // No `user_id` filter would still be correct — the SELECT policy returns
       // the caller's own rows plus their team's — and this page shows only their
       // own, which is what the eq is for. It narrows a policy result; it does
@@ -72,10 +89,38 @@ export default async function TimesheetPage({
     // offer something the insert would then refuse.
     supabase
       .from("vizserve_pms_tasks")
-      .select("id, title, status")
+      .select("id, title, status, list_id, department_id")
       .or(`assignee_id.eq.${context.userId},qa_assignee_id.eq.${context.userId}`)
       .order("due_date", { ascending: true, nullsFirst: false }),
+
+    // P7-05 — this week, if it has been handed in.
+    //
+    // `maybeSingle`, because NO ROW IS THE DRAFT STATE. The migration
+    // deliberately has no DRAFT enum member: "not submitted" is an absence, so
+    // a missing row is the normal case and must not read as an error.
+    //
+    // The `user_id` eq narrows a policy result rather than replacing it — a
+    // lead can read their team's weeks, and this screen is first-person only.
+    supabase
+      .from("vizserve_pms_timesheet_weeks")
+      .select("id, status, submitted_at, decision_reason")
+      .eq("user_id", context.userId)
+      .eq("week_start", monday)
+      .maybeSingle(),
+
+    // Names for the location line under each task. Two small reference reads
+    // rather than a deeper embed on the entries query: the entries embed is
+    // already a LEFT join guarding against a task that left this person's
+    // scope, and nesting two more levels under it makes that guard harder to
+    // read than the thing it is guarding.
+    supabase.from("vizserve_pms_departments").select("id, name"),
+    supabase.from("vizserve_pms_lists").select("id, name"),
   ]);
+
+  const departmentName = new Map(
+    (departmentsResult.data ?? []).map((row) => [row.id, row.name]),
+  );
+  const listName = new Map((listsResult.data ?? []).map((row) => [row.id, row.name]));
 
   type Entry = {
     id: string;
@@ -83,7 +128,12 @@ export default async function TimesheetPage({
     work_date: string;
     minutes: number;
     note: string | null;
-    vizserve_pms_tasks: { title: string; status: string } | null;
+    vizserve_pms_tasks: {
+      title: string;
+      status: string;
+      list_id: string | null;
+      department_id: string | null;
+    } | null;
   };
 
   const entries = (entriesResult.data ?? []) as unknown as Entry[];
@@ -99,10 +149,26 @@ export default async function TimesheetPage({
     if (!row) {
       row = {
         taskId: entry.task_id,
-        title: entry.vizserve_pms_tasks?.title ?? "Task",
-        // A finished task is dropped from the PICKER but never from the rows
-        // already carrying hours — an hour spent on something since completed is
-        // still an hour that was spent.
+        // Null when the task has moved out of this person's scope — reassigned,
+        // or they were dropped as QA. The hours stay theirs and stay counted;
+        // only the name of the work is no longer theirs to read.
+        title: entry.vizserve_pms_tasks?.title ?? "Task no longer visible to you",
+        // Null for the same reason the title is: the task moved out of scope.
+        // The row still carries its hours; it just cannot say what they were for.
+        status: (entry.vizserve_pms_tasks?.status ?? null) as TaskRow["status"],
+        where: [
+          entry.vizserve_pms_tasks?.department_id
+            ? departmentName.get(entry.vizserve_pms_tasks.department_id)
+            : null,
+          entry.vizserve_pms_tasks?.list_id
+            ? listName.get(entry.vizserve_pms_tasks.list_id)
+            : null,
+        ]
+          .filter(Boolean)
+          .join(" / "),
+        // Marks the row, nothing more. An hour spent on something since
+        // completed is still an hour that was spent, and the picker offers
+        // finished tasks too — see `loggableTasks`.
         finished: isTerminal(
           (entry.vizserve_pms_tasks?.status ?? "OPEN") as Parameters<typeof isTerminal>[0],
         ),
@@ -122,9 +188,55 @@ export default async function TimesheetPage({
   // the cursor as soon as somebody fills a cell on a row that had none.
   const taskRows = [...rows.values()].sort((a, b) => a.title.localeCompare(b.title));
 
-  const openTasks = (tasksResult.data ?? [])
-    .filter((task) => !isTerminal(task.status as Parameters<typeof isTerminal>[0]))
-    .map((task) => ({ id: task.id, title: task.title }));
+  const weekRow = weekResult.data;
+  const week: WeekState = weekRow
+    ? {
+        status: weekRow.status,
+        submittedAt: weekRow.submitted_at,
+        decisionReason: weekRow.decision_reason,
+      }
+    : null;
+
+  // Recomputed here rather than trusting the submitted figure: before a week is
+  // handed in there is nothing stored to trust, and after it the grid and the
+  // bar must agree about the same hours.
+  const weekTotalMinutes = taskRows.reduce(
+    (total, row) =>
+      total +
+      Object.values(row.cells)
+        .flat()
+        .reduce((cell, entry) => cell + entry.minutes, 0),
+    0,
+  );
+
+  /**
+   * Everything this person may log against — INCLUDING finished tasks.
+   *
+   * This used to drop terminal tasks from the picker. That was stricter than the
+   * rule it was supposed to mirror: `vizserve_pms_may_log_time` tests PIC-or-QA
+   * and says nothing about status, so the database accepts an entry against a
+   * completed task and the picker was refusing to offer one.
+   *
+   * The scenario is ordinary and the old behaviour made it impossible: finish a
+   * task on Friday, come in on Monday to log Friday's hours, and the task is
+   * gone from the list. Hours already logged always kept their row — it was only
+   * the FIRST entry against a finished task that could not be made.
+   *
+   * The picker shows each task's status, so a finished one is visibly finished
+   * rather than silently offered.
+   */
+  const loggableTasks = (tasksResult.data ?? [])
+    .map((task) => ({
+      id: task.id,
+      title: task.title,
+      status: task.status as TaskRow["status"] & string,
+      where: [
+        task.department_id ? departmentName.get(task.department_id) : null,
+        task.list_id ? listName.get(task.list_id) : null,
+      ]
+        .filter(Boolean)
+        .join(" / "),
+    }));
 
   const previousWeek = addDays(monday, -7);
   const nextWeek = addDays(monday, 7);
@@ -140,7 +252,7 @@ export default async function TimesheetPage({
       {/* Week navigation. Plain links rather than a client-side picker: the week
           lives in the URL, so back and forward already work and there is no
           state to keep in step with it. */}
-      <div className="flex items-center gap-2 rounded-xl bg-card p-2 ring-1 ring-foreground/10">
+      <div className="flex items-center gap-2 rounded-lg border bg-card grade-surface p-2 shadow-raised-lg">
         {/* A LINK styled as a button, not a Button rendering a link. Base UI's
             Button is a native <button> unless told otherwise, so
             `render={<Link/>}` hands it an <a> and it warns that the native
@@ -178,7 +290,16 @@ export default async function TimesheetPage({
         </Link>
       </div>
 
-      <WeekGrid monday={monday} days={days} today={today} rows={taskRows} tasks={openTasks} />
+      <WeekStatusBar weekStart={monday} week={week} weekTotalMinutes={weekTotalMinutes} />
+
+      {/* A failed query used to render as an empty week — indistinguishable
+          from a week nobody worked, on the screen where that distinction
+          matters most. */}
+      {entriesResult.error ? (
+        <QueryError what="this week" message={entriesResult.error.message} />
+      ) : (
+        <WeekGrid monday={monday} days={days} today={today} rows={taskRows} tasks={loggableTasks} />
+      )}
     </PageShell>
   );
 }

@@ -3,12 +3,21 @@ import { cn } from "@/lib/utils";
 /**
  * The standard page wrapper.
  *
- * `pt-0` is deliberate, not an oversight: the shell header is `h-16` and its
- * own bottom spacing supplies the top gap. Adding padding here would double it.
+ * Full padding on all four sides, 18px, on the refresh rhythm. This used to
+ * carry `pt-0` because the shell header was `h-16` and borderless, so its own
+ * bottom spacing supplied the top gap. The header is now `h-14` with a hairline
+ * and a shadow — it ends where it ends, and the page owes itself a top gap.
  *
- * Fluid full width — there is no `max-w-*`. Pages that genuinely need a reading
- * measure (a single form, a detail page) constrain their own inner column
- * rather than the shell doing it for everything.
+ * FULL WIDTH. Two earlier attempts are worth not repeating: centring a 1440px
+ * cap opened a void between the sidebar and the page while the top bar still ran
+ * to the sidebar edge, and even left-aligned the cap left the page short of the
+ * viewport on a wide screen, which reads as the app failing to fill its window.
+ *
+ * A table whose columns drift too far apart is a table problem — give that table
+ * column widths — not a reason to shrink every page.
+ *
+ * A page that needs a narrower measure still sets its own: `cn` is tailwind-merge,
+ * so a `max-w-3xl` passed in className replaces this rather than fighting it.
  *
  * This exists as a component rather than a repeated class string because the
  * repeated-string version is what left us with six different page widths and
@@ -18,7 +27,7 @@ export function PageShell({
   className,
   ...props
 }: React.ComponentProps<"div">) {
-  return <div className={cn("flex flex-1 flex-col gap-4 p-4 pt-0", className)} {...props} />;
+  return <div className={cn("flex w-full flex-1 flex-col gap-4 p-5", className)} {...props} />;
 }
 
 /**
@@ -42,8 +51,8 @@ export function PageHeader({
   return (
     <div className={cn("flex items-start justify-between gap-4", className)}>
       <div className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        {description ? <p className="text-sm text-muted-foreground">{description}</p> : null}
+        <h1 className="text-xl font-semibold tracking-[-0.022em]">{title}</h1>
+        {description ? <p className="text-sm text-foreground-muted">{description}</p> : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}
     </div>

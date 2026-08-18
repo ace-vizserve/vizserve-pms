@@ -9,6 +9,7 @@ import { isRequestStatus, RequestStatusBadge } from "@/components/status-badge";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
+import { QueryError } from "@/components/query-error";
 import { RequestFilters } from "./filters";
 
 export const metadata: Metadata = { title: "Requests" };
@@ -61,7 +62,7 @@ export default async function RequestsPage({
   // first second.
   if (params.to) query = query.lt("submitted_at", `${params.to}T23:59:59.999Z`);
 
-  const { data: requests } = await query;
+  const { data: requests, error: requestsError } = await query;
 
   const { data: forms } = await supabase.from("vizserve_pms_forms").select("id, name").order("name");
   const formName = new Map((forms ?? []).map((form) => [form.id, form.name]));
@@ -134,6 +135,9 @@ export default async function RequestsPage({
         rows={rows}
         getRowKey={(request) => request.id}
         empty={
+          requestsError ? (
+            <QueryError what="requests" message={requestsError.message} />
+          ) : 
           isFiltered ? (
             <EmptyState
               icon={<Inbox />}

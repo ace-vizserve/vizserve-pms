@@ -41,7 +41,7 @@ async function loadPage(token: string) {
 
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-svh bg-muted/40 px-4 py-10">
+    <main className="client-surface min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-2xl">
         <div className="mb-5">
           <BrandLockup align="stacked" subtitle="Request approval" />
@@ -55,7 +55,7 @@ function Shell({ children }: { children: React.ReactNode }) {
 function Message({ heading, body }: { heading: string; body: string }) {
   return (
     <Shell>
-      <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-8 text-center">
+      <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-8 text-center">
         <h1 className="text-lg font-semibold">{heading}</h1>
         <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">{body}</p>
       </div>
@@ -118,7 +118,7 @@ export default async function ClientApprovalPage({
   return (
     <Shell>
       <div className="space-y-4">
-        <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-6 sm:p-8">
+        <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 sm:p-8">
           <p className="text-xs text-muted-foreground">{page.reference_no}</p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight">{page.title}</h1>
 

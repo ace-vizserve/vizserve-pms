@@ -27,7 +27,7 @@ import {
  */
 export function DataTableShell({ className, children }: { className?: string; children: React.ReactNode }) {
   return (
-    <div className={cn("overflow-hidden rounded-xl ring-1 ring-foreground/10", className)}>
+    <div className={cn("overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg", className)}>
       <div className="overflow-x-auto">{children}</div>
     </div>
   );
@@ -135,5 +135,5 @@ export function DataTable<T>({
 }
 
 function EmptyRow() {
-  return <p className="py-10 text-center text-xs text-muted-foreground">Nothing to show.</p>;
+  return <p className="py-9 text-center text-xs text-muted-foreground">Nothing to show.</p>;
 }

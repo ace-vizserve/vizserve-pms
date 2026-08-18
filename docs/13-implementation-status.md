@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 4 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 18 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -16,9 +16,31 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **3 — Tasks + QA (Gate 2)** | **Done.** All exit criteria asserted and green |
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
-| **6 — Timesheet, Reporting, Archive** | **Started.** The timesheet (P6-01/02/03) is built, applied and green — 13 db cases plus 19 unit. P6-04 onward not begun |
+| **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. P6-04 onward not begun |
+| **7 — Personal tasks, overtime, timesheet approval** | **Backend done and applied. NO SCREENS.** Ten migrations live — see below |
 
-`npm run verify` is green: **235 tests, 0 failures**, of which 150 run against a live database as genuinely signed-in users.
+`npm run verify` is green: **488 passed, 2 skipped, 0 failures.** The 2 skips are the opt-in email deliverability tests.
+
+---
+
+## ⚠️ Phase 7 has a backend and no front end
+
+The most important thing to know before touching anything. Ten migrations are applied and the suite is green, but **not one screen was built** — held deliberately at the user's instruction, to be resumed on their signal.
+
+So all of the following are real, enforced, tested, and reachable **only through the API**: a member creating and completing a personal task, a week of timesheet submitted for approval and locked, overtime as an approvable request, task comments, subtasks, and free status movement on internal work.
+
+The design, the traps, and exactly how far it got are in the plan file:
+`~/.claude/plans/shiny-beaming-crab.md` — its **STATUS** block is the authority.
+
+One thread is waiting on Amier: the **list of leave types**, which is the only thing blocking that slice.
+
+Settled 18 Aug: **"billed time" means the time entered against a task on the timesheet** — not client-chargeable. There is no billable/non-billable split in the schema and none is being built.
+
+## ⚠️ The db tests share a project with the running app
+
+`npm run verify` creates and deletes tasks, requests and DTR rows in the **same Supabase project the app is browsed against**. A task can appear in somebody's timesheet picker and be deleted from under them mid-edit. That has already been reported once as a bug and was not one.
+
+A separate dev project is the fix. It is not planned yet.
 
 ---
 
@@ -392,3 +414,66 @@ Two things still need a human and neither blocks Phase 6:
 - **`EMAIL_TEST_RECIPIENT=you@… npm run email:test`**, then check it landed in an
   inbox rather than spam. P4-14 repeats this against a client-domain address —
   deliverability is the one item where a late failure has no workaround.
+
+---
+
+## Phase 7 — personal tasks, overtime, timesheet approval (18 Aug 2026)
+
+Backend complete and applied. **No screens** — see the warning at the top.
+
+| ID | Item | State |
+|----|------|-------|
+| P7-00 | Ownership-guard fix in `vizserve_pms_transition_task` | ✅ **Security fix — see below** |
+| P7-01 | `is_personal` column + `vizserve_pms_create_personal_task` | ✅ A member creates work for themselves |
+| P7-02 | `applies_to` on the transition table + the three completion paths | ✅ |
+| P7-03/04 | `OVERTIME` internal request type, day + minutes | ✅ Capped at 960, which is `1440 − 480` |
+| P7-05 | `vizserve_pms_timesheet_weeks`, submit/decide, entry locking | ✅ Third consumer of the P2-00 engine, engine untouched |
+| P7-06 | Free status movement for internal work, `start_date` | ✅ |
+| P7-07/08 | Task comments + `commented` notification type | ✅ Flat, author-only edit, inbox-only |
+| P7-09 | Subtasks via `parent_task_id` | ✅ One level, enforced by trigger |
+
+### 🔒 P7-00 — a live authorization hole, found and closed
+
+`vizserve_pms_transition_task` decided who may move a task with:
+
+```sql
+v_is_qa := v_task.qa_assignee_id = v_actor;   -- NULL when the column is NULL
+if not (v_is_pic or v_is_qa or v_leads) then  -- false OR NULL OR false = NULL
+```
+
+`NOT NULL` is `NULL`, and `IF NULL THEN` does not fire. **On any task with no QA reviewer, an unrelated signed-in user passed the ownership guard** and could walk it `FOR_QA → QA_IN_PROGRESS → FOR_CLIENT_APPROVAL` — the transition that emails the real client.
+
+Demonstrated before it was fixed: a member of another department moved a QA-less task and the call returned no error. Fixed with `coalesce(…, false)` on all three. **Any future `create or replace` of that function must carry the coalesce forward** — `tests/db/tasks.test.ts`, "the ownership guard holds when a seat is empty", is what catches a regression.
+
+Three-valued logic reads as correct forever. It is worth grepping for `not (` around nullable columns elsewhere.
+
+### The three kinds of task
+
+The distinction settled on 18 Aug, and what the transition rules key on:
+
+| | `request_id` | `is_personal` | Comes from | Finishes via |
+|---|---|---|---|---|
+| **Client** | set | false | a shared form, approved at Gate 1 | the client gate |
+| **Internal** | null | false | the TL, by hand | its QA reviewer |
+| **Personal** | null | **true** | the member, for themselves | the member |
+
+`is_personal` is a **stored column, deliberately not derived**. `created_by = assignee_id` would flip category the moment a task is reassigned, changing which transitions are legal to work somebody is halfway through. It is also kept out of the column-level UPDATE grant, exactly like `status`, so a member cannot reclassify assigned work as personal and close it without review.
+
+### Data-layer bugs found and fixed the same day
+
+All surfaced while investigating "I cannot see my logged time".
+
+1. **DTR was hard-broken and looked empty.** `vizserve_pms_dtr_entries` has **two** FKs to `vizserve_pms_users` (`user_id`, `corrected_by`), so the unqualified embed was refused by PostgREST every time. The page read `data ?? []`, so a total failure rendered as "No entries in this range" — and the empty-state copy actively explained it away. **The payroll CSV export had the same broken embed.** Both now name the constraint; `tests/db/phase5.test.ts` asserts the select strings parse.
+2. **The timesheet lost hours.** `!inner` on tasks meant that once a task was reassigned away, the person's own logged time vanished from their week and every total derived from it. Now a left embed; pinned by a test.
+3. **No list page checked `.error`.** Every one did `data ?? []`, so any query failure rendered as an empty list. `components/query-error.tsx` now covers DTR, timesheet, tasks, requests and approvals — and it is what exposed bug 1 within minutes of existing.
+4. **Silent truncation.** DTR capped at 500 rows while computing "Total in range" from the truncated slice — a payroll number that quietly understated. Approvals capped at 200 in silence. Both now fetch one extra row, detect it, and say so.
+5. **Inverted date ranges** on DTR matched nothing and rendered as empty. Now explained, with a one-click swap.
+6. **A phantom security failure.** Two Phase 4 tests began failing with "an expired token was accepted". The cause was **clock skew: the database ran 1.13 s behind the test runner**, and the tests aged tokens by exactly 1 s. The product was never wrong. Those tests now age by an hour, with the measurement in the comment.
+
+### Traps this phase added
+
+- **Three migrations had to be split in two** because Postgres forbids *using* an enum value in the transaction that adds it. `p7_03`/`p7_04` and `p7_07`/`p7_08` are the worked examples, alongside the Phase 5 original.
+- **A signature change means drop and re-grant.** `create or replace` with a longer argument list creates a *second* function, and PostgREST resolves overloads by argument name — so both match and the call fails as ambiguous.
+- **`vizserve_pms_timesheet_week_locked` must stay granted to `authenticated`.** It runs inside a policy, and policy expressions run as the querying role.
+- **A policy-refused UPDATE or DELETE is not an error.** PostgREST returns success with zero rows, so the actions ask for `.select("id")` and treat an empty result as a refusal. INSERT differs — `WITH CHECK` raises 42501.
+- **The transition mirror test's skip gate must move forward** with every migration that adds a transition row, or it runs against a database that cannot agree with it.

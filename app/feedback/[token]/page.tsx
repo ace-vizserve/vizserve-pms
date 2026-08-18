@@ -32,28 +32,28 @@ export default async function FeedbackPage({ params }: { params: Promise<{ token
   const page = parsed?.success && parsed.data.ok ? parsed.data : null;
 
   return (
-    <main className="min-h-svh bg-muted/40 px-4 py-10">
+    <main className="client-surface min-h-svh bg-muted/40 px-4 py-10">
       <div className="mx-auto max-w-lg">
         <div className="mb-5">
           <BrandLockup align="stacked" subtitle="Feedback" />
         </div>
 
         {!page ? (
-          <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-8 text-center">
+          <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-8 text-center">
             <h1 className="text-lg font-semibold">This link is not valid</h1>
             <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
               Check that you used the most recent email we sent you.
             </p>
           </div>
         ) : page.consumed ? (
-          <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-8 text-center">
+          <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-8 text-center">
             <h1 className="text-lg font-semibold">Thank you</h1>
             <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
               We already have your feedback on this one.
             </p>
           </div>
         ) : (
-          <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-6 sm:p-8">
+          <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 sm:p-8">
             <p className="text-xs text-muted-foreground">{page.reference_no}</p>
             <h1 className="mt-1 text-lg font-semibold tracking-tight">How did we do?</h1>
             <p className="mt-1 text-sm text-muted-foreground">{page.title}</p>

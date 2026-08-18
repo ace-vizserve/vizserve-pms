@@ -17,6 +17,7 @@ export type VizservePmsNotificationType =
   | "status_changed"
   | "qa_requested"
   | "client_decision"
+  | "commented"
   | "internal_decision";
 
 export type VizservePmsFieldType =
@@ -31,15 +32,27 @@ export type VizservePmsFieldType =
 
 export type VizservePmsApprovalDecision = "approved" | "returned" | "rejected";
 
-/** Phase 5. Fixed list at launch — docs/09. Leave balances stay out of scope. */
+/**
+ * Phase 5's four, plus OVERTIME from P7-03. Leave balances stay out of scope.
+ *
+ * Adding a value here is only half the job — `vizserve_pms_internal_requests`
+ * carries a per-type CHECK whose `else` branch used to swallow anything new.
+ */
 export type VizservePmsInternalRequestType =
   | "LEAVE"
   | "NO_TIME_IN"
   | "NO_TIME_OUT"
-  | "REIMBURSEMENT";
+  | "REIMBURSEMENT"
+  | "OVERTIME";
 
 /** No RETURNED: P5-08 specifies approve or reject only. */
 export type VizservePmsInternalRequestStatus = "PENDING_REVIEW" | "APPROVED" | "REJECTED";
+
+/**
+ * P7-05. No DRAFT — a week with no row has not been submitted, and a state that
+ * never appears in the table is one somebody eventually writes by mistake.
+ */
+export type VizservePmsTimesheetWeekStatus = "SUBMITTED" | "RETURNED" | "APPROVED";
 
 /**
  * A client's answer at Gate 3.
@@ -541,12 +554,30 @@ export type Database = {
           request_id: string | null;
           department_id: string;
           list_id: string | null;
+          /**
+           * P7-01. True only for a task somebody created for themselves.
+           *
+           * NOTE its absence from `Update` below: like `status`, it is left out
+           * of the column-level UPDATE grant, so it cannot be flipped after the
+           * fact. A member reclassifying assigned work as personal would let
+           * them close it without review, which is the one thing the three-way
+           * category model must not allow.
+           */
+          is_personal: boolean;
           title: string;
           description: string;
           status: VizservePmsTaskStatus;
           assignee_id: string | null;
           qa_assignee_id: string | null;
           due_date: string | null;
+          /** P7-06. Optional, and only ordered against due_date when both exist. */
+          start_date: string | null;
+          /**
+           * P7-09. A subtask names its parent. One level only — a trigger
+           * refuses a parent that itself has one, which is also what makes
+           * longer cycles impossible.
+           */
+          parent_task_id: string | null;
           field_values: Json;
           resolution: string | null;
           output_link: string | null;
@@ -570,6 +601,8 @@ export type Database = {
           assignee_id: string | null;
           qa_assignee_id: string | null;
           due_date: string | null;
+          start_date: string | null;
+          parent_task_id: string | null;
           resolution: string | null;
           output_link: string | null;
           list_id: string | null;
@@ -781,12 +814,52 @@ export type Database = {
         Relationships: [];
       };
       /** The legal-transition table as data. Mirrored in lib/schemas/tasks.ts. */
+      vizserve_pms_task_comments: {
+        Row: {
+          id: string;
+          task_id: string;
+          author_id: string;
+          body: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          task_id: string;
+          /** Must equal auth.uid() — the INSERT policy says so. */
+          author_id: string;
+          body: string;
+        };
+        // Only the body. Reassigning a comment to another author or another
+        // task is not editing, it is forgery.
+        Update: Partial<{ body: string }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_task_comments_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_task_comments_author_id_fkey";
+            columns: ["author_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_task_transitions: {
         Row: {
           from_status: VizservePmsTaskStatus;
           to_status: VizservePmsTaskStatus;
           actor: string;
           required_field: string | null;
+          /**
+           * P7-02. 'any' | 'personal' | 'internal' | 'request' — which kinds of
+           * task the rule applies to. Mirrored by `appliesTo` in
+           * lib/schemas/tasks.ts, and compared row for row by tests/db.
+           */
+          applies_to: string;
         };
         // Changing the state machine is a migration, not a row edit.
         Insert: never;
@@ -917,6 +990,50 @@ export type Database = {
           },
         ];
       };
+      vizserve_pms_timesheet_weeks: {
+        Row: {
+          id: string;
+          user_id: string;
+          /** Always a Monday — a CHECK enforces it, and the function truncates. */
+          week_start: string;
+          /**
+           * Snapshotted at submission, not resolved live through the user.
+           * A submitted week is a decision-bearing artefact and has to keep the
+           * department it was decided under, the same argument as
+           * vizserve_pms_approvals.department_id.
+           */
+          department_id: string;
+          status: VizservePmsTimesheetWeekStatus;
+          /** What the person attested to. The reviewer sees live entries. */
+          submitted_minutes: number;
+          submitted_at: string;
+          decision_reason: string | null;
+          reviewed_by: string | null;
+          reviewed_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        // Rows arrive only through vizserve_pms_submit_timesheet_week and change
+        // only through vizserve_pms_decide_timesheet_week. There is no INSERT or
+        // UPDATE policy, so a status cannot be set directly and an approval
+        // cannot be forged without the matching vizserve_pms_approvals row.
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_timesheet_weeks_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_timesheet_weeks_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_timesheet_entries: {
         Row: {
           id: string;
@@ -973,6 +1090,8 @@ export type Database = {
           work_date: string | null;
           correction_at: string | null;
           amount: number | null;
+          /** P7-04. Set only on OVERTIME rows; capped at 960 by a CHECK. */
+          overtime_minutes: number | null;
           decision_reason: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
@@ -991,6 +1110,7 @@ export type Database = {
           work_date?: string | null;
           correction_at?: string | null;
           amount?: number | null;
+          overtime_minutes?: number | null;
         };
         Update: Partial<{
           status: VizservePmsInternalRequestStatus;
@@ -1106,6 +1226,13 @@ export type Database = {
           /** Wall-clock 'HH:MM' on p_work_date; combined with it in Manila. */
           p_correction_time?: string | null;
           p_amount?: number | null;
+          /**
+           * P7-04. OPTIONAL here because the SQL gives it a default — which
+           * means TypeScript will NOT flag a caller that forgets it. An OVERTIME
+           * request submitted without it is refused by the shape CHECK at
+           * runtime, so the guard is a db test, not the compiler.
+           */
+          p_overtime_minutes?: number | null;
         };
         Returns: Json;
       };
@@ -1116,6 +1243,37 @@ export type Database = {
           p_reason?: string | null;
         };
         Returns: Json;
+      };
+      vizserve_pms_create_personal_task: {
+        /**
+         * P7-01. No department and no assignee: both come from the caller's own
+         * user row inside the function, so they are not the client's to send.
+         */
+        Args: {
+          p_title: string;
+          p_description?: string;
+          p_due_date?: string | null;
+          p_list_id?: string | null;
+        };
+        Returns: Json;
+      };
+      vizserve_pms_submit_timesheet_week: {
+        /** Any day in the week works — the function truncates to the Monday. */
+        Args: { p_week_start: string };
+        Returns: Json;
+      };
+      vizserve_pms_decide_timesheet_week: {
+        /** 'approved' or 'returned'. 'rejected' is refused by the function. */
+        Args: {
+          p_id: string;
+          p_decision: VizservePmsApprovalDecision;
+          p_reason?: string | null;
+        };
+        Returns: Json;
+      };
+      vizserve_pms_timesheet_week_locked: {
+        Args: { p_user_id: string; p_work_date: string };
+        Returns: boolean;
       };
       vizserve_pms_record_decision: {
         Args: {
@@ -1252,6 +1410,7 @@ export type Database = {
       vizserve_pms_token_purpose: VizservePmsTokenPurpose;
       vizserve_pms_internal_request_type: VizservePmsInternalRequestType;
       vizserve_pms_internal_request_status: VizservePmsInternalRequestStatus;
+      vizserve_pms_timesheet_week_status: VizservePmsTimesheetWeekStatus;
     };
     CompositeTypes: Record<never, never>;
   };
@@ -1266,3 +1425,7 @@ export type InternalRequestRow =
   Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];
 export type TimesheetEntryRow =
   Database["public"]["Tables"]["vizserve_pms_timesheet_entries"]["Row"];
+export type TaskCommentRow =
+  Database["public"]["Tables"]["vizserve_pms_task_comments"]["Row"];
+export type TimesheetWeekRow =
+  Database["public"]["Tables"]["vizserve_pms_timesheet_weeks"]["Row"];

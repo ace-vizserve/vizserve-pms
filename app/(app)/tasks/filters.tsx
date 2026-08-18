@@ -47,18 +47,32 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
     { value: "qa", label: "Waiting on my QA" },
   ];
 
+  // Base UI renders the RAW VALUE in <SelectValue> unless the root is handed an
+  // items map. Without these the Status filter showed the literal "__all__"
+  // sentinel on screen, and every other option showed its enum rather than its
+  // label. inbox-filters.tsx and dtr-toolbar.tsx already did this; these two
+  // were simply missed.
+  const statusItems: Record<string, string> = {
+    [ALL]: "All statuses",
+    ...Object.fromEntries(TASK_STATUS_OPTIONS.map((option) => [option.value, option.label])),
+  };
+  const listItems: Record<string, string> = {
+    [ALL]: "All lists",
+    ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
+  };
+
   return (
     <div className="space-y-3">
-      <div className="flex gap-1 rounded-xl bg-card p-1 ring-1 ring-foreground/10">
+      <div className="flex gap-1 rounded-lg border bg-muted p-1">
         {tabs.map((tab) => (
           <button
             key={tab.value}
             type="button"
             onClick={() => setParam("view", tab.value === "all" ? "" : tab.value)}
-            className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+            className={`rounded-sm px-3 py-1 text-xs font-[550] transition-all ${
               view === tab.value
-                ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-muted"
+                ? "border border-border bg-card grade-raised text-foreground shadow-raised"
+                : "border border-transparent text-muted-foreground hover:text-foreground"
             }`}
             aria-pressed={view === tab.value}
           >
@@ -67,16 +81,17 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
         ))}
       </div>
 
-      <div className="flex flex-wrap items-end gap-3 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
         <div className="space-y-1.5">
           <Label htmlFor="status" className="text-xs text-muted-foreground">
             Status
           </Label>
           <Select
+            items={statusItems}
             value={params.get("status") ?? ALL}
             onValueChange={(value) => setParam("status", value)}
           >
-            <SelectTrigger id="status" className="h-8 w-52">
+            <SelectTrigger id="status" className="w-56">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -96,10 +111,11 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
               List
             </Label>
             <Select
+              items={listItems}
               value={params.get("list") ?? ALL}
               onValueChange={(value) => setParam("list", value)}
             >
-              <SelectTrigger id="list" className="h-8 w-48">
+              <SelectTrigger id="list" className="w-52">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>

@@ -49,6 +49,27 @@ if (dbTestsEnabled && !migrationApplied) {
 }
 
 const run = dbTestsEnabled && migrationApplied;
+
+/**
+ * P7-04 lands in its own pair of migrations, so it gets its own probe. Testing
+ * for the COLUMN rather than the enum value: `overtime_minutes` only exists once
+ * the second file has run, and the second file is the one that also rewrites the
+ * shape constraint. The enum on its own would let these cases run against a
+ * database that cannot store the thing they submit.
+ */
+const overtimeApplied =
+  run
+    ? !(await adminClient().from("vizserve_pms_internal_requests").select("overtime_minutes").limit(1))
+        .error
+    : false;
+
+if (run && !overtimeApplied) {
+  announce(
+    "phase5.test.ts — P7-04 overtime cases SKIPPED." +
+      " supabase/migrations/20260818100100_p7_04_overtime_request.sql is not applied.",
+  );
+}
+
 const today = todayInAppZone();
 const yesterday = yesterdayInAppZone();
 
@@ -554,5 +575,236 @@ describe.skipIf(!run)("P5-01 — the DTR cannot be hand-edited", () => {
       .eq("user_id", owner.userId);
 
     expect((data ?? []).length).toBeGreaterThan(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P7-04 — OVERTIME, the fifth type.
+//
+// The first type added since launch, so these cases carry a second job beyond
+// "does overtime work": they prove the per-type CHECK actually discriminates
+// now. Its old `else` branch swallowed any new enum value into the time
+// correction shape, which would have made this type quietly unusable.
+// ---------------------------------------------------------------------------
+describe.skipIf(!overtimeApplied)("P7-04 — overtime requests", () => {
+  it("submits and routes like every other type", async () => {
+    const { client, userId } = await signIn("member1VizBytes");
+
+    const id = await submit(client, {
+      p_request_type: "OVERTIME",
+      p_reason: "Client deadline moved to Friday.",
+      p_work_date: yesterday,
+      p_overtime_minutes: 120,
+    });
+
+    const { data: row } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("request_type, status, department_id, work_date, overtime_minutes, amount")
+      .eq("id", id)
+      .single();
+
+    const { data: user } = await adminClient()
+      .from("vizserve_pms_users")
+      .select("primary_department_id")
+      .eq("id", userId)
+      .single();
+
+    expect(row!.request_type).toBe("OVERTIME");
+    expect(row!.status).toBe("PENDING_REVIEW");
+    expect(row!.department_id).toBe(user!.primary_department_id);
+    expect(row!.overtime_minutes).toBe(120);
+    expect(row!.amount).toBeNull();
+  });
+
+  it("accepts today, because you ask before you work the evening", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const id = await submit(client, {
+      p_request_type: "OVERTIME",
+      p_reason: "Staying late to finish the deck.",
+      p_work_date: today,
+      p_overtime_minutes: 90,
+    });
+
+    expect(id).toBeTruthy();
+  });
+
+  it("refuses a future day", async () => {
+    const { client } = await signIn("member1VizBytes");
+    const tomorrow = new Date(Date.parse(`${today}T12:00:00Z`) + 86_400_000)
+      .toISOString()
+      .slice(0, 10);
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "Planning ahead a little too far.",
+        p_work_date: tomorrow,
+        p_overtime_minutes: 60,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("refuses a day or a length that is missing", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "No day given.",
+        p_overtime_minutes: 60,
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "No length given.",
+        p_work_date: yesterday,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("refuses more overtime than a day can hold", async () => {
+    // 960 is not arbitrary: 480 + 960 is exactly the 1440-minute day cap the
+    // timesheet trigger enforces. Above it, an approved request would describe
+    // a day the database will not accept entries for.
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "A very long evening indeed.",
+        p_work_date: yesterday,
+        p_overtime_minutes: 961,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("refuses fields that belong to another type", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "OVERTIME",
+        p_reason: "Overtime is not a reimbursement.",
+        p_work_date: yesterday,
+        p_overtime_minutes: 60,
+        p_amount: 500,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("keeps overtime_minutes off the other types", async () => {
+    // The other half of the constraint rewrite. If this passes, the branches
+    // are discriminating rather than falling through to a common shape.
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "NO_TIME_IN",
+        p_reason: "A correction carrying overtime it has no use for.",
+        p_work_date: yesterday,
+        p_correction_time: "08:00",
+        p_overtime_minutes: 60,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("approving one writes nothing into the DTR", async () => {
+    // Deliberate. An approved OT row is a fact the timesheet and payroll READ.
+    // Copying it into the DTR would be a second source of truth for the same
+    // hours, and the two would disagree the first time somebody worked less
+    // overtime than they asked for.
+    const { client } = await signIn("member1VizBytes");
+    const id = await submit(client, {
+      p_request_type: "OVERTIME",
+      p_reason: "Checking the side effects, of which there are none.",
+      p_work_date: yesterday,
+      p_overtime_minutes: 60,
+    });
+
+    const tl = await signIn("tlVizBytes");
+    const { data, error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+      p_reason: null,
+    });
+
+    expect(error).toBeNull();
+    expect((data as unknown as { dtr_entry_id: string | null }).dtr_entry_id).toBeNull();
+
+    // And the engine was used rather than reimplemented.
+    const { data: approvals } = await adminClient()
+      .from("vizserve_pms_approvals")
+      .select("decision, entity_type")
+      .eq("entity_id", id);
+
+    expect(approvals).toHaveLength(1);
+    expect(approvals![0]!.entity_type).toBe("internal_request");
+    expect(approvals![0]!.decision).toBe("approved");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The queries the DTR screens actually send.
+//
+// These assert something the rest of the suite never did: that the SELECT
+// STRING PARSES. `vizserve_pms_dtr_entries` has two foreign keys to
+// `vizserve_pms_users` — `user_id` and `corrected_by` — so an unqualified
+// embed is ambiguous and PostgREST refuses the entire query.
+//
+// That is not a hypothetical. The list page and the payroll export both shipped
+// with the ambiguous form. The page read `data ?? []` and rendered "No entries
+// in this range", so a total failure was indistinguishable from an empty record
+// and it went unnoticed until the error was put on screen.
+//
+// Row counts are deliberately not asserted — the point is that the shape is
+// accepted, which is the part that was broken and the part no other test
+// covers.
+// ---------------------------------------------------------------------------
+describe.skipIf(!run)("the DTR queries parse", () => {
+  const USER_FK = "vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey";
+
+  it("the list page's select is unambiguous", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client
+      .from("vizserve_pms_dtr_entries")
+      .select(`id, work_date, time_in, time_out, corrected_at, user_id, ${USER_FK}(full_name)`)
+      .gte("work_date", "2026-01-01")
+      .lte("work_date", today)
+      .limit(1);
+
+    expect(error).toBeNull();
+  });
+
+  it("the payroll export's select is unambiguous", async () => {
+    const { client } = await signIn("tlVizBytes");
+
+    const { error } = await client
+      .from("vizserve_pms_dtr_entries")
+      .select(`work_date, time_in, time_out, corrected_at, user_id, ${USER_FK}(full_name, email)`)
+      .gte("work_date", "2026-01-01")
+      .lte("work_date", today)
+      .limit(1);
+
+    expect(error).toBeNull();
+  });
+
+  it("proves the unqualified embed is genuinely refused", async () => {
+    // Pins WHY the constraint has to be named. If a future migration drops
+    // `corrected_by`, this starts passing and the hint becomes optional — but
+    // the hint is still correct, so this test failing is information, not an
+    // instruction to remove anything.
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client
+      .from("vizserve_pms_dtr_entries")
+      .select("id, vizserve_pms_users(full_name)")
+      .limit(1);
+
+    expect(error).not.toBeNull();
+    expect(error!.message).toContain("more than one relationship");
   });
 });

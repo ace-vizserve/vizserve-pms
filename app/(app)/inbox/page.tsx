@@ -210,7 +210,7 @@ export default async function InboxPage({
       </div>
 
       {rows.length === 0 ? (
-        <div className="overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
+        <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
           {isFiltered ? (
             <EmptyState
               icon={<SearchX />}
@@ -237,7 +237,7 @@ export default async function InboxPage({
           )}
         </div>
       ) : (
-        <ul className="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10">
+        <ul className="divide-y overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
           {rows.map((item) => {
             const content = (
               <div className="flex items-start gap-3 p-4">

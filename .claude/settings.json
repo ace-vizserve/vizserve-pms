@@ -5,7 +5,10 @@
       "PowerShell(npm uninstall @tanstack/react-query @tanstack/react-table @dnd-kit/core @dnd-kit/modifiers @dnd-kit/sortable @dnd-kit/utilities --no-fund --no-audit 2>&1)",
       "PowerShell(\"--- remove dead deps ---\")",
       "PowerShell(npm run typecheck 2>&1)",
-      "PowerShell(npm run test -- tests/unit/timesheet.test.ts 2>&1)"
+      "PowerShell(npm run test -- tests/unit/timesheet.test.ts 2>&1)",
+      "Bash(npm run *)",
+      "Bash(node -e ' *)",
+      "Bash(python -)"
     ]
   }
 }

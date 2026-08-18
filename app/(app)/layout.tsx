@@ -58,22 +58,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
           <SidebarInset>
             {/*
-              h-16 and borderless, matching the template. The header's height is
-              what supplies the top gap for every page, which is why PageShell
-              carries `pt-0`.
+              h-14 and frosted, per the design refresh. The bar is translucent
+              (`bg-panel`) with a blur behind it, so rows visibly pass UNDER it
+              rather than being hidden by it — which is the point of a sticky
+              header on a list that runs to hundreds of rows.
 
-              STICKY: the breadcrumb is how you know where you are, and on a long
-              list — the inbox runs to hundreds of rows — it used to scroll away
-              and take the sidebar toggle and theme switch with it.
+              That translucency is why it now carries a border and a shadow.
+              The previous version was opaque and borderless, and relied on the
+              opacity alone to separate itself from what slid beneath. A frosted
+              bar cannot do that, so `shadow-chrome` supplies the lit top edge
+              and the soft cast, and `border-b` the hairline.
 
-              `bg-background` is doing real work here, not decoration. It is
-              fully opaque, so rows pass cleanly underneath; without it they show
-              through the header and the text overlaps. That opacity is also why
-              this stays borderless as the template intends, instead of needing a
-              hairline to separate it from what is sliding under it.
+              STICKY: the breadcrumb is how you know where you are, and on a
+              long list it used to scroll away and take the sidebar toggle and
+              theme switch with it.
             */}
-            <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-2 bg-background">
-              <div className="flex items-center gap-2 px-4">
+            <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-panel shadow-chrome backdrop-blur-md backdrop-saturate-150">
+              <div className="flex items-center gap-2 px-4.5">
                 <SidebarTrigger className="-ml-1" />
                 <Separator
                   orientation="vertical"
@@ -82,12 +83,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <DynamicBreadcrumb />
               </div>
 
-              <div className="ml-auto flex items-center gap-2 pr-4">
+              <div className="ml-auto flex items-center gap-2 pr-4.5">
                 <ThemeToggle />
               </div>
             </header>
 
-            <main className="flex flex-1 flex-col">{children}</main>
+            {/* The one gradient in the product UI: a broad, very low-contrast wash so
+                panels have something to cast onto instead of sitting on a flat slab. */}
+            <main className="flex flex-1 flex-col grade-ambient bg-no-repeat">{children}</main>
           </SidebarInset>
         </SidebarProvider>
       </BreadcrumbLabelProvider>

@@ -1,15 +1,22 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
+import { Figtree, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import NextTopLoader from "nextjs-toploader";
 import { Toaster } from "sonner";
 
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
 
-// DESIGN.md: font.family.primary=Geist, font.family.stack="Geist, Geist Fallback".
-// The variable names match what globals.css maps --font-sans/--font-mono to.
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+// The design refresh: Figtree.
+//
+// No `weight` on purpose. Figtree is a variable font, and listing static
+// cuts would make next/font ship those only — globals.css sets the body to
+// weight 450, which is not one of them, so every screen would silently snap to
+// 400 or 500. Omitting it loads the axis and 450 is real.
+//
+// The variable name is what globals.css maps --font-sans and --font-heading to;
+// no component ever names a family.
+const figtree = Figtree({
+  variable: "--font-figtree",
   subsets: ["latin"],
 });
 
@@ -19,8 +26,9 @@ const geistMono = Geist_Mono({
 });
 
 // docs/12 §2 — Plus Jakarta Sans for headings. Declared here because next/font
-// only hoists at module scope, but applied nowhere except the marketing page's
-// `font-display` utility, so the app UI is untouched.
+// only hoists at module scope, but applied nowhere except the marketing and
+// sign-in pages’ `font-display` utility — neither of which the refresh
+// restructures — so the app UI is untouched.
 const plusJakarta = Plus_Jakarta_Sans({
   variable: "--font-plus-jakarta",
   subsets: ["latin"],
@@ -43,7 +51,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} ${plusJakarta.variable} h-full`}
+      className={`${figtree.variable} ${geistMono.variable} ${plusJakarta.variable} h-full`}
       suppressHydrationWarning
     >
       <body className="flex min-h-full flex-col">

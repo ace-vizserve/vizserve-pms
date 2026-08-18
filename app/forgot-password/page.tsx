@@ -28,7 +28,7 @@ export default function ForgotPasswordPage() {
           <BrandLockup subtitle="Project Management System" />
         </div>
 
-        <div className="rounded-xl bg-card ring-1 ring-foreground/10 p-6 sm:p-8">
+        <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 sm:p-8">
           <h1 className="text-lg font-semibold tracking-tight">Reset your password</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             We will email you a link to set a new one.

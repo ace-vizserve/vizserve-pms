@@ -108,8 +108,12 @@ export async function exportDtrCsv(
 
   let query = supabase
     .from("vizserve_pms_dtr_entries")
+    // Same two-FK ambiguity as the list page — see the note there. This export
+    // was refused by PostgREST for exactly the same reason, so the payroll CSV
+    // has been failing too; it just failed into an error toast rather than an
+    // empty screen.
     .select(
-      "work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!inner(full_name, email)",
+      "work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey(full_name, email)",
     )
     .gte("work_date", from)
     .lte("work_date", to)

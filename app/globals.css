@@ -7,22 +7,25 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
+  /* Secondary and tertiary ink. `foreground-muted` is body-safe (6.25:1);
+     `foreground-faint` is NOT — see the note on --foreground-faint below. */
+  --color-foreground-muted: var(--foreground-muted);
+  --color-foreground-faint: var(--foreground-faint);
+
+  /* Figtree throughout, Geist Mono for anything that is data rather than
+     prose. Still reachable ONLY through these tokens, so the face is a
+     three-line change and no component ever names a family. */
+  --font-sans: var(--font-figtree);
   --font-mono: var(--font-geist-mono);
   --font-heading: var(--font-sans);
-  /* Marketing headings only (docs/12 §2 floats Plus Jakarta Sans for headings).
-     Scoped to `/` — the app keeps Geist throughout, so this cannot drift the
-     product UI while Q15 is open. */
-  --font-display: var(--font-plus-jakarta), var(--font-geist-sans);
+  /* Marketing and sign-in only. Scoped to `/` and `/login`, which the refresh
+     deliberately does not restructure. */
+  --font-display: var(--font-plus-jakarta), var(--font-figtree);
 
-  /* --- D11 brand, marketing surface ------------------------------------
-     Kept as hex, deliberately: docs/12-ui-and-notifications.md measures
-     contrast against these exact values (primary on white = 6.54:1), and an
-     oklch round-trip would silently drift the audited ratios.
-
-     These are additive tokens, not a repaint. Q15 — whether the *app's*
-     --primary becomes #4359A5 or stays near-black — is still open, and the
-     brand blue belongs on a public marketing page under either answer. */
+  /* --- D11 brand ---------------------------------------------------------
+     Kept as hex, deliberately: docs/12-ui-and-notifications.md and the design
+     system measure contrast against these exact values, and an oklch
+     round-trip would silently drift the audited ratios. */
   --color-brand: var(--brand);
   --color-brand-foreground: var(--brand-foreground);
   --color-brand-tint: var(--brand-tint);
@@ -44,18 +47,28 @@
   --color-chart-1: var(--chart-1);
   --color-success: var(--success);
   --color-success-subtle: var(--success-subtle);
+  --color-success-border: var(--success-border);
   --color-warning: var(--warning);
   --color-warning-subtle: var(--warning-subtle);
+  --color-warning-border: var(--warning-border);
   --color-info: var(--info);
   --color-info-subtle: var(--info-subtle);
+  --color-info-border: var(--info-border);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
+  --color-border-strong: var(--border-strong);
   --color-destructive: var(--destructive);
+  --color-destructive-subtle: var(--destructive-subtle);
+  --color-destructive-border: var(--destructive-border);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
+  --color-accent-border: var(--accent-border);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
+  /* The fill behind a progress track, a sparkline bar or a skeleton — one step
+     deeper than --muted, which is a surface. */
+  --color-track: var(--track);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
@@ -64,14 +77,16 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  /* --- radius scale ------------------------------------------------------
-     Derived from --radius, matching the upstream template exactly.
+  /* Translucent chrome — the sidebar and top bar, which content passes under.
+     Paired with `backdrop-blur-md` at the call site. */
+  --color-panel: var(--panel);
 
-     These were briefly set to explicit values (8/10/14/18) taken from an
-     earlier DESIGN.md, whose stated numbers did not match what the template's
-     own code computes — and which collapsed rounded-xl through rounded-4xl to
-     a single 18px. The vendored components assume the derived scale, so the
-     code is the authority here, not the prose. */
+  /* --- radius scale ------------------------------------------------------
+     The refresh sets radius=10px, with the rest derived. The `calc()` chain is
+     load-bearing — the vendored components assume the derived scale, so it
+     must not be replaced with literals. At --radius: 0.625rem this lands
+     sm=6 · md=8 · lg=10 · xl=14 · 2xl=18 · 3xl=22 · 4xl=26, which covers the
+     refresh's 5/8/10 ladder without a bespoke ladder. */
   --radius-sm: calc(var(--radius) * 0.6);
   --radius-md: calc(var(--radius) * 0.8);
   --radius-lg: var(--radius);
@@ -79,89 +94,203 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --radius-pill: 9999px;
 
-  /* --- DESIGN.md: type scale -------------------------------------------
-     xs=10 · sm=12 · md=14 · lg=16 · xl=20 · 2xl=24 · 3xl=30.
-     Tailwind's defaults already land on every step except 10px, so only that
-     one is added — overriding the rest would shift every shadcn component for
-     no gain. Roles map: text-2xs=10, text-xs=12, text-sm=14 (base), text-base=16. */
-  --text-2xs: 10px;
-  --text-2xs--line-height: 14px;
+  /* --- type scale --------------------------------------------------------
+     Every existing `text-sm` and `text-xs` call site in the app lands on the
+     new size without being edited, which is the whole point of doing it here.
 
-  /* --- DESIGN.md: elevation --------------------------------------------
-     shadow.1 is a hairline ring, not a drop shadow — it is how cards are
-     bounded in this system. 2/3/4 are real elevation for popovers, dropdowns
-     and dialogs respectively. */
-  --shadow-ring: 0 0 0 1px oklch(0.145 0 0 / 0.1);
-  --shadow-raised:
-    0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-raised-ring:
-    0 0 0 1px var(--border), 0 4px 6px -1px rgb(0 0 0 / 0.1),
-    0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --shadow-overlay:
-    0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+     The canvas specified a 13px base. That was tried and it read as tiny on a
+     real screen — nav labels, meta rows and table cells all needed squinting at.
+     The scale below is one step up throughout: still denser than the 16px it
+     replaced, but comfortable to work in all day.
+
+     Roles: text-2xs=12 (meta, timestamps, counts), text-xs=13 (hints, table
+     headers), text-sm=14 (dense rows, controls), text-base=16 (body),
+     text-lg=18 (card titles), text-xl=24 (page headings), text-2xl=32 (stat
+     values). text-3xl and up keep Tailwind's defaults — they appear only on
+     the marketing and sign-in surfaces. */
+  --text-2xs: 12px;
+  --text-2xs--line-height: 16px;
+  --text-xs: 13px;
+  --text-xs--line-height: 18px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 26px;
+  --text-xl: 24px;
+  --text-xl--line-height: 30px;
+  --text-2xl: 32px;
+  --text-2xl--line-height: 36px;
+
+  /* --- elevation ---------------------------------------------------------
+     DEPTH IS OUTWARD ONLY. A raised thing carries a 1px highlight along its
+     top edge and casts a shadow. Everything else is FLAT — told apart by its
+     fill and its border, never by being pushed into the page.
+
+     No inset emboss anywhere: no carved fields, no sunken tracks, no pressed
+     nav rows. An inward-embossed control reads as damage on a light UI, and
+     it made the current sidebar item look stamped into the panel.
+
+     A press is the lift COLLAPSING (`active:shadow-none` plus the 1px nudge
+     the base class already carries), not the surface caving in.
+
+     These are composed from the primitives in :root rather than written out,
+     so the dark theme re-points one set of values and every token follows.
+     `@theme inline` is what makes that work: the utility emits the var()
+     chain, which resolves at the element and therefore inside `.dark`. */
+  --shadow-ring: 0 0 0 1px var(--border);
+  --shadow-raised: var(--hl), var(--elev-1);
+  --shadow-raised-ring: 0 0 0 1px var(--border), var(--hl), var(--elev-1);
+  --shadow-raised-lg: var(--hl), var(--elev-2);
+  --shadow-overlay: var(--hl), var(--elev-3);
+  /* Frosted chrome — the sidebar and top bar. A lit top edge plus a soft cast
+     onto whatever is sliding underneath. */
+  --shadow-chrome: var(--hl), var(--chrome-cast);
 
   /* motion.duration.instant */
   --default-transition-duration: 150ms;
 }
 
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  /* --- Q15, answered: the brand blue wins -------------------------------
-     D11's #4359A5 is now the app's primary, not just the marketing surface.
-     Primary buttons, active nav, links and focus rings all follow it, which is
-     what docs/12 assumed all along.
+  /* --- surface and ink ---------------------------------------------------
+     A cool-grey ground rather than pure white, so a white panel has something
+     to sit on and a shadow has something to fall onto. */
+  --background: #f5f7fa;
+  --foreground: #0f1626;
+  --card: #ffffff;
+  --card-foreground: #0f1626;
+  --popover: #ffffff;
+  --popover-foreground: #0f1626;
+  --secondary: #f0f3f7;
+  --secondary-foreground: #0f1626;
+  --muted: #f0f3f7;
+  --track: #e7ebf1;
+  --panel: rgb(255 255 255 / 0.82);
 
-     What deliberately stays neutral: --foreground, --muted-foreground and
-     --border. Those are body copy and structure, not identity — tinting them
-     would put a blue cast on every table row and read as a rendering fault,
-     not as branding. The near-black here is typography, not the black that
-     was objected to. */
+  /* Body copy is #0F1626. This is the tier below it — 6.25:1 on white, so it
+     is safe for real text: sub-lines, table cells, secondary labels. */
+  --foreground-muted: #556074;
+
+  /* --- the one deliberate deviation from the design canvas ---------------
+     The canvas sets its tertiary ink to #818B9C and uses it for hints,
+     labels, meta rows and table headers. That measures 3.44:1 on white and
+     fails the 4.5:1 body-text rule on nearly every screen.
+
+     --muted-foreground is therefore #656F82 (5.06:1). #818B9C survives as
+     --foreground-faint for NON-TEXT use only: decorative dots, chevrons,
+     rules, disabled glyphs. Never put a word in it. */
+  --muted-foreground: #656f82;
+  --foreground-faint: #818b9c;
+
+  /* --- Q15, answered: the brand blue wins -------------------------------
+     D11's #4359A5 is the app's primary, not just the marketing surface.
+     Primary buttons, active nav, links and focus rings all follow it. */
   --primary: #4359a5;
   --primary-foreground: #ffffff;
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  /* Hover and active surfaces — a brand tint rather than grey, so a selected
+
+  /* Hover and selected surfaces — a brand tint rather than grey, so a chosen
      nav row reads as chosen rather than merely shaded. Brand text on it is
      5.79:1. */
-  --accent: #eef1f9;
+  --accent: #edf0f8;
   --accent-foreground: #4359a5;
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --accent-border: #c6d0e9;
+
+  --border: #e3e7ee;
+  --border-strong: #b9c1ce;
+  --input: #d2d8e2;
   --ring: #4359a5;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+
+  /* --- chart palette -----------------------------------------------------
+     Brand-anchored: chart-1 is #4359A5 and chart-2 is the info teal, which
+     holds 3:1 as a mark. The remaining three are hue-spaced far enough apart
+     to stay separable, including for the common forms of colour blindness.
+     Charts must still label their series; hue is never the only carrier. */
+  --chart-1: oklch(0.44 0.13 268);
+  --chart-2: oklch(0.55 0.08 220);
+  --chart-3: oklch(0.55 0.13 155);
+  --chart-4: oklch(0.62 0.13 60);
+  --chart-5: oklch(0.55 0.16 330);
+
+  /* The refresh sets radius=10px. */
   --radius: 0.625rem;
 
+  /* --- depth primitives --------------------------------------------------
+     --hl         the lit top edge of anything raised
+     --elev-1/2/3 what it casts: control, panel, overlay
+
+     A control uses --hl + --elev-1. A field uses NEITHER — it is a flat tinted
+     panel with a border. That is the whole rule: things sit ON the page, never
+     in it, and a button is told from an input by having a lift at all. */
+  --hl: inset 0 1px 0 rgb(255 255 255 / 0.9);
+  --hl-soft: inset 0 1px 0 rgb(255 255 255 / 0.55);
+  --chrome-cast: 0 4px 14px -8px rgb(15 22 38 / 0.22);
+  --elev-1: 0 1px 1px rgb(15 22 38 / 0.04), 0 2px 4px -1px rgb(15 22 38 / 0.06);
+  --elev-2:
+    0 1px 1px rgb(15 22 38 / 0.04), 0 4px 8px -2px rgb(15 22 38 / 0.07),
+    0 12px 20px -10px rgb(15 22 38 / 0.12);
+  --elev-3:
+    0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13),
+    0 30px 50px -18px rgb(15 22 38 / 0.22);
+
+  /* Surface grades. Short — lighter at the top, where the light is. Consumed
+     through the grade-surface / grade-raised utilities at the bottom of
+     this file, layered over a bg-* colour. */
+  --gradient-surface: linear-gradient(180deg, #ffffff 0%, #fafcfd 100%);
+  --gradient-raised: linear-gradient(180deg, #fdfeff 0%, #f1f5f9 100%);
+  --gradient-primary: linear-gradient(180deg, #5169b4 0%, #3b4f94 100%);
+  --gradient-chip: linear-gradient(180deg, rgb(255 255 255 / 0.65), rgb(255 255 255 / 0));
+  /* The page's own light source. Broad and very low-contrast — it exists so
+     panels have something to cast onto, not to be noticed. */
+  --gradient-ambient:
+    radial-gradient(
+      120% 70% at 15% -10%,
+      color-mix(in srgb, var(--primary) 9%, transparent),
+      transparent 62%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--primary) 4%, transparent) 0%,
+      transparent 240px
+    );
+
+  /* motion.duration.fast — for anything that must feel deliberate rather than
+     instant (sheet and dialog entrances). Consumed as
+     `duration-[var(--motion-duration-fast)]`. */
+  --motion-duration-fast: 200ms;
+
   /* --- semantic status --------------------------------------------------
-     Added, not from DESIGN.md: this app has 8 task statuses and 6 request
-     statuses, and identity tokens cannot carry state. Each is a solid (text,
-     icons, borders) plus a subtle fill for pills. State is never conveyed by
-     colour alone — every pill keeps its label, so these stay legible in
-     greyscale and in a printed queue. */
-  --success: oklch(0.52 0.12 155);
-  --success-subtle: oklch(0.95 0.04 155);
-  --warning: oklch(0.55 0.12 75);
-  --warning-subtle: oklch(0.96 0.05 85);
-  --info: oklch(0.52 0.13 255);
-  --info-subtle: oklch(0.96 0.03 255);
+     This app has 8 task statuses and 6 request statuses, and identity tokens
+     cannot carry state. Each is a solid (text, icons) plus a subtle fill and
+     a border for pills. State is never conveyed by colour alone — every pill
+     keeps its label and its dot, so these stay legible in greyscale and in a
+     printed queue. */
+  --success: #1c7a52;
+  --success-subtle: #e8f3ee;
+  --success-border: #bfdcce;
+  --warning: #8a6206;
+  --warning-subtle: #fbf2e0;
+  --warning-border: #e8d6ac;
+  /* Darkened from the canvas #2A7F9C, which measured 3.99:1 on --info-subtle
+     and failed 4.5:1 as chip text. This is 4.57:1 there and 5.21:1 on --card. */
+  --info: #277590;
+  --info-subtle: #e7f2f6;
+  --info-border: #bddae4;
+  --destructive: #b3352c;
+  --destructive-subtle: #fbecea;
+  --destructive-border: #efcbc7;
 
   /* --- D11 brand ---------------------------------------------------------
      #4359A5 is the workhorse: it carries white text at 6.54:1 both ways.
      #5BC0DE is a SURFACE colour only — 2.09:1 against white in both
-     directions. It takes --brand-ink on top (7.79:1), never white, and is
-     never used for text. */
+     directions. It takes --brand-ink on top (7.79:1), never white.
+
+     NOT re-pointed to the refresh's teal. app/login/page.tsx renders a
+     heading in `text-brand-tint` on --brand-gradient, where it measures
+     3.12:1 and passes as large text; the darker teal on that dark blue
+     ground would fail badly. The refresh's teal is --info instead. */
   --brand: #4359a5;
   --brand-foreground: #ffffff;
   --brand-tint: #5bc0de;
@@ -181,54 +310,90 @@
      #4359A5. */
   --brand-gradient: linear-gradient(135deg, #1c2547 0%, #4359a5 55%, #2b3a6e 100%);
 
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
+  /* Frosted, like the top bar — content passes under both. */
+  --sidebar: rgb(255 255 255 / 0.82);
+  --sidebar-foreground: #0f1626;
   --sidebar-primary: #4359a5;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #eef1f9;
+  --sidebar-accent: #edf0f8;
   --sidebar-accent-foreground: #4359a5;
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-border: #e3e7ee;
   --sidebar-ring: #4359a5;
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  /* Q15 in dark: #4359A5 is too dark to sit on a dark surface, so primary
-     lightens to the same value --brand uses. Its foreground goes dark rather
-     than white (6.31:1). */
-  --primary: #8fa3e0;
-  --primary-foreground: #1a2340;
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: #262e4a;
-  --accent-foreground: #c9d4f2;
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: #6b7fc4;
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
+  --background: #12151c;
+  --foreground: #edf0f5;
+  --card: #181c25;
+  --card-foreground: #edf0f5;
+  --popover: #181c25;
+  --popover-foreground: #edf0f5;
+  --secondary: #1e232e;
+  --secondary-foreground: #edf0f5;
+  --muted: #1e232e;
+  --track: #262c38;
+  --panel: rgb(24 28 37 / 0.82);
 
-  --success: oklch(0.72 0.14 155);
-  --success-subtle: oklch(0.28 0.05 155);
-  --warning: oklch(0.78 0.13 80);
-  --warning-subtle: oklch(0.3 0.05 80);
-  --info: oklch(0.72 0.12 255);
-  --info-subtle: oklch(0.29 0.05 255);
+  --foreground-muted: #9aa4b6;
+  --muted-foreground: #8e98aa;
+  --foreground-faint: #6e7889;
+
+  /* Q15 in dark: #4359A5 is too dark to sit on a dark surface, so primary
+     lightens. Its foreground goes dark rather than white. */
+  --primary: #8098de;
+  --primary-foreground: #151c2e;
+  /* #8098DE on #1E2537 is 5.43:1. */
+  --accent: #1e2537;
+  --accent-foreground: #8098de;
+  --accent-border: #37405c;
+
+  --border: #262c37;
+  --border-strong: #454d5c;
+  --input: #333a47;
+  --ring: #8098de;
+
+  /* Same hues, lifted so every mark holds 3:1 against the dark ground. */
+  --chart-1: oklch(0.7 0.12 268);
+  --chart-2: oklch(0.75 0.08 220);
+  --chart-3: oklch(0.75 0.14 155);
+  --chart-4: oklch(0.8 0.13 70);
+  --chart-5: oklch(0.72 0.15 330);
+
+  /* Depth, inverted. The highlight thins to a rim of light — a 0.9-alpha white
+     edge on a dark face reads as a scratch, not a lit edge — and the shadows
+     deepen so a lift still registers against a dark ground. */
+  --hl: inset 0 1px 0 rgb(255 255 255 / 0.07);
+  --hl-soft: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --chrome-cast: 0 4px 14px -8px rgb(0 0 0 / 0.7);
+  --elev-1: 0 1px 1px rgb(0 0 0 / 0.3), 0 2px 4px -1px rgb(0 0 0 / 0.35);
+  --elev-2:
+    0 1px 1px rgb(0 0 0 / 0.3), 0 4px 8px -2px rgb(0 0 0 / 0.4),
+    0 12px 20px -10px rgb(0 0 0 / 0.55);
+  --elev-3:
+    0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55),
+    0 30px 50px -18px rgb(0 0 0 / 0.7);
+
+  --gradient-surface: linear-gradient(180deg, #1d222c 0%, #171b23 100%);
+  --gradient-raised: linear-gradient(180deg, #252b37 0%, #1c212b 100%);
+  --gradient-primary: linear-gradient(180deg, #8da3e5 0%, #6f88d3 100%);
+  --gradient-chip: linear-gradient(180deg, rgb(255 255 255 / 0.06), rgb(255 255 255 / 0));
+
+  --success: #4cb483;
+  --success-subtle: #152720;
+  --success-border: #264334;
+  --warning: #d8a94a;
+  --warning-subtle: #2a2213;
+  --warning-border: #463a1f;
+  --info: #5fb6d2;
+  --info-subtle: #182931;
+  --info-border: #2c4653;
+  --destructive: #e0736a;
+  --destructive-subtle: #2b1a18;
+  --destructive-border: #4a2c29;
 
   /* #4359A5 is too dark to read on a dark surface, so the brand lightens
-     rather than inverts — same hue, 6.6:1 on --brand-ink. The tint is already
-     light enough to keep working as a fill. */
+     rather than inverts — same hue. The tint is already light enough to keep
+     working as a fill. */
   --brand: #8fa3e0;
   --brand-foreground: #1a2340;
   --brand-tint: #5bc0de;
@@ -238,14 +403,14 @@
   --brand-surface: #4359a5;
   --brand-surface-foreground: #ffffff;
 
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: #8fa3e0;
-  --sidebar-primary-foreground: #1a2340;
-  --sidebar-accent: #262e4a;
-  --sidebar-accent-foreground: #c9d4f2;
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: #6b7fc4;
+  --sidebar: rgb(24 28 37 / 0.82);
+  --sidebar-foreground: #edf0f5;
+  --sidebar-primary: #8098de;
+  --sidebar-primary-foreground: #151c2e;
+  --sidebar-accent: #1e2537;
+  --sidebar-accent-foreground: #8098de;
+  --sidebar-border: #262c37;
+  --sidebar-ring: #8098de;
 }
 
 @layer base {
@@ -254,11 +419,13 @@
   }
   body {
     @apply bg-background text-foreground;
-    /* DESIGN.md: font.size.base=14px, font.weight.base=400,
-       font.lineHeight.base=20px. */
-    font-size: 14px;
-    font-weight: 400;
-    line-height: 20px;
+    /* 15px. The refresh drew a 13px base for density; on a real screen that
+       read as tiny, so the whole scale went up a step. Weight 450 and the
+       slight negative tracking keep Figtree from reading loose. */
+    font-size: 16px;
+    font-weight: 450;
+    line-height: 1.55;
+    letter-spacing: -0.005em;
   }
   html {
     @apply font-sans;
@@ -272,15 +439,98 @@
   }
 }
 
-@keyframes marquee {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
+/* The marketing gradient. Exposed as a utility so it stops being reachable
+   only from an inline `style` attribute. */
+@utility bg-brand-gradient {
+  background-image: var(--brand-gradient);
 }
 
-@utility animate-marquee {
-  animation: marquee 40s linear infinite;
+/* --- surface grades -------------------------------------------------------
+   Layered OVER a background colour, never instead of one: `bg-card grade-surface`.
+   Splitting them this way means a surface keeps a valid solid colour if the
+   gradient is ever unsupported, and lets a caller change the tint without
+   restating the grade. */
+/* --- surface grades -------------------------------------------------------
+   NAMED `grade-*`, NOT `bg-*`, AND THAT IS LOAD-BEARING.
+
+   `cn()` is tailwind-merge, which groups every `bg-…` class as one conflicting
+   property and keeps only the last. While these were called `bg-surface`,
+   `bg-raised` and `bg-chip`, writing `bg-card bg-surface` silently resolved to
+   `bg-surface` alone — the colour token was thrown away on every panel, button,
+   chip and icon tile in the app. Where the grade happened to be a similar
+   colour nothing looked broken, which is exactly why it went unnoticed; where
+   it did not, `bg-accent grade-chip` lost its accent fill outright.
+
+   tailwind-merge does not recognise the `grade-` prefix, so both classes now
+   survive. Do not rename these back into the `bg-` namespace. */
+@utility grade-surface {
+  background-image: var(--gradient-surface);
+}
+@utility grade-raised {
+  background-image: var(--gradient-raised);
+}
+@utility grade-primary {
+  background-image: var(--gradient-primary);
+}
+/* A soft wash over a chip or icon tile — keeps its own fill colour showing
+   through, so it composes with every status tone. */
+@utility grade-chip {
+  background-image: var(--gradient-chip);
+}
+/* The app's light source. One element, at the top of the content area. */
+@utility grade-ambient {
+  background-image: var(--gradient-ambient);
+}
+
+/* --- client-facing surfaces ----------------------------------------------
+   `/f/[slug]`, `/approve/[token]` and `/feedback/[token]`.
+
+   WCAG 2.2 §2.5.8 asks for 24px targets; the design system asks for 44 on the
+   pages a CLIENT sees, and it is right to: those readers get one shot, are
+   often on a phone, and carry the whole value of Gate 3. The internal control
+   scale — a 30px button, a 32px field — is tuned for an operator working a
+   queue on a desktop all day and is far too small here.
+
+   Applied once on each page's <main> rather than passed at ~19 call sites,
+   which is how a size prop gets forgotten on the one control that mattered.
+   It keys off the `data-slot` attributes the primitives already set, so it
+   cannot drift from them.
+
+   In `@layer utilities` and last in the file on purpose: these selectors are
+   (0,2,0), which beats a bare `h-8` (0,1,0) outright, and ties with Base UI's
+   `data-[size=default]:h-8` — where being later in source order is what wins.
+   Moving this block earlier would silently stop the select triggers growing. */
+@layer utilities {
+  .client-surface [data-slot="button"] {
+    height: 2.75rem;
+    padding-inline: 1rem;
+    border-radius: var(--radius-lg);
+    font-size: var(--text-base);
+  }
+  .client-surface [data-slot="input"],
+  .client-surface [data-slot="select-trigger"] {
+    height: 2.75rem;
+    border-radius: var(--radius-lg);
+    font-size: var(--text-base);
+  }
+  .client-surface [data-slot="textarea"] {
+    min-height: 6rem;
+    border-radius: var(--radius-lg);
+    font-size: var(--text-base);
+  }
+  /* A checkbox or radio cannot grow without wrecking the row it sits in, so it
+     keeps its size and gains the hit area instead. */
+  .client-surface [data-slot="checkbox"],
+  .client-surface [data-slot="radio"] {
+    position: relative;
+  }
+  .client-surface [data-slot="checkbox"]::before,
+  .client-surface [data-slot="radio"]::before {
+    content: "";
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: 2.75rem;
+    height: 2.75rem;
+    transform: translate(-50%, -50%);
+  }
 }

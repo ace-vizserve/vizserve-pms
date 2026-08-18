@@ -10,6 +10,7 @@ import { TaskStatusBadge, isTaskStatus } from "@/components/status-badge";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
+import { QueryError } from "@/components/query-error";
 import { buttonVariants } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/server";
 
@@ -74,7 +75,7 @@ export default async function TasksPage({
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
 
-  const [{ data: tasks }, { data: people }, { data: lists }] = await Promise.all([
+  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }] = await Promise.all([
     query,
     supabase.from("vizserve_pms_users").select("id, full_name"),
     supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
@@ -161,10 +162,14 @@ export default async function TasksPage({
         rows={rows}
         getRowKey={(task) => task.id}
         empty={
-          /* Two messages, because the two ways of arriving here need different
-             next steps: a filter that is too narrow needs loosening, an empty
-             list needs explaining. */
-          isFiltered ? (
+          /* Three messages now, because there are three ways of arriving here
+             and only two of them are somebody's fault: a filter that is too
+             narrow needs loosening, an empty list needs explaining, and a
+             failed query needs saying out loud rather than being dressed up as
+             either of the others. */
+          tasksError ? (
+            <QueryError what="tasks" message={tasksError.message} />
+          ) : isFiltered ? (
             <EmptyState
               icon={<ListChecks />}
               title={

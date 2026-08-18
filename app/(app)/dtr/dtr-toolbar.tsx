@@ -93,7 +93,7 @@ export function DtrToolbar({
       minimum at 140px, and two of them side by side in a 19rem column is how
       you get a clipped picker on Windows.
     */
-    <div className="flex flex-col gap-2 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
+    <div className="flex flex-col gap-2 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
       <div className="space-y-1">
         <Label htmlFor="dtr-from" className="text-xs text-muted-foreground">
           From

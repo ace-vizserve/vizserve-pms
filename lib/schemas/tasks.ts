@@ -34,15 +34,68 @@ export const taskStatusSchema = z.enum(TASK_STATUSES);
 /** Who is entitled to make a given move. */
 export type TransitionActor = "pic" | "qa" | "client" | "system";
 
+/**
+ * Where a task came from, which decides how it is allowed to finish.
+ *
+ * Three kinds of work go through one table:
+ *
+ *   request   a shared form, approved by the TL at Gate 1 → the client signs off
+ *   internal  the TL made it by hand → the QA reviewer closes it
+ *   personal  the member made it for themselves → they close it
+ *
+ * `personal` is a subset of "has no request": every personal task is internal
+ * work, but not every internal task is personal. `is_personal` is a stored
+ * column rather than something derived from who the assignee is, because a
+ * reassignment would otherwise silently change a task's category — and with it
+ * which moves are legal to it.
+ */
+export type TaskCategory = "request" | "internal" | "personal";
+
+/** Which categories a transition applies to. `any` means all three. */
+export type TransitionScope = "any" | TaskCategory;
+
 export type Transition = {
   from: TaskStatus;
   to: TaskStatus;
   actor: TransitionActor;
   /** 'resolution' — the task's own field must be non-empty. 'comment' — supply one. */
   requires: "resolution" | "comment" | null;
+  /** Mirrors `vizserve_pms_task_transitions.applies_to`. */
+  appliesTo: TransitionScope;
   /** The button, from the acting person's point of view. */
   label: string;
 };
+
+/**
+ * The category of a task, from the two columns that record it.
+ *
+ * One definition, used by `availableTransitions` and by every screen that
+ * labels a task — the SQL side asks the same question inside
+ * `vizserve_pms_transition_task`, and these two must agree.
+ */
+export function taskCategory(task: {
+  request_id: string | null;
+  is_personal: boolean;
+}): TaskCategory {
+  if (task.request_id !== null) return "request";
+  return task.is_personal ? "personal" : "internal";
+}
+
+/** Human labels for the three. Shown on the task list and detail. */
+export const TASK_CATEGORY_LABELS: Record<TaskCategory, string> = {
+  request: "Client request",
+  internal: "Assigned to you",
+  personal: "Personal",
+};
+
+/** Does a transition apply to a task of this category? */
+export function scopeAllows(scope: TransitionScope, category: TaskCategory): boolean {
+  if (scope === "any") return true;
+  // `internal` covers personal work too — a personal task is internal work
+  // whose owner happens to be allowed to close it directly as well.
+  if (scope === "internal") return category !== "request";
+  return scope === category;
+}
 
 /**
  * The whole legal set. Anything absent from this list is rejected server-side.
@@ -53,39 +106,137 @@ export type Transition = {
  * the word "Completed" means nothing, which breaks every Phase 6 report.
  */
 export const TASK_TRANSITIONS: readonly Transition[] = [
-  { from: "OPEN", to: "ONGOING", actor: "pic", requires: null, label: "Start work" },
+  { from: "OPEN", to: "ONGOING", actor: "pic", requires: null, appliesTo: "any", label: "Start work" },
   {
     from: "ONGOING",
     to: "WAITING_FOR_INFO",
     actor: "pic",
     requires: "comment",
+    appliesTo: "any",
     label: "Waiting for info",
   },
-  { from: "WAITING_FOR_INFO", to: "ONGOING", actor: "pic", requires: null, label: "Resume work" },
+  {
+    from: "WAITING_FOR_INFO",
+    to: "ONGOING",
+    actor: "pic",
+    requires: null,
+    appliesTo: "any",
+    label: "Resume work",
+  },
   // The resolution gate (P3-07). Enforced by the database, not by this label.
-  { from: "ONGOING", to: "FOR_QA", actor: "pic", requires: "resolution", label: "Send for QA" },
-  { from: "FOR_QA", to: "QA_IN_PROGRESS", actor: "qa", requires: null, label: "Start review" },
+  {
+    from: "ONGOING",
+    to: "FOR_QA",
+    actor: "pic",
+    requires: "resolution",
+    appliesTo: "any",
+    label: "Send for QA",
+  },
+  // P7-02 — you made it for yourself, you close it. Still gated on a resolution:
+  // every other route to COMPLETED passes through FOR_QA, which demands one, and
+  // "every completed task says what was done" is what Phase 6 reporting reads.
+  {
+    from: "ONGOING",
+    to: "COMPLETED",
+    actor: "pic",
+    requires: "resolution",
+    appliesTo: "personal",
+    label: "Mark it done",
+  },
+  {
+    from: "FOR_QA",
+    to: "QA_IN_PROGRESS",
+    actor: "qa",
+    requires: null,
+    appliesTo: "any",
+    label: "Start review",
+  },
   {
     from: "QA_IN_PROGRESS",
     to: "ONGOING",
     actor: "qa",
     requires: "comment",
+    appliesTo: "any",
     label: "Send back to PIC",
   },
+  // Only work with a client goes to the client. Before P7-02 this was open to
+  // every task, and a request-less one arriving here stranded: the token issuer
+  // refuses it and there is no legal way back out.
   {
     from: "QA_IN_PROGRESS",
     to: "FOR_CLIENT_APPROVAL",
     actor: "qa",
     requires: null,
+    appliesTo: "request",
     label: "Pass QA",
+  },
+  // ...which is why internal work needs its own exit. Reviewed, and there is
+  // nobody outside to sign it off, so the reviewer closes it.
+  {
+    from: "QA_IN_PROGRESS",
+    to: "COMPLETED",
+    actor: "qa",
+    requires: null,
+    appliesTo: "internal",
+    label: "Pass QA and close",
+  },
+  // P7-06 — work with no client moves freely. Every one of these still goes
+  // through the state machine and still writes history; what changed is which
+  // moves are legal, not how they happen.
+  {
+    from: "ONGOING",
+    to: "OPEN",
+    actor: "pic",
+    requires: null,
+    appliesTo: "internal",
+    label: "Back to open",
+  },
+  {
+    from: "WAITING_FOR_INFO",
+    to: "OPEN",
+    actor: "pic",
+    requires: null,
+    appliesTo: "internal",
+    label: "Back to open",
+  },
+  {
+    from: "OPEN",
+    to: "WAITING_FOR_INFO",
+    actor: "pic",
+    requires: "comment",
+    appliesTo: "internal",
+    label: "Waiting for info",
+  },
+  {
+    from: "FOR_QA",
+    to: "ONGOING",
+    actor: "pic",
+    requires: null,
+    appliesTo: "internal",
+    label: "Take it back",
+  },
+  // Reopening. Only for work with no client — going behind a client's sign-off
+  // is what Gate 3's own return path is for.
+  {
+    from: "COMPLETED",
+    to: "ONGOING",
+    actor: "pic",
+    requires: null,
+    appliesTo: "internal",
+    label: "Reopen",
   },
   // Phase 4 owns these three. Present so the machine is complete; reachable in
   // Phase 3 only through an admin override.
+  //
+  // Left at `any` deliberately. `vizserve_pms_force_task_status` does not read
+  // this table, so a forced task can still land in FOR_CLIENT_APPROVAL — and
+  // scoping the EXITS would leave it there with no way out at all.
   {
     from: "FOR_CLIENT_APPROVAL",
     to: "ONGOING",
     actor: "client",
     requires: "comment",
+    appliesTo: "any",
     label: "Client rejected",
   },
   {
@@ -93,6 +244,7 @@ export const TASK_TRANSITIONS: readonly Transition[] = [
     to: "COMPLETED",
     actor: "client",
     requires: null,
+    appliesTo: "any",
     label: "Client approved",
   },
   {
@@ -100,6 +252,7 @@ export const TASK_TRANSITIONS: readonly Transition[] = [
     to: "COMPLETED_NO_RESPONSE",
     actor: "system",
     requires: null,
+    appliesTo: "any",
     label: "Auto-completed",
   },
 ] as const;
@@ -119,8 +272,15 @@ export function transitionsFrom(status: TaskStatus): Transition[] {
 export function availableTransitions(
   status: TaskStatus,
   viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
+  // Required, not optional. An optional third argument would let every existing
+  // call site keep compiling while silently offering buttons the server refuses
+  // — the exact failure this mirror exists to prevent.
+  task: { request_id: string | null; is_personal: boolean },
 ): Transition[] {
+  const category = taskCategory(task);
+
   return transitionsFrom(status).filter((transition) => {
+    if (!scopeAllows(transition.appliesTo, category)) return false;
     if (transition.actor === "pic") return viewer.isPic || viewer.leadsDepartment;
     if (transition.actor === "qa") return viewer.isQa || viewer.leadsDepartment;
     // The client and system rows belong to Phase 4's token flow.
@@ -179,6 +339,9 @@ export const taskDetailsSchema = z.object({
   due_date: z
     .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
     .default(""),
+  start_date: z
+    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+    .default(""),
   list_id: z.uuid().nullable().default(null),
 });
 
@@ -197,6 +360,54 @@ export const createTaskSchema = z.object({
 });
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
+
+/**
+ * P7-01 — a task somebody records for themselves.
+ *
+ * Deliberately NOT `createTaskSchema` with optional fields. There is no
+ * `department_id` and no `assignee_id` because neither is the caller's to
+ * choose: both are resolved server-side from the signed-in user's own record,
+ * so the question never reaches the client at all. A field that cannot be sent
+ * is a rule that cannot be bent — the same reasoning as the DTR punch schema,
+ * whose `in` branch has no `work_date` member.
+ */
+export const createPersonalTaskSchema = z.object({
+  title: z.string().trim().min(1, "What are you working on?").max(300),
+  description: z.string().trim().default(""),
+  due_date: z
+    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
+    .default(""),
+  list_id: z.uuid().nullable().default(null),
+});
+
+export type CreatePersonalTaskInput = z.infer<typeof createPersonalTaskSchema>;
+
+/**
+ * P7-08 — a comment on a task.
+ *
+ * No `author_id`. It is taken from the session on the server and the INSERT
+ * policy re-checks it against `auth.uid()`, so posting under somebody else's
+ * name is not a request the server can be talked into.
+ */
+export const taskCommentSchema = z.object({
+  body: z
+    .string()
+    .trim()
+    .min(1, "Say something.")
+    .max(4000, "Keep a comment under 4000 characters."),
+});
+
+export type TaskCommentInput = z.infer<typeof taskCommentSchema>;
+
+/**
+ * P7-09 — moving a task under a parent, or pulling it back out.
+ *
+ * `null` detaches. One level only, and the same department as the parent —
+ * both enforced by a trigger, because both need to read the parent row.
+ */
+export const taskParentSchema = z.object({
+  parent_task_id: z.uuid().nullable(),
+});
 
 export const listSchema = z.object({
   department_id: z.uuid("Choose a department."),

@@ -28,13 +28,13 @@ export function EmptyState({
 }) {
   return (
     <div
-      className={cn("flex flex-col items-center gap-4 py-16 text-center", className)}
+      className={cn("flex flex-col items-center gap-3.5 py-14 text-center", className)}
       // Not `role="status"`: this is static page content, not a live region.
       // Announcing it on every render would interrupt a screen reader mid-task.
     >
       {icon ? (
         <span
-          className="flex size-10 items-center justify-center rounded-full bg-muted text-muted-foreground [&_svg]:size-5"
+          className="flex size-12 items-center justify-center rounded-lg border bg-card grade-raised text-muted-foreground shadow-raised [&_svg]:size-6"
           aria-hidden
         >
           {icon}
@@ -42,7 +42,7 @@ export function EmptyState({
       ) : null}
 
       <div className="max-w-xs space-y-1">
-        <p className="text-sm font-semibold">{title}</p>
+        <p className="text-base font-semibold tracking-[-0.014em]">{title}</p>
         {description ? (
           <p className="text-xs leading-relaxed text-muted-foreground">{description}</p>
         ) : null}

@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { formatWeekRange, formatWeekday, startOfWeek, weekDates } from "@/lib/dates";
 import {
+  dayState,
   formatCellDuration,
   fromMinutes,
   parseCellDuration,
+  isWeekLocked,
   timesheetEntrySchema,
+  timesheetWeekDecisionSchema,
   toMinutes,
 } from "@/lib/schemas/timesheet";
 
@@ -111,10 +114,15 @@ describe("toMinutes — hours and minutes, never a decimal", () => {
 });
 
 describe("parseCellDuration — one field, in a grid", () => {
-  it("reads h:mm", () => {
-    expect(parseCellDuration("1:30")).toBe(90);
-    expect(parseCellDuration("0:45")).toBe(45);
-    expect(parseCellDuration("12:00")).toBe(720);
+  it("REFUSES the colon form rather than guessing at it", () => {
+    // `1:30` used to read as ninety minutes. It looks like a clock, so half the
+    // people typing it mean one-thirty and the other half mean a minute and
+    // thirty seconds. On a record that feeds approval and payroll, a format
+    // that is read backwards by anyone is worse than no format.
+    expect(parseCellDuration("1:30")).toBeNull();
+    expect(parseCellDuration("0:45")).toBeNull();
+    expect(parseCellDuration("12:00")).toBeNull();
+    expect(parseCellDuration("1:30:05")).toBeNull();
   });
 
   it("reads a bare number as HOURS, which is the whole ambiguity", () => {
@@ -144,11 +152,35 @@ describe("parseCellDuration — one field, in a grid", () => {
     expect(parseCellDuration("-1")).toBeNull();
     expect(parseCellDuration("1:75")).toBeNull();
     expect(parseCellDuration("::")).toBeNull();
+    // The scanner must CONSUME the string, not match a prefix of it. This is
+    // the case a non-sticky regex silently accepts as 60 minutes.
+    expect(parseCellDuration("1h banana")).toBeNull();
+    expect(parseCellDuration("90m!!")).toBeNull();
+  });
+
+  it("reads seconds, and says so in minutes because that is what it stores", () => {
+    expect(parseCellDuration("1h 30m 5s")).toBe(90);
+    expect(parseCellDuration("1h30m5s")).toBe(90);
+
+    // Accumulated in seconds and rounded ONCE. Rounding per unit would make
+    // these two disagree, and both are the same length of time.
+    expect(parseCellDuration("1h 30m 40s")).toBe(parseCellDuration("90m 40s"));
+
+    // Under half a minute has nowhere to go: the column is minutes.
+    expect(parseCellDuration("45s")).toBe(1);
+    expect(parseCellDuration("29s")).toBe(0);
+  });
+
+  it("accepts the long spellings people actually type", () => {
+    expect(parseCellDuration("1 hour 30 minutes")).toBe(90);
+    expect(parseCellDuration("2 hrs")).toBe(120);
+    expect(parseCellDuration("90 mins")).toBe(90);
+    expect(parseCellDuration("30 secs")).toBe(1);
   });
 
   it("refuses more than a day, which the CHECK constraint would refuse anyway", () => {
-    expect(parseCellDuration("24:00")).toBe(1440);
-    expect(parseCellDuration("24:01")).toBeNull();
+    expect(parseCellDuration("24h")).toBe(1440);
+    expect(parseCellDuration("24h 1m")).toBeNull();
     expect(parseCellDuration("25")).toBeNull();
   });
 
@@ -158,10 +190,11 @@ describe("parseCellDuration — one field, in a grid", () => {
     }
   });
 
-  it("formats zero-padded so a column lines up", () => {
-    expect(formatCellDuration(45)).toBe("0:45");
-    expect(formatCellDuration(60)).toBe("1:00");
-    expect(formatCellDuration(150)).toBe("2:30");
+  it("writes the same units it reads, so a cell can be retyped as shown", () => {
+    expect(formatCellDuration(45)).toBe("45m");
+    expect(formatCellDuration(60)).toBe("1h");
+    expect(formatCellDuration(150)).toBe("2h 30m");
+    expect(formatCellDuration(480)).toBe("8h");
   });
 });
 
@@ -198,5 +231,70 @@ describe("timesheetEntrySchema — task_id is the feature", () => {
   it("normalises a blank note to null, which is what the CHECK constraint wants", () => {
     const parsed = timesheetEntrySchema.parse({ ...valid, note: "   " });
     expect(parsed.note).toBeNull();
+  });
+});
+
+describe("dayState — advisory, and overtime raises the bar rather than removing it", () => {
+  it("says nothing about an empty day", () => {
+    expect(dayState(0)).toBe("empty");
+    expect(dayState(0, 120)).toBe("empty");
+  });
+
+  it("is normal right up to eight hours", () => {
+    expect(dayState(1)).toBe("normal");
+    expect(dayState(479)).toBe("normal");
+    expect(dayState(480)).toBe("normal");
+  });
+
+  it("flags the first minute past eight with no approval", () => {
+    expect(dayState(481)).toBe("over");
+    expect(dayState(600)).toBe("over");
+  });
+
+  it("reads as overtime while it stays inside what was approved", () => {
+    expect(dayState(481, 60)).toBe("overtime");
+    expect(dayState(540, 60)).toBe("overtime");
+  });
+
+  it("still flags the part nobody signed off", () => {
+    // 60 approved takes the bar to 9h. 9h01 is over it again.
+    expect(dayState(541, 60)).toBe("over");
+  });
+
+  it("treats approved overtime on a short day as irrelevant", () => {
+    expect(dayState(300, 240)).toBe("normal");
+  });
+});
+
+describe("isWeekLocked", () => {
+  it("locks a submitted or approved week and frees a returned one", () => {
+    expect(isWeekLocked("SUBMITTED")).toBe(true);
+    expect(isWeekLocked("APPROVED")).toBe(true);
+    expect(isWeekLocked("RETURNED")).toBe(false);
+    // No row at all is the draft state.
+    expect(isWeekLocked(null)).toBe(false);
+  });
+});
+
+describe("timesheetWeekDecisionSchema — approve or send back, never reject", () => {
+  it("takes an approval with no reason", () => {
+    expect(timesheetWeekDecisionSchema.safeParse({ decision: "approved" }).success).toBe(true);
+  });
+
+  it("demands a reason to send a week back", () => {
+    expect(timesheetWeekDecisionSchema.safeParse({ decision: "returned" }).success).toBe(false);
+    expect(
+      timesheetWeekDecisionSchema.safeParse({ decision: "returned", reason: "  " }).success,
+    ).toBe(false);
+    expect(
+      timesheetWeekDecisionSchema.safeParse({ decision: "returned", reason: "Tuesday is wrong" })
+        .success,
+    ).toBe(true);
+  });
+
+  it("has no rejected branch — hours worked are not rejectable", () => {
+    expect(
+      timesheetWeekDecisionSchema.safeParse({ decision: "rejected", reason: "no thanks" }).success,
+    ).toBe(false);
   });
 });

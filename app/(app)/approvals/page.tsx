@@ -9,8 +9,12 @@ import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
+import { QueryError } from "@/components/query-error";
 import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
 import { NewRequestDialog } from "./new-request-dialog";
+
+/** Rows rendered. The query asks for one more so the cap is detectable. */
+const APPROVALS_PAGE_SIZE = 200;
 import { requestDetail } from "./request-summary";
 
 export const metadata: Metadata = { title: "Approvals" };
@@ -108,13 +112,19 @@ export default async function ApprovalsPage() {
   const context = await requireAuthContext();
   const supabase = await createClient();
 
-  const { data } = await supabase
+  const { data, error: requestsError } = await supabase
     .from("vizserve_pms_internal_requests")
     .select("*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)")
     .order("created_at", { ascending: false })
-    .limit(200);
+    // One more than shown, so truncation is detectable. The list splits into
+    // "mine" and "pending on me" AFTER this, so a silent cap here does not just
+    // hide old rows — it can drop something out of somebody's approval queue
+    // with nothing on screen to say so.
+    .limit(APPROVALS_PAGE_SIZE + 1);
 
-  const rows = (data ?? []) as unknown as Row[];
+  const fetched = (data ?? []) as unknown as Row[];
+  const truncated = fetched.length > APPROVALS_PAGE_SIZE;
+  const rows = truncated ? fetched.slice(0, APPROVALS_PAGE_SIZE) : fetched;
   const mine = rows.filter((row) => row.requester_id === context.userId);
   // Everything visible that is not mine is, by RLS, something I lead the
   // department for. Pending ones are the queue; decided ones are history and
@@ -152,13 +162,23 @@ export default async function ApprovalsPage() {
         rows={mine}
         showWho={false}
         empty={
-          <EmptyState
-            icon={<Inbox />}
-            title="You have not submitted any requests"
-            description="Leave, a missed time in or out, and reimbursements all start here. Your department lead decides them — you cannot decide your own."
-          />
+          requestsError ? (
+            <QueryError what="your requests" message={requestsError.message} />
+          ) : (
+            <EmptyState
+              icon={<Inbox />}
+              title="You have not submitted any requests"
+              description="Leave, a missed time in or out, and reimbursements all start here. Your department lead decides them — you cannot decide your own."
+            />
+          )
         }
       />
+
+      {truncated ? (
+        <p className="text-xs text-muted-foreground">
+          Showing the most recent {APPROVALS_PAGE_SIZE}. Older requests are not listed.
+        </p>
+      ) : null}
     </PageShell>
   );
 }

@@ -36,7 +36,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const { data: task } = await supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, description, status, resolution, output_link, due_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, field_values, created_at",
+      "id, title, description, status, resolution, output_link, due_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, field_values, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -251,6 +251,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               (person) => person.primary_department_id === task.department_id,
             )}
             viewer={viewer}
+            task={{ request_id: task.request_id, is_personal: task.is_personal }}
           />
 
           {/* The output files belong with the work, not with the trail — they

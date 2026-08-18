@@ -82,7 +82,7 @@ export function PunchPanel({
     // p-3, matching the filter card and the summary directly beneath it in the
     // DTR rail. p-5 was the one padding in that column that lined up with
     // nothing, which is what made the rail read as three unrelated boxes.
-    <div className={compact ? "" : "rounded-xl bg-card p-3 ring-1 ring-foreground/10"}>
+    <div className={compact ? "" : "rounded-lg border bg-card grade-surface p-3 shadow-raised-lg"}>
       {!compact ? (
         <div className="mb-3">
           <h2 className="text-sm font-semibold">Today</h2>

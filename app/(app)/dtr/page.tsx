@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { Clock } from "lucide-react";
 
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
@@ -15,11 +16,19 @@ import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
+import { buttonVariants } from "@/components/ui/button";
+import { QueryError } from "@/components/query-error";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { DtrToolbar } from "./dtr-toolbar";
 import { PunchPanel } from "./punch-panel";
 
 export const metadata: Metadata = { title: "DTR" };
+
+/**
+ * How many rows the list renders. The query asks for one more, so truncation is
+ * detectable without a second count query.
+ */
+const DTR_PAGE_SIZE = 500;
 
 /**
  * P5-04 — the daily time record.
@@ -49,20 +58,52 @@ export default async function DtrPage({
   const to = params.to ?? today;
   const selectedUser = params.user ?? null;
 
+  // A range that runs backwards matches nothing, and "nothing" is exactly what
+  // an honestly empty record looks like — so the page has to say which it is.
+  // `dtrExportSchema` already refuses `to < from`; this is the screen catching
+  // up with the export rather than quietly disagreeing with it.
+  const rangeInverted = from > to;
+
   const isLead = roleAtLeast(context.role, "team_leader");
 
   const [punchState, entriesResult, peopleResult] = await Promise.all([
     loadPunchState(context.userId),
     (() => {
+      // ONE MORE THAN WE RENDER.
+      //
+      // The cap has to exist — an unbounded query over a whole department and
+      // an arbitrary date range is how a page falls over. But a silent cap on
+      // THIS page is worse than most, because the rail and the footer add up
+      // the rows that came back and present the result as "Total in range". A
+      // lead looking at sixteen people over thirty days is already near 480
+      // rows; past the cap the total quietly understates, and it is a payroll
+      // number.
+      //
+      // Asking for PAGE_SIZE + 1 makes truncation detectable without a second
+      // count query: if the extra row arrives, there is more than we are
+      // showing, and the screen has to say so rather than do arithmetic on a
+      // slice and call it a total.
       let query = supabase
         .from("vizserve_pms_dtr_entries")
+      // THE FK MUST BE NAMED. `vizserve_pms_dtr_entries` has TWO foreign keys
+      // to `vizserve_pms_users` — `user_id` and `corrected_by` — so an
+      // unqualified embed is ambiguous and PostgREST refuses the whole query
+      // with "more than one relationship was found".
+      //
+      // This shipped broken and looked empty for months: the page read
+      // `data ?? []` and rendered "No entries in this range", which is exactly
+      // what an empty record looks like. Naming the constraint is the fix;
+      // surfacing query errors (QueryError) is what made it visible.
+      //
+      // Left embed rather than `!inner`, for the same reason as the timesheet:
+      // a row whose person is out of scope should lose its name, not its hours.
         .select(
-          "id, work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!inner(full_name)",
+          "id, work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey(full_name)",
         )
         .gte("work_date", from)
         .lte("work_date", to)
         .order("work_date", { ascending: false })
-        .limit(500);
+        .limit(DTR_PAGE_SIZE + 1);
 
       if (selectedUser) query = query.eq("user_id", selectedUser);
       return query;
@@ -89,7 +130,11 @@ export default async function DtrPage({
     vizserve_pms_users: { full_name: string } | null;
   };
 
-  const entries = (entriesResult.data ?? []) as unknown as Entry[];
+  const fetched = (entriesResult.data ?? []) as unknown as Entry[];
+  // The extra row is a signal, not data. Drop it before anything is counted.
+  const truncated = fetched.length > DTR_PAGE_SIZE;
+  const entries = truncated ? fetched.slice(0, DTR_PAGE_SIZE) : fetched;
+
   const people = peopleResult.data ?? [];
   const showPerson = isLead && !selectedUser;
 
@@ -210,6 +255,21 @@ export default async function DtrPage({
             canExport={isLead}
           />
 
+          {/* Said before the numbers, not after them. Somebody reading a total
+              that covers only part of the range needs to know that before they
+              act on it — and the CSV export is not capped, so the export and
+              this screen will disagree until the range is narrowed. */}
+          {truncated ? (
+            <p
+              role="status"
+              className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
+            >
+              More than {DTR_PAGE_SIZE} records match this range, so the list and the totals below
+              cover only the most recent {DTR_PAGE_SIZE}. Narrow the dates, or pick one person, to
+              see the rest. Export gives you the whole range.
+            </p>
+          ) : null}
+
           {/* What fills the rest of the rail. The table already totals itself in
               a footer row, but that footer is at the bottom of thirty rows —
               which is no use to the person who opened this page to find out how
@@ -218,13 +278,15 @@ export default async function DtrPage({
               Only when there is something to summarise: four dashes under an
               empty table is furniture, not information. */}
           {entries.length > 0 ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 rounded-xl bg-card p-3 ring-1 ring-foreground/10">
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
               <div>
                 <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Records</dt>
                 <dd className="mt-0.5 text-sm font-semibold tabular-nums">{entries.length}</dd>
               </div>
               <div>
-                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Total</dt>
+                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+                  {truncated ? "Total shown" : "Total"}
+                </dt>
                 <dd className="mt-0.5 text-sm font-semibold tabular-nums">
                   {formatDuration(totalMinutes)}
                 </dd>
@@ -299,6 +361,28 @@ export default async function DtrPage({
           rows={entries}
           getRowKey={(entry) => entry.id}
           empty={
+            entriesResult.error ? (
+              <QueryError what="your time record" message={entriesResult.error.message} />
+            ) : 
+            rangeInverted ? (
+              // Deliberately NOT swapped behind their back. Silently answering a
+              // different question than the one asked is how somebody ends up
+              // trusting a range they never set.
+              <EmptyState
+                className="py-10"
+                icon={<Clock />}
+                title="That range runs backwards"
+                description={`From is ${formatDate(from)} and To is ${formatDate(to)}, so no day can fall inside it. This is not an empty record — swap the two dates to see what is there.`}
+                action={
+                  <Link
+                    href={`/dtr?from=${to}&to=${from}${selectedUser ? `&user=${selectedUser}` : ""}`}
+                    className={buttonVariants({ variant: "outline", size: "sm" })}
+                  >
+                    Swap the dates
+                  </Link>
+                }
+              />
+            ) : (
             <EmptyState
               // No min-height of its own any more. The table above is stretched
               // to the card while the list is empty, and TableCell's
@@ -309,11 +393,12 @@ export default async function DtrPage({
               title="No entries in this range"
               description="Days with no punch have no row at all. Widen the date range first; if a day is genuinely missing that should not be, raise a No Time-In request from Approvals."
             />
+            )
           }
           footer={
             <TableRow className="hover:bg-transparent">
               <TableHead scope="row" colSpan={columns.length - 1}>
-                Total in range
+                {truncated ? `Total of the first ${DTR_PAGE_SIZE} shown` : "Total in range"}
               </TableHead>
               <TableCell className="font-semibold tabular-nums">
                 {formatDuration(totalMinutes)}

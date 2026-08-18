@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { MessageSquareText, Plus, Trash2 } from "lucide-react";
+import { AlignLeft, Clock, MessageSquareText, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -91,13 +91,16 @@ export function CellDetail({
           </ul>
         ) : null}
 
-        <AddEntry taskId={taskId} day={day} />
-
+        {/* Above the form, not below it. `AddEntry` is pulled out to the
+            popover's edges, so anything after it would sit under a full-bleed
+            card and read as a footnote to the wrong thing. */}
         {split ? (
           <p className="text-2xs text-muted-foreground">
             The cell shows the total of these. Edit them here.
           </p>
         ) : null}
+
+        <AddEntry taskId={taskId} day={day} />
       </PopoverContent>
     </Popover>
   );
@@ -164,7 +167,7 @@ function EntryRow({ entry, taskId, day }: { entry: CellEntry; taskId: string; da
         value={duration}
         disabled={pending}
         aria-label="Length"
-        className="h-8 w-16 text-center tabular-nums"
+        className="h-9 w-18 text-center tabular-nums"
         onChange={(event) => setDuration(event.target.value)}
         onBlur={save}
       />
@@ -173,7 +176,7 @@ function EntryRow({ entry, taskId, day }: { entry: CellEntry; taskId: string; da
         disabled={pending}
         placeholder="Note"
         aria-label="Note"
-        className="h-8 flex-1"
+        className="h-9 flex-1"
         onChange={(event) => setNote(event.target.value)}
         onBlur={save}
       />
@@ -199,6 +202,43 @@ function EntryRow({ entry, taskId, day }: { entry: CellEntry; taskId: string; da
   );
 }
 
+/**
+ * What the field understood, in words.
+ *
+ * Kept beside the form rather than inside `parseCellDuration` because the
+ * parser is the CONTRACT — it returns minutes or null and is shared with the
+ * server action. This is presentation, and it is the only place that knows the
+ * difference between "nothing typed yet" and "typed something that rounds to
+ * nothing", which the parser deliberately collapses to 0.
+ */
+function describeDuration(raw: string): { text: string; tone: "ok" | "error" } {
+  const minutes = parseCellDuration(raw);
+
+  if (minutes === null) {
+    // A colon is the one wrong answer worth naming, because it used to work and
+    // because it is the reason it no longer does: `1:30` reads as one-thirty to
+    // half the people who type it. Guess at what they meant rather than making
+    // them work it out.
+    const colon = /^(\d{1,2})\s*:\s*([0-5]?\d)$/.exec(raw.trim());
+    if (colon) {
+      return {
+        text: `Times are written in units now. Did you mean ${colon[1]}h ${Number(colon[2])}m?`,
+        tone: "error",
+      };
+    }
+
+    return { text: "Not a length of time. Try 1h 30m, 90m or 1.5.", tone: "error" };
+  }
+
+  // The parser returns 0 for an empty field AND for `20s`. Only the second is
+  // worth saying anything about, and the caller has already checked for a blank.
+  if (minutes === 0) {
+    return { text: "Under a minute — too short to record.", tone: "error" };
+  }
+
+  return { text: `= ${formatCellDuration(minutes)}`, tone: "ok" };
+}
+
 /** Splitting one task's day into two entries, because the notes differ. */
 function AddEntry({ taskId, day }: { taskId: string; day: string }) {
   const router = useRouter();
@@ -210,7 +250,7 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
     const minutes = parseCellDuration(duration);
 
     if (minutes === null || minutes === 0) {
-      toast.error("How long was it? Try 1:30, 90m or 1.5.");
+      toast.error("How long was it? Try 1h 30m, 90m or 1.5.");
       return;
     }
 
@@ -233,29 +273,80 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
     });
   }
 
+  const preview = describeDuration(duration);
+
   return (
-    <div className="flex items-center gap-1.5 border-t pt-2">
+    <div className="-mx-2.5 -mb-2.5 border-t">
+      {/*
+        The time field leads, full width and unadorned — it is the only thing
+        most people came here to type, and the example in the placeholder is the
+        documentation. The formats are OURS (`parseCellDuration`): 1h 30m 5s,
+        1h 30m 5s, 90m and 1.5 all parse, and a bare number is hours.
+      */}
       <Input
         value={duration}
         disabled={pending}
-        placeholder="0:30"
+        placeholder="Enter time — 1h 30m 5s, 90m or 1.5"
         aria-label="Length of the new entry"
-        className="h-8 w-16 text-center tabular-nums"
+        className="h-11 rounded-none border-x-0 border-t-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0"
         onChange={(event) => setDuration(event.target.value)}
-      />
-      <Input
-        value={note}
-        disabled={pending}
-        placeholder="Note"
-        aria-label="Note for the new entry"
-        className="h-8 flex-1"
-        onChange={(event) => setNote(event.target.value)}
         onKeyDown={(event) => event.key === "Enter" && add()}
       />
-      <Button variant="ghost" size="icon-xs" loading={pending} onClick={add}>
-        <Plus />
-        <span className="sr-only">Add another entry to this day</span>
-      </Button>
+
+      {/*
+        What it understood, echoed back as you type.
+
+        The parser accepts several spellings of the same length of time, so the
+        only way to know it read `1h 30m 5s` the way you meant is to be shown.
+        It also says when seconds fall off — the column stores minutes, and
+        silently discarding part of what somebody typed into a payroll record is
+        the failure this whole field exists to avoid.
+
+        `aria-live="polite"` because it changes under the cursor while typing;
+        polite waits for a pause rather than interrupting every keystroke.
+      */}
+      {duration.trim() ? (
+        <p
+          aria-live="polite"
+          className={cn(
+            "border-b px-3 py-1.5 text-xs",
+            preview.tone === "error" ? "text-destructive" : "text-muted-foreground",
+          )}
+        >
+          {preview.text}
+        </p>
+      ) : null}
+
+      {/* Icon-led rows, the shape the team already reads in ClickUp. The date is
+          a statement, not a control: the cell you opened decides it, and a date
+          picker here would let somebody file an hour on a day they are not
+          looking at. */}
+      <div className="flex items-center gap-2.5 border-b px-3 py-2 text-sm text-foreground-muted">
+        <Clock className="size-4 shrink-0 text-foreground-faint" aria-hidden />
+        <span>
+          {formatWeekday(day)} · {formatDate(day)}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-2.5 px-3">
+        <AlignLeft className="size-4 shrink-0 text-foreground-faint" aria-hidden />
+        <Input
+          value={note}
+          disabled={pending}
+          placeholder="Notes"
+          aria-label="Note for the new entry"
+          className="h-10 rounded-none border-0 bg-transparent px-0 shadow-none focus-visible:ring-0"
+          onChange={(event) => setNote(event.target.value)}
+          onKeyDown={(event) => event.key === "Enter" && add()}
+        />
+      </div>
+
+      <div className="flex items-center justify-end border-t bg-muted/40 px-3 py-2">
+        <Button size="sm" loading={pending} onClick={add}>
+          <Plus />
+          Add entry
+        </Button>
+      </div>
     </div>
   );
 }

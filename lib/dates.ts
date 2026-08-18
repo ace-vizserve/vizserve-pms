@@ -282,6 +282,24 @@ export function addBusinessDays(value: string, days: number): string | null {
  */
 export const MAX_SHIFT_HOURS = 18;
 
+/**
+ * A standard working day, in minutes.
+ *
+ * A **display threshold, not an enforcement one.** Nothing in this system
+ * refuses a nine-hour day — the only hard ceiling is the database's 1440
+ * minutes per person per day. This is the number the timesheet colours against,
+ * and the point past which a day wants either approved overtime or a second
+ * look.
+ *
+ * Lives here rather than in `schemas/timesheet.ts` because it is a fact about
+ * the working day, not about a timesheet entry — the DTR and the payroll export
+ * both have a claim on it.
+ *
+ * There is deliberately no weekly equivalent. A 40-hour constant would mean
+ * deciding whether Saturday counts, and nobody has answered that.
+ */
+export const STANDARD_DAY_MINUTES = 480;
+
 /** Yesterday in app time, as `YYYY-MM-DD`. */
 export function yesterdayInAppZone(): string {
   return addDays(todayInAppZone(), -1)!;

@@ -3,7 +3,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Loading() {
   return (
-    <PageShell className="mx-auto w-full max-w-3xl">
+    <PageShell>
       <div className="flex items-center justify-between gap-4" aria-hidden>
         <Skeleton className="h-3 w-20" />
         <Skeleton className="h-7 w-28" />
@@ -11,7 +11,7 @@ export default function Loading() {
 
       {/* A list, not a table — mirroring the real divided card. */}
       <ul
-        className="divide-y overflow-hidden rounded-xl bg-card ring-1 ring-foreground/10"
+        className="divide-y overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg"
         aria-hidden
       >
         {Array.from({ length: 6 }, (_, index) => (

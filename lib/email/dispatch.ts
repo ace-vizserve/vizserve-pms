@@ -68,6 +68,13 @@ const PRESENTATION: Record<
     subject: (title) => `Your request — ${title}`,
     action: "Open the request",
   },
+  // Also email-off (P7-08 seeds send_email = false). Discussion on a shared task
+  // is not an interruption, and a mailbox copy of every comment is the fastest
+  // way to teach people to filter this system into a folder they never open.
+  commented: {
+    subject: (title) => title,
+    action: "Open the task",
+  },
 };
 
 export type DispatchSummary = {
