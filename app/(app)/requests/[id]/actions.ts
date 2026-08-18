@@ -107,7 +107,8 @@ export async function decideOnRequest(
 
     revalidatePath("/requests");
     revalidatePath(`/requests/${requestId}`);
-    revalidatePath("/dashboard");
+    revalidatePath("/");
+  revalidatePath("/dashboard");
 
     return { ok: true, data: { taskId: result.data.task_id, status: "APPROVED" } };
   }
@@ -161,6 +162,7 @@ export async function decideOnRequest(
 
   revalidatePath("/requests");
   revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/");
   revalidatePath("/dashboard");
 
   return { ok: true, data: { status: decided.status } };

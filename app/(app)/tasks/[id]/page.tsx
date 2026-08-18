@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowRight } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { TASK_STATUS_LABELS, isTerminal } from "@/lib/schemas/tasks";
-import { TaskStatusBadge } from "@/components/status-badge";
+import { Chip, TaskStatusBadge } from "@/components/status-badge";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -50,35 +50,35 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     { data: request },
     { data: outputs },
   ] = await Promise.all([
-      supabase
-        .from("vizserve_pms_task_status_history")
-        .select("id, from_status, to_status, actor_id, comment, is_override, created_at")
-        .eq("task_id", id)
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("vizserve_pms_users")
-        .select("id, full_name, primary_department_id")
-        .eq("is_active", true)
-        .order("full_name"),
-      supabase
-        .from("vizserve_pms_lists")
-        .select("id, name")
-        .eq("department_id", task.department_id)
-        .eq("is_active", true)
-        .order("name"),
-      task.request_id
-        ? supabase
-            .from("vizserve_pms_requests")
-            .select("id, reference_no, requester_name, requester_email, target_date, form_id")
-            .eq("id", task.request_id)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      supabase
-        .from("vizserve_pms_task_attachments")
-        .select("id, filename, mime_type, size_bytes, uploaded_by")
-        .eq("task_id", id)
-        .order("created_at"),
-    ]);
+    supabase
+      .from("vizserve_pms_task_status_history")
+      .select("id, from_status, to_status, actor_id, comment, is_override, created_at")
+      .eq("task_id", id)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("vizserve_pms_users")
+      .select("id, full_name, primary_department_id")
+      .eq("is_active", true)
+      .order("full_name"),
+    supabase
+      .from("vizserve_pms_lists")
+      .select("id, name")
+      .eq("department_id", task.department_id)
+      .eq("is_active", true)
+      .order("name"),
+    task.request_id
+      ? supabase
+          .from("vizserve_pms_requests")
+          .select("id, reference_no, requester_name, requester_email, target_date, form_id")
+          .eq("id", task.request_id)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
+    supabase
+      .from("vizserve_pms_task_attachments")
+      .select("id, filename, mime_type, size_bytes, uploaded_by")
+      .eq("task_id", id)
+      .order("created_at"),
+  ]);
 
   // The originating form's fields, including archived ones — a historical answer
   // must keep rendering with its label after the field is retired (D20/R5).
@@ -289,20 +289,31 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                   {history.map((entry) => (
                     <li key={entry.id} className="border-l-2 pl-2.5 text-sm">
                       <div className="flex flex-wrap items-baseline gap-x-2">
-                        <span className="font-medium">
-                          {entry.from_status
-                            ? `${TASK_STATUS_LABELS[entry.from_status]} → ${TASK_STATUS_LABELS[entry.to_status]}`
-                            : `Created as ${TASK_STATUS_LABELS[entry.to_status]}`}
+                        {/* An icon, never a typed arrow. A glyph in a text run
+                            inherits the font's metrics and sits off the
+                            baseline; `ArrowRight` is sized and aligned with the
+                            words either side of it, and it is `aria-hidden`
+                            because "Ongoing For QA" already reads as a move to
+                            anyone listening rather than looking. */}
+                        <span className="flex flex-wrap items-center gap-1.5 font-medium">
+                          {entry.from_status ? (
+                            <>
+                              {TASK_STATUS_LABELS[entry.from_status]}
+                              <ArrowRight
+                                className="size-3.5 shrink-0 text-foreground-faint"
+                                aria-hidden
+                              />
+                              {TASK_STATUS_LABELS[entry.to_status]}
+                            </>
+                          ) : (
+                            `Created as ${TASK_STATUS_LABELS[entry.to_status]}`
+                          )}
                         </span>
                         {/* An override that reads like an ordinary step is an
                             override that destroys the trail it appears in. */}
-                        {entry.is_override ? (
-                          <span className="rounded-full bg-warning-subtle px-2 py-0.5 text-2xs font-medium text-warning">
-                            Forced
-                          </span>
-                        ) : null}
+                        {entry.is_override ? <Chip tone="warning" label="Forced" /> : null}
                         <span className="text-xs text-muted-foreground">
-                          {entry.actor_id ? nameOf.get(entry.actor_id) ?? "Someone" : "System"}
+                          {entry.actor_id ? (nameOf.get(entry.actor_id) ?? "Someone") : "System"}
                           {" · "}
                           {formatDateTime(entry.created_at)}
                         </span>

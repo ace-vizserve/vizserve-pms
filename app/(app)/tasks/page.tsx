@@ -1,21 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { LayoutGrid, ListChecks } from "lucide-react";
+import { ListChecks } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
-import { isTerminal } from "@/lib/schemas/tasks";
-import { TaskStatusBadge, isTaskStatus } from "@/components/status-badge";
+import { INITIAL_TASK_STATUS, TASK_STATUSES, isTerminal } from "@/lib/schemas/tasks";
+import { isTaskStatus } from "@/components/status-badge";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
-import { buttonVariants } from "@/components/ui/button";
 import { createClient } from "@/utils/supabase/server";
 
 import { TaskFilters } from "./filters";
 import { NewTaskButton } from "./new-task-button";
+import { TaskStatusGroup } from "./status-group";
+import { TaskToolbar } from "./toolbar";
 
 export const metadata: Metadata = { title: "Tasks" };
 
@@ -24,6 +25,7 @@ type TaskRow = {
   title: string;
   status: VizservePmsTaskStatus;
   due_date: string | null;
+  start_date: string | null;
   assignee_id: string | null;
   qa_assignee_id: string | null;
   list_id: string | null;
@@ -42,9 +44,18 @@ type TaskRow = {
  * The `mine` view is the one exception, and it is not a scope filter: it narrows
  * within what you can already see, to the work that is yours to move.
  *
- * No <h1>. The shell breadcrumb is the page label, and the view tabs already say
- * which slice of the list you are looking at — a heading that repeated "Waiting
- * on my QA" would be a second, staler copy of the same fact.
+ * GROUPED BY STAGE, not one flat table. The list and the board are the same
+ * picture in two shapes — a board column and a list group are the same set of
+ * tasks under the same heading — and grouping is what makes "how much is sitting
+ * in QA" answerable without reading every row. Each group collapses, so the
+ * stages nobody is working on today cost one line instead of a screenful.
+ *
+ * There is no Status COLUMN any more, and that is the point: inside a group the
+ * status is a constant, so a column of identical pills would be eleven copies of
+ * the heading. The group header carries the chip, the glyph and the label.
+ *
+ * No <h1>. The shell breadcrumb is the page label, and the toolbar already says
+ * which slice of the list you are looking at.
  */
 export default async function TasksPage({
   searchParams,
@@ -60,7 +71,7 @@ export default async function TasksPage({
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, status, due_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, resolution",
+      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, resolution",
     )
     // Nearest deadline first; undated work sinks rather than leading the queue.
     .order("due_date", { ascending: true, nullsFirst: false })
@@ -75,11 +86,13 @@ export default async function TasksPage({
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
 
-  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }] = await Promise.all([
-    query,
-    supabase.from("vizserve_pms_users").select("id, full_name"),
-    supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
-  ]);
+  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }] = await Promise.all(
+    [
+      query,
+      supabase.from("vizserve_pms_users").select("id, full_name"),
+      supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
+    ],
+  );
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
   const listName = new Map((lists ?? []).map((list) => [list.id, list.name]));
@@ -87,11 +100,31 @@ export default async function TasksPage({
   const rows = (tasks ?? []) as TaskRow[];
   const isFiltered = Boolean(params.status || params.list) || view !== "all";
 
+  const grouped = new Map<VizservePmsTaskStatus, TaskRow[]>(
+    TASK_STATUSES.map((status) => [status, [] as TaskRow[]]),
+  );
+  for (const task of rows) grouped.get(task.status)?.push(task);
+
+  /**
+   * Which headings to draw.
+   *
+   * A group is worth an empty heading only where a task could legitimately have
+   * landed: it tells you the stage is clear rather than leaving you to wonder
+   * whether the page failed to load it. So the set follows the FILTERS, not the
+   * results — one group under a status filter, the two QA stages in the QA view,
+   * and the full workflow otherwise.
+   */
+  const visibleStatuses: readonly VizservePmsTaskStatus[] = isTaskStatus(params.status)
+    ? [params.status]
+    : view === "qa"
+      ? (["FOR_QA", "QA_IN_PROGRESS"] as const)
+      : TASK_STATUSES;
+
   const columns: Column<TaskRow>[] = [
     {
       key: "task",
       header: "Task",
-      className: "max-w-sm",
+      className: "max-w-sm whitespace-normal",
       cell: (task) => (
         <>
           <Link href={`/tasks/${task.id}`} className="font-medium hover:underline">
@@ -107,21 +140,22 @@ export default async function TasksPage({
       ),
     },
     {
-      key: "status",
-      header: "Status",
-      cell: (task) => <TaskStatusBadge status={task.status} />,
-    },
-    {
       key: "pic",
       header: "PIC",
       className: "hidden md:table-cell text-muted-foreground",
-      cell: (task) => (task.assignee_id ? nameOf.get(task.assignee_id) ?? "—" : "Unassigned"),
+      cell: (task) => (task.assignee_id ? (nameOf.get(task.assignee_id) ?? "—") : "Unassigned"),
     },
     {
       key: "qa",
       header: "QA",
       className: "hidden lg:table-cell text-muted-foreground",
-      cell: (task) => (task.qa_assignee_id ? nameOf.get(task.qa_assignee_id) ?? "—" : "—"),
+      cell: (task) => (task.qa_assignee_id ? (nameOf.get(task.qa_assignee_id) ?? "—") : "—"),
+    },
+    {
+      key: "start",
+      header: "Start",
+      className: "hidden lg:table-cell whitespace-nowrap text-muted-foreground",
+      cell: (task) => formatDate(task.start_date),
     },
     {
       key: "due",
@@ -147,29 +181,26 @@ export default async function TasksPage({
 
   return (
     <PageShell>
-      <div className="flex flex-wrap items-center justify-end gap-2">
-        <Link href="/tasks/board" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          <LayoutGrid />
-          Board view
-        </Link>
-        <NewTaskButton />
+      <div className="flex flex-wrap items-center gap-2">
+        <TaskToolbar view="list" />
+        <div className="ml-auto">
+          <NewTaskButton />
+        </div>
       </div>
 
       <TaskFilters lists={lists ?? []} />
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        getRowKey={(task) => task.id}
-        empty={
-          /* Three messages now, because there are three ways of arriving here
-             and only two of them are somebody's fault: a filter that is too
-             narrow needs loosening, an empty list needs explaining, and a
-             failed query needs saying out loud rather than being dressed up as
-             either of the others. */
-          tasksError ? (
-            <QueryError what="tasks" message={tasksError.message} />
-          ) : isFiltered ? (
+      {/* Three messages, because there are three ways of arriving at an empty
+          screen and only two of them are somebody's fault: a filter that is too
+          narrow needs loosening, an empty system needs explaining, and a failed
+          query needs saying out loud rather than being dressed up as either of
+          the others. Drawing eight empty stage headings in any of those cases
+          would bury the sentence that actually helps. */}
+      {tasksError ? (
+        <QueryError what="tasks" message={tasksError.message} />
+      ) : rows.length === 0 ? (
+        <div className="rounded-lg border bg-card grade-surface shadow-raised-lg">
+          {isFiltered ? (
             <EmptyState
               icon={<ListChecks />}
               title={
@@ -193,9 +224,41 @@ export default async function TasksPage({
               title="Nothing here yet"
               description="Tasks appear once a Team Leader approves a request, or when one is added by hand. Each moves through set stages — the server refuses any step that is not one of them."
             />
-          )
-        }
-      />
+          )}
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3">
+          {visibleStatuses.map((status) => {
+            const group = grouped.get(status) ?? [];
+
+            return (
+              <TaskStatusGroup
+                key={status}
+                status={status}
+                count={group.length}
+                // A stage with nothing in it opens to one line. Closing it by
+                // default would hide the only thing it has to say.
+                defaultOpen
+              >
+                {group.length === 0 ? (
+                  <p className="px-3.5 py-4 text-xs text-muted-foreground">
+                    {status === INITIAL_TASK_STATUS
+                      ? "Nothing waiting to be picked up."
+                      : "Nothing at this stage. Work reaches it from the stage before."}
+                  </p>
+                ) : (
+                  <DataTable bare columns={columns} rows={group} getRowKey={(task) => task.id} />
+                )}
+
+                {/* Renders nothing at all for a member — creating work for other
+                    people is a Team Leader decision, and the button settles that
+                    for itself rather than the page guessing at the role. */}
+                {status === INITIAL_TASK_STATUS ? <NewTaskButton trigger="row" /> : null}
+              </TaskStatusGroup>
+            );
+          })}
+        </div>
+      )}
     </PageShell>
   );
 }

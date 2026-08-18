@@ -1,6 +1,5 @@
 import type { Metadata } from "next";
-import Image from "next/image";
-import Link from "next/link";
+import { BrandLockup } from "@/components/brand-lockup";
 
 import { LoginForm } from "./login-form";
 
@@ -13,7 +12,7 @@ export default async function LoginPage({
 }) {
   const params = await searchParams;
   const next =
-    params.next?.startsWith("/") && !params.next.startsWith("//") ? params.next : "/dashboard";
+    params.next?.startsWith("/") && !params.next.startsWith("//") ? params.next : "/";
 
   return (
     /*
@@ -53,58 +52,47 @@ export default async function LoginPage({
         </div>
       </div>
 
-      {/* -------------------------------------------------------- form panel */}
-      <div className="flex flex-col justify-center bg-muted/50 px-4 py-12 sm:px-8">
-        <div className="mx-auto w-full max-w-sm">
-          {/* Identity lockup — the logo is white-only, so it sits on a brand
-              tile here rather than directly on the pale panel. */}
-          <div className="flex items-center justify-center gap-3">
-            <span className="flex size-11 shrink-0 items-center justify-center rounded-sm bg-brand-surface p-1.5">
-              <Image
-                src="/assets/VizServeWhite.png"
-                alt="VizServe"
-                width={960}
-                height={882}
-                sizes="44px"
-                priority
-                className="h-full w-auto"
-              />
-            </span>
-            <span className="text-left">
-              <span className="block border-y py-0.5 text-sm font-semibold tracking-tight">
-                VizServe
-              </span>
-              <span className="block pt-0.5 text-xs text-muted-foreground">
-                Project Management System
-              </span>
-            </span>
-          </div>
+      {/*
+        ------------------------------------------------------- form panel
 
-          <div className="mt-8 text-center">
+        `--background`, not the `bg-muted/50` this used to carry. Muted is a
+        RAISED-and-inset fill in the system (§1.1), not a ground — using it for a
+        full-height panel is what forced every field on the form to override
+        itself to `bg-background` so it would not dissolve into its own
+        container. The form is a proper card on the page ground instead, so the
+        primitives can be left alone and the panel gets the lift the system
+        gives every other panel in the product.
+      */}
+      <div className="flex flex-col justify-center bg-background px-4 py-12 sm:px-8">
+        <div className="mx-auto w-full max-w-sm">
+          {/* The shared lockup (§3), not a fourth hand-built copy of it. The
+              asset is white-only, so the component sits it on `--brand-surface`
+              — a token that deliberately does NOT flip with the theme, because
+              `--brand` lightens in dark and would drop white on it to ~2.2:1. */}
+          <BrandLockup subtitle="Project Management System" className="justify-center" />
+
+          <div className="mt-7 text-center">
             {/* Names the product outright. Port 3000 on this machine also
                 serves an SIS login, and "Welcome back" on both is how a smoke
                 test passes against the wrong app. */}
-            <h2 className="font-display text-2xl font-extrabold tracking-tight text-foreground">
-              Welcome to VizServe PMS
-            </h2>
-            <p className="mt-1.5 text-sm text-muted-foreground">Sign in to access your account</p>
+            <h1 className="text-xl font-semibold tracking-[-0.022em]">Welcome to VizServe PMS</h1>
+            <p className="mt-1.5 text-sm text-foreground-muted">Sign in to access your account</p>
           </div>
 
-          <div className="mt-8">
+          <div className="mt-6 rounded-lg border bg-card grade-surface p-6 shadow-raised-lg">
             <LoginForm next={next} initialError={params.error} />
           </div>
 
-          <p className="mt-6 text-center text-xs text-muted-foreground">
+          <p className="mt-5 text-center text-xs text-muted-foreground">
             Accounts are created by an administrator. Ask your team leader if you need access.
           </p>
 
-          <div className="mt-6 flex items-center justify-between gap-4 border-t pt-5 text-xs">
-            <span className="text-muted-foreground">
-              Internal platform · <span className="font-semibold text-foreground">VizServe</span>
-            </span>
-            <Link href="/" className="font-medium text-brand underline-offset-4 hover:underline">
-              About this platform →
-            </Link>
+          {/* The "About this platform" link that used to sit here pointed at the
+              marketing page, which is gone — and for a signed-out reader it now
+              bounces straight back to this screen. There is nothing to link to:
+              everyone who belongs here already knows what this is. */}
+          <div className="mt-5 border-t pt-4 text-center text-xs text-muted-foreground">
+            Internal platform · <span className="font-semibold text-foreground">VizServe</span>
           </div>
         </div>
       </div>

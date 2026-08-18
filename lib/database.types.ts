@@ -83,6 +83,16 @@ export type VizservePmsTaskStatus =
   | "COMPLETED"
   | "COMPLETED_NO_RESPONSE";
 
+/**
+ * P7-11. Declared low → high in SQL, so Postgres compares and sorts them in
+ * that order; this union is unordered, and `TASK_PRIORITIES` in
+ * `lib/schemas/tasks.ts` is the copy that carries the ranking.
+ *
+ * The column is NULLABLE and null is a real value — "no priority", the
+ * picker's "Clear". It is not an absence to be defaulted away.
+ */
+export type VizservePmsTaskPriority = "LOW" | "NORMAL" | "HIGH" | "URGENT";
+
 export type VizservePmsRequestStatus =
   | "DRAFT"
   | "SUBMITTED"
@@ -578,6 +588,13 @@ export type Database = {
            * longer cycles impossible.
            */
           parent_task_id: string | null;
+          /**
+           * P7-11. Null is "nobody ranked this", which is most tasks and is not
+           * the same as NORMAL. Unlike `status` and `is_personal` this one IS
+           * in the column UPDATE grant below — re-prioritising is ordinary
+           * work, not a state transition.
+           */
+          priority: VizservePmsTaskPriority | null;
           field_values: Json;
           resolution: string | null;
           output_link: string | null;
@@ -606,6 +623,7 @@ export type Database = {
           resolution: string | null;
           output_link: string | null;
           list_id: string | null;
+          priority: VizservePmsTaskPriority | null;
         }>;
         Relationships: [
           {
@@ -811,6 +829,43 @@ export type Database = {
         Row: { holiday_date: string; name: string; created_at: string };
         Insert: { holiday_date: string; name: string };
         Update: Partial<{ name: string }>;
+        Relationships: [];
+      };
+      /**
+       * P7-12 — the leave type list.
+       *
+       * A TABLE rather than an enum, alone among the closed sets in this schema,
+       * because it is policy data: HR changes it, and Postgres forbids using a
+       * new enum value in the transaction that adds it. Admin-writable, so
+       * unlike most tables here `Insert` and `Update` are real.
+       *
+       * `code` is the stable identifier; `label` is what people read and may be
+       * renamed freely. Nothing joins on the label.
+       */
+      vizserve_pms_leave_types: {
+        Row: {
+          id: string;
+          code: string;
+          label: string;
+          /** Retired, never deleted — historical requests keep pointing at it. */
+          is_active: boolean;
+          sort_order: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          code: string;
+          label: string;
+          is_active?: boolean;
+          sort_order?: number;
+        };
+        Update: Partial<{
+          code: string;
+          label: string;
+          is_active: boolean;
+          sort_order: number;
+        }>;
         Relationships: [];
       };
       /** The legal-transition table as data. Mirrored in lib/schemas/tasks.ts. */
@@ -1092,6 +1147,15 @@ export type Database = {
           amount: number | null;
           /** P7-04. Set only on OVERTIME rows; capped at 960 by a CHECK. */
           overtime_minutes: number | null;
+          /**
+           * P7-12. Required on LEAVE and forbidden on every other type.
+           *
+           * Nullable here despite being required, because LEAVE rows filed
+           * before the list existed have none — the constraint is NOT VALID for
+           * exactly that reason, and there is no honest way to backfill a type
+           * nobody stated.
+           */
+          leave_type_id: string | null;
           decision_reason: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
@@ -1111,6 +1175,7 @@ export type Database = {
           correction_at?: string | null;
           amount?: number | null;
           overtime_minutes?: number | null;
+          leave_type_id?: string | null;
         };
         Update: Partial<{
           status: VizservePmsInternalRequestStatus;
@@ -1183,6 +1248,29 @@ export type Database = {
         };
         Returns: Database["public"]["Tables"]["vizserve_pms_notifications"]["Row"];
       };
+      /**
+       * P7-10 — the shared out-of-office calendar.
+       *
+       * Hand-written rather than generated, like everything else in this file:
+       * `db:types` needs Docker and a local Supabase, which this machine does
+       * not reliably have. Keep it in step with
+       * `20260818130000_p7_10_leave_calendar.sql`.
+       *
+       * NOTE WHAT IS ABSENT: no `reason`, no `id`, no `department_id`. RLS
+       * cannot withhold one column, so the function projects only the four
+       * that are safe for everyone to see. Do not widen this signature without
+       * widening the SQL, and do not widen the SQL without a reason better
+       * than convenience.
+       */
+      vizserve_pms_leave_calendar: {
+        Args: { p_from: string; p_to: string };
+        Returns: {
+          user_id: string;
+          full_name: string;
+          start_date: string;
+          end_date: string;
+        }[];
+      };
       vizserve_pms_submit_request: {
         Args: {
           p_slug: string;
@@ -1233,6 +1321,12 @@ export type Database = {
            * runtime, so the guard is a db test, not the compiler.
            */
           p_overtime_minutes?: number | null;
+          /**
+           * P7-12. Same silent-failure shape as `p_overtime_minutes` above, and
+           * the same answer: optional to the compiler, required by the function
+           * for LEAVE, covered by a db test rather than by types.
+           */
+          p_leave_type_id?: string | null;
         };
         Returns: Json;
       };
@@ -1254,6 +1348,9 @@ export type Database = {
           p_description?: string;
           p_due_date?: string | null;
           p_list_id?: string | null;
+          /** P7-11. Present here where department and assignee are not: how
+           *  urgent your own work is IS yours to decide. */
+          p_priority?: VizservePmsTaskPriority | null;
         };
         Returns: Json;
       };
@@ -1314,6 +1411,13 @@ export type Database = {
           p_title?: string | null;
           p_description?: string | null;
           p_list_id?: string | null;
+          /**
+           * P7-11. THE ONLY MOMENT a client task can be given a priority: this
+           * function is the statement that creates the task row, so there is no
+           * earlier point at which anyone — least of all the client — could
+           * have set one.
+           */
+          p_priority?: VizservePmsTaskPriority | null;
         };
         Returns: Json;
       };
@@ -1347,6 +1451,13 @@ export type Database = {
           p_qa_assignee_id?: string | null;
           p_due_date?: string | null;
           p_list_id?: string | null;
+          /**
+           * P7-11. OPTIONAL, because it has a SQL default — so TypeScript will
+           * NOT flag a call site that forgets it, and a forgotten priority
+           * lands as null rather than as an error. The db suite is what covers
+           * it. Same silent-failure shape as `p_overtime_minutes`.
+           */
+          p_priority?: VizservePmsTaskPriority | null;
         };
         Returns: Json;
       };
@@ -1406,6 +1517,7 @@ export type Database = {
       vizserve_pms_request_status: VizservePmsRequestStatus;
       vizserve_pms_approval_decision: VizservePmsApprovalDecision;
       vizserve_pms_task_status: VizservePmsTaskStatus;
+      vizserve_pms_task_priority: VizservePmsTaskPriority;
       vizserve_pms_client_decision: VizservePmsClientDecision;
       vizserve_pms_token_purpose: VizservePmsTokenPurpose;
       vizserve_pms_internal_request_type: VizservePmsInternalRequestType;
@@ -1423,6 +1535,7 @@ export type NotificationRow = Database["public"]["Tables"]["vizserve_pms_notific
 export type DtrEntryRow = Database["public"]["Tables"]["vizserve_pms_dtr_entries"]["Row"];
 export type InternalRequestRow =
   Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];
+export type LeaveTypeRow = Database["public"]["Tables"]["vizserve_pms_leave_types"]["Row"];
 export type TimesheetEntryRow =
   Database["public"]["Tables"]["vizserve_pms_timesheet_entries"]["Row"];
 export type TaskCommentRow =

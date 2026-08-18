@@ -42,6 +42,7 @@ function readableError(error: { message?: string } | null): string {
 
 function refresh(id?: string) {
   revalidatePath("/approvals");
+  revalidatePath("/");
   revalidatePath("/dashboard");
   revalidatePath("/inbox");
   if (id) revalidatePath(`/approvals/${id}`);

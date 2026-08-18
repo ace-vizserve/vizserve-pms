@@ -41,6 +41,7 @@ export function CellDetail({
   taskTitle,
   day,
   entries,
+  locked = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -48,6 +49,19 @@ export function CellDetail({
   taskTitle: string;
   day: string;
   entries: CellEntry[];
+  /**
+   * P7-05 — the week has been handed in.
+   *
+   * This popover is the ONLY editor for a split cell, so it is also the only
+   * way round a locked grid: the cell above goes read-only, and without this
+   * the bin and the note field would still be sitting one click behind it. The
+   * database refuses all three writes either way; this is about not offering
+   * them.
+   *
+   * It still opens. Notes are why the popover exists, and a submitted week is
+   * exactly when somebody goes back to read what they wrote.
+   */
+  locked?: boolean;
 }) {
   const split = entries.length > 1;
   const noted = entries.some((entry) => entry.note);
@@ -85,7 +99,7 @@ export function CellDetail({
           <ul className="flex flex-col gap-1.5">
             {entries.map((entry) => (
               <li key={entry.id}>
-                <EntryRow entry={entry} taskId={taskId} day={day} />
+                <EntryRow entry={entry} taskId={taskId} day={day} locked={locked} />
               </li>
             ))}
           </ul>
@@ -93,14 +107,22 @@ export function CellDetail({
 
         {/* Above the form, not below it. `AddEntry` is pulled out to the
             popover's edges, so anything after it would sit under a full-bleed
-            card and read as a footnote to the wrong thing. */}
-        {split ? (
+            card and read as a footnote to the wrong thing.
+
+            The locked sentence replaces the editing one rather than joining it:
+            "edit them here" is false once the week is in. */}
+        {locked ? (
+          <p className="text-2xs text-muted-foreground">
+            {split ? "The cell shows the total of these. " : null}
+            Handed in — read-only until your lead decides.
+          </p>
+        ) : split ? (
           <p className="text-2xs text-muted-foreground">
             The cell shows the total of these. Edit them here.
           </p>
         ) : null}
 
-        <AddEntry taskId={taskId} day={day} />
+        {locked ? null : <AddEntry taskId={taskId} day={day} />}
       </PopoverContent>
     </Popover>
   );
@@ -114,13 +136,28 @@ export function CellDetail({
  * form. `dirty` is what stops the blur firing an identical UPDATE every time
  * somebody tabs through.
  */
-function EntryRow({ entry, taskId, day }: { entry: CellEntry; taskId: string; day: string }) {
+function EntryRow({
+  entry,
+  taskId,
+  day,
+  locked,
+}: {
+  entry: CellEntry;
+  taskId: string;
+  day: string;
+  locked: boolean;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [duration, setDuration] = useState(formatCellDuration(entry.minutes));
   const [note, setNote] = useState(entry.note ?? "");
 
   function save() {
+    // Belt and braces with the `readOnly` below: blur fires on a read-only
+    // field too, and this is the one path in the app that can UPDATE an entry
+    // inside a locked week.
+    if (locked) return;
+
     const minutes = parseCellDuration(duration);
 
     if (minutes === null) {
@@ -163,9 +200,13 @@ function EntryRow({ entry, taskId, day }: { entry: CellEntry; taskId: string; da
 
   return (
     <div className="flex items-center gap-1.5">
+      {/* `readOnly`, not `disabled`. A disabled input drops out of the tab order
+          and is skipped by most screen readers — on a locked week these fields
+          are the record, and the record has to stay readable. */}
       <Input
         value={duration}
         disabled={pending}
+        readOnly={locked}
         aria-label="Length"
         className="h-9 w-18 text-center tabular-nums"
         onChange={(event) => setDuration(event.target.value)}
@@ -174,30 +215,37 @@ function EntryRow({ entry, taskId, day }: { entry: CellEntry; taskId: string; da
       <Input
         value={note}
         disabled={pending}
-        placeholder="Note"
+        readOnly={locked}
+        placeholder={locked ? "" : "Note"}
         aria-label="Note"
         className="h-9 flex-1"
         onChange={(event) => setNote(event.target.value)}
         onBlur={save}
       />
-      <Button
-        variant="ghost"
-        size="icon-xs"
-        disabled={pending}
-        onClick={() =>
-          startTransition(async () => {
-            const result = await deleteTimeEntry(entry.id);
-            if (!result.ok) {
-              toast.error(result.error);
-              return;
-            }
-            router.refresh();
-          })
-        }
-      >
-        <Trash2 />
-        <span className="sr-only">Remove this entry</span>
-      </Button>
+
+      {/* The bin goes away entirely. Greying it out would leave the one control
+          in this row whose whole meaning is "this is gone now" sitting on a week
+          that cannot lose anything. */}
+      {locked ? null : (
+        <Button
+          variant="ghost"
+          size="icon-xs"
+          disabled={pending}
+          onClick={() =>
+            startTransition(async () => {
+              const result = await deleteTimeEntry(entry.id);
+              if (!result.ok) {
+                toast.error(result.error);
+                return;
+              }
+              router.refresh();
+            })
+          }
+        >
+          <Trash2 />
+          <span className="sr-only">Remove this entry</span>
+        </Button>
+      )}
     </div>
   );
 }

@@ -1,29 +1,18 @@
 "use client";
 
-import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
+import { Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Plus, X } from "lucide-react";
+import { useCallback, useState, useSyncExternalStore, useTransition } from "react";
 import { toast } from "sonner";
 
+import { TaskStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  STANDARD_DAY_MINUTES,
-  formatDate,
-  formatDuration,
-  formatWeekday,
-} from "@/lib/dates";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import type { VizservePmsTaskStatus } from "@/lib/database.types";
+import { STANDARD_DAY_MINUTES, formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
 import { dayState, formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
-import type { VizservePmsTaskStatus } from "@/lib/database.types";
-import { TaskStatusBadge } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
 
 import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
@@ -134,12 +123,26 @@ export function WeekGrid({
   today,
   rows,
   tasks,
+  locked,
 }: {
   monday: string;
   days: string[];
   today: string;
   rows: TaskRow[];
   tasks: PickableTask[];
+  /**
+   * P7-05 — the week has been handed in and the database will refuse every
+   * write against it (`vizserve_pms_timesheet_week_locked`, called by all three
+   * entry policies).
+   *
+   * This prop does not enforce anything; it stops the grid OFFERING what the
+   * policies already refuse. Without it every keystroke in a submitted week
+   * travels to the server to be rejected, and a refused UPDATE or DELETE comes
+   * back as success with zero rows — so the number would simply spring back to
+   * its old value with no explanation. `WeekStatusBar` says why in words; this
+   * is the same fact expressed as an absence of controls.
+   */
+  locked: boolean;
 }) {
   // The week is in the key, so navigating to another week reads that week's
   // rows rather than carrying this week's across.
@@ -216,12 +219,7 @@ export function WeekGrid({
     return {
       state,
       width: `${Math.min(100, Math.round((total / STANDARD_DAY_MINUTES) * 100))}%`,
-      fill:
-        state === "over"
-          ? "bg-destructive"
-          : state === "overtime"
-            ? "bg-warning"
-            : "bg-primary grade-primary",
+      fill: state === "over" ? "bg-destructive" : state === "overtime" ? "bg-warning" : "bg-primary grade-primary",
     };
   }
 
@@ -239,8 +237,7 @@ export function WeekGrid({
             <tr className="border-b">
               <th
                 scope="col"
-                className="sticky left-0 z-10 bg-card px-3 py-2 text-left text-xs font-medium text-muted-foreground"
-              >
+                className="sticky left-0 z-10 bg-card px-3 py-2 text-left text-xs font-medium text-muted-foreground">
                 Task
               </th>
 
@@ -251,14 +248,11 @@ export function WeekGrid({
                   className={cn(
                     "w-[8%] border-l px-2 py-2 text-left align-bottom text-xs font-medium",
                     day === today ? "text-foreground" : "text-muted-foreground",
-                  )}
-                >
+                  )}>
                   <span className="block whitespace-nowrap">
                     {formatWeekday(day)}
                     <span className="font-normal"> {day.slice(8)}</span>
-                    {day === today ? (
-                      <span className="font-normal text-primary"> · today</span>
-                    ) : null}
+                    {day === today ? <span className="font-normal text-primary"> · today</span> : null}
                   </span>
 
                   {/* The day total belongs in the header, where the week is read.
@@ -291,8 +285,7 @@ export function WeekGrid({
 
               <th
                 scope="col"
-                className="w-[10%] border-l px-2 py-2 text-right align-bottom text-xs font-medium text-muted-foreground"
-              >
+                className="w-[10%] border-l px-2 py-2 text-right align-bottom text-xs font-medium text-muted-foreground">
                 <span className="block">Total</span>
                 <span className="mt-1 block text-sm font-semibold tabular-nums text-foreground">
                   {weekTotal > 0 ? formatCellDuration(weekTotal) : "—"}
@@ -318,10 +311,7 @@ export function WeekGrid({
                   Percentages hold the proportions at any width; the table's
                   `min-w` is still the floor before it scrolls.
                 */}
-                <th
-                  scope="row"
-                  className="sticky left-0 z-10 w-[34%] max-w-0 bg-card px-3 py-2 text-left font-normal"
-                >
+                <th scope="row" className="sticky left-0 z-10 w-[34%] max-w-0 bg-card px-3 py-2 text-left font-normal">
                   <span className="flex items-center gap-1.5">
                     <span className="min-w-0 flex-1">
                       <span className="block truncate font-medium" title={row.title}>
@@ -334,9 +324,7 @@ export function WeekGrid({
                           still theirs, the context is not. */}
                       {row.status || row.where ? (
                         <span className="mt-0.5 flex min-w-0 items-center gap-2">
-                          {row.status ? (
-                            <TaskStatusBadge status={row.status} className="h-5 px-1.5" />
-                          ) : null}
+                          {row.status ? <TaskStatusBadge status={row.status} className="h-5 px-1.5" /> : null}
                           {row.where ? (
                             <span className="truncate text-xs text-muted-foreground" title={row.where}>
                               {row.where}
@@ -346,20 +334,22 @@ export function WeekGrid({
                       ) : null}
                     </span>
 
-                    {row.finished ? (
-                      <span className="shrink-0 text-2xs text-muted-foreground">finished</span>
-                    ) : null}
+                    {row.finished ? <span className="shrink-0 text-2xs text-muted-foreground">finished</span> : null}
 
                     {/* Only a row with nothing on it can be taken off the week.
                         Removing a row with hours on it would have to mean
-                        deleting them, and a close button is not consent. */}
-                    {rowTotal(row) === 0 ? (
+                        deleting them, and a close button is not consent.
+
+                        Gone once the week is locked: an empty row in a handed-in
+                        week cannot be filled, so taking it off is the only thing
+                        left to do with it — and it is a change to a week that is
+                        no longer this person's to change. */}
+                    {rowTotal(row) === 0 && !locked ? (
                       <Button
                         variant="ghost"
                         size="icon-xs"
                         className="shrink-0"
-                        onClick={() => remember(extraTaskIds.filter((id) => id !== row.taskId))}
-                      >
+                        onClick={() => remember(extraTaskIds.filter((id) => id !== row.taskId))}>
                         <X />
                         <span className="sr-only">Take {row.title} off this week</span>
                       </Button>
@@ -375,6 +365,7 @@ export function WeekGrid({
                     day={day}
                     entries={row.cells[day] ?? []}
                     future={day > today}
+                    locked={locked}
                     onEmptied={() => keepRow(row.taskId)}
                   />
                 ))}
@@ -385,16 +376,23 @@ export function WeekGrid({
               </tr>
             ))}
 
-            <tr className="border-b last:border-b-0">
-              <th scope="row" className="sticky left-0 z-10 bg-card px-3 py-1.5 text-left">
-                <AddTaskRow
-                  tasks={pickable}
-                  onAdd={(taskId) => remember([...extraTaskIds, taskId])}
-                  hasRows={allRows.length > 0}
-                />
-              </th>
-              <td colSpan={days.length + 1} />
-            </tr>
+            {/* Dropped entirely once the week is locked, rather than disabled.
+                Adding a row to a handed-in week can only ever produce an empty
+                row nothing may be typed into — the picker would be offering a
+                dead end, and the row it leaves behind is a control that looks
+                like it failed. */}
+            {locked ? null : (
+              <tr className="border-b last:border-b-0">
+                <th scope="row" className="sticky left-0 z-10 bg-card px-3 py-1.5 text-left">
+                  <AddTaskRow
+                    tasks={pickable}
+                    onAdd={(taskId) => remember([...extraTaskIds, taskId])}
+                    hasRows={allRows.length > 0}
+                  />
+                </th>
+                <td colSpan={days.length + 1} />
+              </tr>
+            )}
           </tbody>
 
           <tfoot>
@@ -404,16 +402,12 @@ export function WeekGrid({
             <tr className="border-t bg-muted">
               <th
                 scope="row"
-                className="sticky left-0 z-10 bg-muted px-3 py-2 text-left text-xs font-medium text-muted-foreground"
-              >
+                className="sticky left-0 z-10 bg-muted px-3 py-2 text-left text-xs font-medium text-muted-foreground">
                 Total
               </th>
 
               {days.map((day) => (
-                <td
-                  key={day}
-                  className="border-l px-1 py-2 text-center text-sm font-semibold tabular-nums"
-                >
+                <td key={day} className="border-l px-1 py-2 text-center text-sm font-semibold tabular-nums">
                   {dayTotal(day) > 0 ? formatCellDuration(dayTotal(day)) : "—"}
                 </td>
               ))}
@@ -429,14 +423,23 @@ export function WeekGrid({
       <p className="border-t px-3 py-2 text-xs text-muted-foreground">
         {weekTotal > 0 ? (
           <>
-            <span className="font-medium text-foreground">{formatDuration(weekTotal)}</span> this
-            week ·{" "}
+            <span className="font-medium text-foreground">{formatDuration(weekTotal)}</span> this week ·{" "}
           </>
         ) : null}
-        Type <span className="font-medium text-foreground">1h 30m</span>,{" "}
-        <span className="font-medium text-foreground">90m</span> or{" "}
-        <span className="font-medium text-foreground">1.5</span> into a cell. A bare number is
-        hours.
+        {/* The typing hint is instructions for a thing that can no longer be
+            done. A locked week keeps the total and drops the lesson — the bar
+            above already says why, and repeating it here would say it twice in
+            two voices. */}
+        {locked ? (
+          "Handed in. The hours are read-only until your lead decides."
+        ) : (
+          <>
+            Type <span className="font-medium text-foreground">1h 30m</span>,{" "}
+            <span className="font-medium text-foreground">90m</span> or{" "}
+            <span className="font-medium text-foreground">1.5</span> into a cell. A bare number is
+            hours.
+          </>
+        )}
       </p>
     </div>
   );
@@ -460,6 +463,7 @@ function TimeCell({
   day,
   entries,
   future,
+  locked,
   onEmptied,
 }: {
   taskId: string;
@@ -467,6 +471,7 @@ function TimeCell({
   day: string;
   entries: CellEntry[];
   future: boolean;
+  locked: boolean;
   onEmptied: () => void;
 }) {
   const router = useRouter();
@@ -476,7 +481,13 @@ function TimeCell({
 
   const total = sum(entries);
   const split = entries.length > 1;
-  const readOnly = future || split;
+
+  // Three reasons a cell cannot be typed into, and they are not the same reason:
+  // the day has not happened, the cell holds entries the grid cannot choose
+  // between, or the whole week has been handed in. Only the third is new; all
+  // three end in the same place, which is why they are one flag here and three
+  // different explanations everywhere else.
+  const readOnly = future || split || locked;
 
   // `draft === null` means "show the server". Everything written here goes back
   // to null on commit, so a value the server rejected or reinterpreted never
@@ -527,13 +538,7 @@ function TimeCell({
   }
 
   return (
-    <td
-      className={cn(
-        "group/cell relative border-l p-0",
-        future && "bg-muted/30",
-        pending && "opacity-60",
-      )}
-    >
+    <td className={cn("group/cell relative border-l p-0", future && "bg-muted/30", pending && "opacity-60")}>
       <input
         type="text"
         inputMode="decimal"
@@ -562,11 +567,18 @@ function TimeCell({
 
       {/* A day that has not happened cannot be logged — the INSERT policy says
           so in Manila time, and offering the control anyway just produces an
-          error people read as a bug. */}
+          error people read as a bug.
+
+          A LOCKED week still opens, because the notes are the reason to open it
+          and reading a handed-in week is the whole point of handing it in. It
+          opens read-only — `CellDetail` is a full editor otherwise, and leaving
+          it editable here would make the lock a matter of which control you
+          happened to reach for. */}
       {future ? null : (
         <CellDetail
           open={open}
           onOpenChange={setOpen}
+          locked={locked}
           taskId={taskId}
           taskTitle={taskTitle}
           day={day}
@@ -589,9 +601,7 @@ function AddTaskRow({
 }) {
   const [open, setOpen] = useState(false);
 
-  const items: Record<string, string> = Object.fromEntries(
-    tasks.map((task) => [task.id, task.title]),
-  );
+  const items: Record<string, string> = Object.fromEntries(tasks.map((task) => [task.id, task.title]));
 
   // Two ways to be empty, two different next steps — a dead end that only says
   // "nothing here" is the thing the design system calls out.
@@ -600,8 +610,7 @@ function AddTaskRow({
       <span className="text-xs text-muted-foreground">
         {hasRows ? (
           <>
-            Every task you can log against is already on this week. Take one off to
-            re-add it, or{" "}
+            Every task you can log against is already on this week. Take one off to re-add it, or{" "}
             <Link href="/tasks" className="font-medium text-primary hover:underline">
               open your tasks
             </Link>
@@ -609,8 +618,8 @@ function AddTaskRow({
           </>
         ) : (
           <>
-            You are not the PIC or the QA reviewer on any task, so there is nothing to
-            log against yet. Ask your team leader to assign you, or{" "}
+            You are not the PIC or the QA reviewer on any task, so there is nothing to log against yet. Ask your team
+            leader to assign you, or{" "}
             <Link href="/tasks" className="font-medium text-primary hover:underline">
               see what is on your queue
             </Link>
@@ -623,7 +632,7 @@ function AddTaskRow({
 
   if (!open) {
     return (
-      <Button variant="ghost" size="sm" className="-ml-2" onClick={() => setOpen(true)}>
+      <Button size="sm" className="-ml-2" onClick={() => setOpen(true)}>
         <Plus />
         Add task
       </Button>
@@ -638,8 +647,7 @@ function AddTaskRow({
         if (!value) return;
         onAdd(value);
         setOpen(false);
-      }}
-    >
+      }}>
       <SelectTrigger className="h-9 w-full" autoFocus>
         <SelectValue placeholder="Which task?" />
       </SelectTrigger>
@@ -655,9 +663,7 @@ function AddTaskRow({
               <span className="truncate font-medium">{task.title}</span>
               <span className="flex min-w-0 items-center gap-2">
                 <TaskStatusBadge status={task.status} className="h-5 px-1.5" />
-                {task.where ? (
-                  <span className="truncate text-xs text-muted-foreground">{task.where}</span>
-                ) : null}
+                {task.where ? <span className="truncate text-xs text-muted-foreground">{task.where}</span> : null}
               </span>
             </span>
           </SelectItem>

@@ -63,7 +63,7 @@ export function AppSidebar({
           <SidebarMenuItem>
             <SidebarMenuButton
               size="lg"
-              render={<Link href="/dashboard" />}
+              render={<Link href="/" />}
               className="h-13 border bg-card grade-raised shadow-raised hover:bg-card"
             >
               {/*

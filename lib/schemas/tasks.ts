@@ -31,6 +31,75 @@ export type TaskStatus = VizservePmsTaskStatus;
 
 export const taskStatusSchema = z.enum(TASK_STATUSES);
 
+/**
+ * Where every task starts, and the only stage a screen may offer to create one
+ * in.
+ *
+ * `vizserve_pms_create_task` opens every task here and `status` sits outside the
+ * column-level UPDATE grant, so a board column or a list group offering "add a
+ * task" anywhere else would be promising something the database refuses. Stated
+ * once, imported by both views, rather than each of them deciding for itself.
+ */
+export const INITIAL_TASK_STATUS: TaskStatus = "OPEN";
+
+/**
+ * P7-11 — how urgent a task is, as judged by whoever created it.
+ *
+ * DECLARED LOW → HIGH, and that order is load-bearing twice: Postgres compares
+ * enum values by declaration order, so `priority >= 'HIGH'` and
+ * `order by priority desc` work directly in SQL with no CASE and no lookup
+ * table — the same trick the role enum already relies on. Reversing this list
+ * silently inverts every sort in the app.
+ *
+ * NULLABLE, everywhere, and that is the whole design rather than an oversight.
+ * The picker this came from offers a fifth option, "Clear", which does not mean
+ * Normal — it means no priority on this task. Defaulting every row to NORMAL
+ * would put a flag on every task in the system, and a mark carried by
+ * everything marks nothing. Absence is the ordinary case; presence is the
+ * judgement somebody made.
+ *
+ * WHO SETS IT: whoever creates the task. For personal work that is the member,
+ * for internal work the team leader, and for client work the team leader at
+ * Gate 1 — because `vizserve_pms_approve_request` is the statement that creates
+ * the task, so there is no earlier moment at which anyone could have set it. A
+ * client states urgency on the form, in `field_values`; the lead decides the
+ * priority. Both survive, exactly as `target_date` and `approved_target_date`
+ * already do on the request.
+ */
+export const TASK_PRIORITIES = ["LOW", "NORMAL", "HIGH", "URGENT"] as const;
+
+export type TaskPriority = (typeof TASK_PRIORITIES)[number];
+
+/** Null is a real value here — "no priority set", not "unknown". */
+export const taskPrioritySchema = z.enum(TASK_PRIORITIES).nullable();
+
+/**
+ * Exhaustive by construction: a `Record` keyed on the union fails to compile the
+ * moment a value is added to `TASK_PRIORITIES` without a label to go with it.
+ */
+export const TASK_PRIORITY_LABELS: Record<TaskPriority, string> = {
+  URGENT: "Urgent",
+  HIGH: "High",
+  NORMAL: "Normal",
+  LOW: "Low",
+};
+
+/**
+ * Highest first, then the ones nobody ranked.
+ *
+ * The SQL equivalent is `order by priority desc nulls last`, and this is its
+ * mirror for the rare list that is already in memory. Both exist because a
+ * priority nobody sorts by is a field people stop filling in.
+ */
+export function comparePriority(a: TaskPriority | null, b: TaskPriority | null): number {
+  // Not `?? -1`: LOW is index 0, so a missing priority has to rank below the
+  // lowest real one rather than tying with it.
+  const rank = (value: TaskPriority | null) =>
+    value === null ? -1 : TASK_PRIORITIES.indexOf(value);
+
+  return rank(b) - rank(a);
+}
+
 /** Who is entitled to make a given move. */
 export type TransitionActor = "pic" | "qa" | "client" | "system";
 
@@ -106,7 +175,14 @@ export function scopeAllows(scope: TransitionScope, category: TaskCategory): boo
  * the word "Completed" means nothing, which breaks every Phase 6 report.
  */
 export const TASK_TRANSITIONS: readonly Transition[] = [
-  { from: "OPEN", to: "ONGOING", actor: "pic", requires: null, appliesTo: "any", label: "Start work" },
+  {
+    from: "OPEN",
+    to: "ONGOING",
+    actor: "pic",
+    requires: null,
+    appliesTo: "any",
+    label: "Start work",
+  },
   {
     from: "ONGOING",
     to: "WAITING_FOR_INFO",
@@ -333,9 +409,7 @@ export const taskDetailsSchema = z.object({
   description: z.string().trim().default(""),
   /** What the member actually produced. The QA reviewer reviews against this. */
   resolution: z.string().trim().default(""),
-  output_link: z
-    .union([z.literal(""), z.url("Enter a full URL, including https://")])
-    .default(""),
+  output_link: z.union([z.literal(""), z.url("Enter a full URL, including https://")]).default(""),
   due_date: z
     .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
     .default(""),
@@ -343,6 +417,12 @@ export const taskDetailsSchema = z.object({
     .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
     .default(""),
   list_id: z.uuid().nullable().default(null),
+  /**
+   * P7-11. Editable after the fact, unlike `status` — re-prioritising is
+   * ordinary work rather than a state transition, which is why `priority` sits
+   * INSIDE the column-level UPDATE grant and `status` does not.
+   */
+  priority: taskPrioritySchema.default(null),
 });
 
 export type TaskDetailsInput = z.infer<typeof taskDetailsSchema>;
@@ -357,6 +437,7 @@ export const createTaskSchema = z.object({
     .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
     .default(""),
   list_id: z.uuid().nullable().default(null),
+  priority: taskPrioritySchema.default(null),
 });
 
 export type CreateTaskInput = z.infer<typeof createTaskSchema>;
@@ -378,6 +459,9 @@ export const createPersonalTaskSchema = z.object({
     .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
     .default(""),
   list_id: z.uuid().nullable().default(null),
+  // Present here, unlike `department_id` and `assignee_id`: how urgent your own
+  // work is IS yours to decide, which is exactly what those two are not.
+  priority: taskPrioritySchema.default(null),
 });
 
 export type CreatePersonalTaskInput = z.infer<typeof createPersonalTaskSchema>;

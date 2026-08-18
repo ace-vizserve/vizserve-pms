@@ -180,3 +180,19 @@ Two colours were **changed from the design canvas because they failed here** —
 `--brand-tint` (`#5BC0DE`) was deliberately **not** re-pointed to the info teal. `app/login/page.tsx` renders a heading in it on `--brand-gradient` at 3.13:1, which passes as large text; the darker teal on that dark blue ground would fail badly.
 
 Status chips do not rely on their fill for the 3:1 boundary rule: each carries a hairline border, a leading dot, and its label, so state survives greyscale and print.
+
+### Status as a SURFACE — the board columns and the list's stage groups
+
+Added 18 Aug 2026 with the grouped task views. `taskStatusSurface()` in `components/status-badge.tsx` washes a container in the status' own tone; the tone→colour mapping stays in that file, which is the only place a status becomes a colour.
+
+The wash carries **two alphas**, and the dark one is a measurement, not a taste call. The dark `-subtle` fills sit at almost exactly `--card`'s luminance, so a 45% wash in dark put a card at **1.00–1.04:1** against the column holding it — the two collapsed into one field. At 20% the column reads as a *hue* rather than as a lightness step and card contrast returns to **1.04–1.06:1**, level with the plain `bg-muted` column it replaced (**1.08:1**) and with `--card` on `--background` everywhere else in the app (**1.07:1**).
+
+| Pair | Light | Dark | Needs | Verdict | Where |
+|---|---|---|---|---|---|
+| `--muted-foreground` on the tone wash | **4.55–4.82:1** | **5.9–6.2:1** | 4.5:1 | pass | the count beside a column or group heading |
+| `--card` on the tone wash | 1.09–1.11:1 | 1.04–1.06:1 | — | n/a | a raised card; told apart by its border and `shadow-raised`, never by fill (§1.5) |
+| tone `-border` vs `--background` | **1.34–1.44:1** | **1.46–1.83:1** | — | firmer than `--border` (1.16 / 1.30) | the column edge |
+
+Wash alphas: `bg-<tone>-subtle/45 dark:bg-<tone>-subtle/20`; brand is `bg-accent/60 dark:bg-accent/30`; neutral stays the opaque `bg-muted`. Borders are full strength.
+
+**The wash is never the carrier.** Every column and every group is headed by a full status chip with its stage glyph, its label and its count — the tint only tells the eye where one container stops and the next begins, and the view is entirely usable in greyscale without it.

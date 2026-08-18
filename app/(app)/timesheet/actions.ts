@@ -76,6 +76,7 @@ const LOCKED_OR_GONE =
  */
 function revalidateTimesheet() {
   revalidatePath("/timesheet");
+  revalidatePath("/");
   revalidatePath("/dashboard");
 }
 

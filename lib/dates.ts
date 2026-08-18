@@ -195,6 +195,107 @@ export function formatWeekRange(monday: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Months (P7-10 — the leave calendar)
+// ---------------------------------------------------------------------------
+
+/**
+ * These live here rather than in the calendar component for the reason the whole
+ * file exists: there is no date library, and a month grid computed inline is the
+ * fourth place in this codebase that would have to get UTC-vs-local right.
+ *
+ * Everything below goes through `parseDateOnly`, which pins a bare `YYYY-MM-DD`
+ * to MIDDAY UTC. Midnight would land on the previous day in any negative offset
+ * — and a calendar that renders the wrong month for half the planet is exactly
+ * the bug that rule was written to stop.
+ */
+
+/** The first of the month containing `value`. */
+export function startOfMonth(value: string): string | null {
+  const date = parseDateOnly(value);
+  if (!date) return null;
+
+  date.setUTCDate(1);
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * `value` shifted by whole months, clamped to the last day where the target is
+ * shorter.
+ *
+ * The clamp is not decoration: `setUTCMonth` on 31 March minus one month gives
+ * 3 March, because February has no 31st and the Date silently rolls forward. A
+ * month-step control that skips February is a real bug, and this is where it
+ * would otherwise live.
+ */
+export function addMonths(value: string, months: number): string | null {
+  const date = parseDateOnly(value);
+  if (!date) return null;
+
+  const day = date.getUTCDate();
+  date.setUTCDate(1);
+  date.setUTCMonth(date.getUTCMonth() + months);
+
+  // Days in the month we landed in: day 0 of the NEXT month is its last day.
+  const lastDay = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 0, 12),
+  ).getUTCDate();
+
+  date.setUTCDate(Math.min(day, lastDay));
+  return date.toISOString().slice(0, 10);
+}
+
+/**
+ * The six-week grid a month is drawn on, Sunday first — 42 dates, always.
+ *
+ * FIXED AT SIX ROWS on purpose. A grid that is five rows in one month and six
+ * in the next changes height as you step through it, which moves everything
+ * below the calendar on the page. A constant 42 costs one mostly-empty row and
+ * buys a layout that does not jump.
+ *
+ * Sunday-first, unlike `weekDates` above, and the two are not in conflict: the
+ * timesheet week is a WORKING week and splits the weekend if it starts on
+ * Sunday, while a leave calendar is read the way a wall calendar is.
+ *
+ * Dates outside the month are still returned — the caller decides how to grey
+ * them, and a leave span crossing a month boundary still needs them to land on.
+ */
+export function monthGrid(value: string): string[] {
+  const first = startOfMonth(value);
+  if (!first) return [];
+
+  const date = parseDateOnly(first);
+  if (!date) return [];
+
+  // getUTCDay: 0 = Sunday, which is already the first column.
+  const start = addDays(first, -date.getUTCDay());
+  if (!start) return [];
+
+  return Array.from({ length: 42 }, (_, offset) => addDays(start, offset)).filter(
+    (day): day is string => day !== null,
+  );
+}
+
+/** "August 2026", for a calendar heading. */
+export function formatMonthYear(value: string): string {
+  const date = parseDateOnly(value);
+  if (!date) return "—";
+
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "UTC",
+    month: "long",
+    year: "numeric",
+  }).format(date);
+}
+
+/** Is `value` inside the same calendar month as `reference`? */
+export function isSameMonth(value: string, reference: string): boolean {
+  return value.slice(0, 7) === reference.slice(0, 7);
+}
+
+/** The single-letter-ish column headings, Sunday first. */
+export const MONTH_GRID_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+// ---------------------------------------------------------------------------
 // Business days (Phase 4, Q6)
 // ---------------------------------------------------------------------------
 

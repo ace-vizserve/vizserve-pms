@@ -11,6 +11,7 @@ import {
   weekDates,
 } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
+import { isWeekLocked } from "@/lib/schemas/timesheet";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
@@ -298,7 +299,18 @@ export default async function TimesheetPage({
       {entriesResult.error ? (
         <QueryError what="this week" message={entriesResult.error.message} />
       ) : (
-        <WeekGrid monday={monday} days={days} today={today} rows={taskRows} tasks={loggableTasks} />
+        <WeekGrid
+          monday={monday}
+          days={days}
+          today={today}
+          rows={taskRows}
+          tasks={loggableTasks}
+          // One source for the lock, shared with the bar above: `isWeekLocked`
+          // is the TypeScript mirror of the status list inside
+          // `vizserve_pms_timesheet_week_locked`, and RETURNED is absent from
+          // both — which is the whole "unlock when sent back" mechanism.
+          locked={isWeekLocked(week?.status ?? null)}
+        />
       )}
     </PageShell>
   );

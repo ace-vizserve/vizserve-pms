@@ -59,6 +59,7 @@ function readableError(error: { message?: string } | null): string {
 
 function refresh(taskId?: string) {
   revalidatePath("/tasks");
+  revalidatePath("/");
   revalidatePath("/dashboard");
   if (taskId) revalidatePath(`/tasks/${taskId}`);
 }

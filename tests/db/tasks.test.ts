@@ -80,10 +80,16 @@ const subtasksApplied =
     ? !(await adminClient().from("vizserve_pms_tasks").select("parent_task_id").limit(1)).error
     : false;
 
+const priorityApplied =
+  dbTestsEnabled && migrationApplied
+    ? !(await adminClient().from("vizserve_pms_tasks").select("priority").limit(1)).error
+    : false;
+
 for (const [flag, label, file] of [
   [flexibilityApplied, "P7-06", "20260818120000_p7_06_task_flexibility.sql"],
   [commentsApplied, "P7-08", "20260818120200_p7_08_task_comments.sql"],
   [subtasksApplied, "P7-09", "20260818120300_p7_09_subtasks.sql"],
+  [priorityApplied, "P7-11", "20260818140000_p7_11_task_priority.sql"],
 ] as const) {
   if (dbTestsEnabled && migrationApplied && !flag) {
     process.stderr.write(`\n  tasks.test.ts — ${label} cases SKIPPED. ${file} is not applied.\n`);
@@ -1611,6 +1617,251 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
 
       expect(error).toBeNull();
       await adminClient().from("vizserve_pms_timesheet_entries").delete().eq("task_id", child);
+    });
+  });
+
+  /**
+   * P7-11 — priority.
+   *
+   * Three things are being proved here and only one of them is "the column
+   * exists": that the enum's DECLARED ORDER is what SQL compares by, that the
+   * absence of a priority survives as null rather than being defaulted into
+   * NORMAL, and that the column is writable by the right people — which is the
+   * exact opposite of what the `is_personal` and `status` tests prove, and is
+   * why it needs its own assertion rather than an assumption.
+   */
+  describe("P7-11 priority", () => {
+    it.skipIf(!priorityApplied)("defaults to null, not NORMAL", async () => {
+      // The distinction the whole design rests on: "nobody ranked this" is a
+      // real state and is the ordinary one. A default of NORMAL would put a
+      // flag on every task in the system, and a mark carried by everything
+      // marks nothing.
+      const taskId = await makeTask();
+
+      const { data: task } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("priority")
+        .eq("id", taskId)
+        .single();
+
+      expect(task!.priority).toBeNull();
+    });
+
+    it.skipIf(!priorityApplied)("is set at creation and kept", async () => {
+      const taskId = await makeTask({ p_priority: "URGENT" });
+
+      const { data: task } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("priority")
+        .eq("id", taskId)
+        .single();
+
+      expect(task!.priority).toBe("URGENT");
+    });
+
+    it.skipIf(!priorityApplied)("orders by declaration, not alphabetically", async () => {
+      // THE LOAD-BEARING ASSERTION. `order by priority desc` is only correct
+      // because the enum is declared LOW → URGENT; alphabetically it would run
+      // URGENT, NORMAL, LOW, HIGH and every sorted list in the app would be
+      // quietly wrong. Proved through the database rather than trusted.
+      const urgent = await makeTask({ p_priority: "URGENT" });
+      const low = await makeTask({ p_priority: "LOW" });
+      const high = await makeTask({ p_priority: "HIGH" });
+
+      const { data: rows } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("id, priority")
+        .in("id", [urgent, low, high])
+        .order("priority", { ascending: false });
+
+      expect(rows!.map((row) => row.priority)).toEqual(["URGENT", "HIGH", "LOW"]);
+    });
+
+    it.skipIf(!priorityApplied)("sorts unranked tasks last, not first", async () => {
+      // `nulls last` is a choice, and getting it backwards puts every task
+      // nobody has ranked at the top of a list ordered by urgency.
+      const ranked = await makeTask({ p_priority: "LOW" });
+      const unranked = await makeTask();
+
+      const { data: rows } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("id, priority")
+        .in("id", [ranked, unranked])
+        .order("priority", { ascending: false, nullsFirst: false });
+
+      expect(rows!.map((row) => row.id)).toEqual([ranked, unranked]);
+    });
+
+    it.skipIf(!priorityApplied)("can be changed by the PIC — unlike status", async () => {
+      // The mirror image of the `is_personal` and `status` cases above. This
+      // column IS in the column-level UPDATE grant, because re-prioritising is
+      // ordinary work rather than a state transition, and a test that only ever
+      // proves things are locked would not notice this one being locked by
+      // mistake.
+      const taskId = await makeTask();
+      const { client } = await signIn("member1VizBytes");
+
+      const { error } = await client
+        .from("vizserve_pms_tasks")
+        .update({ priority: "HIGH" })
+        .eq("id", taskId);
+
+      expect(error).toBeNull();
+
+      const { data: task } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("priority")
+        .eq("id", taskId)
+        .single();
+
+      expect(task!.priority).toBe("HIGH");
+    });
+
+    it.skipIf(!priorityApplied)("can be cleared back to null", async () => {
+      // The picker's fifth option. Clearing has to reach the database as null
+      // rather than as NORMAL, or "no priority" becomes unreachable once a
+      // priority has been set once.
+      const taskId = await makeTask({ p_priority: "URGENT" });
+      const { client } = await signIn("member1VizBytes");
+
+      const { error } = await client
+        .from("vizserve_pms_tasks")
+        .update({ priority: null })
+        .eq("id", taskId);
+
+      expect(error).toBeNull();
+
+      const { data: task } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("priority")
+        .eq("id", taskId)
+        .single();
+
+      expect(task!.priority).toBeNull();
+    });
+
+    it.skipIf(!priorityApplied)("is refused to an unrelated member — zero rows", async () => {
+      // A policy-refused UPDATE is not an error: PostgREST reports success with
+      // zero rows affected. Asserting `error === null` here would pass whether
+      // the policy worked or not, so the row count is the assertion.
+      const taskId = await makeTask();
+      const { client } = await signIn("member1VizAssists");
+
+      const { data, error } = await client
+        .from("vizserve_pms_tasks")
+        .update({ priority: "URGENT" })
+        .eq("id", taskId)
+        .select("id");
+
+      expect(error).toBeNull();
+      expect(data).toHaveLength(0);
+
+      const { data: task } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("priority")
+        .eq("id", taskId)
+        .single();
+
+      expect(task!.priority).toBeNull();
+    });
+
+    it.skipIf(!priorityApplied)("did not widen the grant to status", async () => {
+      // The grant statement RESTATES the whole column list, so the failure mode
+      // is a column silently gained or lost. `status` staying unwritable is the
+      // proof that the list was extended rather than replaced.
+      const taskId = await makeTask();
+      const { client } = await signIn("member1VizBytes");
+
+      const { error } = await client
+        .from("vizserve_pms_tasks")
+        .update({ status: "COMPLETED" } as never)
+        .eq("id", taskId);
+
+      expect(error).not.toBeNull();
+    });
+
+    it.skipIf(!priorityApplied)("a personal task carries its creator's priority", async () => {
+      const { client } = await signIn("member1VizBytes");
+
+      const { data, error } = await client.rpc("vizserve_pms_create_personal_task", {
+        p_title: `Priority personal ${Math.random().toString(36).slice(2, 8)}`,
+        p_description: "",
+        p_due_date: null,
+        p_list_id: null,
+        p_priority: "HIGH",
+      });
+
+      expect(error).toBeNull();
+      const taskId = (data as { task_id: string }).task_id;
+      created.push(taskId);
+
+      const { data: task } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("priority, is_personal")
+        .eq("id", taskId)
+        .single();
+
+      expect(task!.priority).toBe("HIGH");
+      expect(task!.is_personal).toBe(true);
+    });
+
+    it.skipIf(!priorityApplied)("Gate 1 sets it on a client task", async () => {
+      // The only moment a client task can be given one, because this is the
+      // statement that creates the task. If this ever stops working there is no
+      // second place to set it from at creation time.
+      const { data: submitted } = await anonClient().rpc("vizserve_pms_submit_request", {
+        p_slug: REQUEST_SLUG,
+        p_payload: {
+          requester_name: "Juan dela Cruz",
+          requester_email: `p7.${Math.random().toString(36).slice(2, 8)}@example.com`,
+          title: "Rush banner",
+          description: "Needed for Friday.",
+          target_date: "2026-12-01",
+          field_values: {},
+        } as Json,
+        p_attachments: [],
+        p_ip: `10.7.0.${Math.floor(Math.random() * 250)}`,
+      });
+
+      const submission = submitted as { ok: boolean; request_id?: string };
+      createdRequests.push(submission.request_id!);
+
+      const { client } = await signIn("tlVizBytes");
+      const { data, error } = await client.rpc("vizserve_pms_approve_request", {
+        p_request_id: submission.request_id!,
+        p_assignee_id: picId,
+        p_qa_assignee_id: qaId,
+        p_approved_target_date: null,
+        p_title: null,
+        p_description: null,
+        p_list_id: null,
+        p_priority: "URGENT",
+      });
+
+      expect(error).toBeNull();
+      const taskId = (data as { task_id: string }).task_id;
+      created.push(taskId);
+
+      const { data: task } = await adminClient()
+        .from("vizserve_pms_tasks")
+        .select("priority, request_id")
+        .eq("id", taskId)
+        .single();
+
+      expect(task!.priority).toBe("URGENT");
+      expect(task!.request_id).not.toBeNull();
+    });
+
+    it.skipIf(!priorityApplied)("refuses a value outside the enum", async () => {
+      const { client } = await signIn("tlVizBytes");
+
+      const { error } = await client.rpc("vizserve_pms_create_task", {
+        p_department_id: DEPARTMENTS.VizBytes,
+        p_title: "Bad priority",
+        p_priority: "CRITICAL",
+      } as never);
+
+      expect(error).not.toBeNull();
     });
   });
 });

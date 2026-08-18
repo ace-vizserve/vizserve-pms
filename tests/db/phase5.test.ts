@@ -70,6 +70,49 @@ if (run && !overtimeApplied) {
   );
 }
 
+/**
+ * P7-12 — leave types.
+ *
+ * Probed on the COLUMN rather than the table, for the same reason the overtime
+ * probe above is: the column and the rewritten shape constraint arrive in the
+ * same file, and a database with the table but not the constraint would run
+ * these cases against rules that are not there yet.
+ */
+const leaveTypesApplied = run
+  ? !(await adminClient().from("vizserve_pms_internal_requests").select("leave_type_id").limit(1))
+      .error
+  : false;
+
+if (run && !leaveTypesApplied) {
+  announce(
+    "phase5.test.ts — P7-12 leave-type cases SKIPPED." +
+      " supabase/migrations/20260818150000_p7_12_leave_types.sql is not applied.",
+  );
+}
+
+/**
+ * A leave type to file against, resolved once.
+ *
+ * EVERY EXISTING LEAVE FIXTURE IN THIS FILE NEEDS ONE once P7-12 is applied —
+ * the shape constraint makes it required, so a submit without it is refused.
+ * That is the whole fixture cost of this slice, and it is test work rather than
+ * product work.
+ *
+ * Null before the migration, and the call sites spread it, so the same fixtures
+ * keep working against a database that does not have the column yet.
+ */
+const leaveType: { p_leave_type_id?: string } = {};
+
+if (leaveTypesApplied) {
+  const { data } = await adminClient()
+    .from("vizserve_pms_leave_types")
+    .select("id")
+    .eq("code", "VACATION")
+    .single();
+
+  if (data) leaveType.p_leave_type_id = data.id;
+}
+
 const today = todayInAppZone();
 const yesterday = yesterdayInAppZone();
 
@@ -270,6 +313,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
         p_reason: "Family matters.",
         p_start_date: today,
         p_end_date: today,
+        ...leaveType,
       }),
       submit(client, {
         p_request_type: "NO_TIME_IN",
@@ -318,6 +362,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
       p_reason: "Scoping the queue test.",
       p_start_date: today,
       p_end_date: today,
+      ...leaveType,
     });
 
     const tl = await signIn("tlVizBytes");
@@ -358,6 +403,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
       p_reason: "Self-approval attempt.",
       p_start_date: today,
       p_end_date: today,
+      ...leaveType,
     });
 
     const { error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
@@ -374,6 +420,7 @@ describe.skipIf(!run)("P5-06 / P5-07 — the four types route to the right queue
       p_reason: "Reason-required test.",
       p_start_date: today,
       p_end_date: today,
+      ...leaveType,
     });
 
     const tl = await signIn("tlVizBytes");
@@ -806,5 +853,203 @@ describe.skipIf(!run)("the DTR queries parse", () => {
 
     expect(error).not.toBeNull();
     expect(error!.message).toContain("more than one relationship");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P7-12 — leave types.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!leaveTypesApplied)("P7-12 — leave types", () => {
+  it("seeded Amier's list, active and ordered", async () => {
+    const { data } = await adminClient()
+      .from("vizserve_pms_leave_types")
+      .select("code, label, is_active")
+      .order("sort_order");
+
+    expect(data!.map((row) => row.code)).toEqual([
+      "VACATION",
+      "SICK",
+      "SERVICE_INCENTIVE",
+      "BIRTHDAY",
+      "MATERNITY",
+      "PATERNITY",
+      "SOLO_PARENT",
+      "SPECIAL_WOMEN",
+    ]);
+
+    // Order is by usage, not alphabet. Vacation and Sick are what almost
+    // everybody picks, and alphabetically Sick lands seventh.
+    expect(data![0]!.label).toBe("Vacation Leave");
+    expect(data!.every((row) => row.is_active)).toBe(true);
+  });
+
+  it("refuses a leave request with no type", async () => {
+    // The constraint is the authority, not the zod schema a direct API call
+    // never runs.
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "LEAVE",
+      p_reason: "No type supplied.",
+      p_start_date: today,
+      p_end_date: today,
+    } as never);
+
+    expect(error).not.toBeNull();
+  });
+
+  it("records the type it was filed under", async () => {
+    const { client } = await signIn("member1VizBytes");
+    const { data: sick } = await adminClient()
+      .from("vizserve_pms_leave_types")
+      .select("id")
+      .eq("code", "SICK")
+      .single();
+
+    const id = await submit(client, {
+      p_request_type: "LEAVE",
+      p_reason: "Down with something.",
+      p_start_date: today,
+      p_end_date: today,
+      p_leave_type_id: sick!.id,
+    });
+
+    const { data: request } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("leave_type_id")
+      .eq("id", id)
+      .single();
+
+    expect(request!.leave_type_id).toBe(sick!.id);
+  });
+
+  it("refuses a retired type on a NEW request but keeps it on old ones", async () => {
+    // The entire reason this is a table and not an enum: a type can stop being
+    // offered without orphaning the requests that already used it.
+    const admin = adminClient();
+    const { data: type } = await admin
+      .from("vizserve_pms_leave_types")
+      .insert({ code: `TEMP_${Math.random().toString(36).slice(2, 8)}`, label: "Temporary" })
+      .select("id")
+      .single();
+
+    const { client } = await signIn("member1VizBytes");
+    const existing = await submit(client, {
+      p_request_type: "LEAVE",
+      p_reason: "Filed while the type was live.",
+      p_start_date: today,
+      p_end_date: today,
+      p_leave_type_id: type!.id,
+    });
+
+    await admin.from("vizserve_pms_leave_types").update({ is_active: false }).eq("id", type!.id);
+
+    const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "LEAVE",
+      p_reason: "Filed after it was retired.",
+      p_start_date: today,
+      p_end_date: today,
+      p_leave_type_id: type!.id,
+    } as never);
+
+    expect(error?.message ?? "").toContain("no longer available");
+
+    // The old one is untouched and still points at the retired type.
+    const { data: kept } = await admin
+      .from("vizserve_pms_internal_requests")
+      .select("leave_type_id")
+      .eq("id", existing)
+      .single();
+
+    expect(kept!.leave_type_id).toBe(type!.id);
+
+    await admin.from("vizserve_pms_internal_requests").delete().eq("id", existing);
+    await admin.from("vizserve_pms_leave_types").delete().eq("id", type!.id);
+  });
+
+  it("refuses to delete a type that is in use", async () => {
+    // `on delete restrict`. A cascade here would silently rewrite history the
+    // first time an admin tidied the list.
+    const { client } = await signIn("member1VizBytes");
+    const id = await submit(client, {
+      p_request_type: "LEAVE",
+      p_reason: "Holding a reference.",
+      p_start_date: today,
+      p_end_date: today,
+      ...leaveType,
+    });
+
+    const { error } = await adminClient()
+      .from("vizserve_pms_leave_types")
+      .delete()
+      .eq("id", leaveType.p_leave_type_id!);
+
+    expect(error).not.toBeNull();
+    expect(await Promise.resolve(id)).toBeTruthy();
+  });
+
+  it("forbids a type on every other request kind", async () => {
+    // The shape constraint's other half. A reimbursement carrying a leave type
+    // is a row nobody can interpret.
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "REIMBURSEMENT",
+      p_reason: "Taxi to the client site.",
+      p_amount: 450,
+      p_leave_type_id: leaveType.p_leave_type_id,
+    } as never);
+
+    // The function coerces it to null rather than refusing, so this SUCCEEDS —
+    // and the row must come back with no type on it. Refusing would give a
+    // worse message for a field the client had no business sending.
+    expect(error).toBeNull();
+
+    const { data: row } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("id, leave_type_id")
+      .eq("requester_id", (await signIn("member1VizBytes")).userId)
+      .eq("request_type", "REIMBURSEMENT")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .single();
+
+    expect(row!.leave_type_id).toBeNull();
+    createdRequests.push(row!.id);
+  });
+
+  it("is readable by any signed-in user and writable by none of them", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const { data, error } = await client.from("vizserve_pms_leave_types").select("id, label");
+    expect(error).toBeNull();
+    expect(data!.length).toBeGreaterThan(0);
+
+    // Admin-only writes, the same shape as vizserve_pms_holidays.
+    const { data: written } = await client
+      .from("vizserve_pms_leave_types")
+      .update({ label: "Hijacked" })
+      .eq("code", "VACATION")
+      .select("id");
+
+    expect(written ?? []).toHaveLength(0);
+  });
+
+  it("does not leak the type through the leave calendar", async () => {
+    // P7-10 withholds the reason because a reason is medical or personal. Four
+    // of the eight types are disclosures in their own right — Sick, Maternity,
+    // Solo Parent and Special Leave for Women. The calendar returns four
+    // columns and this is the test that keeps it at four.
+    const { client } = await signIn("member1VizBytes");
+
+    const { data } = await client.rpc("vizserve_pms_leave_calendar", {
+      p_from: today,
+      p_to: today,
+    });
+
+    for (const row of (data ?? []) as Record<string, unknown>[]) {
+      expect(Object.keys(row).sort()).toEqual(["end_date", "full_name", "start_date", "user_id"]);
+    }
   });
 });

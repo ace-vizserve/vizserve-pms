@@ -8,7 +8,18 @@
       "PowerShell(npm run test -- tests/unit/timesheet.test.ts 2>&1)",
       "Bash(npm run *)",
       "Bash(node -e ' *)",
-      "Bash(python -)"
+      "Bash(python -)",
+      "Bash(ls ~/.claude/plans/ 2>/dev/null | head -50; echo \"---\"; find \"C:/Users/Ace/AppData/Local/Temp/claude\" -name \"*crab*\" 2>/dev/null | head -20)",
+      "Read(//c/Users/Ace/.claude/plans/**)",
+      "Read(//c/Users/Ace/AppData/Local/Temp/claude/**)",
+      "Bash(mkdir -p \"app/\\(app\\)/_home\")",
+      "Bash(git mv *)",
+      "Bash(mv \"app/\\(app\\)/dashboard/home-widgets.tsx\" \"app/\\(app\\)/_home/home-widgets.tsx\")",
+      "Bash(mv \"app/\\(app\\)/dashboard/leave-calendar.tsx\" \"app/\\(app\\)/_home/leave-calendar.tsx\")",
+      "Bash(mv \"app/\\(app\\)/dashboard/page.tsx\" \"app/\\(app\\)/page.tsx\")"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\Ace\\.claude\\plans"
     ]
   }
 }

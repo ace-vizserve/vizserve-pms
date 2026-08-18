@@ -64,6 +64,7 @@ export async function punch(input: unknown): Promise<ActionResult<PunchResult>> 
   if (error) return { ok: false, error: readableError(error) };
 
   revalidatePath("/dtr");
+  revalidatePath("/");
   revalidatePath("/dashboard");
 
   return { ok: true, data: data as unknown as PunchResult };

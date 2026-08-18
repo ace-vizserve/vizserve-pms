@@ -534,3 +534,51 @@
     transform: translate(-50%, -50%);
   }
 }
+
+/* --- scroll reveal (marketing only) ---------------------------------------
+   A section fades and rises as it enters the viewport.
+
+   SCROLL-DRIVEN, not load-driven, and that is the whole reason this exists as
+   CSS rather than as a state hook. A load-time entrance animation has already
+   finished by the time anyone scrolls to the fifth section, so it decorates the
+   hero and nothing else. `animation-timeline: view()` ties the animation to the
+   element's own position in the scrollport, so every card animates when it is
+   actually looked at — with no JavaScript, no IntersectionObserver, and no
+   hydration cost on a public page whose whole job is to load fast.
+
+   THREE GUARDS, and none of them is optional:
+
+   1. `@supports` — Firefox and older Safari do not implement view timelines.
+      Without the guard they would apply the keyframes' `from` state and leave
+      the entire page invisible. Inside it, they simply get static content.
+   2. `prefers-reduced-motion` — movement tied to scrolling is a vestibular
+      trigger, and this is the one kind of animation where that matters most.
+   3. The animation only ever moves 10px and fades in. It never delays content,
+      never blocks interaction, and the element is fully opaque well before it
+      reaches the middle of the screen.
+
+   Duration is not set: a view timeline is driven by scroll position, so
+   `animation-range` is the equivalent knob. `--motion-duration-fast` does not
+   apply to it. */
+@keyframes reveal-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@supports (animation-timeline: view()) {
+  @media (prefers-reduced-motion: no-preference) {
+    .reveal {
+      animation: reveal-rise linear both;
+      animation-timeline: view();
+      /* Starts as the element edges in, done by the time it is a quarter up
+         the viewport — so nothing is still moving where the eye settles. */
+      animation-range: entry 5% cover 22%;
+    }
+  }
+}

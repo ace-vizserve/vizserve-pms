@@ -14,7 +14,7 @@ export type LoginState = {
 /** Only ever redirect to a path on this origin — never to an attacker's URL. */
 function safeNextPath(value: FormDataEntryValue | null): string {
   const next = typeof value === "string" ? value : "";
-  if (!next.startsWith("/") || next.startsWith("//")) return "/dashboard";
+  if (!next.startsWith("/") || next.startsWith("//")) return "/";
   return next;
 }
 

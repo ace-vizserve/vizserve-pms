@@ -1,30 +1,26 @@
 import { PageShell } from "@/components/page-shell";
+import { TableSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
+/**
+ * A TABLE placeholder, matching the real inbox. It stood in for a hand-built
+ * divided list until that list became a `DataTable` like every other list route
+ * — and a skeleton that no longer resembles what arrives is worse than none,
+ * because it promises one layout and delivers another.
+ */
 export default function Loading() {
   return (
     <PageShell>
-      <div className="flex items-center justify-between gap-4" aria-hidden>
-        <Skeleton className="h-3 w-20" />
-        <Skeleton className="h-7 w-28" />
+      <div className="flex flex-wrap items-end gap-3" aria-hidden>
+        <Skeleton className="h-10 w-full rounded-md sm:w-64 lg:w-72" />
+        <Skeleton className="h-10 w-40 rounded-md" />
+        <Skeleton className="h-10 w-32 rounded-md" />
+        <Skeleton className="ml-auto h-10 w-32 rounded-md" />
       </div>
 
-      {/* A list, not a table — mirroring the real divided card. */}
-      <ul
-        className="divide-y overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg"
-        aria-hidden
-      >
-        {Array.from({ length: 6 }, (_, index) => (
-          <li key={index} className="flex items-start gap-3 p-4">
-            <Skeleton className="mt-1.5 size-1.5 shrink-0 rounded-full" />
-            <div className="flex-1 space-y-2">
-              <Skeleton className="h-4 w-2/3" />
-              <Skeleton className="h-3 w-1/2" />
-              <Skeleton className="h-3 w-28" />
-            </div>
-          </li>
-        ))}
-      </ul>
+      <Skeleton className="-mt-1 h-3 w-20" aria-hidden />
+
+      <TableSkeleton columns={3} rows={8} />
     </PageShell>
   );
 }

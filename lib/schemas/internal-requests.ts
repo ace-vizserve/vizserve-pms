@@ -70,6 +70,15 @@ export const leaveRequestSchema = z
     reason: internalReasonSchema,
     start_date: dateOnly,
     end_date: dateOnly,
+    /**
+     * P7-12. Required, and an id rather than a code: the list is admin-editable
+     * data in `vizserve_pms_leave_types`, not an enum, so there is no closed set
+     * to validate against here. The server checks it exists AND is still active
+     * — a retired type stays valid on the rows that already reference it and
+     * must not be selectable for a new one, which is a rule no zod schema can
+     * express.
+     */
+    leave_type_id: z.uuid("Choose what kind of leave this is."),
   })
   // Checked here so the user sees it on the field, and again as a CHECK
   // constraint in the migration so a direct API call cannot dodge it.
