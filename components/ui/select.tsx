@@ -61,9 +61,28 @@ function SelectContent({
   children,
   side = "bottom",
   sideOffset = 4,
-  align = "center",
+  /*
+   * `start`, not `center`. With the popup dropping BELOW the trigger it has an
+   * edge to line up with, and a centred menu under a left-aligned control reads
+   * as a misplaced overlay rather than an extension of the field.
+   */
+  align = "start",
   alignOffset = 0,
-  alignItemWithTrigger = true,
+  /*
+   * ⚠️ `false`. Base UI defaults this to TRUE, which is it imitating a native
+   * `<select>`: the popup is positioned so the CHOSEN ROW sits exactly over the
+   * trigger, covering the control and often its label.
+   *
+   * That is faithful to a native menu on macOS and reads as a rendering fault
+   * everywhere else — it does not drop down, it lands on top, and the field you
+   * clicked disappears underneath it. Every other overlay in this app opens
+   * below the thing that opened it, so this one was the odd one out as well as
+   * the confusing one.
+   *
+   * Still a prop, so a call site that genuinely wants the native behaviour can
+   * ask for it. Nothing does.
+   */
+  alignItemWithTrigger = false,
   ...props
 }: SelectPrimitive.Popup.Props &
   Pick<
