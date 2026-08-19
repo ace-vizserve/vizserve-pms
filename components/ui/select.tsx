@@ -80,10 +80,27 @@ function SelectContent({
         alignItemWithTrigger={alignItemWithTrigger}
         className="isolate z-50"
       >
+        {/*
+          ⚠️ `min-w-(--anchor-width)`, never `w-(--anchor-width)`.
+
+          Capping the popup at the trigger's width sounds tidy and is wrong: the
+          trigger is `w-fit`, so it sizes to the CHOSEN label, while a popup
+          routinely carries more per row than the trigger does — the Gate 1 PIC
+          picker deliberately shows "Ana Cruz · 4 open" while choosing and just
+          the name once chosen. Under a hard cap plus `overflow-x-hidden` every
+          one of those rows was clipped mid-word.
+
+          The max keeps one very long option from running off the screen, and
+          `--available-width` is what stops it running past the viewport edge.
+
+          ONE `max()` RATHER THAN TWO CLASSES. `cn` is tailwind-merge and treats
+          every `min-w-*` as the same property, so `min-w-36 min-w-(--anchor-width)`
+          would silently keep only the second and throw the floor away.
+        */}
         <SelectPrimitive.Popup
           data-slot="select-content"
           data-align-trigger={alignItemWithTrigger}
-          className={cn("relative isolate z-50 max-h-(--available-height) w-(--anchor-width) min-w-36 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-overlay duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          className={cn("relative isolate z-50 max-h-(--available-height) min-w-[max(9rem,var(--anchor-width))] max-w-[min(28rem,var(--available-width))] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border bg-popover text-popover-foreground shadow-overlay duration-100 data-[align-trigger=true]:animate-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95", className )}
           {...props}
         >
           <SelectScrollUpButton />
@@ -122,7 +139,15 @@ function SelectItem({
       )}
       {...props}
     >
-      <SelectPrimitive.ItemText className="flex flex-1 shrink-0 gap-2 whitespace-nowrap">
+      {/*
+        `min-w-0 truncate`, NOT `shrink-0 whitespace-nowrap`.
+
+        A flex child cannot truncate while it refuses to shrink, so a long
+        option ran past the popup's edge instead of ellipsing — and the tick
+        below is positioned against the POPUP, so it landed on top of the
+        overflow rather than after it. Two symptoms, one cause.
+      */}
+      <SelectPrimitive.ItemText className="flex min-w-0 flex-1 gap-2 truncate">
         {children}
       </SelectPrimitive.ItemText>
       <SelectPrimitive.ItemIndicator

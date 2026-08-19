@@ -270,7 +270,7 @@ export function ReviewPanel({
                 value={assigneeId}
                 onValueChange={(v) => v !== null && setAssigneeId(v)}
               >
-                <SelectTrigger id="assignee">
+                <SelectTrigger id="assignee" className="w-full">
                   <SelectValue placeholder="Choose who does the work" />
                 </SelectTrigger>
                 <SelectContent>
@@ -294,7 +294,7 @@ export function ReviewPanel({
                 value={qaAssigneeId}
                 onValueChange={(v) => v !== null && setQaAssigneeId(v)}
               >
-                <SelectTrigger id="qa">
+                <SelectTrigger id="qa" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>

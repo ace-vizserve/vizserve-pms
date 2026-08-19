@@ -41,7 +41,20 @@ function DropdownMenuContent({
       >
         <MenuPrimitive.Popup
           data-slot="dropdown-menu-content"
-          className={cn("z-50 max-h-(--available-height) w-(--anchor-width) min-w-32 origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-overlay duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95", className )}
+          /*
+            ⚠️ `min-w-(--anchor-width)`, never `w-(--anchor-width)` — the same
+            fix as `select.tsx`, and this one bit harder: a dropdown's trigger
+            is frequently an ICON BUTTON, so capping the menu at the trigger's
+            width capped it at 24 pixels. Only the 8rem floor was holding it
+            open, and every item past 8rem was clipped by `overflow-x-hidden`.
+
+            ONE `max()` RATHER THAN TWO CLASSES. `cn` is tailwind-merge and
+            treats every `min-w-*` as the same property, so `min-w-32
+            min-w-(--anchor-width)` silently keeps only the second and throws
+            the floor away — the same trap the `grade-*` utilities are named
+            around.
+          */
+          className={cn("z-50 max-h-(--available-height) min-w-[max(8rem,var(--anchor-width))] max-w-[min(28rem,var(--available-width))] origin-(--transform-origin) overflow-x-hidden overflow-y-auto rounded-lg border bg-popover p-1 text-popover-foreground shadow-overlay duration-100 outline-none data-[side=bottom]:slide-in-from-top-2 data-[side=inline-end]:slide-in-from-left-2 data-[side=inline-start]:slide-in-from-right-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:overflow-hidden data-closed:fade-out-0 data-closed:zoom-out-95", className )}
           {...props}
         />
       </MenuPrimitive.Positioner>
