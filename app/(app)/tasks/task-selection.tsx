@@ -149,20 +149,32 @@ function SelectionBar({
           role="status"
           className="pointer-events-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary grade-primary px-2 py-1.5 text-primary-foreground shadow-overlay"
         >
-          <span className="px-2 text-xs font-medium tabular-nums">
+          <span className="pr-1 pl-2 text-xs font-medium tabular-nums">
             {count} {count === 1 ? "task" : "tasks"} selected
           </span>
 
-          {/*
-            A FILLED destructive button rather than red text. `--destructive` on
-            `--primary` is two mid-tone colours against each other and fails as
-            text; the button brings its own dark fill and white label, which
-            passes and also reads as the one committing action on the bar.
+          {/* Separates what is true from what you can do about it, without
+              spending the height a border on the bar itself would. */}
+          <span aria-hidden className="mx-0.5 h-5 w-px bg-primary-foreground/25" />
 
-            The word and the icon carry the danger either way — the colour is
-            never the only thing saying so.
+          {/*
+            ⚠️ NOT `variant="destructive"`. In this codebase that variant is the
+            SUBTLE pair — `bg-destructive-subtle` with `text-destructive` — which
+            is a pale fill built for a white card. On the brand blue it renders
+            as a near-white blob with red text, and the red on that fill is the
+            only thing left saying "destructive" while the fill shouts louder.
+
+            So: white on brand, which measures 6.54:1, and the trash icon and
+            the word "Delete" carry the meaning as they must anyway. The
+            consequence is spelled out in the confirm dialog, which is where a
+            destructive action is actually explained.
           */}
-          <Button variant="destructive" size="sm" onClick={() => setConfirming(true)}>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setConfirming(true)}
+            className="text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground"
+          >
             <Trash2 />
             Delete
           </Button>
