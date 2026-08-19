@@ -13,6 +13,7 @@ import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   type TaskPriority,
+  availableTransitions,
   isTerminal,
 } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
@@ -22,6 +23,7 @@ import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
 import { TaskStatusSelect } from "../status-select";
 import { TaskToolbar } from "../toolbar";
+import { BoardCard, BoardColumn, BoardDnd, BoardTaskGroup } from "./board-dnd";
 
 export const metadata: Metadata = { title: "Board" };
 
@@ -77,7 +79,7 @@ export default async function TaskBoardPage({
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, request_id, is_personal, priority, output_link, parent_task_id, resolution",
+      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, resolution",
     )
     .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
     .order("due_date", { ascending: true, nullsFirst: false });
@@ -126,6 +128,23 @@ export default async function TaskBoardPage({
   }
 
   const topLevel = (tasks ?? []).filter((task) => !task.parent_task_id);
+
+  /*
+   * P7-09. The subtasks the board can actually render, bucketed by parent.
+   *
+   * Only the ones in `tasks` — the board excludes the two terminal statuses, so
+   * a FINISHED subtask is not here at all. That is the behaviour the list has
+   * too: a subtask leaves its parent's nest when it is done. The COUNT on the
+   * button still comes from `subtaskCount`, which is unfiltered, so a parent
+   * reads "10 subtasks" and unfolds the seven that are still outstanding.
+   */
+  const childrenByParent = new Map<string, typeof topLevel>();
+  for (const task of tasks ?? []) {
+    if (!task.parent_task_id) continue;
+    const bucket = childrenByParent.get(task.parent_task_id) ?? [];
+    bucket.push(task);
+    childrenByParent.set(task.parent_task_id, bucket);
+  }
 
   /*
    * K5 — PROGRESS, and the board cannot derive it the way the list does.
@@ -184,17 +203,46 @@ export default async function TaskBoardPage({
     };
   }
 
+
+  /**
+   * P7-19 — whether to offer the trash on this row.
+   *
+   * Mirrors `vizserve_pms_can_delete_task` exactly: internal work only, and only
+   * for a lead of the department, whoever created it, or the owner of a personal
+   * task. The database is still the authority — this only decides whether to ask.
+   */
+  function canDelete(task: {
+    request_id: string | null;
+    department_id: string;
+    created_by: string | null;
+    is_personal: boolean;
+    assignee_id: string | null;
+  }) {
+    if (task.request_id !== null) return false;
+    // The lead test inline rather than through `seat()`, which also wants a
+    // `qa_assignee_id` that has nothing to do with deleting.
+    const leads =
+      context.role === "admin" || context.managedDepartmentIds.includes(task.department_id);
+    return (
+      leads ||
+      task.created_by === context.userId ||
+      (task.is_personal && task.assignee_id === context.userId)
+    );
+  }
+
   const byStatus = new Map<VizservePmsTaskStatus, typeof topLevel>(BOARD_COLUMNS.map((status) => [status, []]));
   for (const task of topLevel) byStatus.get(task.status)?.push(task);
 
   return (
     <PageShell className="h-[calc(100svh-3.5rem)] min-h-0 gap-3 overflow-hidden">
-      {/* No <h1> — the breadcrumb reads "Tasks / Board". The sentence stays: it
-          is why there is no dragging, which is the first thing anyone tries. */}
+      {/* No <h1> — the breadcrumb reads "Tasks / Board". The sentence stays
+          because it is now the rule for DRAGGING: internal work goes anywhere,
+          client work follows its gates, and a column that cannot take the card
+          dims rather than accepting it and springing back (P7-20). */}
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
         <TaskToolbar view="board" />
         <p className="min-w-0 text-xs text-muted-foreground">
-          Hover a card to move, rename or add to it. Internal work goes to any stage; client work follows its gates.
+          Drag a card by its handle, or use the status control. Internal work goes to any stage; client work follows its gates.
         </p>
       </div>
 
@@ -204,14 +252,16 @@ export default async function TaskBoardPage({
         negative margin with matching padding keeps the focus ring on the first
         card from being shaved off by the scroll box's own edge.
       */}
+      <BoardDnd>
       <div className="-mx-1 min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden px-1 pb-1">
         <div className="flex h-full min-w-max items-stretch gap-3">
           {BOARD_COLUMNS.map((status) => {
             const column = byStatus.get(status) ?? [];
 
             return (
-              <section
+              <BoardColumn
                 key={status}
+                status={status}
                 // The LABEL, never the enum — a screen reader announcing
                 // "FOR_CLIENT_APPROVAL column" is reading a database value out
                 // loud (§6).
@@ -273,9 +323,23 @@ export default async function TaskBoardPage({
                           whole-card link is gone and the title is the
                           affordance.
                         */
-                        <div
+                        <BoardTaskGroup
                           key={task.id}
-                          className="group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg">
+                          count={subtasks}
+                          label={task.title}
+                          parent={
+                        <BoardCard
+                          taskId={task.id}
+                          title={task.title}
+                          status={task.status}
+                          // P7-20. The SAME function the status dropdown uses,
+                          // which mirrors `vizserve_pms_transition_task`. The
+                          // board does not get an opinion of its own about what
+                          // is legal — that would be a fourth copy of the rules.
+                          allowed={availableTransitions(task.status, seat(task), task).map(
+                            (transition) => transition.to,
+                          )}
+                          className="group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg">
                           <div className="flex items-start gap-1.5">
                             <Link
                               href={`/tasks/${task.id}`}
@@ -287,7 +351,8 @@ export default async function TaskBoardPage({
                               taskId={task.id}
                               title={task.title}
                               priority={task.priority as TaskPriority | null}
-                              assignable={assignable}>
+                              assignable={assignable}
+                              deletable={canDelete(task)}>
                               {/* The glyph, not the chip: this card sits IN the
                                   column whose heading is its status. */}
                               <TaskStatusSelect
@@ -366,7 +431,38 @@ export default async function TaskBoardPage({
                               {subtasks} {subtasks === 1 ? "subtask" : "subtasks"}
                             </span>
                           ) : null}
-                        </div>
+                        </BoardCard>
+                          }>
+                          {(childrenByParent.get(task.id) ?? []).map((child) => (
+                            /*
+                              A SUBTASK CARD, and deliberately not a `BoardCard`.
+                              No drag handle: its stage follows the work it
+                              belongs to, and dragging one into another column is
+                              the exact move the nesting exists to prevent. It
+                              keeps its status control, because finishing one is
+                              a real thing to do — and finishing it is what takes
+                              it out of here.
+                            */
+                            <div
+                              key={child.id}
+                              className="group/task flex items-start gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
+                              <Link
+                                href={`/tasks/${child.id}`}
+                                className="line-clamp-2 min-w-0 flex-1 text-2xs leading-snug hover:underline">
+                                {child.title}
+                              </Link>
+                              <TaskStatusSelect
+                                taskId={child.id}
+                                status={child.status}
+                                viewer={seat(child)}
+                                task={child}
+                                resolutionMissing={!child.resolution?.trim()}
+                                variant="compact"
+                                align="end"
+                              />
+                            </div>
+                          ))}
+                        </BoardTaskGroup>
                       );
                     })
                   )}
@@ -393,11 +489,12 @@ export default async function TaskBoardPage({
                     <BoardComposer status={status} assignable={assignable} />
                   </>
                 )}
-              </section>
+              </BoardColumn>
             );
           })}
         </div>
       </div>
+      </BoardDnd>
     </PageShell>
   );
 }

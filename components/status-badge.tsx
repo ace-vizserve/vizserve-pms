@@ -274,6 +274,57 @@ export function TaskStatusBadge({
   );
 }
 
+/**
+ * The stage as a single glyph, for a LIST ROW.
+ *
+ * ⚠️ THE LIST HAD NO STAGE INDICATOR AT ALL. The row's only status control is
+ * `TaskStatusSelect variant="compact"`, which renders `ArrowRightLeft` — the
+ * same "move" glyph for every stage, hidden until hover, and `null` outright
+ * when there is nowhere legal to move to. So a row at rest said nothing about
+ * where it was.
+ *
+ * That was defensible while the group heading directly above every row said it.
+ * It stopped being true when P7-09 nested subtasks under their PARENT: a
+ * subtask sits in its parent's group whatever its own status, so the heading
+ * now describes the parent and not the row.
+ *
+ * NOT A CONTROL, and deliberately separate from `TaskStatusSelect`. This says
+ * where the task is; that one moves it. Merging them would put a dead control on
+ * every row that has nowhere to go — which is the trap the compact variant
+ * already fell into by rendering nothing.
+ *
+ * The label rides `title` AND an `sr-only` span: state is never carried by
+ * colour alone (§5.5), and a tooltip is not readable by a screen reader.
+ */
+export function TaskStatusGlyph({
+  status,
+  className,
+}: {
+  status: VizservePmsTaskStatus;
+  className?: string;
+}) {
+  const tone = TASK_STATUS_TONES[status] ?? "neutral";
+  const label = TASK_STATUS_LABELS[status] ?? status;
+  const Icon = TASK_STATUS_ICONS[status];
+
+  return (
+    <span
+      title={label}
+      className={cn(
+        "inline-flex size-5 shrink-0 items-center justify-center rounded-full border",
+        // The same tone map every other status in the app reads from, so a row
+        // glyph and its column heading cannot drift into disagreeing about what
+        // colour "For QA" is.
+        TONE[tone],
+        className,
+      )}
+    >
+      <Icon className="size-3" aria-hidden />
+      <span className="sr-only">{label}</span>
+    </span>
+  );
+}
+
 export const TASK_STATUS_OPTIONS = (Object.keys(TASK_STATUS_TONES) as VizservePmsTaskStatus[]).map(
   (value) => ({ value, label: TASK_STATUS_LABELS[value] }),
 );

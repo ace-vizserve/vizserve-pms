@@ -208,10 +208,204 @@ is still allowed). The database guards structure but not `is_active`, and
 archiving a live form's inbox would leave client work landing where nobody can
 see it.
 
-**Still owed — the whole frontend.** Sidebar tree (Department → Folder → List),
-folder CRUD on `/tasks/lists`, the `?group=` filter, and the `nav-projects.tsx`
-comment that still argues against this table. Plan:
-`~/.claude/plans/silly-stargazing-oasis.md`, Phase B.
+### Frontend state — built
+
+- **`/tasks/lists`** now manages folders as well as lists. One screen, not a
+  sibling route: the first thing anyone does after making a folder is put a list
+  in it. The reserved folder gets no pencil, and a form's inbox list shows a
+  "From a form" pill with its folder picker and Available switch disabled.
+- **Sidebar** renders Department → Folder → List, collapsing at every level.
+  Folderless lists sort **above** folders, and the reserved folder sorts **last**
+  and is hidden while empty — otherwise every department grows a permanently
+  empty CLIENT REQUESTS the day the SQL is pasted.
+- **`?group=`** filters the board via a conditional PostgREST embed
+  (`vizserve_pms_lists!inner(group_id)`), because tasks carry `list_id` and never
+  `group_id`. Folder and List clear each other in the URL.
+- **`nav-projects.tsx`'s comment is rewritten** — it argued against this table
+  and now records why that call was reversed.
+
+Two things worth knowing for the next person in these files:
+
+**`defaultOpen` was already a bug and is now fixed.** It applies only at mount,
+and the app shell does not remount across client navigations — so arriving at a
+list from the filter panel left the department holding it collapsed. Both levels
+are controlled now, forced open on arrival and never forced shut. The fix adjusts
+state **during render** rather than in an effect: React's own lint refuses the
+effect version, and it renders the closed state once before correcting it, which
+is a visible flicker on every navigation.
+
+**Three shadcn sidebar props are silently dead below the top level**, all because
+they key on `group/menu-item` while a nested row carries `group/menu-sub-item`:
+`SidebarMenuAction`'s `showOnHover`, the `pr-8` action reservation in
+`sidebarMenuButtonVariants`, and `SidebarMenuBadge`'s `top-*` offsets. All three
+are supplied by hand in `nav-projects.tsx`. Separately, `SidebarMenuSubButton`
+defaults to `<a>` — wrapping one in a `CollapsibleTrigger` without
+`render={<button type="button" />}` yields an unfocusable `<a aria-expanded>`
+with no href that still works on a mouse click, which is how it would ship
+unnoticed.
+
+**Still owed:** nothing in the plan. The task-group work is complete end to end.
+Plan: `~/.claude/plans/silly-stargazing-oasis.md`.
+
+## P7-19 / P7-20 — deleting a task, dragging a card, and a design sweep, 19 Aug
+
+### The design sweep
+
+Native controls replaced with the vendored primitives, per the design skill §2
+("a raw `<button>`, `<input>`, `<select>` or `<textarea>` in a page is a bug"):
+
+| Fixed | Count |
+|---|---|
+| Native `<select>` → `Select` | 5 |
+| Native date inputs → new `DatePicker` | **20**, across 11 files |
+| `<details>/<summary>` → `Collapsible` | 2 |
+| Selects rendering a raw UUID or enum in the closed trigger | 16 |
+
+**`components/ui/calendar.tsx` and `react-day-picker` were already in the repo
+and nothing imported either.** Every date field was `<Input type="date">` — the
+browser's own control, which is three different widgets across Chrome, Safari and
+Firefox, none carrying our tokens or a dark mode. `components/ui/date-picker.tsx`
+wraps the calendar that was already there.
+
+⚠️ **The value is a bare `YYYY-MM-DD` string and both boundaries convert
+explicitly.** In through `parseDateOnly` (midday UTC — midnight lands on the
+previous day in a negative offset); out through the picked Date's LOCAL
+components, deliberately **not** `toAppDateString`, which answers "what is the
+date in Manila for this instant" and would shift the day for anyone browsing from
+another timezone. That is also exactly what `<input type="date">` did, so no
+stored value moved.
+
+**Left native on purpose:** the `sr-only` file input (no File primitive), the
+timesheet grid cell (seven per row — a 40px Input would wreck the grid, and the
+existing comment says so), and `/approve/[token]`'s `<details>` (a server
+component on the Gate 3 client page — native disclosure needs zero JS, and making
+a client's approval page depend on JS is a downgrade).
+
+**A real gap, not a lazy call site: there is no Radio primitive** in
+`components/ui/`. Two call sites hand-roll `<input type="radio">` with
+`accent-primary`. Base UI has `Radio`/`RadioGroup`; wrapping it is owed.
+
+### Three dead dropdowns on the Gate 1 screen
+
+Found while sweeping, unrelated to any of the above and **committed since
+`f4abc5c`**. All three Selects in `app/(app)/requests/[id]/review-panel.tsx` had:
+
+```tsx
+onValueChange={(v) => v !== null && (v)}
+```
+
+which evaluates the value and discards it. A Team Leader could not change the
+PIC, the QA reviewer or the list on the Gate 1 review screen. The PIC had a
+second route in (clicking a row in the capacity table); the other two had none.
+Swept the codebase — no other no-op handlers exist.
+
+### P7-19 — deleting an internal task
+
+`20260819140000_p7_19_delete_internal_task.sql`, applied, **13/13 tests green on
+the first run** (`tests/db/task-delete.test.ts`, written before the paste).
+
+**Internal work only.** A task cascades to nine tables; three of them
+(`client_decisions`, `approval_tokens`, `feedback`) exist only on request-backed
+work, so scoping to `request_id is null` means those cascades can never fire.
+What still goes: timesheet entries, status history, comments, attachments,
+assignees — **and every subtask, silently**, via `parent_task_id`.
+
+`vizserve_pms_task_delete_impact` counts the whole subtree so the dialog can name
+the damage; the confirm button stays disabled until it comes back, because a
+confirm that can be pressed before it knows what it destroys is only pretending
+to ask. The audit row is written **before** the delete, with the counts, since
+afterwards there is nothing left to count.
+
+**There is still no DELETE policy on `vizserve_pms_tasks`, and there must not
+be.** A policy would be a second route that skips the audit row and the
+`request_id` guard. `vizserve_pms_delete_task` is the only door, and a direct
+`DELETE` through PostgREST still affects zero rows — asserted.
+
+Lists and folders remain archive-only (`is_active`): `tasks.list_id` is
+`ON DELETE SET NULL`, so deleting a list would silently unfile every task in it.
+
+### P7-20 — dragging a card on the board
+
+`@dnd-kit/core` added — the one new dependency, and justified by §5.3: HTML5
+native drag has no keyboard story, and dnd-kit's `KeyboardSensor` does.
+
+**The board decides nothing about what is legal.** Each card is handed the output
+of `availableTransitions()`, the same function the status dropdown uses, which
+mirrors `vizserve_pms_transition_task`. So the rule is the one `p7_13a` already
+set: **internal work moves anywhere** (its own comment calls the result "a board
+card people drag about" — this feature is what it was for), except
+`FOR_CLIENT_APPROVAL`, which is a dead end rather than a gate; client work still
+follows its table.
+
+A column that cannot take the card dims and refuses the drop, rather than
+accepting it and springing back on a server error.
+
+Two things that are load-bearing: an 8px pointer activation distance, or every
+click on a card's link would start a drag instead; and a **dedicated grip
+handle** rather than a draggable card, because the keyboard sensor would
+otherwise steal Space and the arrow keys from the status dropdown inside it.
+
+### The selection bar
+
+`/tasks` rows carry a checkbox and a floating "N tasks selected" bar — the
+reference's shape, with one action instead of nine. Delete is what was missing;
+the rest either exist inline on the row already or are not features this app has.
+
+**A checkbox appears only on rows that can actually be deleted**, and
+`deleteTasks` decides each task on its own rather than wrapping the selection in
+a transaction: a selection can legitimately mix work the caller may delete with
+work they may not, and one refusal rolling back the other nine is worse than a
+partial result honestly reported.
+
+## P7-09 revisited — a subtask sits under its parent, 19 Aug
+
+Three fixes, all reported from the running app.
+
+**The DND payload was wrong on the first try.** `transitionTask` answered *"Check
+the highlighted fields"* on every drag — a form error, on a drag with no form.
+`transitionPayloadSchema` types `comment` as `.optional()`, **not**
+`.nullable()`, so the `{ comment: null }` the board sent failed zod before it
+reached the database. The field is omitted now.
+
+**A subtask no longer leaves its parent when its own status changes.** It used to
+be pushed into the group for its own status, so moving one to Ongoing tore it out
+of the piece of work it belongs to and stranded it three headings away — which
+reads as the subtask having been promoted to a task of its own. It now renders
+indented **in the parent's group**, whatever its own status, with two exceptions:
+
+- a **finished** subtask leaves the nest for its own terminal group, which is
+  what "done" means on a checklist;
+- a subtask whose **parent is not on screen** stays top level, because filters
+  and the kind tabs can hide a parent and nesting a row under something unrendered
+  would delete it from the view.
+
+**The indent replaces the label.** The row used to say "⊢ subtask" in its meta
+line and sit flush with its parent, which reads as two tasks that happen to
+mention each other. The parent link survives only for the two cases the indent
+cannot express — an off-screen parent, and a finished subtask.
+
+**The list row now shows its stage.** It never did — the only status control on
+a row is `TaskStatusSelect variant="compact"`, which renders `ArrowRightLeft`
+(the same "move" glyph for every stage), is hidden until hover, and returns
+`null` outright when there is nowhere legal to move to. A row at rest said
+nothing about where it was.
+
+That was defensible while the group heading directly above every row said it, and
+the code said so. **Nesting subtasks is what broke it**: a subtask sits in its
+parent's group whatever its own status, so the heading now describes the parent
+rather than the row. `TaskStatusGlyph` in `components/status-badge.tsx` — the
+only file allowed to turn a status into a colour — renders the stage icon in the
+stage's tone, before the title, always visible. It is deliberately NOT the status
+control: that one moves the task and vanishes when there is nowhere to move to,
+which is precisely when a reader still needs to know where the task is.
+
+**The board renders them too.** It used to drop subtasks outright
+(`!task.parent_task_id`), so "10 subtasks" was the only trace of ten pieces of
+work — countable and unreachable. They fold out under the parent card now,
+collapsed by default. They are **not draggable**: their stage follows the work
+they belong to, and dragging one to another column is the exact move the nesting
+prevents. The count comes from the unfiltered query, so a card reads "10
+subtasks" and unfolds the seven still outstanding.
 
 ## ⚠️ The db tests share a project with the running app
 

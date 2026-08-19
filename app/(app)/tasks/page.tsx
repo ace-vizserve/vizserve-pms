@@ -1,9 +1,9 @@
-import { ListChecks, ListTree } from "lucide-react";
+import { CornerDownRight, ListChecks, ListTree } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
-import { isTaskStatus } from "@/components/status-badge";
+import { TaskStatusGlyph, isTaskStatus } from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
@@ -29,6 +29,7 @@ import { LatestCommentCell } from "./latest-comment-cell";
 
 import { GroupComposer } from "./add-task";
 import { AssigneePicker } from "./assignees";
+import { TaskSelectCheckbox, TaskSelectionProvider } from "./task-selection";
 import { TaskFilters } from "./filters";
 import { InlineDate, InlineEstimate, InlinePriority, SubtaskProgress, TaskRowActions } from "./inline";
 import { NewTaskButton } from "./new-task-button";
@@ -49,6 +50,8 @@ type TaskRow = {
   department_id: string;
   list_id: string | null;
   request_id: string | null;
+  /** P7-19. Whoever filed it — a member may delete a task they created. */
+  created_by: string | null;
   /** P7-01. With `request_id`, decides which of the three categories this is. */
   is_personal: boolean;
   /** P7-11. Null on most tasks — that is the ordinary state, not a gap. */
@@ -63,6 +66,14 @@ type TaskRow = {
    */
   resolution: string | null;
 };
+
+/**
+ * A row as the table renders it — a task plus how deep it sits.
+ *
+ * P7-09. Only two levels exist (`parent_task_id` is one level by trigger), so
+ * this is 0 or 1 and never a tree.
+ */
+type ListRow = TaskRow & { depth: 0 | 1 };
 
 /** `?sort=` — the two orders a task list is actually read in. */
 const SORTS = ["due", "priority"] as const;
@@ -115,6 +126,7 @@ export default async function TasksPage({
     status?: string;
     view?: string;
     list?: string;
+    group?: string;
     kind?: string;
     priority?: string;
     sort?: string;
@@ -142,10 +154,31 @@ export default async function TasksPage({
   const priorityFilter = isPriority(params.priority) ? params.priority : null;
   const sort: Sort = isSort(params.sort) ? params.sort : "due";
 
+  /*
+   * P7-18 — filtering by FOLDER needs an embed, not an `.eq()`.
+   *
+   * A task carries `list_id` and never `group_id` (deliberately: a task holding
+   * its own folder would be a second source of truth that disagrees with its
+   * list the first time a list moves). So the folder is reached through the
+   * list, and PostgREST does that with an embedded filter.
+   *
+   * `!inner` is what makes the filter actually restrict rather than just
+   * decorate the rows — and it also drops tasks with no list at all, which is
+   * right when a folder is selected, since a task with no list has no folder.
+   * That is also why the embed is CONDITIONAL: always-on `!inner` would silently
+   * hide every list-less task from the unfiltered board.
+   *
+   * Resolved in the same round trip rather than by fetching the folder's list
+   * ids first — the lists query below sits in the same `Promise.all` as this
+   * one, so reading it first would make the slow query wait on the fast one.
+   */
+  const TASK_COLUMNS =
+    "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution";
+
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution",
+      params.group ? `${TASK_COLUMNS}, vizserve_pms_lists!inner(group_id)` : TASK_COLUMNS,
     );
 
   /*
@@ -171,6 +204,7 @@ export default async function TasksPage({
 
   if (isTaskStatus(params.status)) query = query.eq("status", params.status);
   if (params.list) query = query.eq("list_id", params.list);
+  if (params.group) query = query.eq("vizserve_pms_lists.group_id", params.group);
   if (priorityFilter) query = query.eq("priority", priorityFilter);
   if (kind === "client") query = query.not("request_id", "is", null);
   if (kind === "internal") query = query.is("request_id", null);
@@ -181,13 +215,41 @@ export default async function TasksPage({
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
 
-  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }] = await Promise.all([
-    query,
-    supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
-    supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
-  ]);
+  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }, { data: groups }] =
+    await Promise.all([
+      query,
+      supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
+      supabase
+        .from("vizserve_pms_lists")
+        .select("id, name, group_id")
+        .eq("is_active", true)
+        .order("name"),
+      // P7-18. The reserved folder is offered like any other here — "show me
+      // everything that came through a form" is a filter people want, and it is
+      // the one folder guaranteed to exist.
+      supabase
+        .from("vizserve_pms_task_groups")
+        .select("id, name")
+        .eq("is_active", true)
+        .order("sort_order")
+        .order("name"),
+    ]);
 
-  const rows = (tasks ?? []) as TaskRow[];
+  /*
+   * `as unknown` first, and only because the select string is CONDITIONAL.
+   *
+   * supabase-js types a query by parsing the select string at the type level,
+   * and it can only do that for a literal. The ternary above hands it a union of
+   * two, which it reports as a ParserError — a type-level complaint about a
+   * string, not a claim that the rows are wrong. The columns are identical
+   * either way; the embed adds a `vizserve_pms_lists` key that nothing here
+   * reads.
+   *
+   * Widening the cast is the cost of one round trip instead of two. The
+   * alternative — two literal branches — means maintaining the fifteen-column
+   * list twice, which drifts the first time somebody adds a column to one.
+   */
+  const rows = (tasks ?? []) as unknown as TaskRow[];
   const taskIds = rows.map((task) => task.id);
 
   /*
@@ -327,10 +389,60 @@ export default async function TasksPage({
     ((trackedRows ?? []) as { task_id: string; minutes: number }[]).map((row) => [row.task_id, row.minutes]),
   );
 
-  const isFiltered = Boolean(params.status || params.list || priorityFilter) || view !== "all" || kind !== "all";
+  const isFiltered =
+    Boolean(params.status || params.list || params.group || priorityFilter) ||
+    view !== "all" ||
+    kind !== "all";
 
-  const grouped = new Map<VizservePmsTaskStatus, TaskRow[]>(TASK_STATUSES.map((status) => [status, [] as TaskRow[]]));
-  for (const task of rows) grouped.get(task.status)?.push(task);
+  /*
+   * P7-09 — A SUBTASK LIVES UNDER ITS PARENT, NOT IN ITS OWN STAGE.
+   *
+   * It used to be pushed into the group for its own status, so moving a subtask
+   * to Ongoing tore it out of the piece of work it belongs to and stranded it
+   * three headings away from its parent. On a board that reads as the subtask
+   * having been promoted to a task of its own, which is precisely what it is not.
+   *
+   * So a subtask renders indented beneath its parent, IN THE PARENT'S GROUP,
+   * whatever its own status. Two exceptions, and both are the same idea:
+   *
+   *   * FINISHED subtasks leave the nest and join their own terminal group.
+   *     That is what "done" means on a checklist — it stops being outstanding
+   *     work under the parent and becomes a completed thing in its own right.
+   *   * A subtask whose PARENT IS NOT ON SCREEN stays top level. Filters and
+   *     the kind tabs can hide a parent, and nesting a row under something that
+   *     is not rendered would delete it from the view entirely.
+   */
+  const visibleIds = new Set(rows.map((task) => task.id));
+  const childrenByParent = new Map<string, TaskRow[]>();
+  const nested = new Set<string>();
+
+  for (const task of rows) {
+    if (!task.parent_task_id) continue;
+    if (isTerminal(task.status)) continue;
+    if (!visibleIds.has(task.parent_task_id)) continue;
+
+    const bucket = childrenByParent.get(task.parent_task_id) ?? [];
+    bucket.push(task);
+    childrenByParent.set(task.parent_task_id, bucket);
+    nested.add(task.id);
+  }
+
+  /** `depth` is what the Task column indents on. Flat list, one level only. */
+  const grouped = new Map<VizservePmsTaskStatus, ListRow[]>(
+    TASK_STATUSES.map((status) => [status, [] as ListRow[]]),
+  );
+
+  for (const task of rows) {
+    if (nested.has(task.id)) continue;
+
+    const bucket = grouped.get(task.status);
+    if (!bucket) continue;
+
+    bucket.push({ ...task, depth: 0 });
+    for (const child of childrenByParent.get(task.id) ?? []) {
+      bucket.push({ ...child, depth: 1 });
+    }
+  }
 
   /**
    * Which headings to draw.
@@ -399,6 +511,25 @@ export default async function TasksPage({
   }
 
   const isAdmin = roleAtLeast(context.role, "admin");
+  /**
+   * P7-19 — whether to offer the trash on this row.
+   *
+   * Mirrors `vizserve_pms_can_delete_task`: internal work only, and only for a
+   * lead of the department, whoever created it, or the owner of a personal task.
+   * The database is still the authority — this only decides whether to ask, so
+   * nobody is offered a control that can only answer no.
+   */
+  function canDelete(task: TaskRow) {
+    if (task.request_id !== null) return false;
+    const leads =
+      context.role === "admin" || context.managedDepartmentIds.includes(task.department_id);
+    return (
+      leads ||
+      task.created_by === context.userId ||
+      (task.is_personal && task.assignee_id === context.userId)
+    );
+  }
+
   function seat(task: TaskRow) {
     return {
       isPic: task.assignee_id === context.userId,
@@ -418,19 +549,72 @@ export default async function TasksPage({
    * which is most of the list. The reviewer is on the task itself, where the
    * decision to appoint one is made.
    */
-  const columns: Column<TaskRow>[] = [
+  const columns: Column<ListRow>[] = [
+    {
+      /*
+       * P7-19 — the selection column.
+       *
+       * A checkbox ONLY where the row can actually be deleted, on the same rule
+       * as the per-row trash: `canDelete` mirrors
+       * `vizserve_pms_can_delete_task`, so client-backed work and a colleague's
+       * tasks have nothing to tick. The cell is not merely disabled — a
+       * disabled checkbox on two thirds of the rows reads as the feature being
+       * broken rather than as the row being out of scope.
+       */
+      key: "select",
+      header: "",
+      className: "w-8 pr-0",
+      cell: (task) =>
+        canDelete(task) ? <TaskSelectCheckbox taskId={task.id} title={task.title} /> : null,
+    },
     {
       key: "task",
       header: "Task",
       className: "max-w-sm whitespace-normal",
       cell: (task) => {
+        const isChild = task.depth === 1;
+
         return (
           // `group/task` is what the hover strip keys off. Named, because the
           // status group above is a group too and an unnamed one would make the
           // whole panel's hover reveal every row's actions at once.
-          <div className="group/task">
+          //
+          // P7-09. A subtask is INDENTED rather than labelled. The old row said
+          // "⊢ subtask" in the meta line underneath and sat flush with its
+          // parent, which reads as two tasks that happen to mention each other.
+          // The indent is the relationship — it is how every reference draws it,
+          // and it survives a screenshot where a word in a meta row does not.
+          <div className={cn("group/task", isChild && "pl-6")}>
             <span className="flex min-w-0 items-center gap-2">
-              <Link href={`/tasks/${task.id}`} className="truncate font-medium hover:underline">
+              {/* The elbow. Decoration only — the row's meaning is carried by
+                  the indent and by the parent link in the meta line, so this is
+                  hidden from a screen reader rather than read out as a glyph.
+                  `--foreground-faint` is legal here for exactly that reason:
+                  it is 3.44:1 and NON-TEXT ONLY (§1.1). */}
+              {isChild ? (
+                <CornerDownRight
+                  aria-hidden
+                  className="-ml-4 size-3.5 shrink-0 text-foreground-faint"
+                />
+              ) : null}
+
+              {/*
+                The stage, always visible and BEFORE the title — the shape the
+                reference uses. It is not the hover strip's status control: that
+                one moves the task and disappears when there is nowhere legal to
+                move to, which is exactly when a reader still needs to know where
+                the task is. See the note on `TaskStatusGlyph`.
+              */}
+              <TaskStatusGlyph status={task.status} />
+
+              <Link
+                href={`/tasks/${task.id}`}
+                className={cn(
+                  "truncate hover:underline",
+                  // A subtask is a smaller thing than its parent and should not
+                  // compete with it for the eye.
+                  isChild ? "text-sm font-normal" : "font-medium",
+                )}>
                 {task.title}
               </Link>
 
@@ -439,7 +623,12 @@ export default async function TasksPage({
                   everything marks nothing. */}
               <InlinePriority taskId={task.id} value={task.priority} />
 
-              <TaskRowActions taskId={task.id} title={task.title} priority={task.priority} assignable={assignable}>
+              <TaskRowActions
+                taskId={task.id}
+                title={task.title}
+                priority={task.priority}
+                assignable={assignable}
+                deletable={canDelete(task)}>
                 {/* The glyph, not the chip: the group heading right above this
                     row already says the status in words. */}
                 <TaskStatusSelect
@@ -463,7 +652,15 @@ export default async function TasksPage({
               <span>{TASK_CATEGORY_LABELS[taskCategory(task)]}</span>
               {/* A subtask says so. Without it the list shows two rows that look
                   like peers when one is part of the other. */}
-              {task.parent_task_id ? (
+              {/*
+                P7-09. Only when the row is NOT already sitting under its parent.
+                Once it is indented, the indent says "subtask" and a word saying
+                it again is a word people stop reading. This survives for the two
+                cases where the indent cannot: a subtask whose parent is filtered
+                off screen, and a finished one that has left the nest for its own
+                terminal group.
+              */}
+              {task.parent_task_id && task.depth === 0 ? (
                 <Link href={`/tasks/${task.parent_task_id}`} className="inline-flex items-center gap-1 hover:underline">
                   <ListTree className="size-3" aria-hidden />
                   subtask
@@ -632,7 +829,7 @@ export default async function TasksPage({
         </div>
       </div>
 
-      <TaskFilters lists={lists ?? []} />
+      <TaskFilters lists={lists ?? []} groups={groups ?? []} />
 
       {/* Three messages, because there are three ways of arriving at an empty
           screen and only two of them are somebody's fault: a filter that is too
@@ -671,6 +868,7 @@ export default async function TasksPage({
           )}
         </div>
       ) : (
+        <TaskSelectionProvider>
         <div className="flex flex-col gap-3">
           {visibleStatuses.map((status) => {
             const group = grouped.get(status) ?? [];
@@ -723,6 +921,7 @@ export default async function TasksPage({
             );
           })}
         </div>
+        </TaskSelectionProvider>
       )}
     </PageShell>
   );
