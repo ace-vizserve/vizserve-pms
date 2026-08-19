@@ -1264,3 +1264,99 @@ export async function saveTaskGroup(
   revalidatePath("/tasks/lists");
   return { ok: true, data: { id: data.id } };
 }
+
+// ---------------------------------------------------------------------------
+// P7-19 — deleting an internal task
+// ---------------------------------------------------------------------------
+
+export type TaskDeleteImpact =
+  | { ok: false; reason: string }
+  | {
+      ok: true;
+      title: string;
+      subtasks: number;
+      tracked_minutes: number;
+      comments: number;
+      attachments: number;
+    };
+
+/**
+ * What deleting this task would destroy.
+ *
+ * Called when the confirm dialog OPENS, not when it submits, so the consequence
+ * is on screen before the button is pressed rather than in a toast afterwards.
+ *
+ * A refusal comes back as `{ ok: false, reason }` rather than as a thrown error:
+ * the dialog has to render it, and translating an exception into a sentence at
+ * the call site is how two different wordings end up in two different screens.
+ */
+export async function taskDeleteImpact(taskId: string): Promise<ActionResult<TaskDeleteImpact>> {
+  await requireAuthContextOrThrow();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("vizserve_pms_task_delete_impact", {
+    p_task_id: taskId,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+  return { ok: true, data: data as unknown as TaskDeleteImpact };
+}
+
+/**
+ * Delete an internal task and everything beneath it.
+ *
+ * Every rule lives in `vizserve_pms_delete_task` — internal work only, lead or
+ * creator or personal owner, audit row written before the row goes. Nothing is
+ * re-checked here, because a second copy of a rule is a second thing to keep in
+ * step, and the sentences the function raises are the ones worth showing.
+ */
+export async function deleteTask(taskId: string): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("vizserve_pms_delete_task", { p_task_id: taskId });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  // No `refresh(taskId)` — that path is gone, and revalidating a deleted task's
+  // page would only re-render a 404.
+  revalidatePath("/tasks");
+  revalidatePath("/tasks/board");
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+  return { ok: true, data: undefined };
+}
+
+/** Deleting several at once, for the list view's selection bar. */
+export async function deleteTasks(
+  taskIds: string[],
+): Promise<ActionResult<{ deleted: number; failures: string[] }>> {
+  await requireAuthContextOrThrow();
+
+  const supabase = await createClient();
+  const failures: string[] = [];
+  let deleted = 0;
+
+  /*
+   * ONE AT A TIME, deliberately, and not in a transaction.
+   *
+   * A selection can legitimately mix work the caller may delete with work they
+   * may not — a client-backed task, or a colleague's. Doing them together means
+   * one refusal rolls back the rest, so pressing Delete on ten tasks removes
+   * none of them and explains why in terms of a task the person may not even
+   * have meant to include. Each is decided on its own; the caller is told how
+   * many went and what stopped the others.
+   */
+  for (const id of taskIds) {
+    const { error } = await supabase.rpc("vizserve_pms_delete_task", { p_task_id: id });
+    if (error) failures.push(readableError(error));
+    else deleted += 1;
+  }
+
+  revalidatePath("/tasks");
+  revalidatePath("/tasks/board");
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+
+  return { ok: true, data: { deleted, failures: [...new Set(failures)] } };
+}

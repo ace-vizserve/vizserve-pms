@@ -1592,6 +1592,27 @@ export type Database = {
         Args: { p_task_id: string; p_user_id: string };
         Returns: boolean;
       };
+      /**
+       * P7-19 — deleting an internal task.
+       *
+       * There is no DELETE policy on `vizserve_pms_tasks` and there must not be:
+       * a policy would be a second route in that skips the audit row and the
+       * request_id guard. These three functions are the only door.
+       */
+      vizserve_pms_can_delete_task: {
+        Args: { p_task_id: string };
+        Returns: boolean;
+      };
+      vizserve_pms_task_delete_impact: {
+        /** Returns `{ ok, title, subtasks, tracked_minutes, comments, attachments }`, or `{ ok: false, reason }`. */
+        Args: { p_task_id: string };
+        Returns: Json;
+      };
+      vizserve_pms_delete_task: {
+        /** Hard-deletes an internal task and its subtree. Refuses request-backed work. */
+        Args: { p_task_id: string };
+        Returns: Json;
+      };
       vizserve_pms_add_task_assignee: {
         Args: { p_task_id: string; p_user_id: string };
         Returns: Json;
