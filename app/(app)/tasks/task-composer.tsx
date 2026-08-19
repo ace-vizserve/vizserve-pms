@@ -164,7 +164,23 @@ export function ComposerRow({
 
   return (
     <TableRow className="bg-accent/20 hover:bg-accent/20">
-      {/* Name + priority, mirroring the Task cell above it. */}
+      {/*
+        Name + priority, mirroring the Task cell above it.
+
+        ⚠️ THE INPUT NEEDS A FLOOR OF ITS OWN — see `min-w-48` below.
+
+        A table cell is shrink-to-fit, and `Input` is `w-full min-w-0`: a
+        percentage width resolving against a content-sized parent, with the
+        floor explicitly removed. A row of real tasks is fine, because a title
+        is text and text has a width. An EMPTY composer has no content at all,
+        so the cell collapsed to the priority chip beside it and the field
+        became a 24-pixel square you could not read what you were typing in.
+
+        The floor goes on the INPUT rather than this cell. A width here would
+        size the whole COLUMN — a table sizes a column across every row — so the
+        Task column would jump wider the moment somebody clicked "add task" and
+        snap back when they cancelled.
+      */}
       <TableCell className="max-w-sm whitespace-normal">
         <div className="flex items-center gap-2">
           <Input
@@ -179,7 +195,10 @@ export function ComposerRow({
             }
             onChange={(event) => set("title", event.target.value)}
             onKeyDown={onKeyDown}
-            className="h-8"
+            // `min-w-48` overrides the primitive's `min-w-0` — cn is
+            // tailwind-merge, so the later class wins on the same property.
+            // Without it the input has no width of its own to insist on.
+            className="h-8 min-w-48 flex-1"
           />
           <PriorityField
             value={draft.priority}
