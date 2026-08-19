@@ -697,4 +697,110 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
       expect(theirs).toEqual([]);
     });
   });
+
+  // =========================================================================
+  // P7-26 — the pending queue, where the work lives
+  // =========================================================================
+  /**
+   * A pending request is now rendered on `/tasks`, on the board, and as a badge
+   * in the sidebar — screens a MEMBER opens all day and a lead of another
+   * department opens by accident.
+   *
+   * `lib/pending-requests-server.ts` carries no scope filter at all, by design:
+   * "the policy does it, and restating it in the query implies the policy is
+   * optional". That makes this file the only thing standing between a member
+   * and a client's name, email and brief. The unit tests cover which FILTERS
+   * drop a request; only these cover who may see one.
+   */
+  describe("who can see a request that has not been decided", () => {
+    /** The queue's own query, minus the ordering — exactly what the page runs. */
+    async function pendingFor(account: Parameters<typeof signIn>[0]) {
+      const { client } = await signIn(account);
+      const { data, error } = await client
+        .from("vizserve_pms_requests")
+        .select("id, reference_no, requester_name, vizserve_pms_forms!inner(name, default_list_id)")
+        .eq("status", "PENDING_REVIEW")
+        .eq("form_id", formId);
+
+      return { rows: data ?? [], error };
+    }
+
+    it.skipIf(!migrationApplied)("shows a lead their own department's queue", async () => {
+      const requestId = await submitRequest();
+      const { rows, error } = await pendingFor("tlVizBytes");
+
+      expect(error).toBeNull();
+      expect(rows.map((row) => row.id)).toContain(requestId);
+    });
+
+    it.skipIf(!migrationApplied)("shows a member nothing", async () => {
+      // The member's own group simply never renders. There is no role check in
+      // the loader — this policy IS the check, and if it ever loosens, a member
+      // gets a client's name, organisation and brief on their task list.
+      await submitRequest();
+      const { rows, error } = await pendingFor("member1VizBytes");
+
+      // Zero rows, not an error — a working policy, not a missing grant.
+      expect(error).toBeNull();
+      expect(rows).toEqual([]);
+    });
+
+    it.skipIf(!migrationApplied)("shows a lead of another department nothing", async () => {
+      await submitRequest();
+      const { rows, error } = await pendingFor("tlVizAssists");
+
+      expect(error).toBeNull();
+      expect(rows).toEqual([]);
+    });
+
+    it.skipIf(!migrationApplied)(
+      "drops the request out of the queue and lands its task in the form's list",
+      async () => {
+        // The one behaviour the whole of P7-26 exists for: a request is visible
+        // where the work lives until it is decided, and then it IS the work.
+        // Both halves in one case, because either alone can pass while the
+        // handover is broken — a request that leaves the queue without its task
+        // arriving anywhere is exactly the P7-24 bug wearing a different hat.
+        const requestId = await submitRequest();
+
+        const { data: form } = await adminClient()
+          .from("vizserve_pms_forms")
+          .select("default_list_id")
+          .eq("id", formId)
+          .single();
+
+        // P7-18 gives every form an inbox list and points it there, so this is
+        // the list the task should land in with no `p_list_id` passed at all.
+        expect(form!.default_list_id).not.toBeNull();
+
+        const before = await pendingFor("tlVizBytes");
+        expect(before.rows.map((row) => row.id)).toContain(requestId);
+
+        const { client } = await signIn("tlVizBytes");
+        const { data, error } = await client.rpc("vizserve_pms_approve_request", {
+          p_request_id: requestId,
+          p_assignee_id: picId,
+          p_qa_assignee_id: qaId,
+          p_approved_target_date: null,
+          p_title: null,
+          p_description: null,
+        });
+
+        expect(error).toBeNull();
+
+        const after = await pendingFor("tlVizBytes");
+        expect(after.rows.map((row) => row.id)).not.toContain(requestId);
+
+        const { data: task } = await adminClient()
+          .from("vizserve_pms_tasks")
+          .select("list_id, request_id")
+          .eq("id", (data as { task_id: string }).task_id)
+          .single();
+
+        expect(task!.request_id).toBe(requestId);
+        expect(task!.list_id).toBe(form!.default_list_id);
+      },
+    );
+  });
+
 });

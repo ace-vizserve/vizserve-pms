@@ -327,13 +327,41 @@ describe.skipIf(!run)("P7-18 — the Client Requests folder", () => {
     expect(error?.message ?? "").toMatch(/turned into the Client Requests folder, or out of it/i);
   });
 
-  it("refuses an ordinary list", async () => {
-    // Everything in it arrived from a form. A hand-made list in here breaks that
-    // sentence, which is the only thing the folder means.
+  /**
+   * ⚠️ THIS ASSERTED THE OPPOSITE UNTIL P7-25, and the reversal was deliberate.
+   *
+   * P7-18 read the folder as an inbox — "one list per form, filled
+   * automatically" — and refused anything hand-made in it. P7-25 changed what
+   * the folder MEANS: "where client work lives — the per-form inboxes, plus any
+   * list a lead made for a particular piece of client work". A lead approving a
+   * website rebuild wants a list for it, and sending them elsewhere puts client
+   * work in two places while the folder named after it holds only inboxes.
+   *
+   * The test was left behind by that migration and had been asserting the old
+   * rule ever since.
+   */
+  it("accepts a list a lead made by hand — P7-25", async () => {
     const list = await makeList({ group_id: systemGroupId });
 
-    expect(list.id).toBeNull();
-    expect(list.error?.message ?? "").toMatch(/one list per form/i);
+    expect(list.error).toBeNull();
+    expect(list.id).not.toBeNull();
+  });
+
+  it("still refuses to let a form's inbox live anywhere else", async () => {
+    // The half of the guard that did NOT relax, and the reason
+    // `default_list_id` can be trusted at all. P7-25 loosened one arm; a paste
+    // that loosened both would leave a form's inbox free to wander out of the
+    // folder every screen expects to find it in.
+    const form = await makeForm();
+    const inbox = await listOfForm(form.id!);
+    const ordinary = await makeGroup();
+
+    const { error } = await adminClient()
+      .from("vizserve_pms_lists")
+      .update({ group_id: ordinary.id })
+      .eq("id", inbox!.id);
+
+    expect(error?.message ?? "").toMatch(/Client Requests folder/i);
   });
 });
 
@@ -480,6 +508,115 @@ describe.skipIf(!run)("P7-18 — a form gets its own list", () => {
       .eq("id", list!.id);
 
     expect(orphaned?.message ?? "").toMatch(/cannot be moved out of it/i);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P7-24 — a form must never file into ANOTHER form's inbox
+// ---------------------------------------------------------------------------
+
+/**
+ * THE BUG THE WHOLE PLAN STARTED FROM, pinned.
+ *
+ * Reported as "I approved a client request as TL, a list appeared in Client
+ * Requests named after my form, I opened it and the task wasn't there". What
+ * was true: the form's own inbox list existed, was correctly named and
+ * correctly filed, and was permanently empty, while `default_list_id` pointed
+ * at a DIFFERENT form's inbox and every approved request went there.
+ *
+ * P7-18's `and default_list_id is null` is what let it happen and is also
+ * correct — a lead who has pointed a form somewhere has made a decision. P7-24
+ * adds the one arm that is never a decision. These two cases are the whole
+ * distinction, and getting it wrong in either direction is a real failure:
+ * too narrow and the bug comes back, too wide and it silently overrules a lead.
+ */
+describe.skipIf(!run)("P7-24 — a misrouted form is repointed at its own list", () => {
+  /**
+   * Re-fires `vizserve_pms_ensure_form_list`.
+   *
+   * The trigger is `after insert or update OF department_id`, so touching any
+   * other column does nothing. Clearing it and putting it back is the same
+   * route the existing "chosen by hand" case above uses: the first update
+   * returns early (a form with no department has nowhere to file), the second
+   * runs the function properly against a form whose list already exists.
+   */
+  async function refire(formId: string) {
+    const admin = adminClient();
+    await admin.from("vizserve_pms_forms").update({ department_id: null }).eq("id", formId);
+    await admin
+      .from("vizserve_pms_forms")
+      .update({ department_id: DEPARTMENTS.VizBytes })
+      .eq("id", formId);
+  }
+
+  it("repoints a form filing into another form's inbox", async () => {
+    const other = await makeForm();
+    const victim = await makeForm();
+
+    const otherInbox = await listOfForm(other.id!);
+    const ownInbox = await listOfForm(victim.id!);
+    expect(otherInbox).not.toBeNull();
+    expect(ownInbox).not.toBeNull();
+
+    // The live database's exact state: a form pointed at a list that belongs to
+    // a different form, with its own sitting empty beside it.
+    await adminClient()
+      .from("vizserve_pms_forms")
+      .update({ default_list_id: otherInbox!.id })
+      .eq("id", victim.id!);
+
+    await refire(victim.id!);
+
+    expect((await formRow(victim.id!)).default_list_id).toBe(ownInbox!.id);
+  });
+
+  it("does not disturb the form that was being filed into", async () => {
+    // The repair rewrites one row. A fix that also touched the OTHER form —
+    // the one whose inbox was borrowed — would be trading one misrouting for
+    // another, and it would be the harder one to notice because that form was
+    // working correctly all along.
+    const other = await makeForm();
+    const victim = await makeForm();
+
+    const otherInbox = await listOfForm(other.id!);
+
+    await adminClient()
+      .from("vizserve_pms_forms")
+      .update({ default_list_id: otherInbox!.id })
+      .eq("id", victim.id!);
+
+    await refire(victim.id!);
+
+    expect((await formRow(other.id!)).default_list_id).toBe(otherInbox!.id);
+  });
+
+  it("leaves a form routed to an ORDINARY list alone", async () => {
+    // The other half of the rule, and the reason it is `l.form_id is not null`
+    // rather than `l.id <> own`. An ordinary project list has a null `form_id`,
+    // so a lead who deliberately routes a form into "VizServe Website" keeps
+    // that routing for ever. Repairing this case too would be a migration
+    // overruling a person.
+    const ordinary = await makeList();
+    const form = await makeForm();
+
+    await adminClient()
+      .from("vizserve_pms_forms")
+      .update({ default_list_id: ordinary.id })
+      .eq("id", form.id!);
+
+    await refire(form.id!);
+
+    expect((await formRow(form.id!)).default_list_id).toBe(ordinary.id);
+  });
+
+  it("still fills in a default that was never set", async () => {
+    // P7-18's original arm, restated here because P7-24 rewrote the statement
+    // that contains it. A widened `where` that dropped the `is null` case would
+    // pass every test above and break every new form.
+    const form = await makeForm();
+    const inbox = await listOfForm(form.id!);
+
+    expect((await formRow(form.id!)).default_list_id).toBe(inbox!.id);
   });
 });
 
