@@ -18,7 +18,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { formSettingsSchema, type FormSettingsInput } from "@/lib/schemas/forms";
+import {
+  formCreateSchema,
+  formSettingsSchema,
+  prefixFromName,
+  slugFromName,
+  type FormSettingsInput,
+} from "@/lib/schemas/forms";
 import { createForm, updateFormSettings } from "./actions";
 
 type Department = { id: string; name: string };
@@ -52,10 +58,20 @@ export function FormSettings({
     setError,
     formState: { errors },
   } = useForm<FormSettingsInput>({
-    // The schema's input type is looser than its output (zod defaults make
-    // several keys optional before parsing), so the resolver is cast to the
-    // parsed shape the form actually works with.
-    resolver: zodResolver(formSettingsSchema) as unknown as Resolver<FormSettingsInput>,
+    /*
+     * The schema's input type is looser than its output (zod defaults make
+     * several keys optional before parsing), so the resolver is cast to the
+     * parsed shape the form actually works with.
+     *
+     * P7-29 — CREATING AND EDITING VALIDATE DIFFERENTLY. A blank slug means
+     * "derive one from the name" on a form that does not exist yet, and would
+     * mean "take away the URL somebody has shared" on one that does. The
+     * server draws the same distinction; this is only so the client stops
+     * reporting a required field the create path is happy to fill in itself.
+     */
+    resolver: zodResolver(
+      formId ? formSettingsSchema : formCreateSchema,
+    ) as unknown as Resolver<FormSettingsInput>,
     defaultValues: {
       name: initial?.name ?? "",
       slug: initial?.slug ?? "",
@@ -73,6 +89,24 @@ export function FormSettings({
 
   const isActive = watch("is_active");
   const departmentId = watch("department_id");
+
+  /*
+   * P7-29 — what the server will fill in if these are left blank.
+   *
+   * Shown rather than silently applied, and only while creating. The same two
+   * pure functions run here and in `createForm`, so the preview is the value —
+   * not an approximation of it that drifts the first time either changes.
+   */
+  const creating = !formId;
+  const name = watch("name") ?? "";
+  const slug = watch("slug") ?? "";
+  const prefix = watch("reference_prefix") ?? "";
+
+  const willDeriveSlug = creating && slug === "" && name.trim() !== "";
+  const willDerivePrefix = creating && prefix === "" && name.trim() !== "";
+
+  const shownSlug = slug || (willDeriveSlug ? slugFromName(name) : "");
+  const shownPrefix = prefix || (willDerivePrefix ? prefixFromName(name) : "");
 
   // A list belongs to one department, so offering another department's would be
   // offering a guaranteed rejection from the database.
@@ -165,11 +199,14 @@ export function FormSettings({
           <Label htmlFor="slug">URL slug</Label>
           <Input
             id="slug"
-            placeholder="collateral-request"
+            placeholder={willDeriveSlug ? slugFromName(name) : "collateral-request"}
             aria-invalid={Boolean(errors.slug)}
             {...register("slug")}
           />
-          <p className="text-xs text-muted-foreground">Public at /f/{watch("slug") || "…"}</p>
+          <p className="text-xs text-muted-foreground">
+            Public at /request/{shownSlug || "…"}
+            {willDeriveSlug ? " — from the name. Type your own to change it." : null}
+          </p>
           {errors.slug ? <p className="text-xs text-destructive">{errors.slug.message}</p> : null}
         </div>
       </div>
@@ -215,14 +252,19 @@ export function FormSettings({
           <Label htmlFor="reference_prefix">Reference prefix</Label>
           <Input
             id="reference_prefix"
-            placeholder="COL"
+            placeholder={willDerivePrefix ? prefixFromName(name) : "COL"}
             className="uppercase"
             aria-invalid={Boolean(errors.reference_prefix)}
             disabled={hasSubmissions}
             {...register("reference_prefix")}
           />
           <p className="text-xs text-muted-foreground">
-            {hasSubmissions ? "Locked — requests already quote it." : "e.g. COL-2026-0142"}
+            {hasSubmissions
+              ? // P7-29. Not just disabled — the server refuses the change too,
+                // because a reference already in a client's inbox is
+                // reconstructed from this and stops matching if it moves.
+                "Locked — requests already quote it."
+              : `e.g. ${shownPrefix || "COL"}-2026-0142${willDerivePrefix ? ", from the name" : ""}`}
           </p>
           {errors.reference_prefix ? (
             <p className="text-xs text-destructive">{errors.reference_prefix.message}</p>

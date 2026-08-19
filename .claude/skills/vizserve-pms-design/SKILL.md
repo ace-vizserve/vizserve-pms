@@ -7,7 +7,7 @@ description: The design system of record for VizServe PMS — brand tokens, type
 
 ## Mission
 
-Implementation-ready UI guidance for **VizServe PMS**, the internal ops platform replacing ClickUp and Teams Approvals. Two audiences share one system: authenticated operators (member → team_leader → manager → admin) working queues all day, and unauthenticated clients who see exactly two screens (`/f/[slug]`, `/approve/[token]`) and must not need instructions.
+Implementation-ready UI guidance for **VizServe PMS**, the internal ops platform replacing ClickUp and Teams Approvals. Two audiences share one system: authenticated operators (member → team_leader → manager → admin) working queues all day, and unauthenticated clients who see exactly two screens (`/request/[slug]`, `/approve/[token]`) and must not need instructions.
 
 This file is the authority. `DESIGN.md` is a token *extraction* that has been auto-replaced four times (ClickUp → Pinterest → Shadcn Fintech → Tarsi Web); read it as raw material, never as the system. Where they disagree, this file and `docs/12-ui-and-notifications.md` win.
 
@@ -276,7 +276,7 @@ Every component must define all seven states: **default, hover, focus-visible, a
 
 Dialog, popover, dropdown, sheet, tooltip all use `--shadow-overlay`. Focus must be trapped, `Escape` must close, and focus must return to the trigger. A dialog that can be dismissed must never be the only route to an action.
 
-### 4.6 Client-facing surfaces (`/f/[slug]`, `/approve/[token]`, `/feedback/[token]`)
+### 4.6 Client-facing surfaces (`/request/[slug]`, `/approve/[token]`, `/feedback/[token]`)
 
 No session, no nav, no jargon. `BrandLockup` for identity, one clear primary action, and copy that assumes the reader has never seen the app. These carry the entire value of Gate 3.
 

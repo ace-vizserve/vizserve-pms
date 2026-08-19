@@ -90,9 +90,9 @@ export default async function FormsPage() {
         form.is_active && form.is_public ? (
           <Link
             target="_blank"
-            href={`/f/${form.slug}`}
+            href={`/request/${form.slug}`}
             className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-            /f/{form.slug}
+            /request/{form.slug}
           </Link>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>

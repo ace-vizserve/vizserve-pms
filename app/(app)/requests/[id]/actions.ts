@@ -184,5 +184,13 @@ async function resolveResubmitPath(
 
   // A link to a form that has since been unpublished is worse than no link.
   if (!form?.is_active || !form.is_public) return undefined;
-  return `/f/${form.slug}`;
+  /*
+   * P7-29 — `/request/`, not `/f/`.
+   *
+   * THIS ONE GOES INTO AN EMAIL TO THE CLIENT, which is why it is the reference
+   * that mattered most in the move. `/f/` still redirects, so an email sent
+   * before this change keeps working — but a link written from here today
+   * should not be the one that needs the redirect.
+   */
+  return `/request/${form.slug}`;
 }

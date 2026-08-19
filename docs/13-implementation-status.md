@@ -473,7 +473,7 @@ Every db suite **detects whether its migration has been applied** and skips with
 | P1-03 | Form builder UI | ✅ Add/edit/reorder/archive. Reorder is up/down buttons, not drag |
 | P1-04 | Form settings | ✅ Publishing blocked without a department (UI + DB `CHECK`) |
 | P1-05 | Forms list | ✅ |
-| P1-06 | Public form page | ✅ `/f/[slug]`, no session |
+| P1-06 | Public form page | ✅ `/request/[slug]`, no session. `/f/[slug]` 308s to it (P7-29) |
 | P1-07 | Submission endpoint | ✅ `SECURITY DEFINER`, server-side validation, structured field errors |
 | P1-08 | Requester identity capture | ✅ Email mandatory, not staff-editable |
 | P1-09 | Attachment upload | ✅ Two-step receipt handshake — see below |

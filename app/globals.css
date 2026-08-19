@@ -513,7 +513,7 @@
 }
 
 /* --- client-facing surfaces ----------------------------------------------
-   `/f/[slug]`, `/approve/[token]` and `/feedback/[token]`.
+   `/request/[slug]`, `/approve/[token]` and `/feedback/[token]`.
 
    WCAG 2.2 §2.5.8 asks for 24px targets; the design system asks for 44 on the
    pages a CLIENT sees, and it is right to: those readers get one shot, are

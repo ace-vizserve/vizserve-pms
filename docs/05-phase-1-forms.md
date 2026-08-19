@@ -36,7 +36,7 @@ Enforcement lives in three places, per `02-data-model.md`. Client-side validatio
 | P1-03 | Form builder UI | Add/remove/reorder fields, set type, required toggle, options for selects. Keep it plain — this is not the product's differentiator | Kurt |
 | P1-04 | Form settings | Name, slug, description, owning department, default task list, public flag, `requires_attachment`, `sla_days`, active flag | Kurt |
 | P1-05 | Forms list view | Staff-facing list of forms with status and public URL, per Amier 29:57 | Kurt |
-| P1-06 | Public form page | `/f/[slug]`. No session. Renders fields, client-side validation for UX only | Kurt |
+| P1-06 | Public form page | `/request/[slug]` (was `/f/[slug]`, which now 308s — P7-29). No session. Renders fields, client-side validation for UX only | Kurt |
 | P1-07 | Submission endpoint | `SECURITY DEFINER` function or server action. **Server-side required-field validation. Rejects partial submissions.** Returns field-level errors | Ace |
 | P1-08 | Requester identity capture | Name, email, organization. Email is mandatory on every public form and is not editable by staff afterwards | Ace |
 | P1-09 | Attachment upload | Supabase Storage. Size and MIME allowlist. Required when `requires_attachment` is true | Ace |

@@ -240,6 +240,26 @@ export const formSettingsSchema = z.object({
 
 export type FormSettingsInput = z.infer<typeof formSettingsSchema>;
 
+/**
+ * P7-29 — the same settings, on a form that does not exist yet.
+ *
+ * The ONLY difference is that the slug and the reference prefix may arrive
+ * blank, meaning "derive one from the name". `formSettingsSchema` requires
+ * both, and it has to: on an existing form a blank slug would take a URL
+ * somebody has shared away.
+ *
+ * Two schemas rather than one loose one, so an UPDATE cannot accidentally
+ * accept the blank an INSERT is allowed to.
+ */
+export const formCreateSchema = formSettingsSchema.extend({
+  slug: z.union([z.literal(""), formSettingsSchema.shape.slug]).default(""),
+  reference_prefix: z
+    .union([z.literal(""), formSettingsSchema.shape.reference_prefix])
+    .default(""),
+});
+
+export type FormCreateInput = z.infer<typeof formCreateSchema>;
+
 export const formFieldDraftSchema = z
   .object({
     id: z.uuid().optional(),
@@ -274,4 +294,116 @@ export function suggestFieldKey(label: string): string {
       .replace(/^(\d)/, "f_$1")
       .slice(0, 48) || "field"
   );
+}
+
+// ---------------------------------------------------------------------------
+// P7-29 — the two identifiers, derived from the name
+// ---------------------------------------------------------------------------
+
+/**
+ * BOTH ARE PURE, AND BOTH ARE SUGGESTIONS.
+ *
+ * A form has three names: what it is called, the URL a client visits, and the
+ * prefix on every reference number it issues. Two of the three were blank
+ * fields somebody had to invent a value for, and inventing a globally-unique
+ * value by hand is a job for a machine — which is why the live form is called
+ * "Test Client Request" and reaches the internet at `/request/test-client-form`
+ * with references reading `COL-2026-0001`.
+ *
+ * DERIVED ON CREATE ONLY, and only when the field was left blank. Both stay
+ * editable afterwards, because a URL somebody has already shared is worth more
+ * than a tidy derivation — with one exception, below.
+ *
+ * ⚠️ THE PREFIX LOCKS ONCE THE FORM HAS SUBMISSIONS. `COL-2026-0001` is what
+ * the client quotes back in an email; changing `COL` orphans it from its own
+ * series and there is no record anywhere of what the old prefix was. Same shape
+ * as `field_key` immutability (D20/R5), and enforced in `updateFormSettings`
+ * rather than only in the disabled input — the front end will be bypassed.
+ */
+
+/**
+ * `Collateral Request` → `collateral-request`.
+ *
+ * Matches `formSettingsSchema.slug`'s own regex by construction, so a derived
+ * value can never be one the form would then refuse.
+ */
+export function slugFromName(name: string): string {
+  const slug = name
+    .toLowerCase()
+    // Anything that is not a slug character becomes a separator — including
+    // accented letters, which would otherwise survive `\W` and fail the regex.
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60)
+    // The slice can leave a trailing hyphen behind, which the regex refuses.
+    .replace(/-+$/, "");
+
+  // A name made entirely of characters a URL cannot carry — "字体設計" — still
+  // has to produce a working form rather than a validation error on a field
+  // the person never filled in.
+  return slug || "form";
+}
+
+/**
+ * `Collateral Request` → `COL`. `IT Support` → `IS`. `2026 Planning` → `PLA`.
+ *
+ * The first word where it is long enough to abbreviate on its own, initials
+ * where it is not — "COL" reads as collateral, where "CR" reads as nothing.
+ * Two to eight characters, first one a letter, per the schema's regex.
+ */
+export function prefixFromName(name: string): string {
+  const words = name
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+
+  /*
+   * A prefix must START with a letter — `PREFIX-YYYY-NNNN` is read by segment
+   * and a leading digit makes the first one ambiguous.
+   *
+   * So words that begin with a digit are SKIPPED rather than stripped. "2026
+   * Planning" and "3D Modelling" both lead with one, and stripping would derive
+   * "202" → "" and throw away a perfectly good word standing right behind it.
+   */
+  const usable = words.filter((word) => /^[A-Z]/.test(word));
+
+  const candidate =
+    usable.length === 0
+      ? ""
+      : usable[0].length >= 3
+        ? usable[0].slice(0, 3)
+        : usable.map((word) => word[0]).join("");
+
+  const cleaned = candidate.slice(0, 8);
+
+  // Anything that cannot make a legal prefix falls back rather than failing:
+  // this runs on a field the person deliberately left blank, so an error here
+  // would be the app refusing to do the work it offered to do.
+  return /^[A-Z][A-Z0-9]{1,7}$/.test(cleaned) ? cleaned : "REQ";
+}
+
+/**
+ * The next candidate after one that is already taken — `col` → `col-2`, and
+ * `COL` → `COL2`.
+ *
+ * Both identifiers are GLOBALLY UNIQUE (single-tenant, D-single-tenant), and a
+ * lead cannot necessarily SEE the form they would clash with: RLS scopes forms
+ * to the departments somebody leads, so a uniqueness check in a query would
+ * miss exactly the clashes that matter. The create path therefore derives,
+ * attempts the insert, and asks this for the next candidate when Postgres says
+ * the value is taken.
+ *
+ * ONLY EVER APPLIED TO A DERIVED VALUE. A slug somebody typed and a slug this
+ * function invented are different things: silently saving `collateral-2` to a
+ * lead who asked for `collateral` would put an address they are about to share
+ * one character away from another department's form.
+ */
+export function nextCandidate(value: string, attempt: number, separator: "-" | "" = "-"): string {
+  const suffix = `${separator}${attempt}`;
+  // The prefix has a hard eight-character ceiling, so the suffix eats into the
+  // stem rather than pushing the value past the regex it has to satisfy.
+  const ceiling = separator === "" ? 8 : 60;
+  return `${value.slice(0, ceiling - suffix.length)}${suffix}`;
 }

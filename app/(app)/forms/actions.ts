@@ -5,7 +5,14 @@ import { z } from "zod";
 
 import { assertDepartmentAccess, ForbiddenError, requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
-import { formFieldDraftSchema, formSettingsSchema } from "@/lib/schemas/forms";
+import {
+  formCreateSchema,
+  formFieldDraftSchema,
+  formSettingsSchema,
+  nextCandidate,
+  prefixFromName,
+  slugFromName,
+} from "@/lib/schemas/forms";
 
 /**
  * P1-03 / P1-04 — form builder and settings mutations.
@@ -69,7 +76,10 @@ async function assertCanEditForm(formId: string) {
 
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, department_id, created_by")
+    // `reference_prefix` so `updateFormSettings` can tell a change from a
+    // resubmission of the same value — the lock below must not fire on a Save
+    // that touched something else entirely.
+    .select("id, department_id, created_by, reference_prefix")
     .eq("id", formId)
     .maybeSingle();
 
@@ -77,16 +87,34 @@ async function assertCanEditForm(formId: string) {
 
   // An unrouted draft belongs to its author until a department is chosen.
   if (form.department_id === null && form.created_by === context.userId) {
-    return { context, supabase };
+    return { context, supabase, form };
   }
 
   assertDepartmentAccess(context, form.department_id);
-  return { context, supabase };
+  return { context, supabase, form };
 }
 
+/**
+ * P7-29 — the slug and the reference prefix are DERIVED when left blank.
+ *
+ * Both are globally unique and both were empty boxes somebody had to invent a
+ * value for. That is how the live form ended up called "Test Client Request"
+ * while issuing references reading `COL-`.
+ *
+ * DE-DUPLICATION IS A RETRY, NOT A LOOKUP, and that is the important part. RLS
+ * scopes `vizserve_pms_forms` to the departments somebody leads, so a
+ * "is this slug taken" query would be blind to exactly the clashes that matter
+ * — another department's form, which is invisible here and unique-indexed all
+ * the same. So the insert is attempted, and Postgres is the thing that answers.
+ *
+ * ⚠️ ONLY A DERIVED VALUE IS EVER BUMPED. If somebody TYPED `collateral` and it
+ * is taken, they are told so. Quietly saving `collateral-2` would hand them an
+ * address one character away from another department's form, which they are
+ * about to paste into an email.
+ */
 export async function createForm(input: unknown): Promise<ActionResult<{ id: string }>> {
   const context = await requireRole("team_leader");
-  const parsed = formSettingsSchema.safeParse(input);
+  const parsed = formCreateSchema.safeParse(input);
 
   if (!parsed.success) {
     return {
@@ -101,26 +129,62 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   }
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("vizserve_pms_forms")
-    .insert({ ...parsed.data, created_by: context.userId })
-    .select("id")
-    .single();
 
-  if (error) {
-    if (isUniqueViolation(error)) {
-      const clash = uniqueFieldError(error);
-      return { ok: false, error: clash.error, fieldErrors: { [clash.field]: [clash.message] } };
+  // Blank means "derive it". Remembered as a fact about the REQUEST, because it
+  // is what decides whether a clash may be resolved silently or has to be
+  // reported to the person who typed the value.
+  const derivedSlug = parsed.data.slug === "";
+  const derivedPrefix = parsed.data.reference_prefix === "";
+
+  const slugStem = slugFromName(parsed.data.name);
+  const prefixStem = prefixFromName(parsed.data.name);
+
+  let slug = derivedSlug ? slugStem : parsed.data.slug;
+  let reference_prefix = derivedPrefix ? prefixStem : parsed.data.reference_prefix;
+
+  // Bounded. An unbounded retry against a unique index is a way to hold a
+  // connection open for a very long time; twenty distinct names for one form is
+  // already past the point where the person should be choosing one themselves.
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const { data, error } = await supabase
+      .from("vizserve_pms_forms")
+      .insert({ ...parsed.data, slug, reference_prefix, created_by: context.userId })
+      .select("id")
+      .single();
+
+    if (!error) {
+      revalidatePath("/forms");
+      return { ok: true, data: { id: data.id } };
     }
-    return { ok: false, error: error.message };
+
+    if (!isUniqueViolation(error)) return { ok: false, error: error.message };
+
+    const clash = uniqueFieldError(error);
+
+    if (clash.field === "slug" && derivedSlug) {
+      slug = nextCandidate(slugStem, attempt + 1);
+      continue;
+    }
+
+    if (clash.field === "reference_prefix" && derivedPrefix) {
+      reference_prefix = nextCandidate(prefixStem, attempt + 1, "");
+      continue;
+    }
+
+    // A value somebody typed. Theirs to change.
+    return { ok: false, error: clash.error, fieldErrors: { [clash.field]: [clash.message] } };
   }
 
-  revalidatePath("/forms");
-  return { ok: true, data: { id: data.id } };
+  return {
+    ok: false,
+    error: "Could not find a free URL slug or reference prefix for that name. Set them by hand.",
+  };
 }
 
 export async function updateFormSettings(formId: string, input: unknown): Promise<ActionResult> {
-  const { context, supabase } = await assertCanEditForm(formId);
+  const { context, supabase, form } = await assertCanEditForm(formId);
+  // NOT `formCreateSchema`. A blank slug means "derive one" on a form that does
+  // not exist yet; on this one it would take away a URL somebody has shared.
   const parsed = formSettingsSchema.safeParse(input);
 
   if (!parsed.success) {
@@ -135,6 +199,40 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
   // someone else, so the destination is checked as well as the origin.
   if (parsed.data.department_id) {
     assertDepartmentAccess(context, parsed.data.department_id);
+  }
+
+  /*
+   * ⚠️ P7-29 — THE PREFIX LOCKS ONCE THE FORM HAS ISSUED A REFERENCE.
+   *
+   * `COL-2026-0001` is in the client's inbox and is what they quote back.
+   * Changing `COL` orphans it from its own series, and nothing anywhere records
+   * what the prefix used to be — the reference is reconstructed from the form,
+   * so the old ones simply stop matching. Same shape as `field_key`
+   * immutability (D20/R5), and the same reason it is a rule rather than a
+   * disabled input: the front end will be bypassed.
+   *
+   * The count is exact for everyone who reaches this line. The requests SELECT
+   * policy is `manages_department(form.department_id)` — the identical test
+   * `assertCanEditForm` just applied — so anybody allowed to edit this form can
+   * see every request on it. There is no viewer for whom this under-reports.
+   */
+  if (parsed.data.reference_prefix !== form.reference_prefix) {
+    const { count } = await supabase
+      .from("vizserve_pms_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("form_id", formId);
+
+    if ((count ?? 0) > 0) {
+      return {
+        ok: false,
+        error: "The reference prefix cannot change once requests are using it.",
+        fieldErrors: {
+          reference_prefix: [
+            `Locked at ${form.reference_prefix} — ${count} request${count === 1 ? "" : "s"} already quote it.`,
+          ],
+        },
+      };
+    }
   }
 
   const { error } = await supabase.from("vizserve_pms_forms").update(parsed.data).eq("id", formId);

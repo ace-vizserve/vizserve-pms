@@ -47,7 +47,7 @@ The service role bypasses *policies* but still needs *privileges*. Supabase's de
 | Path | What |
 |---|---|
 | `app/(app)/` | Authenticated area — layout enforces auth, renders shell + role nav |
-| `app/f/[slug]/` | **Public form. No session, by design.** |
+| `app/request/[slug]/` | **Public form. No session, by design.** `app/f/[slug]/` is a permanent 308 to it — an old link lives in client inboxes, so it stays |
 | `app/login/`, `app/auth/callback/` | Entra SSO + email/password |
 | `lib/auth/authorization.ts` | **P0-05 — the single authorization layer.** Every scope decision |
 | `lib/schemas/` | zod contracts — the handoff artefact between tracks (D3a) |

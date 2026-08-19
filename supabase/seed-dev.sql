@@ -31,7 +31,7 @@ update vizserve_pms_users
 -- --- a public form to look at ----------------------------------------------
 -- DEV FIXTURE, not the P1-16 deliverable. P1-16 requires a form built *through
 -- the builder* end to end (build -> publish -> submit -> land in a TL queue);
--- this exists so /f/collateral-request renders before the builder is finished.
+-- this exists so /request/collateral-request renders before the builder is finished.
 insert into vizserve_pms_forms
   (id, name, slug, description, department_id, reference_prefix,
    is_public, is_active, requires_attachment, sla_days)

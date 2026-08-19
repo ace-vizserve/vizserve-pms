@@ -16,7 +16,7 @@ Implementation-ready, token-driven UI guidance for VizServe PMS — optimized fo
 ## Brand
 
 - Product/brand: VizServe PMS
-- Audience: authenticated operators working queues all day (member → team_leader → manager → admin), plus unauthenticated clients who see only `/f/[slug]` and `/approve/[token]`
+- Audience: authenticated operators working queues all day (member → team_leader → manager → admin), plus unauthenticated clients who see only `/request/[slug]` and `/approve/[token]`
 - Product surface: dashboard web app + two public form/approval pages
 - Provenance: brand pair is D11, confirmed by Q15 on 30 Jul 2026. Foundations (type, radius, elevation, motion) are the `app.tarsi.cloud` extraction, recoloured to VizServe.
 

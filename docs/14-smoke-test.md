@@ -53,7 +53,7 @@ As `test.tl.vizbytes@example.com`. **Forms → New form.**
 
 ## 3 · Submit as a client (no login)
 
-Open `/f/collateral-request` in a **private window** — a signed-in one proves nothing.
+Open `/request/collateral-request` in a **private window** — a signed-in one proves nothing.
 
 - [ ] The form renders with your fields and no navigation chrome
 - [ ] Submit with **Deliverable empty** → rejected, error against that field

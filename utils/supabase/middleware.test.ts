@@ -49,6 +49,9 @@ describe("isPublicPath", () => {
     "/login",
     "/auth/callback",
     "/forgot-password",
+    "/request/intake-form",
+    // P7-29 — the OLD address, and it has to stay public or the permanent
+    // redirect that replaced it sends a client with no account to a login.
     "/f/intake-form",
     "/approve/some-token",
     // P4-10. A client has no account by design, so if this stops being public
@@ -86,5 +89,10 @@ describe("isPublicPath", () => {
     // prefix — the trailing slash is what stops `/forms` matching it.
     expect(isPublicPath("/forms")).toBe(false);
     expect(isPublicPath("/logout-audit")).toBe(false);
+    // P7-29 added `/request/`, which is one character from the authenticated
+    // `/requests` — the internal review queue, and the closest lookalike this
+    // allowlist has ever had.
+    expect(isPublicPath("/requests")).toBe(false);
+    expect(isPublicPath("/requests/8f1c")).toBe(false);
   });
 });

@@ -107,7 +107,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
           )}
           {form.is_active && form.is_public ? (
             <Link
-              href={`/f/${form.slug}`}
+              href={`/request/${form.slug}`}
               target="_blank"
               className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
             >

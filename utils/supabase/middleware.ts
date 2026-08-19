@@ -15,7 +15,12 @@ const PUBLIC_PREFIXES = [
   "/auth",
   // Reset is for people who cannot sign in; behind the gate it is useless.
   "/forgot-password",
-  "/f/", // public client forms (P1-06) — no login, by design
+  "/request/", // public client forms (P1-06 / P7-29) — no login, by design
+  // ⚠️ THE OLD ADDRESS STAYS PUBLIC. `/f/[slug]` is a permanent redirect to
+  // `/request/[slug]` now, and a redirect behind the gate is worse than no
+  // redirect: an old link in a client's inbox would ask somebody with no
+  // account to sign in rather than forwarding them.
+  "/f/",
   "/approve/", // client approval page (P4-04) — token-authenticated
   "/feedback/", // client feedback page (P4-10) — same token machinery
   // Cron routes carry `Authorization: Bearer $CRON_SECRET` and no cookie.
@@ -37,7 +42,7 @@ const PUBLIC_PREFIXES = [
  * page arguing for the product. It is a staff home now — this platform is for
  * people who already work here, and nobody who does needs to be sold it — so
  * the root is gated like everything else and an anonymous visitor is sent to
- * sign in. The pages a CLIENT sees are `/f/[slug]`, `/approve/[token]` and
+ * sign in. The pages a CLIENT sees are `/request/[slug]`, `/approve/[token]` and
  * `/feedback/[token]`, which are prefixes below and reach the database only
  * through SECURITY DEFINER functions.
  */
