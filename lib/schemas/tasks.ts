@@ -627,6 +627,36 @@ export const listSchema = z.object({
   description: z.string().trim().default(""),
   is_active: z.boolean().default(true),
   sort_order: z.coerce.number().int().default(0),
+  /**
+   * P7-18. Null is the top level — a ClickUp "Folderless List", and what every
+   * list made before P7-18 is. The folder must belong to the same department,
+   * which `vizserve_pms_lists_group_guard` enforces because it has to read the
+   * folder row and a CHECK cannot.
+   */
+  group_id: z.uuid().nullable().default(null),
 });
 
 export type ListInput = z.infer<typeof listSchema>;
+
+/**
+ * P7-18 — a folder: one level above lists, so the tree reads
+ * Department → Folder → List → Task.
+ *
+ * DELIBERATELY THE SAME SHAPE AS `listSchema`. Two sibling levels that behave
+ * differently for no reason is how people learn to trust neither.
+ *
+ * No `is_system` field, and that is the point rather than an omission: the
+ * reserved "Client Requests" folder is created by
+ * `vizserve_pms_ensure_client_folder` and guarded by a trigger that refuses to
+ * let the flag be set or cleared. A form here would be a control that can only
+ * ever produce an error.
+ */
+export const taskGroupSchema = z.object({
+  department_id: z.uuid("Choose a department."),
+  name: z.string().trim().min(1, "Give the folder a name.").max(80),
+  description: z.string().trim().default(""),
+  is_active: z.boolean().default(true),
+  sort_order: z.coerce.number().int().default(0),
+});
+
+export type TaskGroupInput = z.infer<typeof taskGroupSchema>;

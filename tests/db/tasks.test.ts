@@ -808,8 +808,21 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
   // =========================================================================
   describe("task visibility", () => {
     it.skipIf(!migrationApplied)(
-      "a member sees tasks where they are PIC or QA, and no others",
+      "a member sees their department's tasks, and no other department's",
       async () => {
+        /*
+         * ⚠️ REWRITTEN FOR P7-17, 19 Aug. This case used to assert "PIC or QA,
+         * and no others", with the comment "being in the same department is not
+         * enough" — which is precisely the rule
+         * `20260819100000_p7_17_department_visibility.sql` reversed. Its header:
+         * "every active member of a department can read every non-personal task
+         * in it".
+         *
+         * It had been failing since that migration was pasted and nobody re-ran
+         * this file; `tests/db/task-groups.test.ts` surfaced it. The scope
+         * boundary did not disappear — IT MOVED UP A LEVEL, from the task to the
+         * department — so this asserts where it is now rather than being deleted.
+         */
         const mine = await makeTask();
         const theirs = await makeTask({ p_assignee_id: qaId, p_qa_assignee_id: null });
 
@@ -821,9 +834,21 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
 
         const ids = (visible ?? []).map((row) => row.id);
         expect(ids).toContain(mine);
-        // Not the PIC and not the QA on that one — being in the same department
-        // is not enough.
-        expect(ids).not.toContain(theirs);
+        // P7-17: a colleague's task in the same department, and being in that
+        // department IS now enough. A team that cannot see its own board keeps a
+        // second board somewhere else.
+        expect(ids).toContain(theirs);
+
+        // The boundary, where it actually is: another department sees neither.
+        const outsider = await signIn("member1VizAssists");
+        const { data: hidden, error } = await outsider.client
+          .from("vizserve_pms_tasks")
+          .select("id")
+          .in("id", [mine, theirs]);
+
+        // Zero rows is a working policy; `permission denied` would be a grant bug.
+        expect(error).toBeNull();
+        expect(hidden).toHaveLength(0);
       },
     );
 
@@ -1940,8 +1965,27 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const taskId = await makeTask({ p_qa_assignee_id: null });
       const other = await signIn("member2VizBytes");
 
+      /*
+       * ⚠️ THE "BEFORE" CHECK CHANGED WITH P7-17. It used to assert `other`
+       * could not SEE the task. Since P7-17 every member of a department reads
+       * every non-personal task in it, so visibility can no longer tell you
+       * whether the assignees table is doing anything.
+       *
+       * Moving the task can. P7-17 widened SELECT and deliberately left UPDATE
+       * and `transition_task` alone ("a member can now WATCH a colleague's task
+       * move; they still cannot move it"), so that is the right the assignees
+       * table actually grants — which makes this a STRONGER check than the one
+       * it replaces, not a weaker one.
+       */
       const before = await other.client.from("vizserve_pms_tasks").select("id").eq("id", taskId);
-      expect(before.data ?? []).toHaveLength(0);
+      expect(before.data ?? []).toHaveLength(1);
+
+      const blocked = await other.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: taskId,
+        p_to_status: "ONGOING",
+        p_comment: null,
+      });
+      expect(blocked.error?.message ?? "").toContain("not yours");
 
       const tl = await signIn("tlVizBytes");
       const added = await tl.client.rpc("vizserve_pms_add_task_assignee", {
@@ -1988,8 +2032,18 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
         p_user_id: other.userId,
       });
 
+      // Visible again only because P7-17 shows the whole department its own
+      // work — see the note in the case above. What removal takes away is the
+      // right to MOVE it, which is what was granted.
       const seen = await other.client.from("vizserve_pms_tasks").select("id").eq("id", taskId);
-      expect(seen.data ?? []).toHaveLength(0);
+      expect(seen.data ?? []).toHaveLength(1);
+
+      const moved = await other.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: taskId,
+        p_to_status: "ONGOING",
+        p_comment: null,
+      });
+      expect(moved.error?.message ?? "").toContain("not yours");
     });
 
     it.skipIf(!assigneesApplied)("refuses somebody from another department", async () => {

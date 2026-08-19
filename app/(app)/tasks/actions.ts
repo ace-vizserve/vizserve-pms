@@ -15,6 +15,7 @@ import {
   createPersonalTaskSchema,
   createTaskSchema,
   listSchema,
+  taskGroupSchema,
   overridePayloadSchema,
   taskCommentSchema,
   taskDetailsSchema,
@@ -1100,6 +1101,36 @@ export async function saveList(
   const supabase = await createClient();
 
   if (listId) {
+    /*
+     * P7-18. A form's inbox list may be RENAMED but not ARCHIVED.
+     *
+     * The database guards structure — `vizserve_pms_lists_group_guard` refuses
+     * to let this list leave the Client Requests folder — but it says nothing
+     * about `is_active`, because archiving is not a structural change. It is a
+     * silent one, though: `vizserve_pms_approve_request` is deliberately
+     * untouched by P7-18 and keeps filing approved requests into
+     * `forms.default_list_id`, so archiving the inbox of a live form means
+     * client work keeps landing in a list nobody can see.
+     *
+     * Renaming stays allowed on purpose. `form_id` is the link; the name is only
+     * a label, and a team may well prefer "Collateral Requests" to whatever the
+     * form is called.
+     */
+    if (!values.is_active) {
+      const { data: existing } = await supabase
+        .from("vizserve_pms_lists")
+        .select("form_id")
+        .eq("id", listId)
+        .maybeSingle();
+
+      if (existing?.form_id) {
+        return {
+          ok: false,
+          error: "This list is a form's inbox. Archive the form instead.",
+        };
+      }
+    }
+
     const { error } = await supabase
       .from("vizserve_pms_lists")
       .update({
@@ -1107,6 +1138,11 @@ export async function saveList(
         description: values.description,
         is_active: values.is_active,
         sort_order: values.sort_order,
+        // ⚠️ THIS BRANCH WHITELISTS COLUMNS while the insert below spreads
+        // `values`. Leave `group_id` out and CREATING a list into a folder works
+        // while MOVING one silently does nothing — and the dialog still reports
+        // "List saved". `department_id` stays out deliberately (see the insert).
+        group_id: values.group_id,
       })
       .eq("id", listId);
 
@@ -1138,6 +1174,91 @@ export async function saveList(
           fieldErrors: { name: ["Already in use."] },
         }
       : { ok: false, error: readableError(error) };
+  }
+
+  revalidatePath("/tasks/lists");
+  return { ok: true, data: { id: data.id } };
+}
+
+// ---------------------------------------------------------------------------
+// P7-18 — folders
+// ---------------------------------------------------------------------------
+
+/**
+ * Create or edit a folder.
+ *
+ * Mirrors `saveList` deliberately, down to the shape of the error mapping — two
+ * sibling levels that behave differently for no reason is how people learn to
+ * trust neither.
+ *
+ * NOTHING HERE HANDLES THE SYSTEM FOLDER, and that is not an omission.
+ * `vizserve_pms_task_groups_system_guard` refuses to rename, archive, delete or
+ * reflag the reserved "Client Requests" folder, and it raises `check_violation`
+ * with a sentence written for a person — which `readableError` already passes
+ * through untouched. Restating those rules here would be a second copy that can
+ * disagree with the one that is actually enforced.
+ */
+export async function saveTaskGroup(
+  groupId: string | null,
+  input: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  const context = await requireRole("team_leader");
+
+  const parsed = taskGroupSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Check the highlighted fields.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
+  }
+
+  const values = parsed.data;
+
+  // RLS says the same thing, but saying it here too means the user gets a
+  // sentence instead of an empty result they have to interpret.
+  if (context.role !== "admin" && !context.managedDepartmentIds.includes(values.department_id)) {
+    return { ok: false, error: "That department is outside your scope." };
+  }
+
+  const supabase = await createClient();
+
+  const collision = {
+    ok: false as const,
+    error: "That department already has a folder with this name.",
+    fieldErrors: { name: ["Already in use."] },
+  };
+
+  if (groupId) {
+    const { error } = await supabase
+      .from("vizserve_pms_task_groups")
+      .update({
+        name: values.name,
+        description: values.description,
+        is_active: values.is_active,
+        sort_order: values.sort_order,
+        // `department_id` is absent for the same reason it is in `saveList`:
+        // moving a folder between departments would strand every list in it,
+        // and the guard trigger refuses it anyway.
+      })
+      .eq("id", groupId);
+
+    if (error) {
+      return error.code === "23505" ? collision : { ok: false, error: readableError(error) };
+    }
+
+    revalidatePath("/tasks/lists");
+    return { ok: true, data: { id: groupId } };
+  }
+
+  const { data, error } = await supabase
+    .from("vizserve_pms_task_groups")
+    .insert({ ...values, created_by: context.userId })
+    .select("id")
+    .single();
+
+  if (error) {
+    return error.code === "23505" ? collision : { ok: false, error: readableError(error) };
   }
 
   revalidatePath("/tasks/lists");

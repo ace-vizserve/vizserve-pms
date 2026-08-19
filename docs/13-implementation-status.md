@@ -61,6 +61,158 @@ Solo Parent, Special Leave for Women, seeded in that order (usage, not alphabet)
 
 Settled 18 Aug: **"billed time" means the time entered against a task on the timesheet** — not client-chargeable. There is no billable/non-billable split in the schema and none is being built.
 
+## ✅ FIXED — internal request submission was broken by P7-16 (found and repaired 19 Aug)
+
+From 19 Aug until both repairs below were applied that same day,
+`vizserve_pms_submit_internal_request` raised on **every** request type — leave,
+reimbursement, overtime and both time corrections. Two distinct faults, both
+introduced by `20260819090000_p7_16_leave_halves.sql`, which rewrote the function
+whole and, contrary to its own header ("unchanged apart from the two parameters,
+the LEAVE validation block and the two insert columns"), changed two more things:
+
+| # | What P7-16 changed without saying so | Symptom | Repair |
+|---|---|---|---|
+| 1 | Audit call, six arguments to four — a `jsonb` in the helper's `p_actor_id uuid` slot | `42883: function vizserve_pms_write_audit_log(unknown, uuid, unknown, jsonb) does not exist` | `20260819110000_p7_16a` ✅ applied |
+| 2 | Approver notification rewritten entire, sending a type that is not in the enum | `invalid input value for enum vizserve_pms_notification_type: "request_submitted"` | `20260819120000_p7_16b` ✅ applied |
+
+Both raise *after* the insert, so the row rolls back with them.
+
+**Why it applied cleanly and hand-verification missed it**, and this generalises:
+plpgsql resolves the functions a body calls at **first execution**, not at
+`create or replace` time. Inspecting the new columns, the enum and the
+constraint — all correct — proves nothing about the body. Only a round trip
+through the RPC does.
+
+**`p7_16a` was an incomplete repair, and that is the more useful lesson.** It
+fixed the line the error named and shipped; the error names the *first*
+statement that fails, not the last one that is wrong, so fixing it only moved the
+failure eight lines down. The whole body should have been diffed against `p7_12`
+the first time. It has been now — `p7_16b` restores both blocks, and a
+comment-stripped `diff` of `p7_12` against it shows only the two new parameters,
+the single-day LEAVE check and the three insert columns. Exactly, and only, what
+P7-16 set out to do. There is no third fault.
+
+`p7_16b` supersedes `p7_16a`; applying only `p7_16b` is also correct. It uses
+`create or replace` with **no drop** — the signature is unchanged, so a drop
+would only risk stranding the EXECUTE grant.
+
+**Rejected fix, recorded so it is not retried:** adding `'request_submitted'` to
+`vizserve_pms_notification_type`. `vizserve_pms_notify` wraps the settings lookup
+in `coalesce(v_send_email, false)` (p0_10:89-96), so a new enum value with no
+settings row is not an error — it is a notification type whose email is silently
+and permanently off. The leads would stop being emailed about pending approvals
+and nothing would say so.
+
+Both repairs are applied and the 29 db cases below are green. Nothing about the
+halves, the enum or the constraint was ever wrong; all three were correct from
+the first paste, which is exactly why reading the migration could not find this.
+
+## Two new db suites, 19 Aug
+
+`p7_16` and `p7_17` were applied and hand-verified but had no tests. They do now.
+
+| File | Cases | Covers |
+|---|---|---|
+| `tests/db/leave-halves.test.ts` | 15 | P7-16. The CHECK constraint (reached by direct insert, function bypassed) and the raised sentence, asserted separately — a constraint name is not something a person can act on. Also: the defaults, the dropped nine-argument overload, coercion to null on non-LEAVE types, null halves on pre-P7-16 rows staying decidable, and that the leave calendar deliberately does **not** learn the halves |
+| `tests/db/department-visibility.test.ts` | 14 | P7-17. Colleagues visible, department work visible, and the two things deliberately **not** widened: a colleague's `is_personal` task stays private, and SELECT widening did not widen UPDATE or `transition_task`. Also the SECURITY DEFINER recursion guard, and that `managerAll` (no department of their own) still reads through the untouched lead policy |
+
+Status: **29/29 green** — 15 + 14, verified 19 Aug against the live project.
+
+`department-visibility.test.ts` creates and deletes its own throwaway
+`test.p7-17.*@example.com` account rather than flipping `is_active` on a seeded
+one: the run shares a project with the browsed app, and a run that died between
+the flip and the restore would leave a real account unable to log in.
+
+## P7-18 — folders (task groups), 19 Aug
+
+Applied. `vizserve_pms_task_groups` sits between departments and lists, so the
+tree is now **Department → Folder → List → Task → Subtask** — ClickUp's five
+levels, of which three already existed.
+
+**This reverses the decision recorded at `components/app-shell/nav-projects.tsx:36-40`**
+("a department is the folder and a list is the project"). That call did not
+survive an example: the folder people want is *"VIZSERVE PROJECTS"*, which is not
+a department. Departments are a fixed admin-managed list of *who does the work*;
+folders are how a team groups *what the work is for*. The comment is due to be
+rewritten when the sidebar lands — until then it contradicts the schema.
+
+Rules, all enforced in the database:
+
+- **Folders do not nest.** No `parent_group_id`, matching ClickUp; depth past one
+  folder level comes from subtasks.
+- **`lists.group_id` is nullable** — a ClickUp "Folderless List", and the state of
+  every list that existed before this migration. No backfill of guesses.
+- **One reserved `is_system` folder per department, "Client Requests"**, holding
+  one auto-created list per form. It cannot be renamed, archived, deleted, or have
+  its flag flipped either way, and it accepts only lists with a `form_id`.
+
+**The keystone: `vizserve_pms_approve_request` is not touched at all.** A trigger
+on `vizserve_pms_forms` creates each form's inbox list and points
+`forms.default_list_id` at it — and the approval transaction already files
+approved requests into that column (P2-06). So client work files itself into the
+right folder with zero change to the one function that must not grow.
+`default_list_id` is set **only when null**, so a lead's explicit choice survives.
+
+### The tests were written before the paste, deliberately
+
+`tests/db/task-groups.test.ts` — **24 cases, green on the first run after
+applying.** It was committed while the migration was still unapplied (it skips
+with a printed reason), because of what P7-16 had just taught: plpgsql resolves
+the functions a body calls at **first execution**, so a migration can apply
+cleanly and be broken on every code path. This one ships two SECURITY DEFINER
+functions, three triggers and a `DO` block backfill.
+
+One defect was caught by writing the tests rather than by running them — a
+**race in `vizserve_pms_ensure_client_folder`**. `on conflict … do nothing …
+returning id` yields NULL on conflict, and the obvious `select` fallback cannot
+see a concurrent transaction's *uncommitted* row. Two leads creating a form for
+the same department at the same moment would have failed the whole form INSERT.
+Fixed to `do update set name = excluded.name`, which takes the row lock and
+returns the winner. The suite only dodged it because `fileParallelism: false`.
+
+### It also found three stale tests from P7-17
+
+`tests/db/tasks.test.ts` had **three cases still asserting the pre-P7-17 rule** —
+including one whose comment read *"being in the same department is not enough"*,
+which is exactly what P7-17 reversed. They had been failing since that migration
+was pasted and nobody re-ran the file; `department-visibility.test.ts` asserts the
+opposite and passes, so two suites in this repo were contradicting each other.
+
+Rewritten rather than deleted — **the scope boundary did not disappear, it moved
+up a level**, from the task to the department. The two P7-13 assignee cases now
+assert on *moving* the task instead of *seeing* it, since P7-17 widened SELECT and
+deliberately left UPDATE and `transition_task` alone. That is a stronger check
+than the one it replaces: visibility no longer distinguishes an assignee from any
+colleague, but the right to move it still does.
+
+**Accepted behaviour change:** every form now has a `default_list_id`, so
+`vizserve_pms_approve_request` returns a non-null `list_id` where it used to
+return null. No test asserts on it (checked across `tests/`), but it is real.
+
+### Backend state
+
+Done: the migration, `lib/database.types.ts` (hand-edited — that file is
+hand-written and `npm run db:types` needs Docker), `listSchema.group_id` +
+`taskGroupSchema`, `saveTaskGroup`, and `scripts/purge-test-data.mjs`.
+
+`vizserve_pms_task_groups` is in the purge script's **`KEEP`** set and must never
+move to `PURGE`: the generic delete would hit the system-folder guard, record a
+failure and `exit(1)`. The script now also rebuilds each surviving form's inbox
+list after a purge, by calling `vizserve_pms_ensure_form_list` — the same
+function the trigger calls, so there is one definition of what a form's list is.
+Nothing re-fired on its own, because that trigger only watches insert and
+`department_id`.
+
+Also worth knowing: **`saveList` refuses to archive a form's inbox list** (rename
+is still allowed). The database guards structure but not `is_active`, and
+archiving a live form's inbox would leave client work landing where nobody can
+see it.
+
+**Still owed — the whole frontend.** Sidebar tree (Department → Folder → List),
+folder CRUD on `/tasks/lists`, the `?group=` filter, and the `nav-projects.tsx`
+comment that still argues against this table. Plan:
+`~/.claude/plans/silly-stargazing-oasis.md`, Phase B.
+
 ## ⚠️ The db tests share a project with the running app
 
 `npm run verify` creates and deletes tasks, requests and DTR rows in the **same Supabase project the app is browsed against**. A task can appear in somebody's timesheet picker and be deleted from under them mid-edit. That has already been reported once as a bug and was not one.

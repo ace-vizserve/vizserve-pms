@@ -83,6 +83,12 @@ const KEEP = [
   "vizserve_pms_notification_type_settings",
   "vizserve_pms_attachment_rules",
   "vizserve_pms_public_submission_limits",
+  // P7-18. Folders are structure, not records of something happening — the same
+  // reason `departments` is kept. And the reserved "Client Requests" folder
+  // CANNOT be deleted at all: `vizserve_pms_task_groups_system_guard` raises on
+  // DELETE, so putting this table in PURGE below would make the generic delete
+  // fail and exit(1) rather than merely wiping too much.
+  "vizserve_pms_task_groups",
 ];
 
 /**
@@ -115,6 +121,10 @@ const PURGE = [
   // everything else that is a record of something happening
   "vizserve_pms_notifications",
   "vizserve_pms_audit_logs",
+  // Lists go before `forms` (which is --forms only). `forms.default_list_id` is
+  // ON DELETE SET NULL, so wiping lists nulls the column rather than raising —
+  // which is also why every surviving form needs its inbox list rebuilt
+  // afterwards. See `reensureFormLists` below.
   "vizserve_pms_lists",
 ];
 
@@ -250,7 +260,61 @@ async function main() {
     process.exit(1);
   }
 
+  await reensureFormLists(supabase, includeForms);
+
   console.log(`Done. ${total} rows deleted; accounts and configuration untouched.`);
+}
+
+/**
+ * P7-18 — rebuild each surviving form's inbox list.
+ *
+ * `vizserve_pms_lists` is purged and `forms.default_list_id` is ON DELETE SET
+ * NULL, so without this every form that survives a purge is left pointing at
+ * nothing, with no list in its department's Client Requests folder. Approved
+ * requests would then land loose, and nothing would say why — the folder would
+ * simply be empty forever.
+ *
+ * NOT DONE BY THE TRIGGER. `vizserve_pms_forms_sync_list` fires on insert and on
+ * update of `department_id`; a purge touches neither, so nothing re-fires on its
+ * own. This calls the same function the trigger does, so there is one definition
+ * of what a form's list is.
+ *
+ * Skipped when the forms themselves were dropped — there is nothing left to
+ * point anywhere.
+ */
+async function reensureFormLists(supabase, includeForms) {
+  if (includeForms) return;
+
+  const { data: forms, error } = await supabase
+    .from("vizserve_pms_forms")
+    .select("id, name")
+    .not("department_id", "is", null);
+
+  if (error) {
+    // Not fatal. The purge itself succeeded, and a form with no inbox list is
+    // repaired by re-saving it in the UI — so this reports rather than exits.
+    console.warn(`
+  Could not rebuild form lists: ${error.message}`);
+    console.warn("  Re-save each form's department in /forms to fix it.");
+    return;
+  }
+
+  if (!forms || forms.length === 0) return;
+
+  let rebuilt = 0;
+  for (const form of forms) {
+    const { error: ensureError } = await supabase.rpc("vizserve_pms_ensure_form_list", {
+      p_form_id: form.id,
+    });
+
+    if (ensureError) {
+      console.warn(`  ${form.name}: ${ensureError.message}`);
+    } else {
+      rebuilt += 1;
+    }
+  }
+
+  console.log(`Rebuilt the Client Requests list for ${rebuilt} form(s).`);
 }
 
 main().catch((error) => {

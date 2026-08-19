@@ -663,6 +663,10 @@ export type Database = {
           description: string;
           is_active: boolean;
           sort_order: number;
+          /** P7-18. Null is a ClickUp "Folderless List" — the state of every list made before P7-18. */
+          group_id: string | null;
+          /** P7-18. Set only on a form's auto-created inbox list. */
+          form_id: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -674,8 +678,83 @@ export type Database = {
           description?: string;
           is_active?: boolean;
           sort_order?: number;
+          group_id?: string | null;
+          form_id?: string | null;
           created_by?: string | null;
         };
+        /**
+         * A CURATED ALLOW-LIST, not a Partial of Row — so a column missing here
+         * is a column no server action can write, and `saveList` will not compile
+         * against it. `group_id` is present because moving a list between folders
+         * is the point of P7-18.
+         *
+         * `form_id` is deliberately ABSENT. `vizserve_pms_lists_group_guard`
+         * refuses to let a form's inbox list leave the Client Requests folder, so
+         * offering the column here would only produce a runtime error.
+         */
+        Update: Partial<{
+          name: string;
+          description: string;
+          is_active: boolean;
+          sort_order: number;
+          group_id: string | null;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_lists_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_lists_group_id_fkey";
+            columns: ["group_id"];
+            referencedRelation: "vizserve_pms_task_groups";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_lists_form_id_fkey";
+            columns: ["form_id"];
+            referencedRelation: "vizserve_pms_forms";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      /**
+       * P7-18 — folders. One level above lists: Department -> Folder -> List -> Task.
+       *
+       * Folders DO NOT NEST — there is no `parent_group_id`, matching ClickUp,
+       * where depth past one folder level comes from subtasks instead.
+       */
+      vizserve_pms_task_groups: {
+        Row: {
+          id: string;
+          department_id: string;
+          name: string;
+          description: string;
+          is_active: boolean;
+          sort_order: number;
+          /** The reserved per-department "Client Requests" folder. Guarded by trigger. */
+          is_system: boolean;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          department_id: string;
+          name: string;
+          description?: string;
+          is_active?: boolean;
+          sort_order?: number;
+          is_system?: boolean;
+          created_by?: string | null;
+        };
+        /**
+         * Mirrors `vizserve_pms_task_groups_system_guard`: `department_id` and
+         * `is_system` are omitted because the trigger refuses both, so a type that
+         * offered them would only be a way to write a runtime error.
+         */
         Update: Partial<{
           name: string;
           description: string;
@@ -684,9 +763,15 @@ export type Database = {
         }>;
         Relationships: [
           {
-            foreignKeyName: "vizserve_pms_lists_department_id_fkey";
+            foreignKeyName: "vizserve_pms_task_groups_department_id_fkey";
             columns: ["department_id"];
             referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_task_groups_created_by_fkey";
+            columns: ["created_by"];
+            referencedRelation: "vizserve_pms_users";
             referencedColumns: ["id"];
           },
         ];
