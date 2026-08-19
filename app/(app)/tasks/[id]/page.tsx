@@ -15,6 +15,7 @@ import { createClient } from "@/utils/supabase/server";
 import { CommentThread } from "../comment-thread";
 
 import { RequestAttachmentList } from "./client-files";
+import { EditableTitle } from "./editable-title";
 import { LifecycleRail } from "./lifecycle-rail";
 import { SubtaskList } from "./subtask-list";
 import { TaskOutputs } from "./task-outputs";
@@ -232,7 +233,19 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-xl font-semibold tracking-tight">{task.title}</h1>
+            {/* Editable in place. Same `updateTaskField` the list row's rename
+                calls — a second path to the same column would be a second set
+                of rules to keep in step. */}
+            <EditableTitle
+              taskId={task.id}
+              title={task.title}
+              // NOT gated on `isTerminal`, unlike the uploads below. The list
+              // row's rename is not either, and a task you can rename from the
+              // list but not from its own page is the kind of difference nobody
+              // reports and everybody works around. A name is metadata; closing
+              // the work does not make it wrong.
+              canEdit={viewer.isPic || viewer.isQa || viewer.leadsDepartment}
+            />
             <TaskStatusBadge status={task.status} />
             <TaskPriorityBadge priority={task.priority} />
           </div>
