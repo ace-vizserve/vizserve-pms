@@ -21,6 +21,24 @@ const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/;
 /** A day is 1440 minutes, and the per-row CHECK says exactly this. */
 export const MAX_ENTRY_MINUTES = 1440;
 
+/** `HH:MM` — what `<input type="time">` sends. Seconds are not offered. */
+const TIME_OF_DAY = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+/**
+ * An optional wall-clock time (P7-21).
+ *
+ * Blank normalises to null BEFORE the pattern is applied, so a cleared field
+ * and an untouched one are the same value. Validating first would reject "" as
+ * a malformed time, which is not what an empty optional field means.
+ */
+const timeOfDay = z
+  .string()
+  .nullish()
+  .transform((value) => (value && value.trim() ? value.trim() : null))
+  .refine((value) => value === null || TIME_OF_DAY.test(value), {
+    message: "Use a time like 09:30.",
+  });
+
 /**
  * The rule, as one line of zod.
  *
@@ -29,7 +47,7 @@ export const MAX_ENTRY_MINUTES = 1440;
  * being non-optional is what makes "log time without a task" fail to compile
  * rather than fail at runtime.
  */
-export const timesheetEntrySchema = z.object({
+const timesheetEntryShape = z.object({
   task_id: z.uuid("Pick the task this time went to."),
   work_date: z.string().regex(DATE_ONLY, "Pick a date."),
   minutes: z
@@ -46,14 +64,102 @@ export const timesheetEntrySchema = z.object({
     .max(500, "Keep the note under 500 characters.")
     .nullish()
     .transform((value) => (value ? value : null)),
+  /**
+   * P7-21 — optional wall-clock times on `work_date`.
+   *
+   * `HH:MM`, Manila, the same clock the DTR and every other time in this app
+   * shows. Not a timestamp: the row already carries `work_date`, and a value
+   * with its own date in it would be a second claim about which day this was.
+   *
+   * Empty string is normalised to null so a cleared input and an untouched one
+   * mean the same thing — the paired CHECK reads nulls, not blanks.
+   */
+  started_at: timeOfDay,
+  ended_at: timeOfDay,
 });
+
+/**
+ * The three P7-21 rules, applied to the insert shape and the update shape
+ * alike.
+ *
+ * A function rather than a chain on the base object, because `.refine()`
+ * returns an effects wrapper with no `.extend()` on it — so refining first
+ * would make the update schema below impossible to build from this one, and the
+ * two would drift into checking different things.
+ *
+ * Every rule here has a CHECK constraint behind it. These exist for the message:
+ * the database is the authority, and a round trip that fails on a constraint
+ * name is a worse way to learn a rule than a sentence under the field.
+ */
+function withTimeRules<T extends z.ZodType<{
+  minutes: number;
+  started_at: string | null;
+  ended_at: string | null;
+}>>(schema: T) {
+  return schema
+    // BOTH OR NEITHER — `vizserve_pms_timesheet_entries_times_paired`.
+    .refine((value) => (value.started_at === null) === (value.ended_at === null), {
+      message: "Give both a start and an end time, or neither.",
+      path: ["ended_at"],
+    })
+    .refine(
+      (value) =>
+        value.started_at === null || value.ended_at === null || value.ended_at > value.started_at,
+      {
+        // Work crossing midnight is deliberately not expressible — see the
+        // migration, and Q8, which is still open on the same question for the
+        // DTR. The duration alone still records those hours.
+        message:
+          "The end time has to be after the start. Work past midnight goes on as a duration.",
+        path: ["ended_at"],
+      },
+    )
+    .refine(
+      (value) =>
+        value.started_at === null ||
+        value.ended_at === null ||
+        minutesBetween(value.started_at, value.ended_at) === value.minutes,
+      {
+        // Should be unreachable from the UI — the editor derives the duration
+        // from the times the moment both are set. It is here because the
+        // database enforces it either way.
+        message: "The duration does not match the times.",
+        path: ["minutes"],
+      },
+    );
+}
+
+export const timesheetEntrySchema = withTimeRules(timesheetEntryShape);
 
 export type TimesheetEntryInput = z.infer<typeof timesheetEntrySchema>;
 
-/** Editing an existing row. Same fields, plus which row. */
-export const timesheetEntryUpdateSchema = timesheetEntrySchema.extend({
-  id: z.uuid(),
-});
+/**
+ * Whole minutes between two `HH:MM` wall-clock times on the same day.
+ *
+ * String arithmetic rather than Date construction: `lib/dates.ts` exists
+ * because parsing a bare date drags a timezone in with it, and the same trap is
+ * one line away here. Two clock times on one day need no zone at all.
+ */
+export function minutesBetween(start: string, end: string): number {
+  const [sh = 0, sm = 0] = start.split(":").map(Number);
+  const [eh = 0, em = 0] = end.split(":").map(Number);
+  return eh * 60 + em - (sh * 60 + sm);
+}
+
+/** `HH:MM` as an `<input type="time">` produces it. 150 → "02:30" is `fromMinutes`. */
+export function addMinutesToTime(start: string, minutes: number): string | null {
+  const [h = 0, m = 0] = start.split(":").map(Number);
+  const total = h * 60 + m + minutes;
+  // Refuses to wrap past midnight rather than silently landing on the next day
+  // — the same rule the `ended_at > started_at` constraint states.
+  if (!Number.isFinite(total) || total < 0 || total > 23 * 60 + 59) return null;
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
+}
+
+/** Editing an existing row. Same fields and the same rules, plus which row. */
+export const timesheetEntryUpdateSchema = withTimeRules(
+  timesheetEntryShape.extend({ id: z.uuid() }),
+);
 
 export type TimesheetEntryUpdateInput = z.infer<typeof timesheetEntryUpdateSchema>;
 
@@ -358,4 +464,49 @@ export function dayState(totalMinutes: number, approvedOvertimeMinutes = 0): Day
   // three hours over on a day with two hours approved is still an hour nobody
   // signed off.
   return totalMinutes <= STANDARD_DAY_MINUTES + approvedOvertimeMinutes ? "overtime" : "over";
+}
+
+/**
+ * A day's figures, once — capacity, what was tracked against it, and by how
+ * much it ran over.
+ *
+ * WHY THIS EXISTS. `dayState` already stopped the two grids disagreeing about
+ * what counts as a long day, but each of them then went on to recompute
+ * `STANDARD_DAY_MINUTES + granted` and the overage inline, in slightly
+ * different words, and only ever spoke the amount to a screen reader. On screen
+ * the rule was a red bar and nothing else — a member could see that a day was
+ * "over" and not what it was over BY, which is the one number they need in
+ * order to decide whether to fix the hours or file the overtime.
+ *
+ * ADVISORY, AND STAYING ADVISORY. Nothing here refuses anything. The database
+ * caps a day at 1440 minutes and knows nothing about this figure; approved
+ * overtime is capped at 960 exactly so `480 + approved` can never exceed that
+ * ceiling. This function decides what the screen SAYS, which is the whole of
+ * what the rule has ever been.
+ */
+export type DaySummary = {
+  state: DayState;
+  /** The standard day, plus whatever overtime was approved for this date. */
+  capacityMinutes: number;
+  trackedMinutes: number;
+  /** How far past capacity. Zero unless the state is `over`. */
+  overMinutes: number;
+  /** Tracked as a percentage of capacity, rounded. 0 on an empty day. */
+  percentOfCapacity: number;
+};
+
+export function daySummary(totalMinutes: number, approvedOvertimeMinutes = 0): DaySummary {
+  const capacityMinutes = STANDARD_DAY_MINUTES + approvedOvertimeMinutes;
+
+  return {
+    state: dayState(totalMinutes, approvedOvertimeMinutes),
+    capacityMinutes,
+    trackedMinutes: totalMinutes,
+    // `max(0, …)` rather than a branch on the state: a day inside its approved
+    // overtime is not over by anything, and a negative "over" is not a number
+    // anybody should have to render.
+    overMinutes: Math.max(0, totalMinutes - capacityMinutes),
+    percentOfCapacity:
+      totalMinutes > 0 ? Math.round((totalMinutes / capacityMinutes) * 100) : 0,
+  };
 }

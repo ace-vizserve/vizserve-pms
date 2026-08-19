@@ -17,12 +17,13 @@ import { TaskStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
-import { STANDARD_DAY_MINUTES, formatDate, formatDuration, formatWeekday } from "@/lib/dates";
+import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
 import {
   type CellCommit,
+  type DayState,
   cellCommit,
-  dayState,
+  daySummary,
   formatCellDuration,
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
@@ -37,7 +38,14 @@ export type PickableTask = {
   where: string;
 };
 
-export type CellEntry = { id: string; minutes: number; note: string | null };
+export type CellEntry = {
+  id: string;
+  minutes: number;
+  note: string | null;
+  /** P7-21. `HH:MM` wall-clock on the entry's own day, or null. Both or neither. */
+  started_at: string | null;
+  ended_at: string | null;
+};
 
 export type TaskRow = {
   taskId: string;
@@ -237,16 +245,14 @@ export function WeekGrid({
    * disagree about what counts as a long day. Advisory, never enforcement.
    */
   function dayBar(day: string) {
-    const total = dayTotal(day);
-    const granted = approvedOvertime[day] ?? 0;
-    const state = dayState(total, granted);
+    const summary = daySummary(dayTotal(day), approvedOvertime[day] ?? 0);
+    const { state } = summary;
 
     return {
       state,
-      granted,
-      // Scaled against the day's OWN threshold, so an approved eleven-hour day
+      // Scaled against the day's OWN capacity, so an approved eleven-hour day
       // reads as a full bar rather than a 137% overflow that has to be clamped.
-      width: `${Math.min(100, Math.round((total / (STANDARD_DAY_MINUTES + granted)) * 100))}%`,
+      width: `${Math.min(100, summary.percentOfCapacity)}%`,
       fill: state === "over" ? "bg-destructive" : state === "overtime" ? "bg-warning" : "bg-primary grade-primary",
     };
   }
@@ -261,26 +267,39 @@ export function WeekGrid({
    * Returns null for a normal or empty day, so the ordinary week carries no
    * decoration at all.
    */
-  function dayNote(day: string): { mark: string; spoken: string } | null {
-    const total = dayTotal(day);
+  function dayNote(day: string): { state: DayState; mark: string; spoken: string } | null {
     const granted = approvedOvertime[day] ?? 0;
-    const state = dayState(total, granted);
+    const { state, capacityMinutes, trackedMinutes, overMinutes } = daySummary(
+      dayTotal(day),
+      granted,
+    );
 
     if (state === "overtime") {
       return {
+        state,
         mark: "OT",
-        spoken: `${formatDuration(total)} logged, within the ${formatDuration(
-          STANDARD_DAY_MINUTES + granted,
+        spoken: `${formatDuration(trackedMinutes)} logged, within the ${formatDuration(
+          capacityMinutes,
         )} approved for this day.`,
       };
     }
 
     if (state === "over") {
       return {
-        mark: "over",
-        spoken: `${formatDuration(total)} logged, ${formatDuration(
-          total - STANDARD_DAY_MINUTES - granted,
-        )} more than the ${formatDuration(STANDARD_DAY_MINUTES + granted)} ${
+        state,
+        // THE AMOUNT, ON SCREEN. This used to read "over" and keep the figure
+        // in the screen-reader sentence, so a member could see that a day was
+        // long and not by how much — which is the number that decides whether
+        // to correct the hours or file the overtime. `formatDuration` is terse
+        // enough ("1h", "45m") to sit under a total in a narrow column.
+        //
+        // The word stays alongside it. "+1h" in red would leave the meaning to
+        // the colour, and that is not how anything else in this app states a
+        // state.
+        mark: `over +${formatDuration(overMinutes)}`,
+        spoken: `${formatDuration(trackedMinutes)} logged, ${formatDuration(
+          overMinutes,
+        )} more than the ${formatDuration(capacityMinutes)} ${
           granted > 0 ? "approved for this day" : "standard day"
         }.`,
       };
@@ -293,7 +312,16 @@ export function WeekGrid({
   // this repo and no working-days-per-week concept, so "the week is over" would
   // mean deciding whether Saturday counts — which nobody has answered. A week
   // is over when a day in it is.
-  const daysOver = days.filter((day) => dayNote(day)?.mark === "over").length;
+  const daysOver = days.filter((day) => dayNote(day)?.state === "over").length;
+
+  // How much the week ran over in total, summed across the days that did. There
+  // is no weekly standard in this repo to be over BY, so this is the only
+  // honest weekly figure — the sum of the daily overages, not a week total
+  // measured against a 40 nobody has defined.
+  const weekOverMinutes = days.reduce(
+    (total, day) => total + daySummary(dayTotal(day), approvedOvertime[day] ?? 0).overMinutes,
+    0,
+  );
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
@@ -485,9 +513,9 @@ export function WeekGrid({
                   <td key={day} className="border-l px-1 py-2 text-center text-sm font-semibold tabular-nums">
                     <span
                       className={
-                        note?.mark === "over"
+                        note?.state === "over"
                           ? "text-destructive"
-                          : note?.mark === "OT"
+                          : note?.state === "overtime"
                             ? "text-warning"
                             : undefined
                       }
@@ -504,7 +532,7 @@ export function WeekGrid({
                         aria-hidden
                         className={cn(
                           "mt-0.5 block text-2xs leading-none font-medium",
-                          note.mark === "over" ? "text-destructive" : "text-warning",
+                          note.state === "over" ? "text-destructive" : "text-warning",
                         )}
                       >
                         {note.mark}
@@ -533,14 +561,21 @@ export function WeekGrid({
           </>
         ) : null}
 
-        {/* Days, not hours. There is no weekly standard in this codebase to be
-            over BY, so the honest statement is how many days ran long. */}
+        {/* Days AND the amount. There is still no weekly standard in this
+            codebase to be over BY — `weekOverMinutes` is the sum of the daily
+            overages, which is a different and answerable question, and it is
+            the figure somebody needs before deciding whether to file an
+            overtime request or correct the hours. */}
         {daysOver > 0 ? (
           <>
             <span className="font-medium text-destructive">
               {daysOver === 1 ? "1 day over" : `${daysOver} days over`}
             </span>{" "}
-            the standard day ·{" "}
+            the standard day by{" "}
+            <span className="font-medium text-destructive">
+              {formatDuration(weekOverMinutes)}
+            </span>{" "}
+            in total ·{" "}
           </>
         ) : null}
         {/* The typing hint is instructions for a thing that can no longer be

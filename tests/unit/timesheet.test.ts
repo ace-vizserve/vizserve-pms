@@ -2,13 +2,17 @@ import { describe, expect, it } from "vitest";
 
 import { formatWeekRange, formatWeekday, startOfWeek, weekDates } from "@/lib/dates";
 import {
+  addMinutesToTime,
   cellCommit,
   dayState,
+  daySummary,
   formatCellDuration,
   fromMinutes,
+  minutesBetween,
   parseCellDuration,
   isWeekLocked,
   timesheetEntrySchema,
+  timesheetEntryUpdateSchema,
   timesheetWeekDecisionSchema,
   toMinutes,
 } from "@/lib/schemas/timesheet";
@@ -264,6 +268,192 @@ describe("dayState — advisory, and overtime raises the bar rather than removin
 
   it("treats approved overtime on a short day as irrelevant", () => {
     expect(dayState(300, 240)).toBe("normal");
+  });
+});
+
+describe("P7-21 — start and end times on an entry", () => {
+  const base = {
+    task_id: "11111111-1111-4111-8111-111111111111",
+    work_date: "2026-08-19",
+    minutes: 150,
+  };
+
+  it("accepts an entry with no times at all, which is still the ordinary case", () => {
+    const parsed = timesheetEntrySchema.safeParse(base);
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) {
+      expect(parsed.data.started_at).toBeNull();
+      expect(parsed.data.ended_at).toBeNull();
+    }
+  });
+
+  it("treats an empty string as no time rather than a malformed one", () => {
+    // A cleared input sends "", and rejecting that as "not a time" would make
+    // removing the times impossible.
+    const parsed = timesheetEntrySchema.safeParse({ ...base, started_at: "", ended_at: "" });
+
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data.started_at).toBeNull();
+  });
+
+  it("accepts a matching pair", () => {
+    const parsed = timesheetEntrySchema.safeParse({
+      ...base,
+      started_at: "09:00",
+      ended_at: "11:30",
+    });
+
+    expect(parsed.success).toBe(true);
+  });
+
+  it("refuses half a pair", () => {
+    // Mirrors vizserve_pms_timesheet_entries_times_paired. A start with no end
+    // is an open interval and this table has no concept of one.
+    expect(timesheetEntrySchema.safeParse({ ...base, started_at: "09:00" }).success).toBe(false);
+    expect(timesheetEntrySchema.safeParse({ ...base, ended_at: "11:30" }).success).toBe(false);
+  });
+
+  it("refuses an end before the start", () => {
+    expect(
+      timesheetEntrySchema.safeParse({ ...base, started_at: "11:30", ended_at: "09:00" }).success,
+    ).toBe(false);
+  });
+
+  it("refuses a zero-length span", () => {
+    expect(
+      timesheetEntrySchema.safeParse({ ...base, started_at: "09:00", ended_at: "09:00" }).success,
+    ).toBe(false);
+  });
+
+  it("refuses a duration that disagrees with the times", () => {
+    // The whole point of the constraint behind this: a row saying "09:00 to
+    // 11:30, 45 minutes" makes both numbers untrustworthy on every row.
+    const parsed = timesheetEntrySchema.safeParse({
+      ...base,
+      minutes: 45,
+      started_at: "09:00",
+      ended_at: "11:30",
+    });
+
+    expect(parsed.success).toBe(false);
+  });
+
+  it("refuses a time that is not a time", () => {
+    expect(
+      timesheetEntrySchema.safeParse({ ...base, started_at: "9am", ended_at: "11:30" }).success,
+    ).toBe(false);
+    expect(
+      timesheetEntrySchema.safeParse({ ...base, started_at: "25:00", ended_at: "26:00" }).success,
+    ).toBe(false);
+  });
+
+  it("applies the same rules when editing an existing row", () => {
+    // The update schema is built from the same shape through the same helper,
+    // so the two cannot drift into checking different things.
+    const id = "22222222-2222-4222-8222-222222222222";
+
+    expect(
+      timesheetEntryUpdateSchema.safeParse({ ...base, id, started_at: "09:00", ended_at: "11:30" })
+        .success,
+    ).toBe(true);
+    expect(timesheetEntryUpdateSchema.safeParse({ ...base, id, started_at: "09:00" }).success).toBe(
+      false,
+    );
+  });
+});
+
+describe("minutesBetween / addMinutesToTime", () => {
+  it("measures a span on one day", () => {
+    expect(minutesBetween("09:00", "11:30")).toBe(150);
+    expect(minutesBetween("00:00", "23:59")).toBe(1439);
+  });
+
+  it("goes negative rather than wrapping, so the caller can refuse it", () => {
+    // Wrapping would silently turn "22:00 to 01:00" into a three-hour entry on
+    // a day the second half did not happen. Q8 is still open on overnight work
+    // and this refuses to guess.
+    expect(minutesBetween("22:00", "01:00")).toBeLessThan(0);
+  });
+
+  it("adds minutes to a clock time", () => {
+    expect(addMinutesToTime("09:00", 150)).toBe("11:30");
+    expect(addMinutesToTime("09:05", 55)).toBe("10:00");
+  });
+
+  it("refuses to run past midnight", () => {
+    expect(addMinutesToTime("23:00", 120)).toBeNull();
+  });
+});
+
+describe("daySummary — the figures both grids read", () => {
+  it("puts capacity at the standard day when nothing was approved", () => {
+    const summary = daySummary(480);
+
+    expect(summary.capacityMinutes).toBe(480);
+    expect(summary.trackedMinutes).toBe(480);
+    expect(summary.overMinutes).toBe(0);
+    expect(summary.percentOfCapacity).toBe(100);
+  });
+
+  it("raises capacity by the overtime approved for that day", () => {
+    // The rule the whole overtime approval flow exists to express: 8h plus
+    // whatever a lead signed off, per day.
+    expect(daySummary(0, 120).capacityMinutes).toBe(600);
+  });
+
+  it("names how far past capacity a day ran", () => {
+    // The number that was previously only spoken to a screen reader. Nine
+    // hours with nothing approved is one hour over.
+    const summary = daySummary(540);
+
+    expect(summary.state).toBe("over");
+    expect(summary.overMinutes).toBe(60);
+    expect(summary.percentOfCapacity).toBe(113);
+  });
+
+  it("is over by nothing while the day sits inside its approved overtime", () => {
+    const summary = daySummary(540, 120);
+
+    expect(summary.state).toBe("overtime");
+    expect(summary.overMinutes).toBe(0);
+  });
+
+  it("counts only the part nobody signed off", () => {
+    // 10h logged, 1h approved. The overage is the hour past 9h, not the two
+    // past 8h — approved overtime raises the bar rather than removing it.
+    const summary = daySummary(600, 60);
+
+    expect(summary.state).toBe("over");
+    expect(summary.overMinutes).toBe(60);
+  });
+
+  it("never reports a negative overage on a short day", () => {
+    const summary = daySummary(120);
+
+    expect(summary.state).toBe("normal");
+    expect(summary.overMinutes).toBe(0);
+  });
+
+  it("reports an empty day as zero rather than dividing into a percentage", () => {
+    const summary = daySummary(0);
+
+    expect(summary.state).toBe("empty");
+    expect(summary.percentOfCapacity).toBe(0);
+    expect(summary.overMinutes).toBe(0);
+  });
+
+  it("agrees with dayState, because it is the same decision", () => {
+    for (const [total, granted] of [
+      [0, 0],
+      [480, 0],
+      [481, 0],
+      [540, 60],
+      [541, 60],
+      [600, 120],
+    ] as const) {
+      expect(daySummary(total, granted).state).toBe(dayState(total, granted));
+    }
   });
 });
 

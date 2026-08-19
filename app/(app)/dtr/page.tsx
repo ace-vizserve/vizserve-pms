@@ -12,6 +12,14 @@ import {
   workedMinutes,
 } from "@/lib/dates";
 import { loadPunchState } from "@/lib/dtr-server";
+import {
+  describeLeaveDay,
+  expandLeaveDays,
+  leaveKey,
+  LEAVE_PORTION_LABELS,
+  type LeaveDay,
+  type LeaveSpan,
+} from "@/lib/leave";
 import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
@@ -66,7 +74,7 @@ export default async function DtrPage({
 
   const isLead = roleAtLeast(context.role, "team_leader");
 
-  const [punchState, entriesResult, peopleResult] = await Promise.all([
+  const [punchState, entriesResult, leaveResult, peopleResult] = await Promise.all([
     loadPunchState(context.userId),
     (() => {
       // ONE MORE THAN WE RENDER.
@@ -108,6 +116,43 @@ export default async function DtrPage({
       if (selectedUser) query = query.eq("user_id", selectedUser);
       return query;
     })(),
+
+    /*
+     * APPROVED LEAVE — the days this list used to have nothing to say about.
+     *
+     * A day off has no `dtr_entries` row, so it was an invisible gap: the empty
+     * state says "days with no punch have no row at all", and somebody scanning
+     * their record for a missing punch had no way to tell an approved absence
+     * from a day the system lost. Worse, a lead reading a member's record saw a
+     * silent hole.
+     *
+     * The ordinary policy on internal requests, NOT
+     * `vizserve_pms_leave_calendar`. The calendar is SECURITY DEFINER and
+     * returns every active user; this page is scoped, and borrowing the
+     * calendar would show a member days belonging to people whose DTR they
+     * cannot read. `requester_id = auth.uid() or manages_department(...)` is
+     * the same shape as the DTR's own policy, so the two agree by construction
+     * — and, like the list above, this query carries no department filter.
+     *
+     * `reason` is not selected. The absence belongs on this screen; why belongs
+     * to the requester and the lead who decided it.
+     */
+    (() => {
+      let query = supabase
+        .from("vizserve_pms_internal_requests")
+        .select(
+          "requester_id, start_date, end_date, start_half, end_half, vizserve_pms_leave_types(label)",
+        )
+        .eq("request_type", "LEAVE")
+        .eq("status", "APPROVED")
+        // Overlap, not containment — see vizserve_pms_leave_calendar.
+        .lte("start_date", to)
+        .gte("end_date", from);
+
+      if (selectedUser) query = query.eq("requester_id", selectedUser);
+      return query;
+    })(),
+
     // The picker only makes sense for someone who can see more than themselves.
     // Reads through the same RLS as the list, so it cannot offer a person whose
     // rows would then come back empty.
@@ -120,7 +165,7 @@ export default async function DtrPage({
       : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
   ]);
 
-  type Entry = {
+  type PunchRow = {
     id: string;
     work_date: string;
     time_in: string | null;
@@ -130,13 +175,94 @@ export default async function DtrPage({
     vizserve_pms_users: { full_name: string } | null;
   };
 
-  const fetched = (entriesResult.data ?? []) as unknown as Entry[];
+  /**
+   * A row on this list is now either a punch or an approved absence.
+   *
+   * `leave` hangs off both. On a punched row it annotates — a half day worked
+   * and half taken is ONE day and one row, and splitting it would make the
+   * record show two entries for a date that only happened once. On a row with
+   * no punch it is the whole reason the row exists.
+   */
+  type Entry = PunchRow & { leave: LeaveDay | null; isLeaveOnly: boolean };
+
+  const fetched = (entriesResult.data ?? []) as unknown as PunchRow[];
   // The extra row is a signal, not data. Drop it before anything is counted.
   const truncated = fetched.length > DTR_PAGE_SIZE;
-  const entries = truncated ? fetched.slice(0, DTR_PAGE_SIZE) : fetched;
+  const punchRows = truncated ? fetched.slice(0, DTR_PAGE_SIZE) : fetched;
 
   const people = peopleResult.data ?? [];
   const showPerson = isLead && !selectedUser;
+  const nameOf = new Map(people.map((row) => [row.id, row.full_name] as const));
+
+  type LeaveRequestRow = {
+    requester_id: string;
+    start_date: string | null;
+    end_date: string | null;
+    start_half: "MORNING" | "AFTERNOON" | null;
+    end_half: "MORNING" | "AFTERNOON" | null;
+    vizserve_pms_leave_types: { label: string } | null;
+  };
+
+  const spans: LeaveSpan[] = ((leaveResult.data ?? []) as unknown as LeaveRequestRow[])
+    // The shape constraint guarantees both dates on a LEAVE row; the types do
+    // not, and a null would expand into an unbounded walk.
+    .filter((row) => row.start_date !== null && row.end_date !== null)
+    .map((row) => ({
+      user_id: row.requester_id,
+      start_date: row.start_date!,
+      end_date: row.end_date!,
+      start_half: row.start_half,
+      end_half: row.end_half,
+      type_name: row.vizserve_pms_leave_types?.label ?? null,
+    }));
+
+  // An inverted range would otherwise expand into nothing anyway, but the guard
+  // keeps this honest with the empty state that explains itself below.
+  const leaveDays = rangeInverted ? new Map<string, LeaveDay>() : expandLeaveDays(spans, from, to);
+
+  const punchedKeys = new Set(punchRows.map((row) => leaveKey(row.user_id, row.work_date)));
+
+  const punchEntries: Entry[] = punchRows.map((row) => ({
+    ...row,
+    leave: leaveDays.get(leaveKey(row.user_id, row.work_date)) ?? null,
+    isLeaveOnly: false,
+  }));
+
+  /*
+   * The absences with no punch behind them. These are the rows that did not
+   * exist before — and they are the whole point, because a day off is exactly
+   * the day that leaves no trace in `dtr_entries`.
+   *
+   * Synthetic ids, prefixed so they cannot collide with a real uuid and so a
+   * key in the DOM says what it is.
+   */
+  const leaveEntries: Entry[] = [...leaveDays]
+    .filter(([key]) => !punchedKeys.has(key))
+    .map(([key, day]) => {
+      const [userId = "", workDate = ""] = key.split("|");
+      return {
+        id: `leave:${key}`,
+        work_date: workDate,
+        time_in: null,
+        time_out: null,
+        corrected_at: null,
+        user_id: userId,
+        vizserve_pms_users: nameOf.has(userId) ? { full_name: nameOf.get(userId)! } : null,
+        leave: day,
+        isLeaveOnly: true,
+      };
+    });
+
+  // Newest first, matching the query's own order. Ties broken by name so a day
+  // with several people on it does not reshuffle between renders.
+  const entries: Entry[] = [...punchEntries, ...leaveEntries].sort(
+    (a, b) =>
+      b.work_date.localeCompare(a.work_date) ||
+      (a.vizserve_pms_users?.full_name ?? "").localeCompare(
+        b.vizserve_pms_users?.full_name ?? "",
+      ) ||
+      a.user_id.localeCompare(b.user_id),
+  );
 
   const totalMinutes = entries.reduce(
     (sum, entry) => sum + (workedMinutes(entry.time_in, entry.time_out) ?? 0),
@@ -153,6 +279,11 @@ export default async function DtrPage({
   const closed = entries.filter((entry) => workedMinutes(entry.time_in, entry.time_out) !== null);
   const stillOpen = entries.filter((entry) => entry.time_in && !entry.time_out).length;
   const averageMinutes = closed.length > 0 ? Math.round(totalMinutes / closed.length) : null;
+
+  // Counted apart from the punch records on purpose. Folding leave into
+  // "Records" would inflate a figure people read as "days I was at work", and
+  // the average below divides by days that closed — a day off is neither.
+  const leaveDayCount = leaveEntries.length;
 
   /**
    * F — whose record is this row?
@@ -180,6 +311,22 @@ export default async function DtrPage({
           {entry.corrected_at ? (
             <p className="mt-0.5 text-2xs font-medium text-info">Corrected</p>
           ) : null}
+          {/* The absence, named. Colour alone would not do it here any more
+              than it does on a status pill, and the portion matters: half a day
+              off is a different fact from a whole one. */}
+          {entry.leave ? (
+            <p className="mt-0.5 text-2xs font-medium text-info">
+              {entry.leave.portion === "full"
+                ? "On leave"
+                : `On leave · ${LEAVE_PORTION_LABELS[entry.leave.portion]}`}
+              {entry.leave.typeNames.length > 0 ? (
+                <span className="font-normal text-muted-foreground">
+                  {" "}
+                  {entry.leave.typeNames.join(", ")}
+                </span>
+              ) : null}
+            </p>
+          ) : null}
         </>
       ),
     },
@@ -202,8 +349,14 @@ export default async function DtrPage({
         <>
           {formatAppTime(entry.time_in)}
           {/* F — the route to the correction, from the row showing the problem.
-              A row with no time-in is exactly the case NO_TIME_IN exists for. */}
-          {!entry.time_in && isMine(entry) ? (
+              A row with no time-in is exactly the case NO_TIME_IN exists for.
+
+              EXCEPT on a day somebody was approved to be away. Offering "Time-in
+              missing?" there tells a person on holiday to file a correction for
+              a gap that is not a gap — and a correction they should never file
+              is worse than no link, because filing it puts a punch on a day they
+              did not work. */}
+          {!entry.time_in && !entry.isLeaveOnly && isMine(entry) ? (
             <CorrectionLink type="NO_TIME_IN" date={entry.work_date} label="Time-in missing?" />
           ) : null}
         </>
@@ -238,7 +391,17 @@ export default async function DtrPage({
       key: "worked",
       header: "Worked",
       className: "tabular-nums whitespace-nowrap",
-      cell: (entry) => formatDuration(workedMinutes(entry.time_in, entry.time_out)),
+      // A leave-only row has no hours and never will. "—" would read as a day
+      // that recorded nothing, which is precisely the confusion this row exists
+      // to end, so it says what the day was instead.
+      cell: (entry) =>
+        entry.isLeaveOnly ? (
+          <span className="text-2xs text-muted-foreground">
+            {entry.leave ? describeLeaveDay(entry.leave) : "On leave"}
+          </span>
+        ) : (
+          formatDuration(workedMinutes(entry.time_in, entry.time_out))
+        ),
     },
   ];
 
@@ -303,6 +466,20 @@ export default async function DtrPage({
             </p>
           ) : null}
 
+          {/* Said out loud rather than swallowed. A failed leave query renders
+              as a record with no leave in it, which is indistinguishable from
+              nobody having taken any — the exact "data ?? [] reads as empty"
+              trap that hid the broken embed on this page for months. */}
+          {leaveResult.error ? (
+            <p
+              role="status"
+              className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
+            >
+              Approved leave could not be loaded, so days away are not shown below. The punch
+              records are unaffected.
+            </p>
+          ) : null}
+
           {/* What fills the rest of the rail. The table already totals itself in
               a footer row, but that footer is at the bottom of thirty rows —
               which is no use to the person who opened this page to find out how
@@ -314,7 +491,12 @@ export default async function DtrPage({
             <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
               <div>
                 <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Records</dt>
-                <dd className="mt-0.5 text-sm font-semibold tabular-nums">{entries.length}</dd>
+                {/* Punch records only. The leave rows below are days in the
+                    list but not days at work, and adding them here would
+                    overstate the figure people read as attendance. */}
+                <dd className="mt-0.5 text-sm font-semibold tabular-nums">
+                  {punchEntries.length}
+                </dd>
               </div>
               <div>
                 <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
@@ -347,6 +529,20 @@ export default async function DtrPage({
                   {stillOpen > 0 ? <span className="sr-only"> days not timed out</span> : null}
                 </dd>
               </div>
+
+              {/* Only when there is leave in the range. A permanent "0" here
+                  would be a stat that is furniture on most weeks. */}
+              {leaveDayCount > 0 ? (
+                <div>
+                  <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+                    On leave
+                  </dt>
+                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-info">
+                    {leaveDayCount}
+                    <span className="sr-only"> approved days away with no punch</span>
+                  </dd>
+                </div>
+              ) : null}
             </dl>
           ) : null}
 
@@ -424,7 +620,7 @@ export default async function DtrPage({
               className="py-10"
               icon={<Clock />}
               title="No entries in this range"
-              description="Days with no punch have no row at all. Widen the date range first — if a day is genuinely missing that should not be, raise the correction from here."
+              description="Days with no punch have no row at all, apart from approved leave, which is listed. Widen the date range first — if a day is genuinely missing that should not be, raise the correction from here."
               action={
                 // F. It carries `from`, the first day of the range being looked
                 // at, because that is the only day this screen can name — an

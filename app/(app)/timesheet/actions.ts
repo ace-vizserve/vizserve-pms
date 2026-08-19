@@ -98,6 +98,10 @@ export async function logTime(input: unknown): Promise<ActionResult> {
     work_date: parsed.data.work_date,
     minutes: parsed.data.minutes,
     note: parsed.data.note,
+    // P7-21. Both or neither — the schema has already refused a half-filled
+    // pair, and the CHECK behind it would refuse one that got past.
+    started_at: parsed.data.started_at,
+    ended_at: parsed.data.ended_at,
   });
 
   if (error) return { ok: false, error: readableError(error) };
@@ -130,6 +134,11 @@ export async function updateTimeEntry(input: unknown): Promise<ActionResult> {
       work_date: parsed.data.work_date,
       minutes: parsed.data.minutes,
       note: parsed.data.note,
+      // Written on every update, including when both are null. Omitting them
+      // would make clearing the times impossible — the row would keep whatever
+      // it had while the form said otherwise.
+      started_at: parsed.data.started_at,
+      ended_at: parsed.data.ended_at,
     })
     .eq("id", parsed.data.id)
     .select("id");

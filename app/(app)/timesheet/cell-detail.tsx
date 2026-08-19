@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlignLeft, Clock, MessageSquareText, Plus, Trash2 } from "lucide-react";
+import { AlignLeft, Clock, MessageSquareText, Plus, Timer, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { formatDate, formatWeekday } from "@/lib/dates";
-import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
+import { formatCellDuration, minutesBetween, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
 import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
@@ -65,6 +65,10 @@ export function CellDetail({
 }) {
   const split = entries.length > 1;
   const noted = entries.some((entry) => entry.note);
+  // P7-21. Times are the third thing a cell total cannot show, so they pin the
+  // marker open for the same reason a note does — otherwise the only sign the
+  // entry carries them is hovering the cell that hides them.
+  const timed = entries.some((entry) => entry.started_at);
 
   return (
     <Popover open={open} onOpenChange={onOpenChange}>
@@ -76,14 +80,20 @@ export function CellDetail({
           "absolute top-0.5 right-0.5 flex h-4 min-w-4 items-center justify-center rounded px-0.5",
           "text-2xs leading-none font-medium text-muted-foreground",
           "hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          split || noted
+          split || noted || timed
             ? "opacity-100"
             : "opacity-0 group-hover/cell:opacity-100 group-focus-within/cell:opacity-100",
         )}
       >
-        {split ? entries.length : <MessageSquareText className="size-3" />}
+        {split ? (
+          entries.length
+        ) : timed && !noted ? (
+          <Clock className="size-3" />
+        ) : (
+          <MessageSquareText className="size-3" />
+        )}
         <span className="sr-only">
-          {taskTitle} — {formatWeekday(day)} {formatDate(day)}: notes and split entries
+          {taskTitle} — {formatWeekday(day)} {formatDate(day)}: notes, times and split entries
         </span>
       </PopoverTrigger>
 
@@ -151,6 +161,25 @@ function EntryRow({
   const [pending, startTransition] = useTransition();
   const [duration, setDuration] = useState(formatCellDuration(entry.minutes));
   const [note, setNote] = useState(entry.note ?? "");
+  // P7-21. Empty string rather than null, because that is what an untouched
+  // `<input type="time">` holds and a controlled input cannot take null.
+  const [startTime, setStartTime] = useState(entry.started_at ?? "");
+  const [endTime, setEndTime] = useState(entry.ended_at ?? "");
+
+  /*
+   * THE TIMES WIN WHEN BOTH ARE SET.
+   *
+   * `vizserve_pms_timesheet_entries_times_match_minutes` refuses a row whose
+   * duration disagrees with its span, so the editor cannot offer two fields
+   * that can disagree. When both times are present the length is derived and
+   * the length field goes read-only; clearing either hands it back.
+   *
+   * This is the same move as deriving a task's department from its assignee:
+   * remove the disagreement rather than validate it after the fact.
+   */
+  const timed = Boolean(startTime && endTime);
+  const derived = timed ? minutesBetween(startTime, endTime) : null;
+  const shownDuration = derived !== null && derived > 0 ? formatCellDuration(derived) : duration;
 
   function save() {
     // Belt and braces with the `readOnly` below: blur fires on a read-only
@@ -158,11 +187,20 @@ function EntryRow({
     // inside a locked week.
     if (locked) return;
 
-    const minutes = parseCellDuration(duration);
+    // Half a pair is not a state the row can be saved in, and it is a state the
+    // person is mid-way through typing — so it waits rather than complaining.
+    if (Boolean(startTime) !== Boolean(endTime)) return;
+
+    const minutes = derived ?? parseCellDuration(duration);
 
     if (minutes === null) {
       toast.error(`"${duration}" is not a length of time.`);
       setDuration(formatCellDuration(entry.minutes));
+      return;
+    }
+
+    if (timed && minutes <= 0) {
+      toast.error("The end time has to be after the start.");
       return;
     }
 
@@ -176,7 +214,17 @@ function EntryRow({
     }
 
     const nextNote = note.trim() ? note.trim() : null;
-    if (minutes === entry.minutes && nextNote === entry.note) return;
+    const nextStart = startTime || null;
+    const nextEnd = endTime || null;
+
+    if (
+      minutes === entry.minutes &&
+      nextNote === entry.note &&
+      nextStart === entry.started_at &&
+      nextEnd === entry.ended_at
+    ) {
+      return;
+    }
 
     startTransition(async () => {
       const result = await updateTimeEntry({
@@ -185,12 +233,16 @@ function EntryRow({
         work_date: day,
         minutes,
         note: nextNote,
+        started_at: nextStart,
+        ended_at: nextEnd,
       });
 
       if (!result.ok) {
         toast.error(result.error);
         setDuration(formatCellDuration(entry.minutes));
         setNote(entry.note ?? "");
+        setStartTime(entry.started_at ?? "");
+        setEndTime(entry.ended_at ?? "");
         return;
       }
 
@@ -198,17 +250,26 @@ function EntryRow({
     });
   }
 
+  // A locked week keeps its times on screen — they are part of the record — but
+  // an empty pair of time inputs on a row that never had any is furniture.
+  const showTimes = !locked || Boolean(entry.started_at);
+
   return (
+    <div className="space-y-1.5">
     <div className="flex items-center gap-1.5">
       {/* `readOnly`, not `disabled`. A disabled input drops out of the tab order
           and is skipped by most screen readers — on a locked week these fields
           are the record, and the record has to stay readable. */}
       <Input
-        value={duration}
+        value={shownDuration}
         disabled={pending}
-        readOnly={locked}
+        readOnly={locked || timed}
         aria-label="Length"
-        className="h-9 w-18 text-center tabular-nums"
+        title={timed ? "Worked out from the start and end times." : undefined}
+        className={cn(
+          "h-9 w-18 text-center tabular-nums",
+          timed && "text-muted-foreground",
+        )}
         onChange={(event) => setDuration(event.target.value)}
         onBlur={save}
       />
@@ -246,6 +307,44 @@ function EntryRow({
           <span className="sr-only">Remove this entry</span>
         </Button>
       )}
+    </div>
+
+      {/* P7-21 — when in the day this happened. Optional, and indented under
+          the row it belongs to rather than beside it: the length and the note
+          are what most people came here for, and three controls on one line
+          turns a quick correction into a form. */}
+      {showTimes ? (
+        <div className="flex items-center gap-1.5 pl-1 text-xs text-muted-foreground">
+          <Clock className="size-3.5 shrink-0 text-foreground-faint" aria-hidden />
+          <Input
+            type="time"
+            value={startTime}
+            disabled={pending}
+            readOnly={locked}
+            aria-label="Start time"
+            className="h-8 w-26 tabular-nums"
+            onChange={(event) => setStartTime(event.target.value)}
+            onBlur={save}
+          />
+          <span aria-hidden>–</span>
+          <Input
+            type="time"
+            value={endTime}
+            disabled={pending}
+            readOnly={locked}
+            aria-label="End time"
+            className="h-8 w-26 tabular-nums"
+            onChange={(event) => setEndTime(event.target.value)}
+            onBlur={save}
+          />
+          {/* The one error the pair can be in that the person has to fix
+              themselves. Everything else either waits (half a pair, mid-typing)
+              or is derived. */}
+          {timed && derived !== null && derived <= 0 ? (
+            <span className="text-destructive">End must be after the start.</span>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -293,9 +392,27 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
   const [pending, startTransition] = useTransition();
   const [duration, setDuration] = useState("");
   const [note, setNote] = useState("");
+  const [startTime, setStartTime] = useState("");
+  const [endTime, setEndTime] = useState("");
+
+  // Same rule as the rows above: both times present means the length is theirs
+  // to state, and the length field stops being an independent number that could
+  // contradict them.
+  const timed = Boolean(startTime && endTime);
+  const derived = timed ? minutesBetween(startTime, endTime) : null;
 
   function add() {
-    const minutes = parseCellDuration(duration);
+    if (Boolean(startTime) !== Boolean(endTime)) {
+      toast.error("Give both a start and an end time, or neither.");
+      return;
+    }
+
+    if (timed && (derived === null || derived <= 0)) {
+      toast.error("The end time has to be after the start.");
+      return;
+    }
+
+    const minutes = derived ?? parseCellDuration(duration);
 
     if (minutes === null || minutes === 0) {
       toast.error("How long was it? Try 1h 30m, 90m or 1.5.");
@@ -308,6 +425,8 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
         work_date: day,
         minutes,
         note: note.trim() ? note.trim() : null,
+        started_at: startTime || null,
+        ended_at: endTime || null,
       });
 
       if (!result.ok) {
@@ -317,6 +436,8 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
 
       setDuration("");
       setNote("");
+      setStartTime("");
+      setEndTime("");
       router.refresh();
     });
   }
@@ -332,11 +453,16 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
         1h 30m 5s, 90m and 1.5 all parse, and a bare number is hours.
       */}
       <Input
-        value={duration}
+        value={timed && derived !== null && derived > 0 ? formatCellDuration(derived) : duration}
         disabled={pending}
+        readOnly={timed}
         placeholder="Enter time — 1h 30m 5s, 90m or 1.5"
         aria-label="Length of the new entry"
-        className="h-11 rounded-none border-x-0 border-t-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0"
+        title={timed ? "Worked out from the start and end times." : undefined}
+        className={cn(
+          "h-11 rounded-none border-x-0 border-t-0 bg-transparent px-3 text-base shadow-none focus-visible:ring-0",
+          timed && "text-muted-foreground",
+        )}
         onChange={(event) => setDuration(event.target.value)}
         onKeyDown={(event) => event.key === "Enter" && add()}
       />
@@ -353,7 +479,7 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
         `aria-live="polite"` because it changes under the cursor while typing;
         polite waits for a pause rather than interrupting every keystroke.
       */}
-      {duration.trim() ? (
+      {duration.trim() && !timed ? (
         <p
           aria-live="polite"
           className={cn(
@@ -374,6 +500,38 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
         <span>
           {formatWeekday(day)} · {formatDate(day)}
         </span>
+      </div>
+
+      {/* P7-21 — WHEN in the day, optional. Sits under the date because it
+          qualifies it: the date says which day, this says where in it. Leave
+          both empty and the entry is a duration exactly as it was before, which
+          is still the fast path. */}
+      <div className="flex items-center gap-2.5 border-b px-3 py-2 text-sm">
+        <Timer className="size-4 shrink-0 text-foreground-faint" aria-hidden />
+        <Input
+          type="time"
+          value={startTime}
+          disabled={pending}
+          aria-label="Start time"
+          className="h-8 w-28 tabular-nums"
+          onChange={(event) => setStartTime(event.target.value)}
+        />
+        <span className="text-foreground-muted" aria-hidden>
+          –
+        </span>
+        <Input
+          type="time"
+          value={endTime}
+          disabled={pending}
+          aria-label="End time"
+          className="h-8 w-28 tabular-nums"
+          onChange={(event) => setEndTime(event.target.value)}
+        />
+        {timed && derived !== null && derived <= 0 ? (
+          <span className="text-xs text-destructive">End must be after the start.</span>
+        ) : !startTime && !endTime ? (
+          <span className="text-xs text-muted-foreground">Optional</span>
+        ) : null}
       </div>
 
       <div className="flex items-center gap-2.5 px-3">

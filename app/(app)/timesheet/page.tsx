@@ -79,7 +79,7 @@ export default async function TimesheetPage({
       // Pinned by a test: tests/db/timesheet.test.ts, "entries survive losing
       // sight of their task".
       .select(
-        "id, task_id, work_date, minutes, note, vizserve_pms_tasks(title, status, list_id, department_id)",
+        "id, task_id, work_date, minutes, note, started_at, ended_at, vizserve_pms_tasks(title, status, list_id, department_id)",
       )
       // No `user_id` filter would still be correct — the SELECT policy returns
       // the caller's own rows plus their team's — and this page shows only their
@@ -178,6 +178,13 @@ export default async function TimesheetPage({
     work_date: string;
     minutes: number;
     note: string | null;
+    /**
+     * P7-21. Postgres `time` arrives as `HH:MM:SS`; the grid and the
+     * `<input type="time">` behind it both work in `HH:MM`, so the seconds are
+     * trimmed once here rather than in each of the three places that read them.
+     */
+    started_at: string | null;
+    ended_at: string | null;
     vizserve_pms_tasks: {
       title: string;
       status: string;
@@ -187,6 +194,18 @@ export default async function TimesheetPage({
   };
 
   const entries = (entriesResult.data ?? []) as unknown as Entry[];
+
+  /**
+   * `09:30:00` → `09:30`, and null stays null.
+   *
+   * `<input type="time">` accepts the seconds form but normalises it away the
+   * moment somebody touches the field, which would make an untouched row and a
+   * touched-but-unchanged one compare as different and fire a pointless UPDATE
+   * on blur. Trimming on the way in removes the difference instead.
+   */
+  function toClock(value: string | null): string | null {
+    return value ? value.slice(0, 5) : null;
+  }
 
   // Entries into grid rows. A task appears once, however many days it spans —
   // that collapse is the difference between a week grid and a list of entries,
@@ -231,6 +250,8 @@ export default async function TimesheetPage({
       id: entry.id,
       minutes: entry.minutes,
       note: entry.note,
+      started_at: toClock(entry.started_at),
+      ended_at: toClock(entry.ended_at),
     });
   }
 

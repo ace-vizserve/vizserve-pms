@@ -8,11 +8,11 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Chip } from "@/components/status-badge";
-import { STANDARD_DAY_MINUTES, formatDate, formatDuration, formatWeekday } from "@/lib/dates";
+import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import {
   TIMESHEET_WEEK_LABELS,
   type TimesheetWeekStatus,
-  dayState,
+  daySummary,
   formatCellDuration,
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
@@ -148,7 +148,10 @@ export function TeamWeekGrid({
                   {days.map((day) => {
                     const minutes = row.cells[day] ?? 0;
                     const granted = row.overtime[day] ?? 0;
-                    const state = dayState(minutes, granted);
+                    // The same function the member's own grid reads, so the two
+                    // views cannot drift into disagreeing about a day — which is
+                    // the exact disagreement a lead would have to arbitrate.
+                    const { state, capacityMinutes, overMinutes } = daySummary(minutes, granted);
                     const onLeave = leave.has(day);
 
                     return (
@@ -179,17 +182,24 @@ export function TeamWeekGrid({
                                   state === "over" ? "text-destructive" : "text-warning",
                                 )}
                               >
-                                {state === "over" ? "over" : "OT"}
+                                {/* The amount on screen, not only in the spoken
+                                    sentence. A lead deciding whether to send a
+                                    week back needs to see how far over it is,
+                                    and "over" alone made them open the member's
+                                    own grid to find out. */}
+                                {state === "over" ? `over +${formatDuration(overMinutes)}` : "OT"}
                               </span>
                             ) : null}
                             {state === "over" || state === "overtime" ? (
                               <span className="sr-only">
                                 {formatDuration(minutes)} logged,{" "}
                                 {state === "over"
-                                  ? `${formatDuration(
-                                      minutes - STANDARD_DAY_MINUTES - granted,
-                                    )} over the approved day.`
-                                  : "within the overtime approved for this day."}
+                                  ? `${formatDuration(overMinutes)} more than the ${formatDuration(
+                                      capacityMinutes,
+                                    )} ${granted > 0 ? "approved for this day" : "standard day"}.`
+                                  : `within the ${formatDuration(
+                                      capacityMinutes,
+                                    )} approved for this day.`}
                               </span>
                             ) : null}
                           </>

@@ -1210,6 +1210,16 @@ export type Database = {
           work_date: string;
           minutes: number;
           note: string | null;
+          /**
+           * P7-21. Optional wall-clock times on `work_date`, Manila. Both or
+           * neither, and when both are set `minutes` is the span between them —
+           * three CHECK constraints, so a row cannot contradict itself.
+           *
+           * Postgres `time` arrives over PostgREST as `HH:MM:SS`; the UI works
+           * in `HH:MM` and trims once on the way in.
+           */
+          started_at: string | null;
+          ended_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -1223,12 +1233,16 @@ export type Database = {
           work_date: string;
           minutes: number;
           note?: string | null;
+          started_at?: string | null;
+          ended_at?: string | null;
         };
         Update: Partial<{
           task_id: string;
           work_date: string;
           minutes: number;
           note: string | null;
+          started_at: string | null;
+          ended_at: string | null;
         }>;
         Relationships: [
           {
