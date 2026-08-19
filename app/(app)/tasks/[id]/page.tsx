@@ -10,11 +10,13 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
-import { TASK_STATUS_LABELS, isTerminal } from "@/lib/schemas/tasks";
+import { TASK_STATUS_LABELS, isTerminal, taskCategory } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
 import { CommentThread } from "../comment-thread";
 
 import { RequestAttachmentList } from "./client-files";
+import { LifecycleRail } from "./lifecycle-rail";
+import { SubtaskList } from "./subtask-list";
 import { TaskOutputs } from "./task-outputs";
 import { TaskWorkflow } from "./task-workflow";
 
@@ -38,7 +40,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const { data: task } = await supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, description, status, resolution, output_link, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, field_values, created_at",
+      "id, title, description, status, resolution, output_link, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, field_values, created_by, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -52,6 +54,9 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     { data: request },
     { data: outputs },
     { data: commentRows },
+    { data: subtasks },
+    { data: trackedRows },
+    { data: decisions },
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_task_status_history")
@@ -75,8 +80,12 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           // `requester_org`, `description` and `submitted_at` added: the person
           // doing the work was being shown a name and nothing else about who
           // asked or when, and had to open the request to find out.
+          // `reviewed_by` / `reviewed_at` are GATE 1, and they cost no query —
+          // the row is already being read. Without them the lifecycle rail
+          // could say the gate had been passed but never who passed it, which
+          // is the half of an approval that matters when somebody asks later.
           .select(
-            "id, reference_no, requester_name, requester_email, requester_org, description, target_date, submitted_at, form_id",
+            "id, reference_no, requester_name, requester_email, requester_org, description, target_date, submitted_at, reviewed_by, reviewed_at, form_id",
           )
           .eq("id", task.request_id)
           .maybeSingle()
@@ -92,6 +101,51 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       .select("id, body, author_id, created_at, updated_at")
       .eq("task_id", id)
       .order("created_at", { ascending: true }),
+
+    /*
+     * P7-28 — THE SUBTASKS, which this page has never shown.
+     *
+     * The list has drawn a progress bar from these since K5; the detail page
+     * drew nothing, so the one screen you open to work on a task was the one
+     * screen that could not tell you it had four children. P7-09 is one level
+     * deep and trigger-enforced, so this is a single flat query — no recursion.
+     *
+     * Same order as the list's own groups: it is a queue, not a trail.
+     */
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id, title, status, due_date, assignee_id, priority")
+      .eq("parent_task_id", id)
+      .order("created_at"),
+
+    /*
+     * P7-15 — TIME TRACKED CANNOT BE A PLAIN SUM. This is the trap, and it is
+     * the same one `app/(app)/tasks/page.tsx` documents at its own call.
+     *
+     * `vizserve_pms_timesheet_entries`' SELECT policy is owner-or-their-lead,
+     * so a member summing that table for this task would see only the hours
+     * THEY logged and read it as the task total. Two people on one task would
+     * see two different figures on the same screen and their lead a third.
+     * The rollup is SECURITY DEFINER for exactly that reason, and it returns a
+     * row only for tasks the caller may already see.
+     */
+    supabase.rpc("vizserve_pms_task_time_tracked", { p_task_ids: [id] }),
+
+    /*
+     * GATE 3 — what the client actually said, and only where there is a client.
+     *
+     * Newest first: a returned task goes round again, so a task can carry a
+     * REVISION_REQUESTED and then an APPROVED, and the rail reports the most
+     * recent one. Scoped by the task's own policy (P4), so a task out of scope
+     * has already 404'd above.
+     */
+    task.request_id
+      ? supabase
+          .from("vizserve_pms_client_decisions")
+          .select("id, decision, comment, approver_name, created_at")
+          .eq("task_id", id)
+          .order("created_at", { ascending: false })
+      : Promise.resolve({ data: null }),
   ]);
 
   /*
@@ -127,6 +181,23 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
   const values = (task.field_values ?? {}) as Record<string, unknown>;
+
+  /*
+   * One task, so one row — but the RPC takes and returns a set, because it is
+   * the same rollup the list page calls for eighty of them. Nothing logged
+   * comes back as NO ROW rather than a zero, which is why the fallback is here
+   * and not in the query.
+   */
+  const trackedMinutes =
+    ((trackedRows ?? []) as { task_id: string; minutes: number }[])[0]?.minutes ?? 0;
+
+  const children = subtasks ?? [];
+
+  // Newest first out of the query, so the first row is the client's most recent
+  // word — a task can carry a REVISION_REQUESTED and then an APPROVED.
+  const latestDecision = decisions?.[0] ?? null;
+
+  const category = taskCategory({ request_id: task.request_id, is_personal: task.is_personal });
 
   const viewer = {
     isPic: task.assignee_id === context.userId,
@@ -351,10 +422,26 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             estimateMinutes={task.estimate_minutes}
             assigneeId={task.assignee_id}
             qaAssigneeId={task.qa_assignee_id}
+            trackedMinutes={trackedMinutes}
             lists={lists ?? []}
             candidates={(people ?? []).filter((person) => person.primary_department_id === task.department_id)}
             viewer={viewer}
             task={{ request_id: task.request_id, is_personal: task.is_personal }}
+          />
+
+          {/* P7-28 — under the work and above its outputs, which is the order
+              they happen in: you split the task up, you do the pieces, you
+              attach what came out. */}
+          <SubtaskList
+            parentId={task.id}
+            subtasks={children}
+            nameOf={nameOf}
+            assignable={(people ?? [])
+              .filter((person) => person.primary_department_id === task.department_id)
+              .map((person) => ({ id: person.id, full_name: person.full_name }))}
+            // Same test as uploading an output: doing the work, or leading the
+            // department it belongs to. A finished task takes no new children.
+            canAdd={(viewer.isPic || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)}
           />
 
           {/* The output files belong with the work, not with the trail — they
@@ -403,6 +490,47 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               <CardTitle>History</CardTitle>
             </CardHeader>
             <CardContent>
+              {/* THE SUMMARY, ABOVE THE EVIDENCE. The trail below is complete
+                  and unreadable at a glance; this says which of the gates the
+                  work is sitting behind, in as many stages as this KIND of task
+                  actually has. */}
+              <LifecycleRail
+                status={task.status}
+                category={category}
+                createdAt={task.created_at}
+                createdByName={task.created_by ? (nameOf.get(task.created_by) ?? null) : null}
+                picName={task.assignee_id ? (nameOf.get(task.assignee_id) ?? null) : null}
+                qaName={task.qa_assignee_id ? (nameOf.get(task.qa_assignee_id) ?? null) : null}
+                request={
+                  request
+                    ? {
+                        submittedAt: request.submitted_at,
+                        requesterName: request.requester_name,
+                        reviewedAt: request.reviewed_at,
+                        reviewedByName: request.reviewed_by
+                          ? (nameOf.get(request.reviewed_by) ?? null)
+                          : null,
+                      }
+                    : null
+                }
+                decision={
+                  latestDecision
+                    ? {
+                        decision: latestDecision.decision,
+                        createdAt: latestDecision.created_at,
+                        approverName: latestDecision.approver_name,
+                      }
+                    : null
+                }
+              />
+
+              {/* Names the second half, because with the rail above it the
+                  card now holds two different things and the summary would
+                  otherwise look like the first entry of the trail. */}
+              <p className="mb-1.5 text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
+                Every move
+              </p>
+
               {!history || history.length === 0 ? (
                 <p className="text-xs text-muted-foreground">Nothing recorded yet.</p>
               ) : (

@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ChevronRight, Save } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, Play, Save } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -23,16 +23,20 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { formatCellDuration } from "@/lib/schemas/timesheet";
 import {
   TASK_STATUSES,
   TASK_STATUS_LABELS,
   availableTransitions,
   isTerminal,
+  nextStep,
   type TaskPriority,
   type TaskStatus,
+  type Transition,
 } from "@/lib/schemas/tasks";
+import { cn } from "@/lib/utils";
 
-import { overrideTaskStatus, reassignTask, updateTaskDetails } from "../actions";
+import { overrideTaskStatus, reassignTask, transitionTask, updateTaskDetails } from "../actions";
 import { EstimateField } from "../estimate-field";
 import { PriorityPicker } from "../priority-picker";
 import { TaskStatusSelect } from "../status-select";
@@ -57,6 +61,18 @@ import { TaskStatusSelect } from "../status-select";
  * purpose: the resolution gate is the reason half of these moves refuse, and a
  * control that fails for a reason living on another part of the screen is one
  * people learn to distrust.
+ *
+ * P7-28 — THE STATUS ROW IS NOW THE FIRST THING ON THE CARD, not the last, and
+ * the paragraph above is the reason it did not simply move to the header chip
+ * instead. The resolution sits DIRECTLY BENEATH it, so the gate and its cause
+ * are still in one glance; what changed is that the reason most people open
+ * this page is no longer four fields down.
+ *
+ * Beside the dropdown is ONE promoted move — `nextStep`. The dropdown keeps
+ * every legal move, because free movement means an internal task has seven of
+ * them; the button is the one somebody would almost certainly have chosen. It
+ * is DERIVED from the same `availableTransitions` the menu is built from, so it
+ * can never offer something the menu does not.
  */
 
 type Person = { id: string; full_name: string; primary_department_id: string | null };
@@ -78,6 +94,7 @@ export function TaskWorkflow({
   estimateMinutes: initialEstimate,
   assigneeId,
   qaAssigneeId,
+  trackedMinutes,
   lists,
   candidates,
   viewer,
@@ -102,6 +119,13 @@ export function TaskWorkflow({
   estimateMinutes: number | null;
   assigneeId: string | null;
   qaAssigneeId: string | null;
+  /**
+   * P7-15. Minutes logged against this task by EVERYONE, from
+   * `vizserve_pms_task_time_tracked` — never a sum of `timesheet_entries`,
+   * whose policy is owner-or-their-lead and would show each viewer a different
+   * total for the same task.
+   */
+  trackedMinutes: number;
   lists: List[];
   candidates: Person[];
   viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
@@ -162,6 +186,37 @@ export function TaskWorkflow({
   const resolutionMissing = initialResolution.trim().length === 0;
   const unsavedResolution = resolution !== initialResolution;
 
+  /**
+   * The one move worth a button, and — separately — the ending, where the
+   * ending is not already it.
+   *
+   * `complete` is a SECOND button rather than part of `nextStep`, because on
+   * internal work at ONGOING both are true at once: the expected route is QA,
+   * and closing it directly is legal and common. Promoting only one of them
+   * would hide whichever the person wanted. Where the two ARE the same move —
+   * personal work at ONGOING, internal work leaving QA — the second button is
+   * not drawn, because two buttons that do the same thing is worse than one.
+   */
+  const next = nextStep(status, viewer, task);
+  const complete =
+    next?.to === "COMPLETED"
+      ? null
+      : (transitions.find(
+          (transition) =>
+            transition.to === "COMPLETED" &&
+            // Gate 3's own approval belongs to the client, not to whoever is
+            // looking at the screen — an admin may still force it from the menu.
+            transition.actor !== "client" &&
+            transition.actor !== "system" &&
+            transition.requires !== "comment",
+        ) ?? null);
+
+  /** A move whose precondition is a field on this very card, still empty. */
+  const blockedByResolution = (transition: Transition | null) =>
+    transition?.requires === "resolution" && resolutionMissing;
+
+  const overEstimate = estimate !== null && trackedMinutes > estimate;
+
   function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
     setError(null);
     startTransition(async () => {
@@ -175,6 +230,16 @@ export function TaskWorkflow({
       setOverrideReason("");
       router.refresh();
     });
+  }
+
+  /**
+   * A promoted move, pressed. No comment argument and none needed: `nextStep`
+   * refuses any transition that requires one, because a button cannot satisfy a
+   * requirement that needs typing — those stay in the dropdown, which asks for
+   * the comment in place.
+   */
+  function move(transition: Transition) {
+    run(() => transitionTask(taskId, { to_status: transition.to }), transition.label);
   }
 
   function save() {
@@ -209,6 +274,95 @@ export function TaskWorkflow({
       </CardHeader>
 
       <CardContent className="space-y-3">
+        {/* -------------------------------------------------------------- */}
+        {/* WHERE THE TASK IS, AND THE ONE MOVE THAT FOLLOWS.               */}
+        {/*                                                                 */}
+        {/* First on the card, with the resolution immediately below it —   */}
+        {/* see the note at the top of this file. Moving it to the header    */}
+        {/* chip instead would have separated the control from the field    */}
+        {/* that blocks it, which is the arrangement people stop trusting.  */}
+        {/* -------------------------------------------------------------- */}
+        <div className="space-y-2 border-b pb-3">
+          {transitions.length > 0 ? (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground">Status</Label>
+                <TaskStatusSelect
+                  taskId={taskId}
+                  status={status}
+                  viewer={viewer}
+                  task={task}
+                  resolutionMissing={resolutionMissing}
+                />
+              </div>
+
+              {next ? (
+                <Button
+                  size="sm"
+                  onClick={() => move(next)}
+                  loading={pending}
+                  disabled={blockedByResolution(next)}
+                  // `disabled` is never the only explanation (§4.2). The
+                  // sentence below says the same thing in words, and this
+                  // carries it for anyone reading the button on its own.
+                  title={
+                    blockedByResolution(next)
+                      ? "Fill in the resolution below first."
+                      : undefined
+                  }>
+                  <Play />
+                  {next.label}
+                </Button>
+              ) : null}
+
+              {complete ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => move(complete)}
+                  loading={pending}
+                  disabled={blockedByResolution(complete)}
+                  title={
+                    blockedByResolution(complete)
+                      ? "Fill in the resolution below first."
+                      : undefined
+                  }>
+                  <Check />
+                  Complete
+                </Button>
+              ) : null}
+            </div>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              {isTerminal(status)
+                ? "This task is finished."
+                : "Nothing for you to do here right now — it is with somebody else."}
+            </p>
+          )}
+
+          {/*
+            Two different sentences for two different situations, and the order
+            matters: an unsaved draft is the more actionable of the two, because
+            pressing Save is what unblocks the move.
+
+            WARNING TONE, NOT MUTED GREY. This is the reason a button on the
+            same line is refusing, and the grey it used to be read as a hint
+            about the form rather than an answer to "why can I not press that".
+            The icon is the second, non-colour carrier.
+          */}
+          {unsavedResolution ? (
+            <p className="flex items-start gap-1.5 text-xs text-warning">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              The resolution has unsaved changes — Save before moving this.
+            </p>
+          ) : transitions.some((t) => t.requires === "resolution") && resolutionMissing ? (
+            <p className="flex items-start gap-1.5 text-xs text-warning">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+              Fill in the resolution below to send this for QA.
+            </p>
+          ) : null}
+        </div>
+
         {/* -------------------------------------------------------------- */}
         {/* The resolution. The thing this phase exists to capture.        */}
         {/* -------------------------------------------------------------- */}
@@ -274,6 +428,32 @@ export function TaskWorkflow({
           />
         </div>
 
+        {/*
+          P7-15 — WHAT IT HAS ACTUALLY COST, against what somebody thought it
+          would. Beside the estimate rather than up in the header, because the
+          estimate is the only thing that gives this number a meaning.
+
+          HIDDEN WHEN NOTHING IS LOGGED, never a permanent "0h of 6h". A figure
+          that reads zero on most of the tasks in the system is one people learn
+          to stop reading, and the estimate field directly above already says
+          what was estimated.
+
+          The wording matches the timesheet's own — `1h 30m`, `over +1h` — so
+          the same duration is written the same way wherever it appears.
+        */}
+        {trackedMinutes > 0 ? (
+          <p
+            className={cn(
+              "text-xs tabular-nums",
+              overEstimate ? "font-medium text-warning" : "text-muted-foreground",
+            )}>
+            {formatCellDuration(trackedMinutes)} logged
+            {estimate !== null ? ` of ${formatCellDuration(estimate)} estimated` : null}
+            {/* Never colour alone — the overage is named, not just tinted. */}
+            {overEstimate ? ` · over +${formatCellDuration(trackedMinutes - estimate)}` : null}
+          </p>
+        ) : null}
+
         <PriorityPicker value={priority} onChange={setPriority} disabled={!canEdit || pending} />
 
         {lists.length > 0 ? (
@@ -306,43 +486,6 @@ export function TaskWorkflow({
             Save
           </Button>
         ) : null}
-
-        {/* -------------------------------------------------------------- */}
-        {/* Transitions                                                     */}
-        {/* -------------------------------------------------------------- */}
-        {transitions.length > 0 ? (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2 border-t pt-3">
-            <div className="flex items-center gap-2">
-              <Label className="text-xs text-muted-foreground">Status</Label>
-              <TaskStatusSelect
-                taskId={taskId}
-                status={status}
-                viewer={viewer}
-                task={task}
-                resolutionMissing={resolutionMissing}
-              />
-            </div>
-
-            {/* Two different sentences for two different situations, and the
-                order matters: an unsaved draft is the more actionable of the
-                two, because pressing Save is what unblocks the move. */}
-            {unsavedResolution ? (
-              <span className="text-xs text-muted-foreground">
-                The resolution has unsaved changes — Save before moving this.
-              </span>
-            ) : transitions.some((t) => t.requires === "resolution") && resolutionMissing ? (
-              <span className="text-xs text-muted-foreground">
-                Fill in the resolution above to send this for QA.
-              </span>
-            ) : null}
-          </div>
-        ) : (
-          <p className="border-t pt-3 text-xs text-muted-foreground">
-            {isTerminal(status)
-              ? "This task is finished."
-              : "Nothing for you to do here right now — it is with somebody else."}
-          </p>
-        )}
 
         {/* -------------------------------------------------------------- */}
         {/* Q5 — the override. Quiet, and never the obvious thing to click. */}

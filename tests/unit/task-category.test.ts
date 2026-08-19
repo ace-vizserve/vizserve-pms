@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  TASK_STATUSES,
   TASK_TRANSITIONS,
   availableTransitions,
+  nextStep,
   scopeAllows,
   taskCategory,
 } from "@/lib/schemas/tasks";
@@ -127,5 +129,139 @@ describe("the transition table itself", () => {
     for (const transition of owned) {
       if (transition.from === "ONGOING") expect(transition.requires).toBe("resolution");
     }
+  });
+});
+
+/**
+ * P7-28 — the ONE move promoted to a button.
+ *
+ * Every case here is a claim about what the task page's primary button says,
+ * and each one is a move `availableTransitions` already offers — the point of
+ * the function is choosing between them, never adding to them.
+ */
+describe("nextStep", () => {
+  const QA_LEAD = { isPic: false, isQa: true, leadsDepartment: true, isAdmin: false };
+  const ADMIN = { isPic: true, isQa: true, leadsDepartment: true, isAdmin: true };
+
+  it("walks client work down the approved flow, one gate at a time", () => {
+    expect(nextStep("OPEN", PIC, CLIENT)).toMatchObject({ to: "ONGOING", label: "Start work" });
+    expect(nextStep("ONGOING", PIC, CLIENT)).toMatchObject({ to: "FOR_QA", label: "Send for QA" });
+    expect(nextStep("FOR_QA", QA, CLIENT)).toMatchObject({ to: "QA_IN_PROGRESS" });
+    expect(nextStep("QA_IN_PROGRESS", QA, CLIENT)).toMatchObject({
+      to: "FOR_CLIENT_APPROVAL",
+      label: "Pass QA",
+    });
+  });
+
+  it("keeps the resolution gate on the button rather than routing around it", () => {
+    // The button is DISABLED by the empty resolution on screen; it must still be
+    // the move on offer, or the reason for the block has nothing to attach to.
+    expect(nextStep("ONGOING", PIC, CLIENT)).toMatchObject({ requires: "resolution" });
+  });
+
+  it("never promotes a move somebody else has to make", () => {
+    // The PIC cannot start the review; that is the QA seat's move, and the
+    // honest answer for the PIC is that there is nothing to press.
+    expect(nextStep("FOR_QA", PIC, CLIENT)).toBeNull();
+  });
+
+  it("never promotes the client's own answer, even for an admin", () => {
+    // `availableTransitions` DOES offer these to an admin — forcing a client's
+    // hand is a legal override — but a one-click "Client approved" is not a
+    // button anyone should be able to press by reflex.
+    expect(availableTransitions("FOR_CLIENT_APPROVAL", ADMIN, CLIENT).length).toBeGreaterThan(0);
+    expect(nextStep("FOR_CLIENT_APPROVAL", ADMIN, CLIENT)).toBeNull();
+  });
+
+  it("never promotes parking the work", () => {
+    // WAITING_FOR_INFO is declared between ONGOING and FOR_QA, so a naive "next
+    // in enum order" makes it the headline move on every task that is going
+    // fine. It is a decision somebody makes, not the default.
+    for (const task of [CLIENT, INTERNAL, PERSONAL]) {
+      expect(nextStep("ONGOING", PIC, task)?.to).not.toBe("WAITING_FOR_INFO");
+      expect(nextStep("OPEN", PIC, task)?.to).not.toBe("WAITING_FOR_INFO");
+    }
+  });
+
+  it("offers the way out of a parked task, which the enum order calls backwards", () => {
+    expect(nextStep("WAITING_FOR_INFO", PIC, CLIENT)).toMatchObject({
+      to: "ONGOING",
+      label: "Resume work",
+    });
+    expect(nextStep("WAITING_FOR_INFO", PIC, INTERNAL)).toMatchObject({ to: "ONGOING" });
+  });
+
+  it("gives internal work the same wording as client work for the same move", () => {
+    // Free movement synthesises its transitions with the STATUS NAME as the
+    // label, so without the lookup this would read "For QA" on one kind of task
+    // and "Send for QA" on the other for an identical step.
+    expect(nextStep("ONGOING", PIC, INTERNAL)).toMatchObject({
+      to: "FOR_QA",
+      label: "Send for QA",
+    });
+    expect(nextStep("QA_IN_PROGRESS", QA_LEAD, INTERNAL)).toMatchObject({
+      to: "COMPLETED",
+      label: "Pass QA and close",
+    });
+  });
+
+  it("sends personal work straight to done — P7-02", () => {
+    // QA is still REACHABLE on personal work through the dropdown; it is simply
+    // not the expected route, so it is not what the button offers.
+    expect(nextStep("ONGOING", PIC, PERSONAL)).toMatchObject({
+      to: "COMPLETED",
+      label: "Mark it done",
+    });
+    expect(targets(availableTransitions("ONGOING", PIC, PERSONAL))).toContain("FOR_QA");
+  });
+
+  it("has nothing to say once the work is finished", () => {
+    // Internal work can legally be reopened (P7-06) and that move stays in the
+    // dropdown — but "reopen" is not what a primary button on a closed task
+    // should invite.
+    expect(nextStep("COMPLETED", PIC, INTERNAL)).toBeNull();
+    expect(nextStep("COMPLETED_NO_RESPONSE", PIC, CLIENT)).toBeNull();
+    expect(targets(availableTransitions("COMPLETED", PIC, INTERNAL))).toContain("ONGOING");
+  });
+
+  it("has nothing to say to somebody holding neither seat", () => {
+    const stranger = { isPic: false, isQa: false, leadsDepartment: false, isAdmin: false };
+    for (const task of [CLIENT, INTERNAL, PERSONAL]) {
+      expect(nextStep("ONGOING", stranger, task)).toBeNull();
+    }
+  });
+
+  it("only ever returns a move the server would accept", () => {
+    // The whole safety property in one case: whatever this promotes must be in
+    // the set `availableTransitions` produced, for every status and seat.
+    for (const task of [CLIENT, INTERNAL, PERSONAL]) {
+      for (const status of TASK_STATUSES) {
+        const step = nextStep(status, ADMIN, task);
+        if (step === null) continue;
+        expect(targets(availableTransitions(status, ADMIN, task))).toContain(step.to);
+      }
+    }
+  });
+});
+
+/**
+ * A task can legitimately stand somewhere its own category has no stage for.
+ * These are the two ways that happens, and in both the button is the way
+ * onward — which is exactly when it must not disappear.
+ */
+describe("nextStep — off the category's own path", () => {
+  it("still closes personal work that was sent to QA anyway", () => {
+    // P7-13a lets personal work reach FOR_QA from the dropdown. Personal work
+    // has no QA STAGE, so there is nothing after it on its own path — the next
+    // step is the ending its owner is entitled to.
+    expect(nextStep("FOR_QA", PIC, PERSONAL)).toMatchObject({ to: "COMPLETED" });
+  });
+
+  it("gives forced internal work a way out of the client gate", () => {
+    // `vizserve_pms_force_task_status` does not consult the transition table,
+    // so a lead can strand work with no client at FOR_CLIENT_APPROVAL. Free
+    // movement is the way back and this is the button for it.
+    const lead = { isPic: true, isQa: false, leadsDepartment: true, isAdmin: false };
+    expect(nextStep("FOR_CLIENT_APPROVAL", lead, INTERNAL)).toMatchObject({ to: "COMPLETED" });
   });
 });

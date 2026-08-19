@@ -418,6 +418,130 @@ export function availableTransitions(
   });
 }
 
+/**
+ * P7-28 — THE ONE MOVE WORTH A BUTTON.
+ *
+ * `availableTransitions` answers "what may I do"; this answers "what would I
+ * almost certainly do next". The dropdown keeps every legal move — free
+ * movement means an internal task offers seven — and this promotes exactly one
+ * of them to a primary button so the common move is not as hard to find as the
+ * rare one.
+ *
+ * DERIVED FROM `availableTransitions`, never from a second table. The returned
+ * Transition is the one that function produced, so `requires` is whatever the
+ * server will actually enforce; only the `label` is upgraded (below). If a move
+ * is not on offer it can never be promoted, which is what stops this drawing a
+ * button the server refuses.
+ *
+ * FOUR THINGS ARE NEVER THE NEXT STEP, and each exclusion is a different rule:
+ *
+ *   WAITING_FOR_INFO      A PAUSE, NOT A STEP. It is declared between ONGOING
+ *                         and FOR_QA, so a naive "next in enum order" makes
+ *                         "Waiting for info" the headline move on every task
+ *                         that is going fine. Parking work is a decision
+ *                         somebody makes; it is not the default.
+ *   COMPLETED_NO_RESPONSE Only the auto-complete cron reaches it.
+ *   a `client` or `system` actor
+ *                         The person at the keyboard is not the actor. An admin
+ *                         may force a client's answer from the dropdown; a
+ *                         one-click "Client approved" is not a button anyone
+ *                         should be able to press by reflex.
+ *   `requires: "comment"` A button cannot satisfy a requirement that needs
+ *                         typing. Those moves stay in the dropdown, which asks
+ *                         for the comment in place.
+ *
+ * `requires: "resolution"` IS kept, and deliberately: it is a field on this very
+ * screen, sitting directly under the button, so a disabled "Send for QA" and
+ * the empty box that disables it are in one glance.
+ *
+ * Returns null when the work is finished, when nobody holds a seat on it, and
+ * at FOR_CLIENT_APPROVAL — where the honest answer is that it is not the team's
+ * move at all.
+ */
+export function nextStep(
+  status: TaskStatus,
+  viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
+  task: { request_id: string | null; is_personal: boolean },
+): Transition | null {
+  // Nothing follows a finished task. Internal work can legally be reopened
+  // (P7-06) and that move stays in the dropdown, but "reopen" is not what a
+  // primary button on a closed task should invite.
+  if (isTerminal(status)) return null;
+
+  const category = taskCategory(task);
+  const moves = availableTransitions(status, viewer, task).filter(
+    (move) =>
+      move.actor !== "client" && move.actor !== "system" && move.requires !== "comment",
+  );
+  if (moves.length === 0) return null;
+
+  const promote = (move: Transition): Transition => ({
+    ...move,
+    // The verb, where the canonical table has one. Free movement synthesises
+    // its transitions with the STATUS NAME as the label, so an internal task
+    // would offer "▶ For QA" where client work offers "▶ Send for QA" for the
+    // identical move. Borrowing the wording — and only the wording — makes the
+    // button read the same on both without importing a `requires` the server
+    // does not enforce for internal work.
+    label:
+      TASK_TRANSITIONS.find(
+        (row) =>
+          row.from === move.from && row.to === move.to && scopeAllows(row.appliesTo, category),
+      )?.label ?? move.label,
+  });
+
+  // Parked work has exactly one move worth promoting: un-park it. It is off the
+  // spine below in both directions, so it is answered here rather than by an
+  // index comparison that would read "resume" as going backwards.
+  if (status === "WAITING_FOR_INFO") {
+    const resume = moves.find((move) => move.to === "ONGOING");
+    return resume ? promote(resume) : null;
+  }
+
+  /*
+   * The nearest stage ahead of here that is actually on offer.
+   *
+   * "Ahead" is measured against `TASK_STATUSES` rather than against a position
+   * IN the spine, because a task can legitimately be standing somewhere its own
+   * category has no stage for: personal work sent to QA through the dropdown
+   * (P7-13a lets it), or anything an admin forced into FOR_CLIENT_APPROVAL. An
+   * index into the spine would be -1 for both and the button would vanish from
+   * exactly the tasks that most need a way onward.
+   */
+  const here = TASK_STATUSES.indexOf(status);
+
+  for (const target of forwardSpine(category)) {
+    if (TASK_STATUSES.indexOf(target) <= here) continue;
+    const move = moves.find((candidate) => candidate.to === target);
+    if (move) return promote(move);
+  }
+
+  return null;
+}
+
+/**
+ * The happy path for a category, as a list of statuses — FILTERED FROM
+ * `TASK_STATUSES` rather than written out, so adding a status cannot leave a
+ * second order behind to drift.
+ *
+ * It is the same shape the lifecycle rail draws: five stages for client work,
+ * four for internal, three for personal.
+ */
+function forwardSpine(category: TaskCategory): TaskStatus[] {
+  return TASK_STATUSES.filter((status) => {
+    // A pause and a cron's ending. Neither is a step anyone takes.
+    if (status === "WAITING_FOR_INFO" || status === "COMPLETED_NO_RESPONSE") return false;
+    // Work with no client has no client gate — it is a dead end there, not a
+    // stage (see `availableTransitions`).
+    if (status === "FOR_CLIENT_APPROVAL") return category === "request";
+    // P7-02 — you made it for yourself, you close it. QA is still REACHABLE on
+    // personal work through the dropdown; it is simply not the expected route,
+    // so it is not what the button offers.
+    if (status === "FOR_QA" || status === "QA_IN_PROGRESS") return category !== "personal";
+    return true;
+  });
+}
+
 /** Statuses that mean the work is finished, either way. */
 export const TERMINAL_STATUSES: readonly TaskStatus[] = ["COMPLETED", "COMPLETED_NO_RESPONSE"];
 
