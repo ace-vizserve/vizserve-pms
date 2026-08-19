@@ -1,7 +1,9 @@
+import { CalendarDays, Link2, ListTree } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { CalendarDays, Link2, ListTree } from "lucide-react";
 
+import { PageShell } from "@/components/page-shell";
+import { TaskPriorityBadge, TaskStatusBadge, taskStatusSurface } from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
@@ -15,12 +17,9 @@ import {
 } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
-import { PageShell } from "@/components/page-shell";
-import { TaskPriorityBadge, TaskStatusBadge, taskStatusSurface } from "@/components/status-badge";
 
 import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
-import { NewTaskButton } from "../new-task-button";
 import { TaskStatusSelect } from "../status-select";
 import { TaskToolbar } from "../toolbar";
 
@@ -140,10 +139,7 @@ export default async function TaskBoardPage({
   const parentIds = topLevel.map((task) => task.id);
 
   const { data: childRows } = parentIds.length
-    ? await supabase
-        .from("vizserve_pms_tasks")
-        .select("id, parent_task_id, status")
-        .in("parent_task_id", parentIds)
+    ? await supabase.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", parentIds)
     : { data: [] };
 
   const progress = new Map<string, { done: number; total: number }>();
@@ -165,9 +161,7 @@ export default async function TaskBoardPage({
    */
   /** Who the composer may assign to — P7-14's rule, same as the list's. */
   const assignableScope = new Set(
-    [context.primaryDepartmentId, ...context.managedDepartmentIds].filter(
-      (id): id is string => Boolean(id),
-    ),
+    [context.primaryDepartmentId, ...context.managedDepartmentIds].filter((id): id is string => Boolean(id)),
   );
 
   const assignable = (people ?? [])
@@ -185,15 +179,12 @@ export default async function TaskBoardPage({
     return {
       isPic: task.assignee_id === context.userId,
       isQa: task.qa_assignee_id === context.userId,
-      leadsDepartment:
-        context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
+      leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
       isAdmin,
     };
   }
 
-  const byStatus = new Map<VizservePmsTaskStatus, typeof topLevel>(
-    BOARD_COLUMNS.map((status) => [status, []]),
-  );
+  const byStatus = new Map<VizservePmsTaskStatus, typeof topLevel>(BOARD_COLUMNS.map((status) => [status, []]));
   for (const task of topLevel) byStatus.get(task.status)?.push(task);
 
   return (
@@ -203,8 +194,7 @@ export default async function TaskBoardPage({
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
         <TaskToolbar view="board" />
         <p className="min-w-0 text-xs text-muted-foreground">
-          Hover a card to move, rename or add to it. Internal work goes to any stage; client work
-          follows its gates.
+          Hover a card to move, rename or add to it. Internal work goes to any stage; client work follows its gates.
         </p>
       </div>
 
@@ -236,8 +226,7 @@ export default async function TaskBoardPage({
                   // because that file is the only place a status is allowed to
                   // become a colour.
                   taskStatusSurface(status),
-                )}
-              >
+                )}>
                 {/*
                   The status chip IS the column heading — same component, same
                   tone map as every other status in the app, so a column and a
@@ -286,13 +275,11 @@ export default async function TaskBoardPage({
                         */
                         <div
                           key={task.id}
-                          className="group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg"
-                        >
+                          className="group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg">
                           <div className="flex items-start gap-1.5">
                             <Link
                               href={`/tasks/${task.id}`}
-                              className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium hover:underline"
-                            >
+                              className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium hover:underline">
                               {task.title}
                             </Link>
 
@@ -300,8 +287,7 @@ export default async function TaskBoardPage({
                               taskId={task.id}
                               title={task.title}
                               priority={task.priority as TaskPriority | null}
-                              assignable={assignable}
-                            >
+                              assignable={assignable}>
                               {/* The glyph, not the chip: this card sits IN the
                                   column whose heading is its status. */}
                               <TaskStatusSelect
@@ -322,10 +308,7 @@ export default async function TaskBoardPage({
                                 nothing. Read-only here, because the hover
                                 strip's flag is where it changes and one field
                                 does not get two controls on one card. */}
-                            <TaskPriorityBadge
-                              priority={task.priority as TaskPriority | null}
-                              className="h-5 px-1.5"
-                            />
+                            <TaskPriorityBadge priority={task.priority as TaskPriority | null} className="h-5 px-1.5" />
 
                             {/* PIC and QA, in that order. The second assignee is
                                 the thing this product turns on, so a board that
@@ -333,9 +316,7 @@ export default async function TaskBoardPage({
                                 is on the hook. */}
                             {pic ? <Avatar name={pic} title={`PIC ${pic}`} /> : null}
                             {qa ? <Avatar name={qa} title={`QA ${qa}`} tone="qa" /> : null}
-                            {!pic && !qa ? (
-                              <span className="text-2xs text-muted-foreground">Unassigned</span>
-                            ) : null}
+                            {!pic && !qa ? <span className="text-2xs text-muted-foreground">Unassigned</span> : null}
 
                             {task.due_date ? (
                               <span
@@ -347,8 +328,7 @@ export default async function TaskBoardPage({
                                   late
                                     ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
                                     : "border-border bg-muted text-muted-foreground",
-                                )}
-                              >
+                                )}>
                                 <CalendarDays className="size-3.5 shrink-0" aria-hidden />
                                 {task.start_date
                                   ? `${formatDate(task.start_date)} – ${formatDate(task.due_date)}`
@@ -359,10 +339,7 @@ export default async function TaskBoardPage({
                             ) : null}
 
                             {task.output_link ? (
-                              <Link2
-                                className="size-3.5 text-foreground-faint"
-                                aria-label="Has an output link"
-                              />
+                              <Link2 className="size-3.5 text-foreground-faint" aria-label="Has an output link" />
                             ) : null}
                           </span>
 
@@ -414,7 +391,6 @@ export default async function TaskBoardPage({
                 {status === "FOR_CLIENT_APPROVAL" ? null : (
                   <>
                     <BoardComposer status={status} assignable={assignable} />
-                    {status === INITIAL_TASK_STATUS ? <NewTaskButton trigger="column" /> : null}
                   </>
                 )}
               </section>
@@ -434,15 +410,7 @@ export default async function TaskBoardPage({
  * exists for. `title` carries the whole name and the role, because the initials
  * alone are ambiguous the moment two people share them.
  */
-function Avatar({
-  name,
-  title,
-  tone = "pic",
-}: {
-  name: string;
-  title: string;
-  tone?: "pic" | "qa";
-}) {
+function Avatar({ name, title, tone = "pic" }: { name: string; title: string; tone?: "pic" | "qa" }) {
   return (
     <span
       title={title}
@@ -451,8 +419,7 @@ function Avatar({
         tone === "qa"
           ? "border-info-border bg-info-subtle text-info"
           : "border-accent-border bg-accent text-accent-foreground",
-      )}
-    >
+      )}>
       {initials(name)}
       <span className="sr-only">{title}</span>
     </span>
