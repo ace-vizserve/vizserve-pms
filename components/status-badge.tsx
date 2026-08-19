@@ -19,8 +19,10 @@ import type {
 } from "@/lib/database.types";
 import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
 import {
+  TASK_CATEGORY_LABELS,
   TASK_PRIORITY_LABELS,
   TASK_STATUS_LABELS,
+  type TaskCategory,
   type TaskPriority,
 } from "@/lib/schemas/tasks";
 
@@ -406,4 +408,87 @@ export function TaskPriorityBadge({
   return (
     <Pill tone={TASK_PRIORITY_TONES[priority]} label={TASK_PRIORITY_LABELS[priority]} className={className} />
   );
+}
+
+// ---------------------------------------------------------------------------
+// P7-27 — client work vs internal work, said loudly
+// ---------------------------------------------------------------------------
+
+/**
+ * WHY THIS IS A CHIP AND NOT A WORD.
+ *
+ * The three categories were rendered as a plain `<span>` in a row of plain
+ * `<span>`s — list name, category, subtask marker — all the same muted grey. So
+ * the single most consequential fact about a task, the one that decides whether
+ * finishing it needs a client's sign-off or just your own, read as the least
+ * consequential thing on the row. On the board it was not rendered at all.
+ *
+ * `taskCategory` already answers the question; this is only about making the
+ * answer visible at a glance.
+ *
+ * TONES, and the asymmetry is the point:
+ *
+ *   request   `brand`   — somebody outside the company is waiting on this, and
+ *                         it cannot be finished without them. It is the only
+ *                         one that earns an accent.
+ *   internal  `neutral` — ordinary shared work.
+ *   personal  `neutral` — your own list. Neutral like internal because the
+ *                         difference between them is who may close it, not how
+ *                         much it matters, and two accents would leave nothing
+ *                         standing out.
+ *
+ * Never colour alone: `Pill` carries the label and a dot that inherits
+ * `currentColor`, so the distinction survives greyscale exactly as every other
+ * chip in this app does.
+ */
+const TASK_CATEGORY_TONES: Record<TaskCategory, Tone> = {
+  request: "brand",
+  internal: "neutral",
+  personal: "neutral",
+};
+
+/**
+ * CLIENT WORK IS THE ONE SOLID CHIP IN THE TASK VIEWS.
+ *
+ * Every other chip on a row — status, priority, category — is a subtle tint on
+ * a pale ground, which is right for things you read once you are already
+ * looking at the row. This one has to be answerable from across the screen,
+ * because "does finishing this need somebody outside the company" changes what
+ * the row means rather than decorating it.
+ *
+ * Solid `primary` is used by nothing else in the list or the board, so it
+ * cannot be confused with a status or a priority. The label still says "Client"
+ * — the fill is the second carrier, never the only one.
+ */
+const CLIENT_FILL = "border-primary bg-primary text-primary-foreground";
+
+export function TaskCategoryBadge({
+  category,
+  className,
+}: {
+  category: TaskCategory;
+  className?: string;
+}) {
+  return (
+    <Pill
+      tone={TASK_CATEGORY_TONES[category]}
+      label={TASK_CATEGORY_LABELS[category]}
+      className={cn(category === "request" && CLIENT_FILL, className)}
+    />
+  );
+}
+
+/**
+ * The left edge of a row or card, accented for client work.
+ *
+ * A chip is readable once you are looking at a row. This is what makes a
+ * COLUMN of rows scannable — client work has a coloured edge, everything else
+ * does not, so "which of these has somebody outside waiting on it" is
+ * answerable without reading a word.
+ *
+ * Returns the empty string for internal and personal deliberately, rather than
+ * a neutral border: an accent that appears on every row is not an accent.
+ */
+export function taskCategoryEdge(category: TaskCategory): string {
+  return category === "request" ? "border-l-2 border-l-accent-border" : "";
 }

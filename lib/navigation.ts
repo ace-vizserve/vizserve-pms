@@ -87,22 +87,26 @@ export const NAV_ITEMS: NavItem[] = [
     enabled: true,
     icon: "inbox-stack",
   },
-  {
-    label: "Tasks",
-    href: "/tasks",
-    minRole: "member",
-    children: [
-      { label: "List", href: "/tasks" },
-      { label: "Board", href: "/tasks/board" },
-      // The one child a member cannot reach: `/tasks/lists` calls
-      // `requireRole("team_leader")` and renders the forbidden page for anybody
-      // else. It was linked from the sidebar for everyone for about an hour,
-      // which is how that got found.
-      { label: "Lists", href: "/tasks/lists", minRole: "team_leader" },
-    ],
-    enabled: true,
-    icon: "tasks",
-  },
+  /*
+   * NO "TASKS" ENTRY, and its absence is the design rather than an omission.
+   *
+   * It used to sit here as a disclosure holding "List", "Board" and "Lists" —
+   * beside a Projects group that is ALSO tasks, organised by where they live.
+   * Two headings for one thing, and the redundancy was the smaller half of the
+   * problem: the Board could not filter by list at all, so a list opened from
+   * Projects had exactly one shape available to it and the two structures never
+   * met.
+   *
+   * The shape now follows ClickUp, which is what D21 says to borrow: the
+   * sidebar holds WHERE the work lives (Space → Folder → List) and List/Board
+   * are VIEWS OF WHATEVER YOU OPENED, as tabs on the page. `TaskToolbar` was
+   * already built that way and already carried the query string across; the
+   * only thing missing was the list filter, which the board now honours.
+   *
+   * `/tasks` (all tasks) and `/tasks/lists` (managing them) are both reached
+   * from the Projects group — see `nav-projects.tsx`. Neither route changed and
+   * both still enforce their own role check.
+   */
   {
     label: "DTR",
     href: "/dtr",
@@ -197,7 +201,10 @@ export function visibleNavItems(role: Role): NavItem[] {
 export type NavGroup = { label: string; hrefs: string[]; pinBottom?: boolean };
 
 export const NAV_GROUPS: NavGroup[] = [
-  { label: "Work", hrefs: ["/dashboard", "/requests", "/tasks", "/inbox"] },
+  // `/tasks` is NOT here any more. Tasks are reached through the Projects tree,
+  // which is its own group rendered between the flow and the pinned sections —
+  // listing the route here as well is what put two task headings in the rail.
+  { label: "Work", hrefs: ["/dashboard", "/requests", "/inbox"] },
   // `/timesheet/team` is NOT here any more — it is a child of `/timesheet` and
   // is reached through it. Listing a child href beside its parent is what put
   // them side by side in the rail in the first place.

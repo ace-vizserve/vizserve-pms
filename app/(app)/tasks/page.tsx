@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
-import { TaskStatusGlyph, isTaskStatus } from "@/components/status-badge";
+import { TaskCategoryBadge, TaskStatusGlyph, isTaskStatus, taskCategoryEdge } from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
@@ -11,7 +11,6 @@ import { formatDate, isOverdue } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
   isTerminal,
-  TASK_CATEGORY_LABELS,
   TASK_PRIORITIES,
   TASK_STATUSES,
   taskCategory,
@@ -20,6 +19,8 @@ import {
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 
 import { EmptyState } from "@/components/empty-state";
+import { loadPendingRequests } from "@/lib/pending-requests-server";
+import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { cn } from "@/lib/utils";
@@ -35,6 +36,7 @@ import { InlineDate, InlineEstimate, InlinePriority, SubtaskProgress, TaskRowAct
 import { NewTaskButton } from "./new-task-button";
 import { TaskStatusGroup } from "./status-group";
 import { TaskStatusSelect } from "./status-select";
+import { PendingRequestList } from "./pending-requests";
 import { TaskToolbar } from "./toolbar";
 
 export const metadata: Metadata = { title: "Tasks" };
@@ -395,6 +397,37 @@ export default async function TasksPage({
     kind !== "all";
 
   /*
+   * P7-26 — the requests that have not been decided yet.
+   *
+   * Awaited separately rather than joining the Promise.all above, because it is
+   * an ADDITION to this page rather than part of it: the task queries decide
+   * whether the page renders at all, and this one must not be able to change
+   * that. It returns [] on its own errors for the same reason.
+   *
+   * `status` and `priority` are passed as one boolean rather than as values —
+   * the rule is "any task-only filter hides these", and `pendingRequestsApply`
+   * should not have to learn what a status is to express that.
+   */
+  /*
+   * Does this view actually hold both kinds of work?
+   *
+   * Read off the rows already fetched, so it costs nothing. Counted BEFORE the
+   * grouping below, and on the unfiltered-by-status set, because the question
+   * is "is there a split here to filter", not "is there one in the stage you
+   * happen to have open".
+   *
+   * A pending request counts as client work: it is client work, and it is on
+   * screen. Without it, a list showing three pending requests and two internal
+   * chores would call itself single-kind.
+   */
+  const pendingRequests = await loadPendingRequests({
+    listId: params.list ?? null,
+    kind,
+    scope: view,
+    hasTaskOnlyFilter: Boolean(params.status || priorityFilter || params.group),
+  });
+
+  /*
    * P7-09 — A SUBTASK LIVES UNDER ITS PARENT, NOT IN ITS OWN STAGE.
    *
    * It used to be pushed into the group for its own status, so moving a subtask
@@ -647,9 +680,15 @@ export default async function TasksPage({
               {/* P7-01. THREE categories, not two. "Added by hand" used to cover
                   both work a lead assigned you and work you made for yourself —
                   and those finish differently: an assigned task goes through
-                  review, a personal one you close yourself. The distinction this
-                  slice exists to make is not visible unless it is said here. */}
-              <span>{TASK_CATEGORY_LABELS[taskCategory(task)]}</span>
+                  review, a personal one you close yourself.
+
+                  ⚠️ P7-27 — THIS WAS A PLAIN `<span>` in a row of plain spans,
+                  the same muted grey as the list name beside it. So the single
+                  most consequential fact about a row — whether finishing it
+                  needs a client's sign-off or just your own — read as the least
+                  consequential thing on it. It is a chip now, and client work is
+                  the only category that gets an accent. */}
+              <TaskCategoryBadge category={taskCategory(task)} className="px-1.5 py-0" />
               {/* A subtask says so. Without it the list shows two rows that look
                   like peers when one is part of the other. */}
               {/*
@@ -822,6 +861,18 @@ export default async function TasksPage({
 
   return (
     <PageShell>
+      {/* Which list you are in, in the breadcrumb — the same fix the board
+          carries. Since the Tasks nav group was removed, a list is opened from
+          the project tree and List/Board are two shapes of it, so the page has
+          to name the list rather than leaving the crumb reading "Tasks" over
+          somebody else's work. `listName` is already built for the rows below.
+
+          Only when the id resolves: a stale `?list=` from a bookmark whose list
+          has since been archived should not put an empty label in the crumb. */}
+      {params.list && listName.get(params.list) ? (
+        <BreadcrumbLabel value={listName.get(params.list)!} />
+      ) : null}
+
       <div className="flex flex-wrap items-center gap-2">
         <TaskToolbar view="list" />
         <div className="ml-auto">
@@ -830,6 +881,24 @@ export default async function TasksPage({
       </div>
 
       <TaskFilters lists={lists ?? []} groups={groups ?? []} />
+
+      {/*
+        THE QUEUE, ABOVE THE STAGES — and OUTSIDE the empty-state branch below.
+
+        ⚠️ Putting this inside the `rows.length === 0` ternary is the obvious
+        placement and it is wrong: a department with three requests waiting and
+        no tasks yet would render "Nothing here yet" and hide the very thing it
+        is waiting on, which is the exact bug this feature exists to fix.
+
+        Above the stages because a queue is read before the work. "Open" being
+        the first heading on the page while three requests sit unlooked-at is
+        how a request waits a week.
+
+        Renders nothing for a member — `vizserve_pms_requests` is readable only
+        by a lead of the form's department, so the array is empty and the
+        component returns null. No role check here.
+      */}
+      <PendingRequestList requests={pendingRequests} />
 
       {/* Three messages, because there are three ways of arriving at an empty
           screen and only two of them are somebody's fault: a filter that is too
@@ -862,8 +931,17 @@ export default async function TasksPage({
           ) : (
             <EmptyState
               icon={<ListChecks />}
-              title="Nothing here yet"
-              description="Tasks appear once a Team Leader approves a request, or when one is added by hand. Each moves through set stages — the server refuses any step that is not one of them."
+              title={pendingRequests.length > 0 ? "Nothing approved yet" : "Nothing here yet"}
+              // ⚠️ Two sentences, because this heading can now sit directly
+              // under a list of requests waiting to be approved — and "tasks
+              // appear once a Team Leader approves a request" reads as a
+              // brush-off when the reader IS the team leader and the requests
+              // are on screen above it.
+              description={
+                pendingRequests.length > 0
+                  ? "The requests above have not been approved yet. Approving one creates the task and files it in a list."
+                  : "Tasks appear once a Team Leader approves a request, or when one is added by hand. Each moves through set stages — the server refuses any step that is not one of them."
+              }
             />
           )}
         </div>
@@ -893,6 +971,11 @@ export default async function TasksPage({
                   columns={columns}
                   rows={group}
                   getRowKey={(task) => task.id}
+                  // P7-27. The accented left edge on client work, so a column of
+                  // rows says which ones have somebody outside waiting without
+                  // anybody reading a word. Empty string for the other two —
+                  // an accent on every row is not an accent.
+                  rowClassName={(task) => taskCategoryEdge(taskCategory(task))}
                   empty={
                     <p className="px-3.5 py-4 text-xs text-muted-foreground">
                       {status === INITIAL_TASK_STATUS

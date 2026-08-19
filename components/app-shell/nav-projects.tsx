@@ -16,7 +16,6 @@ import {
   SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuAction,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -54,16 +53,30 @@ import { cn } from "@/lib/utils";
  * everything — from the same queries, with no role check in this component.
  */
 
-export type ProjectList = { id: string; name: string; openTasks: number };
+export type ProjectList = {
+  id: string;
+  name: string;
+  openTasks: number;
+  /** P7-26. Client requests waiting on Gate 1 that will land in this list. */
+  pendingRequests: number;
+};
 
 export type ProjectFolder = {
   id: string;
   name: string;
-  /** The reserved "Client Requests" folder. Gets no controls — see below. */
+  /**
+   * The reserved "Client Requests" folder.
+   *
+   * Still special — it cannot be renamed, moved, archived while forms file into
+   * it, or deleted — so it gets no pencil. Since P7-25 it DOES take hand-made
+   * lists, so it gets the `+` like every other folder.
+   */
   isSystem: boolean;
   lists: ProjectList[];
   /** Rolled up from `lists`, so a collapsed folder still says how much is in it. */
   openTasks: number;
+  /** Rolled up the same way. Client Requests is where this is usually non-zero. */
+  pendingRequests: number;
 };
 
 /**
@@ -107,17 +120,33 @@ export function NavProjects({
   // query string rather than the path because `?list=` IS the route — there is
   // no `/tasks/lists/<id>` page and inventing one would be a second way to say
   // the same thing.
-  const activeList = pathname === "/tasks" ? params.get("list") : null;
+  //
+  // BOTH VIEWS, not just the list. Now that List and Board are two shapes of the
+  // same list rather than two separate destinations, `/tasks/board?list=<id>` is
+  // as much "inside that list" as `/tasks?list=<id>` is — and testing only the
+  // bare route would collapse the tree the moment somebody switched to the
+  // board, and light "All tasks" while they were plainly inside one.
+  //
+  // `/tasks/lists` is excluded: it is the management screen, not a view of a
+  // list, and it never carries `?list=`.
+  const onTaskView = pathname === "/tasks" || pathname === "/tasks/board";
+  const activeList = onTaskView ? params.get("list") : null;
 
   /*
-   * The group renders with nothing but its "Create a list" row, and that is the
-   * point: an early cut returned null while no lists existed, which made the
-   * whole feature invisible including the only route to creating the first one.
+   * ⚠️ THIS GROUP NO LONGER RETURNS NULL, and removing that early exit was
+   * REQUIRED rather than tidy.
    *
-   * But a member cannot create lists, so for THEM an empty tree is a heading
-   * over nothing. Nothing to navigate to and nothing to do about it.
+   * It used to read `if (spaces.length === 0 && !canManageLists) return null`,
+   * on the reasoning that an empty tree is a heading over nothing for a member
+   * who cannot create lists. That was true while a separate Tasks group carried
+   * `/tasks`. It was deleted (lib/navigation.ts), so this group is now the ONLY
+   * route to the task list — and a member in a department with no lists yet
+   * would have had no way to reach their own work at all.
+   *
+   * "All tasks" below is always rendered, so the group always has a row worth
+   * showing. The "Create a list" row is still gated on `canManageLists`,
+   * because that screen genuinely refuses a member.
    */
-  if (spaces.length === 0 && !canManageLists) return null;
 
   return (
     // The group collapses like every other one in the rail, and everything
@@ -139,6 +168,31 @@ export function NavProjects({
 
       <CollapsibleContent render={<SidebarGroupContent />}>
         <SidebarMenu>
+          {/*
+            EVERYTHING, ABOVE THE TREE.
+
+            The Tasks nav group used to hold this route and was deleted for
+            being a second heading over the same work (see lib/navigation.ts).
+            The route itself is not redundant: the tree can only ever say "one
+            list", and "what is on my plate across all of them" is the question
+            most people open the app to answer.
+
+            Marked active only on the BARE route. `/tasks?list=<id>` is a list
+            in the tree below and lighting both would be the two-places-at-once
+            bug that nesting the timesheet routes fixed.
+          */}
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={onTaskView && !activeList}
+              tooltip="Every task you can see"
+              // Same rule as a list row: keep the shape, drop the list.
+              render={<Link href={pathname === "/tasks/board" ? "/tasks/board" : "/tasks"} />}
+            >
+              <ListChecks />
+              <span>All tasks</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+
           {spaces.map((space) => (
             <SpaceNode
               key={space.departmentId}
@@ -316,28 +370,24 @@ function FolderNode({
             <span className="truncate text-2xs font-semibold uppercase tracking-wider">
               {folder.name}
             </span>
+            <FolderCounts
+              pending={folder.pendingRequests}
+              open={folder.openTasks}
+              hideOpenWhenExpanded
+            />
           </SidebarMenuSubButton>
         }
       />
 
-      {/* Hidden while open, because the children below already say it, and while
-          hovered, because the `+` occupies the same slot.
-
-          `peer-*` rather than `group-*`: the badge is a SIBLING of the trigger,
-          and `group-aria-expanded` compiles to an ancestor selector that can
-          never match a sibling. `SidebarMenuBadge` already uses
-          `peer-hover/menu-button:`, so the mechanism is the established one. */}
-      {folder.openTasks > 0 ? (
-        <SidebarMenuBadge className="top-0.5 tabular-nums peer-aria-expanded/menu-button:hidden group-hover/menu-sub-item:hidden">
-          {folder.openTasks}
-          <span className="sr-only"> open tasks</span>
-        </SidebarMenuBadge>
-      ) : null}
-
       {/*
-       * The `+` from the screenshot. THE RESERVED FOLDER GETS NONE: its lists
+       * The `+` from the screenshot, on EVERY folder.
+       *
+       * ⚠️ THE RESERVED FOLDER USED TO GET NONE. The old note read: "its lists
        * are created by a trigger when a form is made, and it refuses a hand-made
-       * one — so the control could only ever produce an error message.
+       * one — so the control could only ever produce an error message." True
+       * until P7-25 relaxed `vizserve_pms_lists_group_guard`. A folder is a
+       * folder now: every one of them holds lists and every one of them can be
+       * added to.
        *
        * `showOnHover` is NOT passed and must not be: it keys on
        * `group-hover/menu-item`, and `group/menu-item` only exists on
@@ -350,7 +400,7 @@ function FolderNode({
        * where this `+` already goes — two controls to the same screen is one
        * more than the screen deserves.
        */}
-      {canManageLists && !folder.isSystem ? (
+      {canManageLists ? (
         <SidebarMenuAction
           className="top-0.5 size-5 opacity-0 group-focus-within/menu-sub-item:opacity-100 group-hover/menu-sub-item:opacity-100"
           render={<Link href="/tasks/lists" />}
@@ -378,25 +428,96 @@ function FolderNode({
 }
 
 function ListRow({ list, activeList }: { list: ProjectList; activeList: string | null }) {
+  const pathname = usePathname();
+
+  /*
+   * THE VIEW SURVIVES THE JUMP.
+   *
+   * A list is a place and List/Board are two shapes of it, so somebody working
+   * on the board who clicks the next list expects the next board — being thrown
+   * back to the list view every time is the same complaint as a filter that
+   * resets, and it is why `TaskToolbar` carries the query string in the other
+   * direction.
+   *
+   * Anywhere else in the app, the list view is the right landing.
+   */
+  const base = pathname === "/tasks/board" ? "/tasks/board" : "/tasks";
+
   return (
     <SidebarMenuSubItem>
       <SidebarMenuSubButton
         isActive={list.id === activeList}
-        render={<Link href={`/tasks?list=${list.id}`} />}
+        render={<Link href={`${base}?list=${list.id}`} />}
       >
         <ListChecks className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate">{list.name}</span>
+        <FolderCounts pending={list.pendingRequests} open={list.openTasks} />
       </SidebarMenuSubButton>
+
+    </SidebarMenuSubItem>
+  );
+}
+
+/**
+ * The two counts a folder or list carries, rendered INSIDE the row.
+ *
+ * ⚠️ THESE USED TO BE `SidebarMenuBadge`, WHICH IS `absolute right-1` — and so
+ * is `SidebarMenuAction`, the `+`. They shared one slot. That was survivable
+ * while the `+` appeared on hover only and the badge hid itself on hover to get
+ * out of the way, and it stopped being survivable the moment P7-25 put a `+` on
+ * every folder including the reserved one: the count and the button drew on top
+ * of each other, and on a sub-row the badge had no `top` to key off at all
+ * (`SidebarMenuBadge`'s offsets are `peer-data-[size=*]/menu-button:` classes,
+ * and a sub-button carries no `data-size`), so it floated over the label.
+ *
+ * Inline in the flex row removes the whole class of bug: the counts take part in
+ * the layout, `ml-auto` puts them at the end, and the trigger's own `pr-9`
+ * keeps them clear of the `+`. Nothing has to hide to make room for anything.
+ */
+function FolderCounts({
+  pending,
+  open,
+  hideOpenWhenExpanded = false,
+}: {
+  pending: number;
+  open: number;
+  /**
+   * On a FOLDER, the open-task total is the sum of the rows revealed directly
+   * beneath it, so it is worth saying only while shut. The pending count is not
+   * — nothing below repeats it, because a pending request has no list row of
+   * its own to appear in.
+   */
+  hideOpenWhenExpanded?: boolean;
+}) {
+  if (pending === 0 && open === 0) return null;
+
+  return (
+    <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-2xs tabular-nums">
+      {/* P7-26 — waiting on a decision, and deliberately NOT the open-task count
+          in a different colour. "2 new" carries the meaning in words, which is
+          the standing rule: a reader who cannot separate the accent from the
+          muted tone still gets the fact. */}
+      {pending > 0 ? (
+        <span className="rounded-full bg-info/15 px-1.5 font-semibold text-info">
+          {pending} new
+          <span className="sr-only"> requests awaiting approval</span>
+        </span>
+      ) : null}
 
       {/* Live work only, and hidden at zero. A permanent 0 beside every list
           teaches people to stop reading the column — the same rule the QA tile
           on the dashboard follows. */}
-      {list.openTasks > 0 ? (
-        <SidebarMenuBadge className="tabular-nums">
-          {list.openTasks}
+      {open > 0 ? (
+        <span
+          className={cn(
+            "font-semibold text-muted-foreground",
+            hideOpenWhenExpanded && "group-aria-expanded/folder:hidden",
+          )}
+        >
+          {open}
           <span className="sr-only"> open tasks</span>
-        </SidebarMenuBadge>
+        </span>
       ) : null}
-    </SidebarMenuSubItem>
+    </span>
   );
 }

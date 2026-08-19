@@ -42,7 +42,12 @@ const VIEWS = [
     href: "/tasks/board",
     label: "Board",
     icon: LayoutGrid,
-    carries: ["view", "kind"],
+    // `list` joins the two the board can honestly honour. It is not a filter in
+    // the same sense as the others — it is WHICH LIST YOU ARE IN, and dropping
+    // it on the way to the board would throw somebody out of the list they
+    // opened. The board reads it since the Tasks nav group was removed and a
+    // list became the only way in.
+    carries: ["view", "kind", "list"],
   },
 ] as const;
 
@@ -138,6 +143,20 @@ export function TaskToolbar({ view }: { view: "list" | "board" }) {
         })}
       </div>
 
+      {/*
+        ⚠️ THIS WAS BRIEFLY CONDITIONAL and it was a mistake worth recording.
+
+        The idea was to hide it where it could do nothing — a view holding only
+        one kind of work. It was even data-driven rather than guessing from the
+        folder. But a control that comes and goes is a control people cannot
+        rely on, and the case where it vanished was exactly the case where
+        somebody wanted it: a board showing no client work is when you reach for
+        "Client" to check whether there is any. Finding the button gone reads as
+        a second bug on top of the first.
+
+        Three buttons is a cheap price for a toolbar that is the same every
+        time.
+      */}
       <div className={TRACK} role="group" aria-label="Kind of work">
         {KINDS.map((item) => {
           const active = kind === item.value;

@@ -53,8 +53,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
    * cannot aggregate a related table and a per-list count would be an N+1 in the
    * SHELL — the one component on every single page in the app.
    */
-  const [{ data: departments }, { data: lists }, { data: groups }, { data: openTasks }] =
-    await Promise.all([
+  const [
+    { data: departments },
+    { data: lists },
+    { data: groups },
+    { data: openTasks },
+    { data: pendingRequests },
+  ] = await Promise.all([
       supabase
         .from("vizserve_pms_departments")
         .select("id, name")
@@ -81,6 +86,24 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         .select("list_id")
         .not("list_id", "is", null)
         .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+      /*
+       * P7-26 — client requests waiting on Gate 1, counted per list.
+       *
+       * A pending request has no task and therefore no `list_id`; where it WILL
+       * land is the form's inbox list, so the count is grouped through the form.
+       * `!inner` because a request whose form has gone has nowhere to be
+       * counted.
+       *
+       * This is the number that stops a request sitting unlooked-at for a week:
+       * the folder it belongs to says so in the rail, on every page.
+       *
+       * Returns nothing for a member — `vizserve_pms_requests` is lead-only, so
+       * the badge simply never appears for them and no role check is needed.
+       */
+      supabase
+        .from("vizserve_pms_requests")
+        .select("vizserve_pms_forms!inner(default_list_id)")
+        .eq("status", "PENDING_REVIEW"),
     ]);
 
   const countByList = new Map<string, number>();
@@ -89,10 +112,22 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     countByList.set(task.list_id, (countByList.get(task.list_id) ?? 0) + 1);
   }
 
+  // Same shape as the task count above, keyed by the list the request will land
+  // in rather than one it is already in.
+  const pendingByList = new Map<string, number>();
+  for (const row of (pendingRequests ?? []) as unknown as {
+    vizserve_pms_forms: { default_list_id: string | null } | null;
+  }[]) {
+    const listId = row.vizserve_pms_forms?.default_list_id;
+    if (!listId) continue;
+    pendingByList.set(listId, (pendingByList.get(listId) ?? 0) + 1);
+  }
+
   const toList = (list: { id: string; name: string }) => ({
     id: list.id,
     name: list.name,
     openTasks: countByList.get(list.id) ?? 0,
+    pendingRequests: pendingByList.get(list.id) ?? 0,
   });
 
   const spaces = (departments ?? [])
@@ -110,6 +145,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             lists: folderLists,
             // Rolled up, so a collapsed folder still says how much is inside.
             openTasks: folderLists.reduce((total, list) => total + list.openTasks, 0),
+            pendingRequests: folderLists.reduce((total, list) => total + list.pendingRequests, 0),
           };
         })
         // THE RESERVED FOLDER IS DROPPED WHILE EMPTY, and only that one. The

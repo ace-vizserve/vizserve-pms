@@ -118,3 +118,80 @@ export const decideResultSchema = z.object({
   requester_name: z.string(),
   title: z.string(),
 });
+
+// ---------------------------------------------------------------------------
+// P7-26 — a pending request, read where the WORK lives
+// ---------------------------------------------------------------------------
+
+/**
+ * A client request still waiting on Gate 1, as the task views render it.
+ *
+ * WHY IT EXISTS. "The requested task of the client is basically a task" — and
+ * it is: the submission carries a title, a description, a wanted date, the
+ * client's answers and their files, and `vizserve_pms_approve_request` copies
+ * all of it onto the task it creates. What did not follow was WHERE it was
+ * visible. A pending request lived only on `/requests`, so the Client Requests
+ * folder showed nothing until somebody approved. Work that had been asked for
+ * was invisible in every view of the work.
+ *
+ * NOT a task and not becoming one. Creating the task at submission was the
+ * alternative and it is worse: a rejected request would leave a task behind,
+ * and every gate, report and count in the app would gain a stage meaning
+ * "might not be real yet". The client drafts; the TL/TM commits.
+ */
+export type PendingRequest = {
+  id: string;
+  reference_no: string;
+  title: string;
+  requester_name: string;
+  requester_org: string | null;
+  target_date: string | null;
+  submitted_at: string | null;
+  /** The form's inbox list (P7-18) — where this request's task will land. */
+  listId: string | null;
+  formName: string;
+};
+
+/** The task-view filters, as far as a request can answer them. */
+export type PendingRequestFilters = {
+  /** `?kind=` — a request is client work by definition. */
+  kind?: "all" | "client" | "internal";
+  /** `?view=` — nobody is assigned yet, so `mine` and `qa` exclude these. */
+  scope?: "all" | "mine" | "qa";
+  /** `?status=` or `?priority=` — a request has neither column. */
+  hasTaskOnlyFilter?: boolean;
+};
+
+/**
+ * Do pending requests belong on this page at all, given its filters?
+ *
+ * THE RULE: a request has no status, no priority, no assignee and no QA
+ * reviewer. Where the task view asks a question a request cannot answer, the
+ * requests are DROPPED — never shown regardless.
+ *
+ * Showing them anyway is the "a control that claims a filter it does not apply"
+ * trap the board's `kind` note already records, one table along: a page
+ * filtered to `?status=FOR_QA` that still lists three requests is a page whose
+ * filter is a suggestion. Dropping them is the only answer that keeps the count
+ * at the top of the screen true.
+ *
+ * Pure, so it is testable without a database — the same shape as `scopeAllows`
+ * in `lib/schemas/tasks.ts` and `dayState` in `lib/schemas/timesheet.ts`.
+ */
+export function pendingRequestsApply(filters: PendingRequestFilters = {}): boolean {
+  const { kind = "all", scope = "all", hasTaskOnlyFilter = false } = filters;
+
+  // Internal work explicitly excludes anything with a client behind it, and a
+  // pending request is nothing but a client behind it.
+  if (kind === "internal") return false;
+
+  // "Mine" and "waiting on my QA" are seat questions. A request has no seats
+  // filled — that is what approving it decides.
+  if (scope === "mine" || scope === "qa") return false;
+
+  // A status or priority filter is a question about a column requests do not
+  // have. Any value at all hides them.
+  if (hasTaskOnlyFilter) return false;
+
+  return true;
+}

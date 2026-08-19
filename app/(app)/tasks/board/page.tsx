@@ -2,8 +2,16 @@ import { CalendarDays, Link2, ListTree } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
+import { loadPendingRequests } from "@/lib/pending-requests-server";
+import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
-import { TaskPriorityBadge, TaskStatusBadge, taskStatusSurface } from "@/components/status-badge";
+import {
+  TaskCategoryBadge,
+  TaskPriorityBadge,
+  TaskStatusBadge,
+  taskCategoryEdge,
+  taskStatusSurface,
+} from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
@@ -15,6 +23,7 @@ import {
   type TaskPriority,
   availableTransitions,
   isTerminal,
+  taskCategory,
 } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
@@ -22,6 +31,7 @@ import { createClient } from "@/utils/supabase/server";
 import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
 import { TaskStatusSelect } from "../status-select";
+import { PendingRequestColumn } from "../pending-requests";
 import { TaskToolbar } from "../toolbar";
 import { BoardCard, BoardColumn, BoardDnd, BoardTaskGroup } from "./board-dnd";
 
@@ -53,7 +63,16 @@ export const metadata: Metadata = { title: "Board" };
  * with it. The board scrolls; the app around it does not.
  */
 
-const BOARD_COLUMNS = TASK_STATUSES.filter((status) => !isTerminal(status));
+/**
+ * How many finished cards a terminal column shows before it stops.
+ *
+ * Small on purpose. These columns answer "what just closed", not "everything we
+ * have ever done" — that question belongs to the list view, which has filters,
+ * sorting and pagination built for it.
+ */
+const FINISHED_PER_COLUMN = 12;
+
+const FINISHED_COLUMNS = TASK_STATUSES.filter((status) => isTerminal(status));
 
 /** `Amier Bautista` → `AB`. Two letters, because three is a monogram. */
 function initials(name: string): string {
@@ -70,7 +89,7 @@ function initials(name: string): string {
 export default async function TaskBoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; kind?: string }>;
+  searchParams: Promise<{ view?: string; kind?: string; list?: string; done?: string }>;
 }) {
   const context = await requireAuthContext();
   const params = await searchParams;
@@ -79,10 +98,57 @@ export default async function TaskBoardPage({
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, resolution",
+      "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
     )
-    .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
     .order("due_date", { ascending: true, nullsFirst: false });
+
+  /*
+   * ⚠️ EVERY STAGE IS A COLUMN, COMPLETED AND COMPLETED (NO RESPONSE INCLUDED.
+   *
+   * This file used to say the opposite, and the old reasoning is worth keeping
+   * because half of it is still true:
+   *
+   *   "The board shows live work; a column that accumulates every finished
+   *    ticket since launch stops being a board and becomes an archive nobody
+   *    scrolls."
+   *
+   * The archive worry is real. Omitting the columns was the wrong answer to it.
+   * A board whose columns are not the status enum is a board that disagrees
+   * with the list, the status dropdown and the state machine about what the
+   * stages are — and it was reported three times in three different words
+   * before the actual complaint surfaced: the stages were missing.
+   *
+   * The archive problem is solved where it actually lives — in HOW MUCH is
+   * fetched, not in whether the column exists. Live work is unbounded because
+   * it is naturally bounded; finished work is capped at
+   * `FINISHED_PER_COLUMN` and says so when there is more.
+   *
+   * ⚠️ A cap without a stated limit is a lie about the number. `+ 1` is asked
+   * for so truncation is DETECTABLE without a second count query — the same
+   * trick the DTR list uses, and for the same reason: a board that quietly
+   * shows twenty of forty is a board somebody counts off.
+   */
+  const BOARD_COLUMNS = TASK_STATUSES;
+
+  query = query.not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)");
+
+  /*
+   * ONE LIST, and without this the sidebar and the board were two structures
+   * that never met.
+   *
+   * The project tree links every list to `?list=<id>`, the list view honoured
+   * it, and the board did not read the parameter at all — so a list had exactly
+   * one shape available to it, and switching to the board silently widened the
+   * page to every task in the department while the URL still claimed a list.
+   * That is the same "a control that claims a filter it does not apply" trap the
+   * `kind` note below records, one parameter along.
+   *
+   * Now that the Tasks nav group is gone (lib/navigation.ts) and a list is
+   * reached only through the tree, this is what makes Board a VIEW of that list
+   * rather than a different destination.
+   */
+  const listId = params.list ?? null;
+  if (listId) query = query.eq("list_id", listId);
 
   // The same three scopes the toolbar offers on both views. The board used to
   // read `mine` and silently ignore `qa`, which is what a control living on only
@@ -106,9 +172,61 @@ export default async function TaskBoardPage({
   if (kind === "client") query = query.not("request_id", "is", null);
   if (kind === "internal") query = query.is("request_id", null);
 
-  const [{ data: tasks }, { data: people }] = await Promise.all([
+  /*
+   * P7-26 — the requests that have not been decided yet, as the first column.
+   *
+   * Awaited on its own rather than joined into the Promise.all below: it is an
+   * addition to the board, not part of it, and a failure here must not be able
+   * to stop the board rendering. The loader returns [] on its own errors.
+   *
+   * The board has no status or priority filter to honour, so the only task-only
+   * filter it can carry is none — `hasTaskOnlyFilter` stays false.
+   */
+  const pendingRequests = await loadPendingRequests({
+    listId,
+    kind,
+    scope: params.view === "mine" || params.view === "qa" ? params.view : "all",
+  });
+
+  const [{ data: tasks }, { data: people }, { data: openList }, { data: finishedTasks }] =
+    await Promise.all([
     query,
     supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
+    // Just the name, and only when there is one to fetch. The board has no list
+    // picker to populate — this is purely so the page can say which list you are
+    // looking at, now that a board can be a view of one.
+    listId
+      ? supabase.from("vizserve_pms_lists").select("name").eq("id", listId).maybeSingle()
+      : Promise.resolve({ data: null }),
+    /*
+     * Finished work, as its own bounded read.
+     *
+     * A SEPARATE QUERY rather than relaxing the filter above, because the two
+     * want opposite things. Live work is ordered by due date and unbounded —
+     * there is only ever so much of it. Finished work is ordered by RECENCY and
+     * capped: what closed this week is worth a glance, what closed in March is
+     * what the list view and its filters are for.
+     *
+     * Carries the same list/scope/kind filters as the board, so the columns
+     * agree with the ones beside them.
+     */
+    (() => {
+      let done = supabase
+        .from("vizserve_pms_tasks")
+        .select(
+          "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
+        )
+        .in("status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
+        .order("updated_at", { ascending: false })
+        .limit(FINISHED_PER_COLUMN * 2 + 1);
+
+      if (listId) done = done.eq("list_id", listId);
+      if (params.view === "mine") done = done.eq("assignee_id", context.userId);
+      if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
+      if (kind === "client") done = done.not("request_id", "is", null);
+      if (kind === "internal") done = done.is("request_id", null);
+      return done;
+    })(),
   ]);
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
@@ -233,17 +351,46 @@ export default async function TaskBoardPage({
   const byStatus = new Map<VizservePmsTaskStatus, typeof topLevel>(BOARD_COLUMNS.map((status) => [status, []]));
   for (const task of topLevel) byStatus.get(task.status)?.push(task);
 
+  /*
+   * The two finished columns, from their own bounded query.
+   *
+   * Subtasks are dropped here for the same reason they are above: a board that
+   * deals a parent and its ten children as eleven equal cards has stopped
+   * saying how much work there is.
+   *
+   * `truncated` is per column, and it is the reason the query asks for more
+   * than it renders: a column that silently shows twelve of forty is a column
+   * somebody counts off and then stops trusting.
+   */
+  const truncated = new Map<VizservePmsTaskStatus, boolean>();
+  for (const status of FINISHED_COLUMNS) {
+    const all = ((finishedTasks ?? []) as typeof topLevel).filter(
+      (task) => task.status === status && !task.parent_task_id,
+    );
+    truncated.set(status, all.length > FINISHED_PER_COLUMN);
+    byStatus.set(status, all.slice(0, FINISHED_PER_COLUMN));
+  }
+
   return (
     <PageShell className="h-[calc(100svh-3.5rem)] min-h-0 gap-3 overflow-hidden">
-      {/* No <h1> — the breadcrumb reads "Tasks / Board". The sentence stays
-          because it is now the rule for DRAGGING: internal work goes anywhere,
-          client work follows its gates, and a column that cannot take the card
-          dims rather than accepting it and springing back (P7-20). */}
+      {/* No <h1> — the breadcrumb is the page label. Now that a board can be a
+          view of ONE list, the crumb has to name it, or two lists' boards are
+          the same page with different cards on it and nothing on screen says
+          which one you opened. `BreadcrumbLabel` clears itself on unmount, so
+          leaving the list takes the name with it.
+
+          The sentence below stays because it is the rule for DRAGGING: internal
+          work goes anywhere, client work follows its gates, and a column that
+          cannot take the card dims rather than accepting it and springing back
+          (P7-20). */}
+      {openList ? <BreadcrumbLabel value={openList.name} /> : null}
+
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
         <TaskToolbar view="board" />
         <p className="min-w-0 text-xs text-muted-foreground">
           Drag a card by its handle, or use the status control. Internal work goes to any stage; client work follows its gates.
         </p>
+
       </div>
 
       {/*
@@ -253,8 +400,30 @@ export default async function TaskBoardPage({
         card from being shaved off by the scroll box's own edge.
       */}
       <BoardDnd>
-      <div className="-mx-1 min-h-0 min-w-0 flex-1 overflow-x-auto overflow-y-hidden px-1 pb-1">
+      {/*
+        ⚠️ THE FADE IS AN AFFORDANCE, NOT DECORATION.
+
+        Six live columns at w-64 need roughly 1600px and a laptop with the
+        sidebar open has about 1360px, so at least one stage is off the right
+        edge on most screens. Reported as "the board doesn't show all stages" —
+        which is what a horizontal scroller with no visible edge looks like.
+
+        `relative` on the wrapper and a gradient pinned to the right, above the
+        scroller and `pointer-events-none` so it cannot swallow a drag. It is
+        drawn unconditionally rather than only when scrollable: knowing whether
+        there is overflow needs a client component measuring on resize, and a
+        16px wash over the last column's own padding costs nothing when there is
+        nothing to scroll to.
+      */}
+      <div className="relative min-h-0 min-w-0 flex-1">
+      <div className="-mx-1 h-full min-h-0 min-w-0 overflow-x-auto overflow-y-hidden px-1 pb-1">
         <div className="flex h-full min-w-max items-stretch gap-3">
+          {/* Before every stage, and deliberately not one of them: nothing in
+              it has a status yet. It is not a `BoardColumn` either — that is a
+              drop target, and approving needs a PIC, a QA reviewer and a list
+              that a drag cannot express. Renders nothing for a member. */}
+          <PendingRequestColumn requests={pendingRequests} />
+
           {BOARD_COLUMNS.map((status) => {
             const column = byStatus.get(status) ?? [];
 
@@ -270,7 +439,7 @@ export default async function TaskBoardPage({
                   // FLAT, per the elevation rule: a column is a place, not a
                   // control. Its fill and hairline tell it apart, and the cards
                   // inside are the only things carrying a lift.
-                  "flex h-full w-72 shrink-0 flex-col rounded-lg border",
+                  "flex h-full w-64 shrink-0 flex-col rounded-lg border",
                   // The wash is the status' own tone, thinned so a white card
                   // still reads as raised on it. It comes from status-badge.tsx
                   // because that file is the only place a status is allowed to
@@ -302,7 +471,13 @@ export default async function TaskBoardPage({
                     <p className="px-1 py-6 text-center text-xs text-muted-foreground">
                       {status === INITIAL_TASK_STATUS
                         ? "Nothing waiting to be picked up."
-                        : "Nothing here yet. Work reaches this stage from the one before it."}
+                        : isTerminal(status)
+                          ? // A finished column is empty because nothing has
+                            // finished, not because work has not reached it —
+                            // "work reaches this stage from the one before" is
+                            // true of the pipeline and false of an archive.
+                            "Nothing finished this way yet."
+                          : "Nothing here yet. Work reaches this stage from the one before it."}
                     </p>
                   ) : (
                     column.map((task) => {
@@ -339,7 +514,13 @@ export default async function TaskBoardPage({
                           allowed={availableTransitions(task.status, seat(task), task).map(
                             (transition) => transition.to,
                           )}
-                          className="group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg">
+                          className={cn(
+                            "group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg",
+                            // P7-27. Client work carries an accented edge, so a
+                            // column of cards says which ones have somebody
+                            // outside waiting without anybody reading a word.
+                            taskCategoryEdge(taskCategory(task)),
+                          )}>
                           <div className="flex items-start gap-1.5">
                             <Link
                               href={`/tasks/${task.id}`}
@@ -368,6 +549,16 @@ export default async function TaskBoardPage({
                           </div>
 
                           <span className="flex flex-wrap items-center gap-1.5">
+                            {/* P7-27 — WHICH KIND OF WORK THIS IS, which the
+                                board did not say at all. The list has said it
+                                since P7-01 and the board never did, so the same
+                                card meant two different things depending on
+                                which view you opened it from. Client work is the
+                                only category that takes an accent. */}
+                            <TaskCategoryBadge
+                              category={taskCategory(task)}
+                              className="h-5 px-1.5"
+                            />
                             {/* Renders nothing when unranked, which is most
                                 tasks: a mark carried by everything marks
                                 nothing. Read-only here, because the hover
@@ -468,6 +659,22 @@ export default async function TaskBoardPage({
                   )}
                 </div>
 
+                {/*
+                  ⚠️ THE CAP, STATED. A finished column shows the most recent
+                  `FINISHED_PER_COLUMN` and no more — and a column that quietly
+                  shows twelve of forty is a column somebody counts off once and
+                  then stops trusting. The list view is where the rest lives,
+                  because it has the filters and the sorting for it.
+                */}
+                {truncated.get(status) ? (
+                  <Link
+                    href={`/tasks?status=${status}`}
+                    className="block border-t px-2.5 py-2 text-center text-2xs text-muted-foreground hover:text-foreground"
+                  >
+                    Showing the {FINISHED_PER_COLUMN} most recent — see all in the list
+                  </Link>
+                ) : null}
+
                 {/* Renders nothing at all for a member — creating work for other
                     people is a Team Leader decision, and the button settles that
                     for itself rather than the board guessing at the role. */}
@@ -481,10 +688,14 @@ export default async function TaskBoardPage({
                   `FOR_CLIENT_APPROVAL` is dropped: a task with no client that
                   landed there could never be finished or moved back.
 
-                  The two terminal columns are not drawn on this board at all, so
-                  there is nothing to exclude for them here.
+                  ⚠️ THE TWO TERMINAL COLUMNS ARE DROPPED TOO, and that note used
+                  to read "they are not drawn on this board at all". They are
+                  now. Typing a new task straight into Completed would be
+                  creating work that is already over — the composer creates at
+                  the status of its column, and there is no honest reading of
+                  that one.
                 */}
-                {status === "FOR_CLIENT_APPROVAL" ? null : (
+                {status === "FOR_CLIENT_APPROVAL" || isTerminal(status) ? null : (
                   <>
                     <BoardComposer status={status} assignable={assignable} />
                   </>
@@ -493,6 +704,12 @@ export default async function TaskBoardPage({
             );
           })}
         </div>
+      </div>
+
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent"
+      />
       </div>
       </BoardDnd>
     </PageShell>

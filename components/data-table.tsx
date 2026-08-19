@@ -70,6 +70,7 @@ export function DataTable<T>({
   empty,
   footer,
   onRowHref,
+  rowClassName,
   bare = false,
   appendRow,
   className,
@@ -77,6 +78,16 @@ export function DataTable<T>({
   columns: Column<T>[];
   rows: T[];
   getRowKey: (row: T, index: number) => string;
+  /**
+   * Classes for one row, from the row itself.
+   *
+   * Added for P7-27's client-work edge: a chip is readable once you are looking
+   * at a row, and an accented edge is what makes a COLUMN of rows scannable.
+   * Deliberately a function of the row rather than a `variant` prop — the table
+   * has no business knowing what a client task is, and the next caller that
+   * wants to mark a row will want to mark it for a different reason.
+   */
+  rowClassName?: (row: T) => string | undefined;
   empty?: React.ReactNode;
   /**
    * A totals row, as `<tr>` content. Inside the table rather than under it
@@ -153,7 +164,7 @@ export function DataTable<T>({
           rows.map((row, index) => (
             <TableRow
               key={getRowKey(row, index)}
-              className={cn("align-top", onRowHref?.(row) && "cursor-pointer")}
+              className={cn("align-top", onRowHref?.(row) && "cursor-pointer", rowClassName?.(row))}
             >
               {columns.map((column) => (
                 <TableCell

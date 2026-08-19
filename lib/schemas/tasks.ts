@@ -150,10 +150,31 @@ export function taskCategory(task: {
   return task.is_personal ? "personal" : "internal";
 }
 
-/** Human labels for the three. Shown on the task list and detail. */
+/**
+ * Human labels for the three. Shown on the task list, the board and the
+ * dashboard.
+ *
+ * ⚠️ THESE USED TO READ "Client request" / "Assigned to you" / "Personal", and
+ * both problems with that were the same problem.
+ *
+ *   1. THEY WERE NOT PARALLEL. "Client request" and "Assigned to you" answer
+ *      two different questions — what it is, and who has it — so a column of
+ *      them did not read as one distinction with three values. The single most
+ *      consequential fact about a task, whether finishing it needs somebody
+ *      outside the company, did not stand out because nothing lined up against
+ *      it.
+ *   2. "Assigned to you" WAS OFTEN FALSE. A lead reading their team's list, or
+ *      anyone opening a colleague's task, saw work described as theirs when it
+ *      was not. `taskCategory` says where a task CAME FROM; it has never known
+ *      who is holding it.
+ *
+ * These also match the words on the task toolbar's own filter — All work /
+ * Internal / Client — so the chip and the control that filters by it finally
+ * use one vocabulary.
+ */
 export const TASK_CATEGORY_LABELS: Record<TaskCategory, string> = {
-  request: "Client request",
-  internal: "Assigned to you",
+  request: "Client",
+  internal: "Internal",
   personal: "Personal",
 };
 

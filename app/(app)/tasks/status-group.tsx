@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, Inbox } from "lucide-react";
 
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { cn } from "@/lib/utils";
@@ -56,6 +56,58 @@ export function TaskStatusGroup({
         </CollapsibleTrigger>
 
         {action ? <div className="ml-auto shrink-0">{action}</div> : null}
+      </div>
+
+      <CollapsibleContent>{children}</CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/**
+ * Client requests waiting on Gate 1, as a group above the stages.
+ *
+ * A SIBLING OF `TaskStatusGroup`, NOT A CALL INTO IT. That component takes a
+ * `VizservePmsTaskStatus` and washes its heading in that status' own tone, so
+ * it cannot express a group that is not a stage — and "Awaiting approval" is
+ * not a stage. Nothing in it has a status yet; that is the whole point of it.
+ *
+ * Dashed and muted rather than tinted, for the same reason: a heading painted
+ * like the others would read as the step before Open, and these rows have not
+ * been agreed to at all. The two share the disclosure shape because they sit in
+ * one column and should open and shut alike — they deliberately do not share a
+ * palette.
+ */
+export function PendingGroup({
+  count,
+  defaultOpen = true,
+  children,
+}: {
+  count: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  return (
+    <Collapsible
+      defaultOpen={defaultOpen}
+      className="overflow-hidden rounded-lg border border-dashed bg-card grade-surface shadow-raised-lg"
+    >
+      <div className="flex items-center gap-2 border-b border-dashed bg-muted/40 px-2 py-2">
+        <CollapsibleTrigger className="group flex min-w-0 items-center gap-2 rounded-sm px-0.5 py-0.5 text-left">
+          <ChevronRight
+            aria-hidden
+            className="size-4 shrink-0 text-muted-foreground transition-transform group-aria-expanded:rotate-90"
+          />
+          <Inbox className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          {/* The words, not a coloured pill. Every other heading in this column
+              carries its label; this one has no status to name, so it names the
+              thing it is waiting for. */}
+          <span className="text-2xs font-semibold tracking-[0.03em] uppercase text-muted-foreground">
+            Awaiting approval
+          </span>
+          <span className="font-mono text-2xs font-semibold tabular-nums text-muted-foreground">
+            {count}
+          </span>
+        </CollapsibleTrigger>
       </div>
 
       <CollapsibleContent>{children}</CollapsibleContent>
