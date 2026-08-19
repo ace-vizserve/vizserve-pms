@@ -135,25 +135,47 @@ function SelectionBar({
         eat clicks on the rows either side of it.
       */}
       <div className="pointer-events-none fixed inset-x-0 bottom-4 z-40 flex justify-center px-4">
+        {/*
+          BRAND, not a white card. This bar exists only while a selection does,
+          and a floating white panel over a white page reads as part of the page
+          — something that drifted loose rather than a mode you are currently
+          in. The brand fill says "something is selected" before a word is read.
+
+          `grade-primary` layered over `bg-primary`, never instead of it: the
+          grade utilities are deliberately outside the `bg-` namespace because
+          cn is tailwind-merge and would otherwise keep only one of the two.
+        */}
         <div
           role="status"
-          className="pointer-events-auto flex items-center gap-1 rounded-lg border bg-card grade-raised px-2 py-1.5 shadow-overlay"
+          className="pointer-events-auto flex items-center gap-1 rounded-lg border border-primary/40 bg-primary grade-primary px-2 py-1.5 text-primary-foreground shadow-overlay"
         >
           <span className="px-2 text-xs font-medium tabular-nums">
             {count} {count === 1 ? "task" : "tasks"} selected
           </span>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            onClick={() => setConfirming(true)}
-          >
+          {/*
+            A FILLED destructive button rather than red text. `--destructive` on
+            `--primary` is two mid-tone colours against each other and fails as
+            text; the button brings its own dark fill and white label, which
+            passes and also reads as the one committing action on the bar.
+
+            The word and the icon carry the danger either way — the colour is
+            never the only thing saying so.
+          */}
+          <Button variant="destructive" size="sm" onClick={() => setConfirming(true)}>
             <Trash2 />
             Delete
           </Button>
 
-          <Button variant="ghost" size="icon-sm" aria-label="Clear selection" onClick={onClear}>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            aria-label="Clear selection"
+            onClick={onClear}
+            // Ghost defaults to a foreground-coloured label on a light hover —
+            // both wrong on a brand fill, so both are restated.
+            className="text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground"
+          >
             <X />
           </Button>
         </div>
