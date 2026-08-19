@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { NavGroup, NavItem } from "@/lib/navigation";
 import { NavIcon } from "./nav-icon";
-import { NavProjects, type ProjectFolder } from "./nav-projects";
+import { NavProjects, type ProjectSpace } from "./nav-projects";
 import { NavUser } from "./nav-user";
 
 export type SidebarSection = { group: NavGroup; items: NavItem[] };
@@ -51,7 +51,7 @@ export function AppSidebar({
   sections,
   user,
   badges,
-  folders = [],
+  spaces = [],
   canManageLists = false,
 }: {
   sections: SidebarSection[];
@@ -65,12 +65,16 @@ export function AppSidebar({
    */
   badges?: Record<string, string | null>;
   /**
-   * The project tree — departments as folders, their lists inside.
+   * The project tree — Department → Folder → List (P7-18).
+   *
+   * "Space" rather than "folder" for this level: since P7-18 a folder is a real
+   * row in `vizserve_pms_task_groups`, and one word for two levels is how the
+   * wrong one gets edited later.
    *
    * Already scoped by RLS in the layout, so a member gets their own department
    * and an admin gets everything from the same query.
    */
-  folders?: ProjectFolder[];
+  spaces?: ProjectSpace[];
   /** Whether `/tasks/lists` is reachable for this person — it is team_leader+. */
   canManageLists?: boolean;
 }) {
@@ -138,7 +142,7 @@ export function AppSidebar({
         {/* Between the flow and the pinned sections: the modules are what you
             DO, the projects are where the work lives, and Admin stays at the
             foot. */}
-        <NavProjects folders={folders} canManageLists={canManageLists} />
+        <NavProjects spaces={spaces} canManageLists={canManageLists} />
 
         {pinned.map((section) => (
           <NavSection

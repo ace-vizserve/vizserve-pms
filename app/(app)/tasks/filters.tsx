@@ -28,7 +28,13 @@ const ALL = "__all__";
  * status is a grouping on the board, and a list filter is a column it does not
  * draw.
  */
-export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }) {
+export function TaskFilters({
+  lists,
+  groups,
+}: {
+  lists: { id: string; name: string; group_id: string | null }[];
+  groups: { id: string; name: string }[];
+}) {
   const router = useRouter();
   const params = useSearchParams();
 
@@ -38,10 +44,22 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
     const next = new URLSearchParams(params.toString());
     if (!value || value === ALL) next.delete(key);
     else next.set(key, value);
+
+    /*
+     * P7-18 — FOLDER AND LIST CLEAR EACH OTHER.
+     *
+     * `?group=A&list=B` where B is not in A is a URL claiming two filters that
+     * cannot both hold; the server applies both and returns nothing, which reads
+     * as "no tasks" rather than as "these filters contradict". Picking either one
+     * drops the other, so the panel can only ever express one narrowing.
+     */
+    if (key === "group") next.delete("list");
+    if (key === "list") next.delete("group");
+
     router.push(`/tasks?${next.toString()}`);
   }
 
-  const hasFilters = ["status", "view", "list", "priority", "sort"].some((key) =>
+  const hasFilters = ["status", "view", "list", "group", "priority", "sort"].some((key) =>
     params.get(key),
   );
 
@@ -79,9 +97,21 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
     [ALL]: "All statuses",
     ...Object.fromEntries(TASK_STATUS_OPTIONS.map((option) => [option.value, option.label])),
   };
+  const activeGroup = params.get("group");
+
+  // Narrowed to the chosen folder, so the two pickers cannot be set to a pair
+  // that returns nothing. With no folder chosen, every list is offered.
+  const listsInScope = activeGroup
+    ? lists.filter((list) => list.group_id === activeGroup)
+    : lists;
+
   const listItems: Record<string, string> = {
     [ALL]: "All lists",
-    ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
+    ...Object.fromEntries(listsInScope.map((list) => [list.id, list.name])),
+  };
+  const groupItems: Record<string, string> = {
+    [ALL]: "All folders",
+    ...Object.fromEntries(groups.map((group) => [group.id, group.name])),
   };
 
   return (
@@ -109,7 +139,35 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
         </Select>
       </div>
 
-      {lists.length > 0 ? (
+      {groups.length > 0 ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="group" className="text-xs text-muted-foreground">
+            Folder
+          </Label>
+          {/* `items` AND the children below. Base UI renders the raw value in
+              SelectValue without the map, which here would put the literal
+              "__all__" on screen. */}
+          <Select
+            items={groupItems}
+            value={activeGroup ?? ALL}
+            onValueChange={(value) => setParam("group", value)}
+          >
+            <SelectTrigger id="group" className="w-52">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>All folders</SelectItem>
+              {groups.map((group) => (
+                <SelectItem key={group.id} value={group.id}>
+                  {group.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+      ) : null}
+
+      {listsInScope.length > 0 ? (
         <div className="space-y-1.5">
           <Label htmlFor="list" className="text-xs text-muted-foreground">
             List
@@ -124,7 +182,7 @@ export function TaskFilters({ lists }: { lists: { id: string; name: string }[] }
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={ALL}>All lists</SelectItem>
-              {lists.map((list) => (
+              {listsInScope.map((list) => (
                 <SelectItem key={list.id} value={list.id}>
                   {list.name}
                 </SelectItem>

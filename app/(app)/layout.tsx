@@ -42,32 +42,46 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .is("read_at", null);
 
   /*
-   * The project tree — departments as folders, their lists inside.
+   * The project tree — Department → Folder → List (P7-18).
    *
-   * NO SCOPE FILTER ON EITHER QUERY. `vizserve_pms_lists` and
-   * `vizserve_pms_departments` both scope by policy, so a member gets their own
-   * department's folders and an admin gets every one from the same two queries —
-   * restating the rule here would imply the policy were optional.
+   * NO SCOPE FILTER ON ANY OF THESE QUERIES. Departments, lists and folders all
+   * scope by policy, so a member gets their own department's tree and an admin
+   * gets every one from the same queries — restating the rule here would imply
+   * the policies were optional.
    *
-   * The task counts are a third query rather than a join, because PostgREST
+   * The task counts are a separate query rather than a join, because PostgREST
    * cannot aggregate a related table and a per-list count would be an N+1 in the
    * SHELL — the one component on every single page in the app.
    */
-  const [{ data: departments }, { data: lists }, { data: openTasks }] = await Promise.all([
-    supabase.from("vizserve_pms_departments").select("id, name").eq("is_active", true).order("name"),
-    supabase
-      .from("vizserve_pms_lists")
-      .select("id, name, department_id")
-      .eq("is_active", true)
-      .order("name"),
-    // Live work only. A count including everything ever finished would grow
-    // forever and stop meaning "how much is in here".
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("list_id")
-      .not("list_id", "is", null)
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
-  ]);
+  const [{ data: departments }, { data: lists }, { data: groups }, { data: openTasks }] =
+    await Promise.all([
+      supabase
+        .from("vizserve_pms_departments")
+        .select("id, name")
+        .eq("is_active", true)
+        .order("name"),
+      // `sort_order` first, to agree with /tasks/lists — which has always
+      // ordered that way while this query silently did not.
+      supabase
+        .from("vizserve_pms_lists")
+        .select("id, name, department_id, group_id")
+        .eq("is_active", true)
+        .order("sort_order")
+        .order("name"),
+      supabase
+        .from("vizserve_pms_task_groups")
+        .select("id, name, department_id, is_system")
+        .eq("is_active", true)
+        .order("sort_order")
+        .order("name"),
+      // Live work only. A count including everything ever finished would grow
+      // forever and stop meaning "how much is in here".
+      supabase
+        .from("vizserve_pms_tasks")
+        .select("list_id")
+        .not("list_id", "is", null)
+        .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+    ]);
 
   const countByList = new Map<string, number>();
   for (const task of openTasks ?? []) {
@@ -75,24 +89,57 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     countByList.set(task.list_id, (countByList.get(task.list_id) ?? 0) + 1);
   }
 
-  const folders = (departments ?? [])
-    .map((department) => ({
-      departmentId: department.id,
-      departmentName: department.name,
-      lists: (lists ?? [])
-        .filter((list) => list.department_id === department.id)
-        .map((list) => ({
-          id: list.id,
-          name: list.name,
-          openTasks: countByList.get(list.id) ?? 0,
-        })),
-    }))
-    // A department with no lists is a folder that opens onto nothing. Dropped
-    // rather than shown empty — the tree is for navigating to work, and an
-    // admin sees every department in the company here. The group itself still
-    // renders, carrying the "Create a list" row, so the feature is reachable
-    // before anybody has made one.
-    .filter((folder) => folder.lists.length > 0);
+  const toList = (list: { id: string; name: string }) => ({
+    id: list.id,
+    name: list.name,
+    openTasks: countByList.get(list.id) ?? 0,
+  });
+
+  const spaces = (departments ?? [])
+    .map((department) => {
+      const own = (lists ?? []).filter((list) => list.department_id === department.id);
+
+      const folders = (groups ?? [])
+        .filter((group) => group.department_id === department.id)
+        .map((group) => {
+          const folderLists = own.filter((list) => list.group_id === group.id).map(toList);
+          return {
+            id: group.id,
+            name: group.name,
+            isSystem: group.is_system,
+            lists: folderLists,
+            // Rolled up, so a collapsed folder still says how much is inside.
+            openTasks: folderLists.reduce((total, list) => total + list.openTasks, 0),
+          };
+        })
+        // THE RESERVED FOLDER IS DROPPED WHILE EMPTY, and only that one. The
+        // migration's backfill gives every department a Client Requests folder,
+        // so without this every team grows a permanently empty section the day
+        // the SQL is pasted. An empty folder somebody MADE is kept — otherwise
+        // it vanishes the moment they create it, and the way to put a list in it
+        // is unreachable.
+        .filter((folder) => !folder.isSystem || folder.lists.length > 0)
+        // System folder last, tie-broken on the flag rather than on sort_order,
+        // which a lead could out-bid.
+        .sort((a, b) => Number(a.isSystem) - Number(b.isSystem));
+
+      return {
+        departmentId: department.id,
+        departmentName: department.name,
+        // Folderless lists — ClickUp's own term, and what EVERY list is until
+        // somebody makes a folder. They render above the folders for that
+        // reason: folders-first would bury the whole company's work under a
+        // heading on the day P7-18 landed.
+        lists: own.filter((list) => list.group_id === null).map(toList),
+        folders,
+      };
+    })
+    // A department with nothing in it opens onto nothing. Dropped rather than
+    // shown empty — the tree is for navigating to work, and an admin sees every
+    // department in the company here. The group itself still renders, carrying
+    // the "Create a list" row, so the feature is reachable before anybody has
+    // made one.
+    .filter((space) => space.lists.length > 0 || space.folders.length > 0);
 
   return (
     <TooltipProvider>
@@ -101,7 +148,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <AppSidebar
             sections={sections}
             badges={{ "/inbox": formatUnreadBadge(unread ?? 0) }}
-            folders={folders}
+            spaces={spaces}
             canManageLists={roleAtLeast(context.role, "team_leader")}
             user={{
               fullName: context.fullName,

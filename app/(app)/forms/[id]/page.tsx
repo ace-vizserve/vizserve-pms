@@ -41,7 +41,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   // P2-06 — scoped by RLS to the departments this person leads.
   const { data: lists } = await supabase
     .from("vizserve_pms_lists")
-    .select("id, name, department_id")
+    .select("id, name, department_id, form_id")
     .eq("is_active", true)
     .order("sort_order")
     .order("name");

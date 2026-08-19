@@ -29,13 +29,21 @@ export default async function ListsPage() {
   // Both are RLS-scoped: a TL sees the departments they lead and those
   // departments' lists. No `.in()` needed, and restating it here would imply
   // the policy were optional.
-  const [{ data: lists }, { data: departments }] = await Promise.all([
+  const [{ data: lists }, { data: departments }, { data: groups }] = await Promise.all([
     supabase
       .from("vizserve_pms_lists")
-      .select("id, name, description, department_id, is_active, sort_order")
+      .select("id, name, description, department_id, is_active, sort_order, group_id, form_id")
       .order("sort_order")
       .order("name"),
     supabase.from("vizserve_pms_departments").select("id, name").eq("is_active", true).order("name"),
+    // P7-18. NO `is_active` FILTER, deliberately — same as the lists query above.
+    // This is the screen where an archived folder is un-archived, so filtering it
+    // out here would make that impossible from the only place it is offered.
+    supabase
+      .from("vizserve_pms_task_groups")
+      .select("id, name, description, department_id, is_active, sort_order, is_system")
+      .order("sort_order")
+      .order("name"),
   ]);
 
   const allowed =
@@ -71,13 +79,15 @@ export default async function ListsPage() {
         </Link>
         {/* No <h1> — the breadcrumb reads "Tasks / Lists". */}
         <p className="mt-2 text-xs text-muted-foreground">
-          How a department groups its work — one per helpdesk area or project. A form can point at
-          a list so approved requests land there automatically.
+          How a department groups its work. A folder holds lists; a list holds tasks; a list can
+          also sit on its own. Every form gets a list of its own in Client Requests, which is
+          where approved requests land.
         </p>
       </div>
 
       <ListManager
         lists={lists ?? []}
+        groups={groups ?? []}
         departments={allowed}
         openCounts={Object.fromEntries(openByList)}
       />
