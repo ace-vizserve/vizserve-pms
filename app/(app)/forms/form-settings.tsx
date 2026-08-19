@@ -22,7 +22,7 @@ import { formSettingsSchema, type FormSettingsInput } from "@/lib/schemas/forms"
 import { createForm, updateFormSettings } from "./actions";
 
 type Department = { id: string; name: string };
-type List = { id: string; name: string; department_id: string };
+type List = { id: string; name: string; department_id: string; form_id?: string | null };
 
 const NO_LIST = "__none__";
 
@@ -76,7 +76,26 @@ export function FormSettings({
 
   // A list belongs to one department, so offering another department's would be
   // offering a guaranteed rejection from the database.
-  const departmentLists = lists.filter((list) => list.department_id === departmentId);
+  const departmentLists = lists
+    .filter((list) => list.department_id === departmentId)
+    /*
+     * P7-18 — this form's OWN inbox list sorts to the front.
+     *
+     * Every form now gets one, created by a trigger and living in the
+     * department's Client Requests folder, and `default_list_id` is pointed at
+     * it automatically. So this Select is no longer choosing between equals:
+     * one of these is where the form already files, and it should not be buried
+     * alphabetically among lists that have nothing to do with it.
+     *
+     * The control STAYS, deliberately. The migration sets `default_list_id`
+     * only when it is null, precisely so a lead's explicit choice survives —
+     * removing the picker would take away a decision the database goes out of
+     * its way to preserve.
+     */
+    .sort((a, b) => Number(b.form_id === formId) - Number(a.form_id === formId));
+
+  const ownListLabel = (list: List) =>
+    list.form_id === formId ? `${list.name} — this form's list` : list.name;
 
   // value → label maps for the two Selects below. Without these, Base UI's
   // Select.Value falls back to rendering the raw value, and these two are the
@@ -84,7 +103,7 @@ export function FormSettings({
   const departmentItems = Object.fromEntries(departments.map((d) => [d.id, d.name]));
   const listItems = {
     [NO_LIST]: "No list",
-    ...Object.fromEntries(departmentLists.map((list) => [list.id, list.name])),
+    ...Object.fromEntries(departmentLists.map((list) => [list.id, ownListLabel(list)])),
   };
 
   const onSubmit = handleSubmit((values) => {
@@ -221,9 +240,12 @@ export function FormSettings({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value={NO_LIST}>No list</SelectItem>
+              {/* The label goes in BOTH the items map and the children — Base UI
+                  reads the map for the trigger and the children for the popup,
+                  and labelling only one is how they drift. */}
               {departmentLists.map((list) => (
                 <SelectItem key={list.id} value={list.id}>
-                  {list.name}
+                  {ownListLabel(list)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -233,7 +255,7 @@ export function FormSettings({
           <p className="text-xs text-muted-foreground">
             {departmentLists.length === 0
               ? "This department has no lists yet."
-              : "Where approved requests land. The reviewer can change it."}
+              : "Where approved requests land. This form has a list of its own in Client Requests; pick another only if you want them filed elsewhere. The reviewer can still change it per request."}
           </p>
         </div>
 

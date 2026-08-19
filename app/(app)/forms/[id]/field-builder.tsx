@@ -114,7 +114,13 @@ function FieldForm({
 
         <div className="space-y-2">
           <Label htmlFor="f-type">Type</Label>
-          <Select value={fieldType} onValueChange={(v) => setFieldType(v as FieldType)}>
+          {/* `items` fills the TRIGGER; the children fill the popup. Without it
+              the closed control reads "short_text" instead of "Short text". */}
+          <Select
+            items={TYPE_LABELS}
+            value={fieldType}
+            onValueChange={(v) => setFieldType(v as FieldType)}
+          >
             <SelectTrigger id="f-type">
               <SelectValue />
             </SelectTrigger>

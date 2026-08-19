@@ -2,11 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, ChevronRight } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -79,6 +85,34 @@ export function ReviewPanel({
   const [approvedDate, setApprovedDate] = useState<string>(targetDate ?? "");
   // P2-06 — seeded from the form's default, overridable here.
   const [listId, setListId] = useState<string>(defaultListId ?? NO_LIST);
+
+  /*
+   * value → label maps for the three Selects below.
+   *
+   * ⚠️ Base UI's SelectValue renders the RAW VALUE unless the Select root is
+   * given `items`. The `<SelectItem>` children fill the POPUP; this fills the
+   * TRIGGER. Without it the closed control on the Gate 1 screen showed a bare
+   * UUID where the person's name belongs.
+   *
+   * The PIC map carries no capacity suffix on purpose — "Ana Cruz · 4 open"
+   * helps while choosing and is noise once chosen.
+   */
+  const assigneeItems = Object.fromEntries(
+    candidates.map((person) => [person.id, person.full_name]),
+  );
+  const qaItems = {
+    [currentUserId]: `${currentUserName} (you)`,
+    [NO_QA]: "No QA reviewer",
+    ...Object.fromEntries(
+      candidates
+        .filter((person) => person.id !== currentUserId)
+        .map((person) => [person.id, person.full_name]),
+    ),
+  };
+  const listItems = {
+    [NO_LIST]: "No list",
+    ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
+  };
   const [title, setTitle] = useState(requestTitle);
   const [description, setDescription] = useState(requestDescription);
 
@@ -146,7 +180,17 @@ export function ReviewPanel({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="assignee">Person in charge</Label>
-              <Select value={assigneeId} onValueChange={(v) => v !== null && (v)}>
+              {/* ⚠️ `setAssigneeId(v)`, not `(v)`. All three Selects in this file
+                  shipped with a handler that evaluated the new value and threw it
+                  away, so the Gate 1 review screen could not change its PIC, its
+                  QA reviewer or its list at all. The PIC had a second route in
+                  (clicking a row in the capacity table below); the other two had
+                  none. Committed in f4abc5c and unnoticed since. */}
+              <Select
+                items={assigneeItems}
+                value={assigneeId}
+                onValueChange={(v) => v !== null && setAssigneeId(v)}
+              >
                 <SelectTrigger id="assignee">
                   <SelectValue placeholder="Choose who does the work" />
                 </SelectTrigger>
@@ -166,7 +210,11 @@ export function ReviewPanel({
 
             <div className="space-y-2">
               <Label htmlFor="qa">QA reviewer</Label>
-              <Select value={qaAssigneeId} onValueChange={(v) => v !== null && (v)}>
+              <Select
+                items={qaItems}
+                value={qaAssigneeId}
+                onValueChange={(v) => v !== null && setQaAssigneeId(v)}
+              >
                 <SelectTrigger id="qa">
                   <SelectValue />
                 </SelectTrigger>
@@ -192,12 +240,11 @@ export function ReviewPanel({
 
           <div className="space-y-2">
             <Label htmlFor="approved_date">Delivery date you are committing to</Label>
-            <Input
+            <DatePicker
               id="approved_date"
-              type="date"
-              className="w-auto"
+              className="w-56"
               value={approvedDate}
-              onChange={(event) => setApprovedDate(event.target.value)}
+              onChange={(value) => setApprovedDate(value ?? "")}
             />
             <p className="text-xs text-muted-foreground">
               {targetDate ? (
@@ -217,7 +264,11 @@ export function ReviewPanel({
           {lists.length > 0 ? (
             <div className="space-y-2">
               <Label htmlFor="list">List</Label>
-              <Select value={listId} onValueChange={(v) => v !== null && (v)}>
+              <Select
+                items={listItems}
+                value={listId}
+                onValueChange={(v) => v !== null && setListId(v)}
+              >
                 <SelectTrigger id="list" className="w-64">
                   <SelectValue />
                 </SelectTrigger>
@@ -238,11 +289,15 @@ export function ReviewPanel({
             </div>
           ) : null}
 
-          <details className="rounded-md border px-3 py-2">
-            <summary className="cursor-pointer text-xs text-muted-foreground">
+          <Collapsible className="rounded-md border px-3 py-2">
+            <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
               Correct a typo in the title or description
-            </summary>
-            <div className="mt-3 space-y-3">
+              <ChevronRight
+                aria-hidden
+                className="size-3.5 shrink-0 transition-transform group-aria-expanded:rotate-90"
+              />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-3 space-y-3">
               <div className="space-y-1.5">
                 <Label htmlFor="edit_title">Title</Label>
                 <Input
@@ -264,8 +319,8 @@ export function ReviewPanel({
               <p className="text-xs text-muted-foreground">
                 Edits are recorded with the original text alongside them.
               </p>
-            </div>
-          </details>
+            </CollapsibleContent>
+          </Collapsible>
 
           {mode === "approve" ? (
             <div className="flex flex-wrap items-center gap-2 border-t pt-4">

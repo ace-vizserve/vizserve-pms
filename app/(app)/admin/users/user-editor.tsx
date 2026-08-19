@@ -114,6 +114,23 @@ function UserForm({
   const [email, setEmail] = useState(user?.email ?? "");
   const [fullName, setFullName] = useState(user?.full_name ?? "");
   const [role, setRole] = useState<Role>(user?.role ?? "member");
+
+  /*
+   * value → label maps for the two Selects below.
+   *
+   * ⚠️ Base UI's SelectValue renders the RAW VALUE unless the Select root is
+   * given `items`. The `<SelectItem>` children populate the POPUP; this map
+   * populates the TRIGGER, and supplying only the children means the closed
+   * control shows "team_leader" instead of "Team leader", and a bare
+   * `a1000000-…` instead of the department name.
+   */
+  const roleItems = Object.fromEntries(
+    ROLE_OPTIONS.map((option) => [option, ROLE_LABELS[option].label]),
+  );
+  const departmentItems = {
+    [NO_DEPARTMENT]: "No department",
+    ...Object.fromEntries(departments.map((department) => [department.id, department.name])),
+  };
   const [primaryDepartmentId, setPrimaryDepartmentId] = useState<string | null>(
     user?.primary_department_id ?? null,
   );
@@ -230,6 +247,7 @@ function UserForm({
           <div className="space-y-2">
             <Label htmlFor="role">Role</Label>
             <Select
+              items={roleItems}
               value={role}
               onValueChange={(value) => setRole(value as Role)}
             >
@@ -252,6 +270,7 @@ function UserForm({
           <div className="space-y-2">
             <Label htmlFor="primary_department">Belongs to</Label>
             <Select
+              items={departmentItems}
               value={primaryDepartmentId ?? NO_DEPARTMENT}
               onValueChange={(value) =>
                 setPrimaryDepartmentId(value === NO_DEPARTMENT ? null : value)

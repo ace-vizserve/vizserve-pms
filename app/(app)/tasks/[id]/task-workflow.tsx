@@ -2,11 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, Save } from "lucide-react";
+import { AlertTriangle, ChevronRight, Save } from "lucide-react";
 import { toast } from "sonner";
 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -122,6 +128,27 @@ export function TaskWorkflow({
   const [overrideReason, setOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * value → label maps for the four Selects below.
+   *
+   * ⚠️ Base UI's SelectValue renders the RAW VALUE unless the Select root is
+   * given `items`. The `<SelectItem>` children fill the POPUP; this fills the
+   * TRIGGER. Without it these showed a bare UUID, the literal "__none__", or
+   * the raw enum "FOR_QA" where "Waiting for QA" belongs.
+   */
+  const peopleItems = Object.fromEntries(
+    candidates.map((person) => [person.id, person.full_name]),
+  );
+  const listItems = {
+    [NONE]: "No list",
+    ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
+  };
+  const statusItems = Object.fromEntries(
+    TASK_STATUSES.map((option) => [option, TASK_STATUS_LABELS[option]]),
+  );
+  const picItems = { [NONE]: "Unassigned", ...peopleItems };
+  const qaItems = { [NONE]: "No QA reviewer", ...peopleItems };
+
   const transitions = availableTransitions(status, viewer, task);
   const canEdit = viewer.isPic || viewer.isQa || viewer.leadsDepartment;
   /**
@@ -220,23 +247,22 @@ export function TaskWorkflow({
 
           <div className="space-y-1.5">
             <Label htmlFor="start">Start date</Label>
-            <Input
+            <DatePicker
               id="start"
-              type="date"
               value={startDate}
               disabled={!canEdit || pending}
-              onChange={(event) => setStartDate(event.target.value)}
+              onChange={(value) => setStartDate(value ?? "")}
             />
           </div>
 
           <div className="space-y-1.5">
             <Label htmlFor="due">Due date</Label>
-            <Input
+            <DatePicker
               id="due"
-              type="date"
               value={dueDate}
               disabled={!canEdit || pending}
-              onChange={(event) => setDueDate(event.target.value)}
+              onChange={(value) => setDueDate(value ?? "")}
+              min={startDate || undefined}
             />
           </div>
 
@@ -253,7 +279,12 @@ export function TaskWorkflow({
         {lists.length > 0 ? (
           <div className="space-y-1.5">
             <Label htmlFor="list">List</Label>
-            <Select value={listId} onValueChange={(v) => v !== null && setListId(v)} disabled={!canEdit || pending}>
+            <Select
+              items={listItems}
+              value={listId}
+              onValueChange={(v) => v !== null && setListId(v)}
+              disabled={!canEdit || pending}
+            >
               <SelectTrigger id="list" className="w-64">
                 <SelectValue />
               </SelectTrigger>
@@ -338,6 +369,7 @@ export function TaskWorkflow({
               <div className="space-y-1.5">
                 <Label htmlFor="override_status">Move to</Label>
                 <Select
+                  items={statusItems}
                   value={overrideStatus}
                   onValueChange={(value) => setOverrideStatus(value as TaskStatus)}
                 >
@@ -394,12 +426,18 @@ export function TaskWorkflow({
         {/* Reassignment — a lead decision, not self-service.               */}
         {/* -------------------------------------------------------------- */}
         {viewer.leadsDepartment ? (
-          <details className="border-t pt-3">
-            <summary className="cursor-pointer text-xs text-muted-foreground">Reassign</summary>
-            <div className="mt-2.5 grid gap-3 sm:grid-cols-2">
+          <Collapsible className="border-t pt-3">
+            <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">Reassign
+              <ChevronRight
+                aria-hidden
+                className="size-3.5 shrink-0 transition-transform group-aria-expanded:rotate-90"
+              />
+            </CollapsibleTrigger>
+            <CollapsibleContent className="mt-2.5 grid gap-3 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="new_pic">Person in charge</Label>
                 <Select
+                  items={picItems}
                   defaultValue={assigneeId ?? NONE}
                   onValueChange={(value) =>
                     run(
@@ -429,6 +467,7 @@ export function TaskWorkflow({
               <div className="space-y-1.5">
                 <Label htmlFor="new_qa">QA reviewer</Label>
                 <Select
+                  items={qaItems}
                   defaultValue={qaAssigneeId ?? NONE}
                   onValueChange={(value) =>
                     run(
@@ -454,8 +493,8 @@ export function TaskWorkflow({
                   </SelectContent>
                 </Select>
               </div>
-            </div>
-          </details>
+            </CollapsibleContent>
+          </Collapsible>
         ) : null}
 
         {error ? (

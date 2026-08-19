@@ -14,11 +14,18 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import type { TaskPriority } from "@/lib/schemas/tasks";
-import { cn } from "@/lib/utils";
 
 import { createPersonalTask, createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
@@ -77,6 +84,26 @@ export function NewPersonalTaskDialog({
   const [estimate, setEstimate] = useState<number | null>(null);
   const [assignee, setAssignee] = useState<string>(MINE);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
+
+  /*
+   * Controlled, with an explicit hidden input, because this dialog submits
+   * through a native `<form action={submit}>` and reads FormData. Base UI's
+   * Select would emit its own hidden input from a `name`; one field emitted
+   * twice is one `FormData.get()` silently taking whichever came first.
+   */
+  const [listId, setListId] = useState(NO_LIST);
+  // Optional on this dialog, so both start empty and stay clearable.
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [dueDate, setDueDate] = useState<string | null>(null);
+
+  const assigneeItems = {
+    [MINE]: "Myself",
+    ...Object.fromEntries(colleagues.map((person) => [person.id, person.full_name])),
+  };
+  const listItems = {
+    [NO_LIST]: "No list",
+    ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
+  };
   const [pending, startTransition] = useTransition();
 
   /** Offering the picker at all needs both a department and somebody in it. */
@@ -181,23 +208,27 @@ export function NewPersonalTaskDialog({
           {canAssign ? (
             <div className="space-y-2">
               <Label htmlFor="assignee">Assign to</Label>
-              <select
-                id="assignee"
+              {/* No hidden input: `assignee` is read from state in `submit`,
+                  not from FormData, so this one never travelled through the
+                  form in the first place. */}
+              <Select
+                items={assigneeItems}
                 value={assignee}
                 disabled={pending}
-                onChange={(event) => setAssignee(event.target.value)}
-                className={cn(
-                  "h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised",
-                  "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                )}
+                onValueChange={(value) => value !== null && setAssignee(value)}
               >
-                <option value={MINE}>Myself</option>
-                {colleagues.map((person) => (
-                  <option key={person.id} value={person.id}>
-                    {person.full_name}
-                  </option>
-                ))}
-              </select>
+                <SelectTrigger id="assignee" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={MINE}>Myself</SelectItem>
+                  {colleagues.map((person) => (
+                    <SelectItem key={person.id} value={person.id}>
+                      {person.full_name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <p className="text-2xs text-muted-foreground">
                 Only your own department. Work belongs to the department doing it, or somebody ends
                 up holding a task their own Team Leader cannot see.
@@ -214,13 +245,26 @@ export function NewPersonalTaskDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
               <Label htmlFor="start_date">Start</Label>
-              <Input id="start_date" name="start_date" type="date" />
+              <DatePicker
+                id="start_date"
+                name="start_date"
+                value={startDate}
+                onChange={setStartDate}
+                invalid={Boolean(errors.start_date?.length)}
+              />
               <FieldError messages={errors.start_date} />
             </div>
 
             <div className="space-y-2">
               <Label htmlFor="due_date">Due</Label>
-              <Input id="due_date" name="due_date" type="date" />
+              <DatePicker
+                id="due_date"
+                name="due_date"
+                value={dueDate}
+                onChange={setDueDate}
+                min={startDate ?? undefined}
+                invalid={Boolean(errors.due_date?.length)}
+              />
               <FieldError messages={errors.due_date} />
             </div>
           </div>
@@ -233,22 +277,28 @@ export function NewPersonalTaskDialog({
             {lists.length > 0 ? (
               <div className="space-y-2">
                 <Label htmlFor="list_id">List</Label>
-                <select
-                  id="list_id"
+                <input
+                  type="hidden"
                   name="list_id"
-                  defaultValue=""
-                  className={cn(
-                    "h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised",
-                    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-                  )}
+                  value={listId === NO_LIST ? "" : listId}
+                />
+                <Select
+                  items={listItems}
+                  value={listId}
+                  onValueChange={(value) => value !== null && setListId(value)}
                 >
-                  <option value="">No list</option>
-                  {lists.map((list) => (
-                    <option key={list.id} value={list.id}>
-                      {list.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="list_id" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={NO_LIST}>No list</SelectItem>
+                    {lists.map((list) => (
+                      <SelectItem key={list.id} value={list.id}>
+                        {list.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <FieldError messages={errors.list_id} />
               </div>
             ) : null}
@@ -280,6 +330,16 @@ export function NewPersonalTaskDialog({
  * has to be distinguishable from "a person who happens to be me".
  */
 const MINE = "__mine__";
+
+/*
+ * "No list", as a Select value.
+ *
+ * The form still submits the EMPTY STRING the server has always read — the
+ * hidden input below maps this sentinel back — because a Select cannot carry
+ * "" as a value (Base UI reads it as "nothing chosen") and the action's contract
+ * is not this component's to change.
+ */
+const NO_LIST = "__none__";
 
 function FieldError({ messages }: { messages?: string[] }) {
   if (!messages?.length) return null;

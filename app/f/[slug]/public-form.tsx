@@ -5,6 +5,7 @@ import { useForm, Controller, type Path, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 
 import { Button } from "@/components/ui/button";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -290,7 +291,30 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
               *
             </span>
           </Label>
-          <Input id="target_date" type="date" className="w-auto" {...register("target_date")} />
+          {/*
+            Through a Controller rather than `register`, because DatePicker is
+            controlled and has no DOM event to hook a ref onto.
+
+            ⚠️ CLIENT-FACING (§4.6): this is one of two screens somebody outside
+            the company ever sees, and the browser's native picker was the last
+            thing here that did not carry our tokens or a dark mode. The target
+            date is also the field a client is most likely to get wrong — a real
+            calendar showing them the day of the week is worth more here than
+            anywhere else in the app.
+          */}
+          <Controller
+            control={control}
+            name="target_date"
+            render={({ field }) => (
+              <DatePicker
+                id="target_date"
+                className="w-56"
+                value={(field.value as string) ?? null}
+                onChange={(value) => field.onChange(value ?? "")}
+                invalid={Boolean(errors.target_date)}
+              />
+            )}
+          />
           <p className="text-xs text-muted-foreground">
             When you need this by. A team leader may propose a different date.
           </p>

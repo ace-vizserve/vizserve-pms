@@ -6,12 +6,14 @@ import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } fr
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { toDateString } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TableCell, TableRow } from "@/components/ui/table";
 import { TaskPriorityBadge } from "@/components/status-badge";
-import { formatDate } from "@/lib/dates";
+import { formatDate, parseDateOnly } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
   TASK_PRIORITIES,
@@ -499,19 +501,26 @@ function DateField({
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-auto p-2">
-        <div className="flex items-center gap-1.5">
-          <Input
+        {/* `onKeyDown` rides the wrapper: react-day-picker owns its own grid
+            navigation and exposes no `onKeyDown`, but the caller's handler (the
+            composer's "keep typing to the next field" shortcut) still has to
+            see the event. */}
+        <div className="flex items-center gap-1.5" onKeyDown={onKeyDown}>
+          {/* The Calendar directly, not `DatePicker` — this is already inside a
+              Popover, and nesting one in another traps focus in the wrong layer
+              and closes both on a single Escape. */}
+          <Calendar
+            mode="single"
             autoFocus
-            type="date"
-            value={value}
-            disabled={disabled}
             aria-label={label}
-            className="w-40"
-            onChange={(event) => {
-              onChange(event.target.value);
-              if (event.target.value) setOpen(false);
+            disabled={disabled}
+            selected={value ? (parseDateOnly(value) ?? undefined) : undefined}
+            defaultMonth={value ? (parseDateOnly(value) ?? undefined) : undefined}
+            onSelect={(date) => {
+              if (!date) return;
+              onChange(toDateString(date));
+              setOpen(false);
             }}
-            onKeyDown={onKeyDown}
           />
           {value ? (
             <Button

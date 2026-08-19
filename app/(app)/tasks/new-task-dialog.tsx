@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -163,6 +164,27 @@ function TaskForm({
     [lists, departmentId],
   );
 
+  /*
+   * value → label maps for the four Selects below.
+   *
+   * ⚠️ Base UI's SelectValue renders the RAW VALUE unless the Select root is
+   * given `items`. The `<SelectItem>` children fill the POPUP; this fills the
+   * TRIGGER. Without it the closed controls showed a bare UUID, or the literal
+   * "__none__", where a name belongs.
+   */
+  const departmentItems = Object.fromEntries(
+    departments.map((department) => [department.id, department.name]),
+  );
+  const peopleItems = Object.fromEntries(
+    candidates.map((person) => [person.id, person.full_name]),
+  );
+  const assigneeItems = { [NONE]: "Unassigned", ...peopleItems };
+  const qaItems = { [NONE]: "No QA reviewer", ...peopleItems };
+  const listItems = {
+    [NONE]: "No list",
+    ...Object.fromEntries(departmentLists.map((list) => [list.id, list.name])),
+  };
+
   function changeDepartment(next: string) {
     setDepartmentId(next);
     // Clear anything now pointing at the old department, rather than sending a
@@ -232,6 +254,7 @@ function TaskForm({
           <div className="space-y-2">
             <Label htmlFor="department">Department</Label>
             <Select
+              items={departmentItems}
               value={departmentId}
               onValueChange={(value) => value !== null && changeDepartment(value)}
             >
@@ -250,11 +273,10 @@ function TaskForm({
 
           <div className="space-y-2">
             <Label htmlFor="start">Start date</Label>
-            <Input
+            <DatePicker
               id="start"
-              type="date"
               value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
+              onChange={(value) => setStartDate(value ?? "")}
             />
           </div>
         </div>
@@ -262,11 +284,11 @@ function TaskForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="due">Due date</Label>
-            <Input
+            <DatePicker
               id="due"
-              type="date"
               value={dueDate}
-              onChange={(event) => setDueDate(event.target.value)}
+              onChange={(value) => setDueDate(value ?? "")}
+              min={startDate || undefined}
             />
           </div>
 
@@ -277,6 +299,7 @@ function TaskForm({
           <div className="space-y-2">
             <Label htmlFor="assignee">Person in charge</Label>
             <Select
+              items={assigneeItems}
               value={assigneeId}
               onValueChange={(value) => value !== null && setAssigneeId(value)}
             >
@@ -300,6 +323,7 @@ function TaskForm({
           <div className="space-y-2">
             <Label htmlFor="qa">QA reviewer</Label>
             <Select
+              items={qaItems}
               value={qaAssigneeId}
               onValueChange={(value) => value !== null && setQaAssigneeId(value)}
             >
@@ -321,7 +345,11 @@ function TaskForm({
         {departmentLists.length > 0 ? (
           <div className="space-y-2">
             <Label htmlFor="list">List</Label>
-            <Select value={listId} onValueChange={(value) => value !== null && setListId(value)}>
+            <Select
+              items={listItems}
+              value={listId}
+              onValueChange={(value) => value !== null && setListId(value)}
+            >
               <SelectTrigger id="list">
                 <SelectValue />
               </SelectTrigger>

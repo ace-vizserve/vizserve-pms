@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 
 /**
@@ -42,12 +42,11 @@ export function RangePicker({ from, to }: { from: string; to: string }) {
         <Label htmlFor="from" className="text-xs text-muted-foreground">
           From
         </Label>
-        <Input
+        <DatePicker
           id="from"
-          type="date"
           value={from}
           className="w-40"
-          onChange={(event) => set("from", event.target.value)}
+          onChange={(value) => set("from", value ?? "")}
         />
       </div>
 
@@ -55,12 +54,12 @@ export function RangePicker({ from, to }: { from: string; to: string }) {
         <Label htmlFor="to" className="text-xs text-muted-foreground">
           To
         </Label>
-        <Input
+        <DatePicker
           id="to"
-          type="date"
           value={to}
           className="w-40"
-          onChange={(event) => set("to", event.target.value)}
+          min={from || undefined}
+          onChange={(value) => set("to", value ?? "")}
         />
       </div>
 

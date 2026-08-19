@@ -14,13 +14,22 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { todayInAppZone } from "@/lib/dates";
 import {
   DAY_HALF_LABELS,
   DAY_HALVES,
+  type DayHalf,
   INTERNAL_REQUEST_BLURBS,
   INTERNAL_REQUEST_LABELS,
   INTERNAL_REQUEST_TYPES,
@@ -78,6 +87,37 @@ export function NewRequestDialog({
   const [open, setOpen] = useState(Boolean(prefill?.openOnMount));
   const [type, setType] = useState<InternalRequestType>(prefill?.type ?? "LEAVE");
   const [errors, setErrors] = useState<Record<string, string[]>>({});
+
+  /*
+   * The three Selects below are CONTROLLED, each paired with its own hidden
+   * input, because this dialog submits through a native `<form action={submit}>`
+   * and reads FormData.
+   *
+   * Base UI's Select accepts a `name` and emits its own hidden input from it.
+   * That is not used here on purpose: if it emits one and we emit one, the field
+   * appears twice in the FormData and `.get()` silently returns whichever came
+   * first. One explicit input is unambiguous, and it is the same shape the rest
+   * of this form already uses.
+   */
+  const [leaveTypeId, setLeaveTypeId] = useState("");
+  /*
+   * The dates are state now rather than `defaultValue`, because `DatePicker` is
+   * controlled — it has no uncontrolled mode by design, since a calendar has to
+   * re-render its own selection. Each still writes a hidden input, so the native
+   * `<form action={submit}>` reads exactly the same FormData keys it always did.
+   */
+  const [startDate, setStartDate] = useState<string | null>(null);
+  const [endDate, setEndDate] = useState<string | null>(null);
+  const [correctionDate, setCorrectionDate] = useState<string | null>(null);
+  const [startHalf, setStartHalf] = useState<DayHalf>("MORNING");
+  const [endHalf, setEndHalf] = useState<DayHalf>("AFTERNOON");
+
+  const leaveTypeItems = Object.fromEntries(
+    leaveTypes.map((option) => [option.id, option.label]),
+  );
+  const halfItems = Object.fromEntries(
+    DAY_HALVES.map((half) => [half, DAY_HALF_LABELS[half]]),
+  );
   const [pending, startTransition] = useTransition();
 
   const today = todayInAppZone();
@@ -91,6 +131,12 @@ export function NewRequestDialog({
    * first day with a past date would be filing leave for a day already worked.
    */
   const workDate = prefill?.date ?? today;
+
+  // Seeded from the same values the old `defaultValue`s used. `??` not `||`, so
+  // a deliberate clear (null) is not silently refilled on the next render.
+  const startValue = startDate ?? today;
+  const endValue = endDate ?? today;
+  const correctionValue = correctionDate ?? workDate;
 
   function submit(formData: FormData) {
     setErrors({});
@@ -252,21 +298,23 @@ export function NewRequestDialog({
                   a type. */}
               <div className="space-y-2">
                 <Label htmlFor="leave_type_id">Leave type</Label>
-                <select
-                  id="leave_type_id"
-                  name="leave_type_id"
-                  defaultValue=""
-                  className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                <input type="hidden" name="leave_type_id" value={leaveTypeId} />
+                <Select
+                  items={leaveTypeItems}
+                  value={leaveTypeId || null}
+                  onValueChange={(value) => value !== null && setLeaveTypeId(value)}
                 >
-                  <option value="" disabled>
-                    Choose one…
-                  </option>
-                  {leaveTypes.map((option) => (
-                    <option key={option.id} value={option.id}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="leave_type_id" className="w-full">
+                    <SelectValue placeholder="Choose one…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {leaveTypes.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
                 <FieldError messages={errors.leave_type_id} />
               </div>
 
@@ -287,47 +335,74 @@ export function NewRequestDialog({
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="start_half">Leave start</Label>
-                  <select
-                    id="start_half"
-                    name="start_half"
-                    defaultValue="MORNING"
-                    className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
-                    {DAY_HALVES.map((half) => (
-                      <option key={half} value={half}>
-                        {DAY_HALF_LABELS[half]}
-                      </option>
-                    ))}
-                  </select>
+                  <input type="hidden" name="start_half" value={startHalf} />
+                  <Select
+                    items={halfItems}
+                    value={startHalf}
+                    onValueChange={(value) => value !== null && setStartHalf(value as DayHalf)}
+                  >
+                    <SelectTrigger id="start_half" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DAY_HALVES.map((half) => (
+                        <SelectItem key={half} value={half}>
+                          {DAY_HALF_LABELS[half]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="text-2xs text-muted-foreground">Afternoon means you work the morning of that day.</p>
                   <FieldError messages={errors.start_half} />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="start_date">Start date</Label>
-                  <Input id="start_date" name="start_date" type="date" defaultValue={today} />
+                  <DatePicker
+                    id="start_date"
+                    name="start_date"
+                    value={startValue}
+                    onChange={setStartDate}
+                    clearable={false}
+                    invalid={Boolean(errors.start_date?.length)}
+                  />
                   <FieldError messages={errors.start_date} />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="end_half">Leave end</Label>
-                  <select
-                    id="end_half"
-                    name="end_half"
-                    defaultValue="AFTERNOON"
-                    className="h-9 w-full rounded-sm border bg-transparent px-3 text-sm shadow-raised focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none">
-                    {DAY_HALVES.map((half) => (
-                      <option key={half} value={half}>
-                        {DAY_HALF_LABELS[half]}
-                      </option>
-                    ))}
-                  </select>
+                  <input type="hidden" name="end_half" value={endHalf} />
+                  <Select
+                    items={halfItems}
+                    value={endHalf}
+                    onValueChange={(value) => value !== null && setEndHalf(value as DayHalf)}
+                  >
+                    <SelectTrigger id="end_half" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {DAY_HALVES.map((half) => (
+                        <SelectItem key={half} value={half}>
+                          {DAY_HALF_LABELS[half]}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   <p className="text-2xs text-muted-foreground">Morning means you are back for the afternoon.</p>
                   <FieldError messages={errors.end_half} />
                 </div>
 
                 <div className="space-y-2">
                   <Label htmlFor="end_date">End date</Label>
-                  <Input id="end_date" name="end_date" type="date" defaultValue={today} />
+                  <DatePicker
+                    id="end_date"
+                    name="end_date"
+                    value={endValue}
+                    onChange={setEndDate}
+                    min={startValue}
+                    clearable={false}
+                    invalid={Boolean(errors.end_date?.length)}
+                  />
                   <FieldError messages={errors.end_date} />
                 </div>
               </div>
@@ -341,7 +416,15 @@ export function NewRequestDialog({
                 {/* Today is allowed and capped there. Asking at 17:00 for the
                     evening you are about to work is the ordinary case; the
                     submit function says so too. */}
-                <Input id="work_date" name="work_date" type="date" max={today} defaultValue={workDate} />
+                <DatePicker
+                  id="work_date"
+                  name="work_date"
+                  value={correctionValue}
+                  onChange={setCorrectionDate}
+                  max={today}
+                  clearable={false}
+                  invalid={Boolean(errors.work_date?.length)}
+                />
                 <FieldError messages={errors.work_date} />
               </div>
 
@@ -385,7 +468,15 @@ export function NewRequestDialog({
                 {/* Capped at today. A correction for a day that has not happened
                     is refused by the submit function anyway; stopping it in the
                     picker saves the round trip. */}
-                <Input id="work_date" name="work_date" type="date" max={today} defaultValue={workDate} />
+                <DatePicker
+                  id="work_date"
+                  name="work_date"
+                  value={correctionValue}
+                  onChange={setCorrectionDate}
+                  max={today}
+                  clearable={false}
+                  invalid={Boolean(errors.work_date?.length)}
+                />
                 <FieldError messages={errors.work_date} />
               </div>
               <div className="space-y-2">

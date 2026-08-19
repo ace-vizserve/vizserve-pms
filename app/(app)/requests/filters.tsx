@@ -4,7 +4,7 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -101,12 +101,11 @@ export function RequestFilters({ forms }: { forms: { id: string; name: string }[
         <Label htmlFor="from" className="text-xs text-muted-foreground">
           Submitted from
         </Label>
-        <Input
+        <DatePicker
           id="from"
-          type="date"
           className="w-44"
-          defaultValue={params.get("from") ?? ""}
-          onChange={(e) => setParam("from", e.target.value)}
+          value={params.get("from")}
+          onChange={(value) => setParam("from", value ?? "")}
         />
       </div>
 
@@ -114,12 +113,12 @@ export function RequestFilters({ forms }: { forms: { id: string; name: string }[
         <Label htmlFor="to" className="text-xs text-muted-foreground">
           to
         </Label>
-        <Input
+        <DatePicker
           id="to"
-          type="date"
           className="w-44"
-          defaultValue={params.get("to") ?? ""}
-          onChange={(e) => setParam("to", e.target.value)}
+          value={params.get("to")}
+          onChange={(value) => setParam("to", value ?? "")}
+          min={params.get("from") ?? undefined}
         />
       </div>
 

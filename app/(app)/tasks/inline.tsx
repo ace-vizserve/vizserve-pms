@@ -6,10 +6,14 @@ import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Calendar } from "@/components/ui/calendar";
+import { toDateString } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
+
+import { DeleteTaskDialog } from "./delete-task-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TaskPriorityBadge } from "@/components/status-badge";
-import { formatDate } from "@/lib/dates";
+import { formatDate, parseDateOnly } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
   TASK_PRIORITIES,
@@ -94,6 +98,7 @@ export function TaskRowActions({
   title,
   priority,
   assignable = [],
+  deletable = false,
   children,
 }: {
   taskId: string;
@@ -101,6 +106,16 @@ export function TaskRowActions({
   priority: TaskPriority | null;
   /** Passed through to the subtask composer. */
   assignable?: Assignable[];
+  /**
+   * P7-19. Whether to offer the trash at all.
+   *
+   * Computed by the PAGE, not here, because it needs the viewer's seat and the
+   * task's `created_by` — and because the alternative is a control that always
+   * opens a dialog only to say no. `nav-projects.tsx` records what that costs:
+   * hiding a link protects nobody, but it stops offering a door that does not
+   * open. The database refuses regardless; this is about not asking.
+   */
+  deletable?: boolean;
   /** Anything view-specific — the status control on a board card. */
   children?: ReactNode;
 }) {
@@ -119,6 +134,8 @@ export function TaskRowActions({
       <InlineTitle taskId={taskId} title={title} />
       <InlinePriority taskId={taskId} value={priority} iconOnly />
       <AddSubtask parentId={taskId} assignable={assignable} />
+      {/* Last in the strip, and the only destructive thing in it. */}
+      {deletable ? <DeleteTaskDialog taskId={taskId} title={title} /> : null}
     </span>
   );
 }
@@ -292,10 +309,14 @@ export function InlinePriority({
 /**
  * A date, edited where it is read.
  *
- * A native `<input type="date">` behind a text trigger rather than the calendar
- * primitive: the value is one field, the browser's own picker is keyboard- and
- * locale-correct for free, and this appears on every row of a long list where a
- * mounted calendar per row would be absurd.
+ * ⚠️ THIS USED TO BE A NATIVE `<input type="date">`, on the reasoning that "a
+ * mounted calendar per row would be absurd". The concern was right and the
+ * conclusion was not: `PopoverContent` only mounts while it is open, so exactly
+ * one calendar exists at a time no matter how long the list is.
+ *
+ * The calendar is rendered DIRECTLY rather than through `DatePicker`, because
+ * this is already inside a Popover and nesting one inside another traps focus in
+ * the wrong layer and dismisses both on a single Escape.
  */
 export function InlineDate({
   taskId,
@@ -346,14 +367,14 @@ export function InlineDate({
 
       <PopoverContent align="start" className="w-auto p-2">
         <div className="flex items-center gap-1.5">
-          <Input
+          <Calendar
+            mode="single"
             autoFocus
-            type="date"
-            defaultValue={shown ?? ""}
-            disabled={pending}
             aria-label={label}
-            className="w-40"
-            onChange={(event) => commit(event.target.value)}
+            disabled={pending}
+            selected={shown ? (parseDateOnly(shown) ?? undefined) : undefined}
+            defaultMonth={shown ? (parseDateOnly(shown) ?? undefined) : undefined}
+            onSelect={(date) => date && commit(toDateString(date))}
           />
           {/* Clearing a date is a real instruction and a date input has no
               obvious way to express it — hence the explicit button. */}

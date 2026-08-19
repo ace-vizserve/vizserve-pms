@@ -6,7 +6,7 @@ import { Download } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -98,12 +98,15 @@ export function DtrToolbar({
         <Label htmlFor="dtr-from" className="text-xs text-muted-foreground">
           From
         </Label>
-        <Input
+        {/* Applied on pick rather than on blur — a calendar closes when you
+            choose, so there is no "leaving the field" moment to hang it on. */}
+        <DatePicker
           id="dtr-from"
-          type="date"
           value={range.from}
-          onChange={(event) => setRange((r) => ({ ...r, from: event.target.value }))}
-          onBlur={(event) => apply({ from: event.target.value })}
+          onChange={(value) => {
+            setRange((r) => ({ ...r, from: value ?? "" }));
+            apply({ from: value ?? "" });
+          }}
         />
       </div>
 
@@ -111,12 +114,14 @@ export function DtrToolbar({
         <Label htmlFor="dtr-to" className="text-xs text-muted-foreground">
           To
         </Label>
-        <Input
+        <DatePicker
           id="dtr-to"
-          type="date"
           value={range.to}
-          onChange={(event) => setRange((r) => ({ ...r, to: event.target.value }))}
-          onBlur={(event) => apply({ to: event.target.value })}
+          min={range.from || undefined}
+          onChange={(value) => {
+            setRange((r) => ({ ...r, to: value ?? "" }));
+            apply({ to: value ?? "" });
+          }}
         />
       </div>
 
