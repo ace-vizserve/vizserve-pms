@@ -74,6 +74,8 @@ export function ListManager({
 }) {
   const [editingList, setEditingList] = useState<ListRow | null>(null);
   const [listOpen, setListOpen] = useState(false);
+  /** P7-25. The folder a new list should start in, when opened from its heading. */
+  const [seedFolder, setSeedFolder] = useState<GroupRow | null>(null);
   const [editingGroup, setEditingGroup] = useState<GroupRow | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
 
@@ -122,6 +124,25 @@ export function ListManager({
 
   function createList() {
     setEditingList(null);
+    setSeedFolder(null);
+    setListOpen(true);
+  }
+
+  /**
+   * "Add a list" from a FOLDER heading, rather than from the page's own button.
+   *
+   * Without this the only route was the top-level New list button followed by
+   * picking the department and the folder again from scratch — on a screen that
+   * is already showing you the folder you meant. Since P7-25 the reserved
+   * Client Requests folder is a legitimate destination too, which made the
+   * missing control more obvious: there was no way to say "put it in here".
+   *
+   * Seeds the form rather than writing anything. Everything is still editable
+   * before Save, and `saveList` re-checks the department either way.
+   */
+  function addListTo(folder: GroupRow) {
+    setEditingList(null);
+    setSeedFolder(folder);
     setListOpen(true);
   }
 
@@ -180,15 +201,13 @@ export function ListManager({
             const folders = groupsByDepartment.get(department.id) ?? [];
 
             // A department with no folders and no loose lists has nothing to
-            // show. Its Client Requests folder alone does not count — every
-            // department has one, and an empty one is not news.
-            const worthShowing =
-              loose.length > 0 ||
-              folders.some(
-                (folder) =>
-                  !folder.is_system ||
-                  (listsByGroup.get(`${department.id}:${folder.id}`) ?? []).length > 0,
-              );
+            // show.
+            //
+            // ⚠️ The Client Requests folder USED TO NOT COUNT here — "every
+            // department has one, and an empty one is not news". Since P7-25 it
+            // is somewhere a lead can deliberately file client work, so an empty
+            // one IS news: it is the destination they are looking for.
+            const worthShowing = loose.length > 0 || folders.length > 0;
 
             if (!worthShowing) return null;
 
@@ -208,11 +227,14 @@ export function ListManager({
                 {folders.map((folder) => {
                   const folderLists = listsByGroup.get(`${department.id}:${folder.id}`) ?? [];
 
-                  // The reserved folder is hidden until it holds something.
-                  // Every department has one from the migration's backfill, and
-                  // a permanently empty CLIENT REQUESTS on every team's screen
-                  // teaches people to stop reading the headings.
-                  if (folder.is_system && folderLists.length === 0) return null;
+                  // ⚠️ The reserved folder USED TO BE HIDDEN while empty, on
+                  // the grounds that a permanently empty CLIENT REQUESTS on
+                  // every team's screen teaches people to stop reading the
+                  // headings. That held while nothing could be put in it by
+                  // hand. Since P7-25 it is a place a lead deliberately files
+                  // client work, and a destination you cannot see is a
+                  // destination nobody uses — so it now renders with an empty
+                  // state like any other folder.
 
                   return (
                     <div key={folder.id} className="mt-4">
@@ -226,6 +248,22 @@ export function ListManager({
                             Archived
                           </span>
                         ) : null}
+
+                        {/* P7-25 — add a list straight into THIS folder.
+                            Every folder takes lists, the reserved one included
+                            since the guard was relaxed, so this control is
+                            unconditional. It is the pencil's neighbour rather
+                            than a row at the bottom of the folder: the heading
+                            is what you are pointing at when you decide. */}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="size-6 p-0"
+                          onClick={() => addListTo(folder)}
+                        >
+                          <Plus className="size-3.5" />
+                          <span className="sr-only">Add a list to {folder.name}</span>
+                        </Button>
 
                         {/* No pencil on the reserved folder. It cannot be
                             renamed, archived or deleted, so the control could
@@ -273,8 +311,9 @@ export function ListManager({
               first one's name across. */}
           {listOpen ? (
             <ListForm
-              key={editingList?.id ?? "new"}
+              key={editingList?.id ?? `new:${seedFolder?.id ?? "none"}`}
               list={editingList}
+              seedFolder={seedFolder}
               departments={departments}
               groups={groups}
               openCount={editingList ? (openCounts[editingList.id] ?? 0) : 0}
@@ -359,12 +398,22 @@ function ListRows({
 
 function ListForm({
   list,
+  seedFolder,
   departments,
   groups,
   openCount,
   onDone,
 }: {
   list: ListRow | null;
+  /**
+   * P7-25. The folder this form was opened FROM, when it was opened from a
+   * folder heading rather than the page's New list button.
+   *
+   * Only ever read on a NEW list — editing an existing one takes its folder
+   * from the row, and letting a seed override that would silently move a list
+   * somebody opened to rename.
+   */
+  seedFolder: GroupRow | null;
   departments: Department[];
   groups: GroupRow[];
   openCount: number;
@@ -375,8 +424,13 @@ function ListForm({
 
   const [name, setName] = useState(list?.name ?? "");
   const [description, setDescription] = useState(list?.description ?? "");
-  const [departmentId, setDepartmentId] = useState(list?.department_id ?? departments[0]!.id);
-  const [groupId, setGroupId] = useState(list?.group_id ?? NO_FOLDER);
+  // The seeded folder decides the department too — a folder belongs to one, and
+  // landing on a department the folder is not in would make the folder vanish
+  // from the picker the moment the dialog opened.
+  const [departmentId, setDepartmentId] = useState(
+    list?.department_id ?? seedFolder?.department_id ?? departments[0]!.id,
+  );
+  const [groupId, setGroupId] = useState(list?.group_id ?? seedFolder?.id ?? NO_FOLDER);
   const [isActive, setIsActive] = useState(list?.is_active ?? true);
   const [sortOrder, setSortOrder] = useState(String(list?.sort_order ?? 0));
   const [error, setError] = useState<string | null>(null);
@@ -385,15 +439,24 @@ function ListForm({
   const isFormList = Boolean(list?.form_id);
 
   /*
-   * Only this department's own folders, and never the reserved one.
+   * This department's own folders, INCLUDING the reserved one.
    *
-   * Offering another department's would be offering a guaranteed rejection —
-   * `vizserve_pms_lists_group_guard` answers "That folder belongs to another
-   * department." Offering Client Requests would be worse, because the refusal
-   * arrives only after the whole form is filled in.
+   * ⚠️ `!group.is_system` USED TO BE IN THIS FILTER and its removal is the
+   * point of P7-25. The old comment read "Offering Client Requests would be
+   * worse, because the refusal arrives only after the whole form is filled in"
+   * — true while `vizserve_pms_lists_group_guard` refused a hand-made list
+   * there. It no longer does.
+   *
+   * A lead approving a client request wants a list for that work, and Client
+   * Requests is the folder client work belongs in. Excluding it meant client
+   * work had to be filed under a folder named after something else.
+   *
+   * The department filter STAYS. Offering another department's folder is still
+   * a guaranteed rejection — the guard answers "That folder belongs to another
+   * department."
    */
   const folders = groups.filter(
-    (group) => group.department_id === departmentId && !group.is_system && group.is_active,
+    (group) => group.department_id === departmentId && group.is_active,
   );
 
   /*
@@ -541,7 +604,7 @@ function ListForm({
               ? "Fixed — this list is a form's inbox and lives in Client Requests."
               : folders.length === 0
                 ? "This department has no folders yet. A list is fine without one."
-                : "A list can sit in a folder or on its own."}
+                : "A list can sit in a folder or on its own. Client Requests is where client work goes."}
           </p>
         </div>
 

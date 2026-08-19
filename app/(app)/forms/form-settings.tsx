@@ -97,6 +97,24 @@ export function FormSettings({
   const ownListLabel = (list: List) =>
     list.form_id === formId ? `${list.name} — this form's list` : list.name;
 
+  /*
+   * P7-24 — SAY WHERE REQUESTS ACTUALLY LAND.
+   *
+   * The bug this exists to stop repeating: a form's own inbox list sat empty in
+   * Client Requests while every approved request went to a different list, and
+   * nothing on any screen said so. It took an afternoon to work out from the
+   * outside, because the list was correctly named and correctly filed — it was
+   * simply not the one being used.
+   *
+   * P7-24 repairs the case that is never intentional (a default pointing at
+   * ANOTHER form's inbox). This covers the case that IS legitimate and still
+   * surprising: routing to an ordinary project list, which leaves this form's
+   * own list permanently empty.
+   */
+  const ownList = departmentLists.find((list) => list.form_id === formId) ?? null;
+  const chosenListId = watch("default_list_id") ?? null;
+  const routedElsewhere = Boolean(ownList && chosenListId && chosenListId !== ownList.id);
+
   // value → label maps for the two Selects below. Without these, Base UI's
   // Select.Value falls back to rendering the raw value, and these two are the
   // worst case of that: a bare UUID and the literal string "__none__".
@@ -257,6 +275,24 @@ export function FormSettings({
               ? "This department has no lists yet."
               : "Where approved requests land. This form has a list of its own in Client Requests; pick another only if you want them filed elsewhere. The reviewer can still change it per request."}
           </p>
+
+          {/* Stated out loud, with the way back. A form routed away from its own
+              list is a legitimate choice — but it leaves that list empty
+              forever, and somebody opening it and finding nothing has no way to
+              tell that from a bug. */}
+          {routedElsewhere && ownList ? (
+            <p className="rounded-md border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-foreground">
+              Requests from this form do <strong>not</strong> go to its own list
+              (&ldquo;{ownList.name}&rdquo;), which will stay empty.{" "}
+              <button
+                type="button"
+                className="font-medium underline underline-offset-2"
+                onClick={() => setValue("default_list_id", ownList.id, { shouldDirty: true })}
+              >
+                Send them there instead
+              </button>
+            </p>
+          ) : null}
         </div>
 
         <div className="space-y-2">

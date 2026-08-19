@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertTriangle, ChevronRight } from "lucide-react";
+import { AlertTriangle, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
 
 import {
@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { formatDate, isOverdue } from "@/lib/dates";
 import type { CapacityRow } from "@/lib/schemas/approvals";
 
+import { saveList } from "../../tasks/actions";
 import { decideOnRequest } from "./actions";
 
 /**
@@ -47,7 +48,6 @@ type Person = { id: string; full_name: string; role: string };
 type List = { id: string; name: string };
 
 const NO_QA = "__none__";
-const NO_LIST = "__none__";
 
 export function ReviewPanel({
   requestId,
@@ -60,6 +60,8 @@ export function ReviewPanel({
   currentUserName,
   lists,
   defaultListId,
+  departmentId,
+  clientFolderId,
 }: {
   requestId: string;
   requestTitle: string;
@@ -73,6 +75,19 @@ export function ReviewPanel({
   /** P2-06. Empty when the department has not organised itself into lists. */
   lists: List[];
   defaultListId: string | null;
+  /** P7-23. Which department a list created from here belongs to. */
+  departmentId: string;
+  /**
+   * P7-25. The department's Client Requests folder.
+   *
+   * A list created during the approval belongs with the client work, not loose
+   * under the department — which is where it landed before this, because
+   * `saveList` was called with no `group_id` at all.
+   *
+   * Null only if the department somehow has no reserved folder; the list is
+   * still created, just folderless, rather than the creation failing.
+   */
+  clientFolderId: string | null;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -83,8 +98,20 @@ export function ReviewPanel({
   // no second pair of eyes, which is the failure this gate exists to prevent.
   const [qaAssigneeId, setQaAssigneeId] = useState<string>(currentUserId);
   const [approvedDate, setApprovedDate] = useState<string>(targetDate ?? "");
-  // P2-06 — seeded from the form's default, overridable here.
-  const [listId, setListId] = useState<string>(defaultListId ?? NO_LIST);
+  /*
+   * P2-06 — seeded from the form's default, overridable here.
+   *
+   * P7-23: the empty string is "nothing chosen yet", NOT a "no list" option.
+   * The Select shows its placeholder on it and `approve()` refuses it, which is
+   * the same shape as the PIC field above and the same rule the database now
+   * enforces.
+   */
+  const [listId, setListId] = useState<string>(defaultListId ?? "");
+  // Lists created from here are added locally rather than waiting on a refresh,
+  // so the one somebody just made is selected and selectable immediately.
+  const [extraLists, setExtraLists] = useState<List[]>([]);
+  const [creatingList, setCreatingList] = useState(false);
+  const [newListName, setNewListName] = useState("");
 
   /*
    * value → label maps for the three Selects below.
@@ -109,10 +136,9 @@ export function ReviewPanel({
         .map((person) => [person.id, person.full_name]),
     ),
   };
-  const listItems = {
-    [NO_LIST]: "No list",
-    ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
-  };
+  // The department's lists plus anything created here this session.
+  const options = [...lists, ...extraLists];
+  const listItems = Object.fromEntries(options.map((list) => [list.id, list.name]));
   const [title, setTitle] = useState(requestTitle);
   const [description, setDescription] = useState(requestDescription);
 
@@ -146,13 +172,66 @@ export function ReviewPanel({
     });
   }
 
+  /**
+   * P7-23 — create a list without leaving the review.
+   *
+   * `saveList` is the SAME action /tasks/lists uses, called with a null id to
+   * mean "new". Not a second creation path: a lighter one here would be a
+   * second set of rules to keep in step with the first, and this one already
+   * checks the department is in scope and maps the unique-name collision to a
+   * sentence.
+   */
+  function addList() {
+    const name = newListName.trim();
+
+    if (!name) {
+      toast.error("Give the list a name.");
+      return;
+    }
+
+    setFormError(null);
+    startTransition(async () => {
+      const result = await saveList(null, {
+        department_id: departmentId,
+        name,
+        description: "",
+        is_active: true,
+        sort_order: 0,
+        // P7-25. Client Requests, so the list appears with the client work in
+        // the sidebar rather than hanging loose under the department.
+        group_id: clientFolderId,
+      });
+
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      // Selected straight away. Creating a list and then having to find it in
+      // the dropdown is the step that makes people not bother.
+      setExtraLists((current) => [...current, { id: result.data.id, name }]);
+      setListId(result.data.id);
+      setNewListName("");
+      setCreatingList(false);
+      toast.success(`"${name}" created.`);
+    });
+  }
+
   function approve() {
+    // Mirrors the raise in `vizserve_pms_approve_request`. The database is the
+    // authority; this is so the reviewer is told before the round trip rather
+    // than after it.
+    if (!listId) {
+      setFormError("Choose the list this task will go under.");
+      return;
+    }
+
     run({
       decision: "approved",
       assignee_id: assigneeId || undefined,
       qa_assignee_id: qaAssigneeId === NO_QA ? null : qaAssigneeId,
       approved_target_date: approvedDate || null,
-      list_id: listId === NO_LIST ? null : listId,
+      list_id: listId,
       // Only send an edit if it is one. Null means unchanged.
       title: title.trim() !== requestTitle ? title.trim() : null,
       description: description.trim() !== requestDescription ? description.trim() : null,
@@ -264,27 +343,80 @@ export function ReviewPanel({
           {lists.length > 0 ? (
             <div className="space-y-2">
               <Label htmlFor="list">List</Label>
+              {/* P7-23 — "No list" is gone. It was the only way to approve a
+                  request into a task belonging to nowhere: absent from
+                  /tasks/lists, in no folder, findable only by scrolling the flat
+                  list. `vizserve_pms_approve_request` now refuses a null list,
+                  so offering the option would be offering a button that errors. */}
               <Select
                 items={listItems}
                 value={listId}
                 onValueChange={(v) => v !== null && setListId(v)}
               >
                 <SelectTrigger id="list" className="w-64">
-                  <SelectValue />
+                  <SelectValue placeholder="Choose a list" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={NO_LIST}>No list</SelectItem>
-                  {lists.map((list) => (
+                  {options.map((list) => (
                     <SelectItem key={list.id} value={list.id}>
                       {list.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+
+              {/* Creating one WITHOUT LEAVING THE APPROVAL. The alternative is
+                  telling somebody mid-decision to open /tasks/lists in another
+                  tab, make a list, come back and start the review again — at
+                  which point they pick whatever list already exists instead,
+                  which is how work ends up in the wrong place. */}
+              {creatingList ? (
+                <div className="flex items-center gap-1.5">
+                  <Input
+                    autoFocus
+                    value={newListName}
+                    disabled={pending}
+                    placeholder="New list name"
+                    aria-label="Name for the new list"
+                    className="h-9"
+                    onChange={(event) => setNewListName(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault();
+                        addList();
+                      }
+                      if (event.key === "Escape") setCreatingList(false);
+                    }}
+                  />
+                  <Button size="sm" onClick={addList} loading={pending}>
+                    Create
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    disabled={pending}
+                    onClick={() => setCreatingList(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setCreatingList(true)}
+                  className="self-start text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
+                >
+                  <Plus className="mr-0.5 inline size-3" aria-hidden />
+                  New list
+                </button>
+              )}
+
               <p className="text-xs text-muted-foreground">
-                {defaultListId
-                  ? "Pre-filled from the form's default."
-                  : "This form has no default list."}
+                {options.length === 0
+                  ? "This department has no lists yet — create one to approve."
+                  : defaultListId
+                    ? "Pre-filled from the form's default."
+                    : "This form has no default list, so pick one."}
               </p>
             </div>
           ) : null}

@@ -1,15 +1,15 @@
+import { ArrowLeft } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/authorization";
-import { createClient } from "@/utils/supabase/server";
-import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
-import { RequestStatusBadge } from "@/components/status-badge";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
+import { RequestStatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireRole } from "@/lib/auth/authorization";
+import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
+import { createClient } from "@/utils/supabase/server";
 
 import { AttachmentList } from "./attachment-list";
 import { ReviewPanel } from "./review-panel";
@@ -33,11 +33,7 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-export default async function RequestDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default async function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const context = await requireRole("team_leader");
   const supabase = await createClient();
@@ -67,7 +63,7 @@ export default async function RequestDetailPage({
   // Loaded only when the panel will render — the capacity query is a scan over
   // the department's open tasks and there is no reason to pay for it on a
   // request that was decided last week.
-  const [candidates, capacity, decisions, lists] = awaitingDecision
+  const [candidates, capacity, decisions, lists, clientFolder] = awaitingDecision
     ? await Promise.all([
         supabase
           .from("vizserve_pms_users")
@@ -87,6 +83,24 @@ export default async function RequestDetailPage({
           .eq("is_active", true)
           .order("sort_order")
           .order("name"),
+        /*
+         * P7-25 — where a list created DURING the approval goes.
+         *
+         * Without this the inline creator called `saveList` with no `group_id`
+         * and the list hung loose under the department, outside every folder —
+         * so a lead who made a list for a piece of client work found it filed
+         * nowhere near the client work.
+         *
+         * The reserved folder, by its flag rather than by its name: the name is
+         * refused a rename by trigger, but matching on a string would still be
+         * matching on a label where a boolean exists.
+         */
+        supabase
+          .from("vizserve_pms_task_groups")
+          .select("id")
+          .eq("department_id", form?.department_id ?? "")
+          .eq("is_system", true)
+          .maybeSingle(),
       ])
     : [
         { data: null },
@@ -97,6 +111,10 @@ export default async function RequestDetailPage({
           .eq("entity_type", "request")
           .eq("entity_id", id)
           .order("created_at", { ascending: false }),
+        { data: null },
+        // Fifth slot, matching the branch above. A decided request renders no
+        // review panel, so neither the lists nor the folder are ever read —
+        // but the tuple has to have the same shape either way.
         { data: null },
       ];
 
@@ -122,11 +140,10 @@ export default async function RequestDetailPage({
     return String(raw);
   }
 
-  const negotiated =
-    request.approved_target_date && request.approved_target_date !== request.target_date;
+  const negotiated = request.approved_target_date && request.approved_target_date !== request.target_date;
 
   return (
-    <PageShell className="mx-auto w-full max-w-3xl">
+    <PageShell className="mx-auto w-full max-w-4xl">
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={request.reference_no} />
@@ -134,8 +151,7 @@ export default async function RequestDetailPage({
       <div>
         <Link
           href="/requests"
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-        >
+          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
           <ArrowLeft className="size-3.5" />
           Requests
         </Link>
@@ -247,6 +263,12 @@ export default async function RequestDetailPage({
           currentUserName={context.fullName}
           lists={lists?.data ?? []}
           defaultListId={form?.default_list_id ?? null}
+          // P7-23. The form's department, not the viewer's: a list created
+          // during the review has to belong where the task will.
+          departmentId={form?.department_id ?? ""}
+          // P7-25. The department's Client Requests folder, so a list made here
+          // lands with the client work rather than loose under the department.
+          clientFolderId={(clientFolder?.data as { id: string } | null)?.id ?? null}
         />
       ) : decisions?.data && decisions.data.length > 0 ? (
         <Card>
@@ -265,9 +287,7 @@ export default async function RequestDetailPage({
                   </span>
                 </p>
                 {decision.reason ? (
-                  <p className="whitespace-pre-wrap rounded-sm bg-muted/50 px-3 py-2 text-sm">
-                    {decision.reason}
-                  </p>
+                  <p className="whitespace-pre-wrap rounded-sm bg-muted/50 px-3 py-2 text-sm">{decision.reason}</p>
                 ) : null}
               </div>
             ))}
