@@ -90,27 +90,59 @@ describe.skipIf(!dbTestsEnabled)("P0-12 scope suite", () => {
   // Users table — the core scope assertion
   // -------------------------------------------------------------------------
   describe("vizserve_pms_users visibility", () => {
-    it("a member sees exactly one row — their own", async () => {
+    /**
+     * ⚠️ THESE TWO ASSERTED "EXACTLY ONE ROW" UNTIL P7-17, and the widening was
+     * deliberate — the migration states the cost in its own header.
+     *
+     * P0-06 read this table as "yourself, or anyone in a department you MANAGE,
+     * or everything if you are an admin". A member manages nothing, so they saw
+     * one row. P7-14 then gave members the right to create and reassign work to
+     * a colleague, and never widened this — so the assignee picker was empty for
+     * exactly the people that migration was written for. The capability was real
+     * and unusable.
+     *
+     * The boundary that still matters is the DEPARTMENT one, which is what these
+     * now assert. A test left saying "exactly one" would have gone red on every
+     * run since P7-17 and taught people to ignore this file.
+     */
+    it("a member sees their own department, and only their own", async () => {
       const { client, userId } = await signIn("member1VizBytes");
-      const { data, error } = await client.from("vizserve_pms_users").select("id, email");
+      const { data, error } = await client
+        .from("vizserve_pms_users")
+        .select("id, email, primary_department_id");
 
       expect(error).toBeNull();
-      expect(data).toHaveLength(1);
-      expect(data![0]!.id).toBe(userId);
+      expect(data!.map((row) => row.id)).toContain(userId);
+
+      // The line P7-17 drew. Everyone visible is in the viewer's department —
+      // no admin, no manager of another team, nobody unrouted.
+      for (const row of data!) {
+        expect(row.primary_department_id).toBe(DEPARTMENTS.VizBytes);
+      }
     });
 
-    it("a member sees zero rows for a colleague, not an error", async () => {
-      // The distinction the grants incident turned on: a failing POLICY returns
-      // zero rows; a missing GRANT says permission denied. This must be the
-      // former.
+    it("a member sees a colleague, and still not somebody in another department", async () => {
       const { client } = await signIn("member1VizBytes");
-      const { data, error } = await client
+
+      // P7-17's whole purpose: the assignee picker has somebody in it.
+      const { data: colleague, error } = await client
         .from("vizserve_pms_users")
         .select("id")
         .eq("email", ACCOUNTS.member2VizBytes);
 
       expect(error).toBeNull();
-      expect(data).toEqual([]);
+      expect(colleague).toHaveLength(1);
+
+      // And the distinction the grants incident turned on: a failing POLICY
+      // returns zero rows, a missing GRANT says permission denied. Crossing a
+      // department must still be the former.
+      const { data: outsider, error: outsiderError } = await client
+        .from("vizserve_pms_users")
+        .select("id")
+        .eq("email", ACCOUNTS.member1VizAssists);
+
+      expect(outsiderError).toBeNull();
+      expect(outsider).toEqual([]);
     });
 
     it("a TL sees their own department and not another", async () => {
@@ -198,10 +230,19 @@ describe.skipIf(!dbTestsEnabled)("P0-12 scope suite", () => {
         const { data: claimed } = await client.auth.getUser();
         expect(claimed.user?.user_metadata?.role).toBe("admin");
 
-        const { data, error } = await client.from("vizserve_pms_users").select("id");
+        const { data, error } = await client
+          .from("vizserve_pms_users")
+          .select("id, primary_department_id");
         expect(error).toBeNull();
-        expect(data).toHaveLength(1);
-        expect(data![0]!.id).toBe(userId);
+        expect(data!.map((row) => row.id)).toContain(userId);
+
+        // The claim is what makes this test mean anything: a member reads their
+        // DEPARTMENT (P7-17) and nothing beyond it, whatever their metadata
+        // says. If the tampered role were believed, this would be every user in
+        // the company rather than one team.
+        for (const row of data!) {
+          expect(row.primary_department_id).toBe(DEPARTMENTS.VizBytes);
+        }
 
         // And it buys nothing on the audit log either.
         const { data: auditRows } = await client

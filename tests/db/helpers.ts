@@ -36,6 +36,20 @@ export const ACCOUNTS = {
   member1VizBytes: "test.member1.vizbytes@example.com",
   member2VizBytes: "test.member2.vizbytes@example.com",
   member1VizAssists: "test.member1.vizassists@example.com",
+  // Seeded like the rest. Exposed for `app-access.test.ts`, which revokes the
+  // account it signs in as — so a second case in that file needs a second
+  // account, or it is testing a user the previous case already locked out.
+  member2VizAssists: "test.member2.vizassists@example.com",
+  /**
+   * VIZBOOKS IS THE QUIET DEPARTMENT, and that is why this one is here.
+   *
+   * `timesheet.test.ts` has to TRANSFER a member between departments to reach
+   * the only state P7-17 leaves where somebody holds hours against a task they
+   * cannot see. A transfer is a mutation of a shared row, vitest runs files in
+   * parallel, and every other member account is signed in — or revoked — by
+   * some other file. Nothing else touches a VizBooks member.
+   */
+  member2VizBooks: "test.member2.vizbooks@example.com",
 } as const;
 
 export type AccountKey = keyof typeof ACCOUNTS;

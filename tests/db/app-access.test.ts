@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, it } from "vitest";
 
-import { adminClient, dbTestsEnabled, signIn, skipReason } from "./helpers";
+import { DEPARTMENTS, adminClient, dbTestsEnabled, signIn, skipReason } from "./helpers";
 
 /**
  * The app access gate.
@@ -38,8 +38,16 @@ async function revokeAccess(userId: string) {
 }
 
 describe.skipIf(!dbTestsEnabled)("app access gate", () => {
+  /** Fixtures this file creates, torn down with the access it revoked. */
+  const createdTasks: string[] = [];
+
   afterAll(async () => {
     const admin = adminClient();
+
+    if (createdTasks.length > 0) {
+      await admin.from("vizserve_pms_tasks").delete().in("id", createdTasks);
+    }
+
     for (const userId of touched) {
       await admin
         .from("vizserve_pms_users")
@@ -75,7 +83,67 @@ describe.skipIf(!dbTestsEnabled)("app access gate", () => {
       // Not even their own profile row: `users read own profile` is the one
       // policy that does not go through current_role(), so this proves the
       // reader itself is what stops.
+      //
+      // ⚠️ THIS CAUGHT P7-30. It went red when P7-17 added a SECOND policy that
+      // skips current_role() — `users read own department`, reading
+      // `vizserve_pms_my_department()`, which checked `is_active` and not
+      // `app_access`. A revoked user kept reading their whole department by
+      // name. The claim in the comment at the top of this case is the one the
+      // system makes about itself, so the test was right and the code was not.
       expect(own?.length ?? 0).toBeLessThanOrEqual(1);
+    });
+
+    it.skipIf(!migrationApplied)("closes the department's work too — P7-30", async () => {
+      /*
+       * THE SECOND HOLE, which nothing asked about.
+       *
+       * P7-17 gave `vizserve_pms_tasks` the same department clause off the same
+       * ungated function, so a revoked user could still read every non-personal
+       * task in their department — client work included. Only the users table
+       * had a test watching it.
+       *
+       * Pinned separately from the case above because they are two policies on
+       * two tables, and the whole reason P7-30 fixes the FUNCTION rather than
+       * each policy is that the next one written this way inherits the fix. A
+       * test per table is what tells you whether that held.
+       */
+      const { client, userId } = await signIn("member2VizAssists");
+
+      // A task of their own to see, made here rather than assumed. Without it
+      // this case passes on a department that simply has no tasks — which is
+      // the worst kind of green, since it reports a closed gate either way.
+      const lead = await signIn("tlVizAssists");
+      const { data: created, error: madeTask } = await lead.client.rpc("vizserve_pms_create_task", {
+        p_department_id: DEPARTMENTS.VizAssists,
+        p_title: `P7-30 fixture ${Math.random().toString(36).slice(2, 8)}`,
+        p_description: "Department work, visible until access is revoked.",
+        p_assignee_id: lead.userId,
+        p_qa_assignee_id: null,
+        p_due_date: "2026-12-01",
+        p_list_id: null,
+      });
+      expect(madeTask).toBeNull();
+      const taskId = (created as { task_id: string }).task_id;
+      createdTasks.push(taskId);
+
+      // P7-17 — they can see it because it is their department's, and they are
+      // on neither side of it. That IS the visibility P7-30 has to close.
+      const { data: before } = await client
+        .from("vizserve_pms_tasks")
+        .select("id")
+        .eq("id", taskId);
+      expect(before).toHaveLength(1);
+
+      await revokeAccess(userId);
+
+      const { data: tasks, error } = await client
+        .from("vizserve_pms_tasks")
+        .select("id")
+        .eq("id", taskId);
+
+      // Zero rows, not an error — a working policy, not a missing grant.
+      expect(error).toBeNull();
+      expect(tasks).toEqual([]);
     });
 
     it.skipIf(!migrationApplied)(

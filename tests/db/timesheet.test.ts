@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, todayInAppZone } from "@/lib/dates";
 
 import {
+  ACCOUNTS,
   DEPARTMENTS,
   adminClient,
   dbTestsEnabled,
@@ -399,36 +400,95 @@ describe.skipIf(!run)("P6-01 — anon is locked out", () => {
 // figure derived from them.
 // ---------------------------------------------------------------------------
 describe.skipIf(!run)("entries survive losing sight of their task", () => {
-  it("keeps returning the entry after the task is reassigned away", async () => {
-    const { client } = await signIn("member1VizBytes");
-    const qa = await signIn("member2VizBytes");
-    await clearEntries(picId);
+  /** Put back whatever the transfer below moved, whether or not it asserted. */
+  let transferred: { id: string; department: string } | null = null;
 
-    const taskId = await makeTask(picId, null);
+  afterAll(async () => {
+    if (!run || !transferred) return;
+    await adminClient()
+      .from("vizserve_pms_users")
+      .update({ primary_department_id: transferred.department })
+      .eq("id", transferred.id);
+  });
 
-    const { error: logged } = await client.from("vizserve_pms_timesheet_entries").insert({
-      user_id: picId,
+  it("keeps returning the entry after the owner transfers out of the department", async () => {
+    /*
+     * ⚠️ THIS USED TO REASSIGN THE TASK TO A COLLEAGUE, and P7-17 made that stop
+     * putting it out of scope — a member now reads every non-personal task in
+     * their own department, so the original PIC could still see it and the case
+     * quietly stopped testing anything.
+     *
+     * Everything simpler was tried and is genuinely unreachable now:
+     *
+     *   move the task            `department_id` and `is_personal` sit outside
+     *                            the column grant, deliberately
+     *   borrow somebody          `add_task_assignee` refuses anyone whose
+     *                            department is not the task's
+     *   log from outside         `may_log_time` IS `is_on_task`
+     *
+     * Which leaves one route, and it is a real one: somebody transfers teams
+     * and their old hours must not vanish from their own timesheet. A VizBooks
+     * member is used because the transfer mutates a shared row and no other
+     * file touches that department.
+     */
+    const worker = await signIn("member2VizBooks");
+    const lead = await signIn("tlVizBooks");
+    await clearEntries(worker.userId);
+
+    const { data: created, error: madeTask } = await lead.client.rpc("vizserve_pms_create_task", {
+      p_department_id: DEPARTMENTS.VizBooks,
+      p_title: `P6 transfer fixture ${Math.random().toString(36).slice(2, 8)}`,
+      p_description: "Their work, until they moved teams.",
+      p_assignee_id: worker.userId,
+      p_qa_assignee_id: null,
+      p_due_date: "2026-12-01",
+      p_list_id: null,
+    });
+    expect(madeTask).toBeNull();
+
+    const taskId = (created as { task_id: string }).task_id;
+    createdTasks.push(taskId);
+
+    const { error: logged } = await worker.client.from("vizserve_pms_timesheet_entries").insert({
+      user_id: worker.userId,
       task_id: taskId,
       work_date: today,
       minutes: 120,
     });
     expect(logged).toBeNull();
 
-    // The lead moves the work to somebody else. Ordinary, and nothing about it
-    // should touch hours that were already spent.
-    const lead = await signIn("tlVizBytes");
-    const { error: reassigned } = await lead.client
-      .from("vizserve_pms_tasks")
-      .update({ assignee_id: qa.userId })
-      .eq("id", taskId);
-    expect(reassigned).toBeNull();
+    // They move teams, and the work stays behind with somebody who is still on
+    // it. Both halves are needed: the department clause AND `assignee_id` have
+    // to stop matching, or the task is still in sight.
+    transferred = { id: worker.userId, department: DEPARTMENTS.VizBooks };
 
-    // The task itself is now out of scope for the original PIC. Expected.
-    const { data: taskRows } = await client
+    const { error: moved } = await adminClient()
+      .from("vizserve_pms_users")
+      .update({ primary_department_id: DEPARTMENTS.VizMedia })
+      .eq("id", worker.userId);
+    expect(moved).toBeNull();
+
+    const { error: handedOver } = await adminClient()
+      .from("vizserve_pms_tasks")
+      .update({ assignee_id: lead.userId })
+      .eq("id", taskId);
+    expect(handedOver).toBeNull();
+
+    // A fresh session, so the transfer is certainly in play rather than being
+    // read through a token minted before it.
+    const after = await signIn("member2VizBooks");
+
+    // The task is now out of scope for them: not the assignee, not the
+    // reviewer, not on the join table, not in their department. This is the
+    // state the rest of the case depends on.
+    const { data: taskRows } = await after.client
       .from("vizserve_pms_tasks")
       .select("id")
       .eq("id", taskId);
     expect(taskRows).toHaveLength(0);
+
+    const client = after.client;
+    const picId = worker.userId;
 
     // The ENTRY must still be theirs. This is the policy doing its job.
     const { data: plain } = await client
