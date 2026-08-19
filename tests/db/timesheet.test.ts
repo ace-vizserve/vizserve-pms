@@ -411,7 +411,7 @@ describe.skipIf(!run)("entries survive losing sight of their task", () => {
       .eq("id", transferred.id);
   });
 
-  it("keeps returning the entry after the owner transfers out of the department", async () => {
+  it("keeps returning the entry after the owner leaves the department", async () => {
     /*
      * ⚠️ THIS USED TO REASSIGN THE TASK TO A COLLEAGUE, and P7-17 made that stop
      * putting it out of scope — a member now reads every non-personal task in
@@ -426,10 +426,10 @@ describe.skipIf(!run)("entries survive losing sight of their task", () => {
      *                            department is not the task's
      *   log from outside         `may_log_time` IS `is_on_task`
      *
-     * Which leaves one route, and it is a real one: somebody transfers teams
+     * Which leaves one route, and it is a real one: somebody leaves the team
      * and their old hours must not vanish from their own timesheet. A VizBooks
-     * member is used because the transfer mutates a shared row and no other
-     * file touches that department.
+     * member is used because this mutates a shared row and no other file signs
+     * in as one.
      */
     const worker = await signIn("member2VizBooks");
     const lead = await signIn("tlVizBooks");
@@ -457,14 +457,24 @@ describe.skipIf(!run)("entries survive losing sight of their task", () => {
     });
     expect(logged).toBeNull();
 
-    // They move teams, and the work stays behind with somebody who is still on
-    // it. Both halves are needed: the department clause AND `assignee_id` have
-    // to stop matching, or the task is still in sight.
+    /*
+     * They leave the department, and the work stays behind with somebody who is
+     * still on it. Both halves are needed: the department clause AND
+     * `assignee_id` have to stop matching, or the task is still in sight.
+     *
+     * ⚠️ MOVED TO NULL, NOT TO ANOTHER DEPARTMENT. Parking them in one for the
+     * duration is visible to every other file running in parallel —
+     * `approval-engine` and `tasks` both select users by
+     * `primary_department_id`, and an extra body in the result is a flake that
+     * appears in whichever suite happens to overlap. Null belongs to nobody's
+     * query, and "no longer in that department" is the whole of what this case
+     * needs to say.
+     */
     transferred = { id: worker.userId, department: DEPARTMENTS.VizBooks };
 
     const { error: moved } = await adminClient()
       .from("vizserve_pms_users")
-      .update({ primary_department_id: DEPARTMENTS.VizMedia })
+      .update({ primary_department_id: null })
       .eq("id", worker.userId);
     expect(moved).toBeNull();
 
