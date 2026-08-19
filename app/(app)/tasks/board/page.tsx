@@ -624,35 +624,98 @@ export default async function TaskBoardPage({
                           ) : null}
                         </BoardCard>
                           }>
-                          {(childrenByParent.get(task.id) ?? []).map((child) => (
-                            /*
-                              A SUBTASK CARD, and deliberately not a `BoardCard`.
-                              No drag handle: its stage follows the work it
-                              belongs to, and dragging one into another column is
-                              the exact move the nesting exists to prevent. It
-                              keeps its status control, because finishing one is
-                              a real thing to do — and finishing it is what takes
-                              it out of here.
-                            */
-                            <div
-                              key={child.id}
-                              className="group/task flex items-start gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
-                              <Link
-                                href={`/tasks/${child.id}`}
-                                className="line-clamp-2 min-w-0 flex-1 text-2xs leading-snug hover:underline">
-                                {child.title}
-                              </Link>
-                              <TaskStatusSelect
-                                taskId={child.id}
-                                status={child.status}
-                                viewer={seat(child)}
-                                task={child}
-                                resolutionMissing={!child.resolution?.trim()}
-                                variant="compact"
-                                align="end"
-                              />
-                            </div>
-                          ))}
+                          {(childrenByParent.get(task.id) ?? []).map((child) => {
+                            const childPic = child.assignee_id ? nameOf.get(child.assignee_id) : null;
+                            const childLate = isOverdue(child.due_date);
+
+                            return (
+                              /*
+                                A SUBTASK CARD, and deliberately not a `BoardCard`.
+                                No drag handle: its stage follows the work it
+                                belongs to, and dragging one into another column
+                                is the exact move the nesting exists to prevent.
+                                It keeps its status control, because finishing one
+                                is a real thing to do — and finishing it is what
+                                takes it out of here.
+
+                                ⚠️ IT USED TO BE A TITLE AND A GLYPH, which made a
+                                subtask read as a label rather than as work. It is
+                                a task: it has an owner, a date and a priority
+                                exactly as its parent does, and the one view that
+                                folds it under its parent was the only one showing
+                                none of them.
+
+                                The second line is the parent's, minus the two
+                                things a child cannot say differently. No category
+                                badge — a subtask carries no `request_id` of its
+                                own, so it would read "Internal" directly beneath
+                                a parent marked "Client". No QA avatar — this is
+                                always internal work, which needs no reviewer
+                                (P7-13a).
+                              */
+                              <div
+                                key={child.id}
+                                className="group/task flex flex-col gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
+                                <div className="flex items-start gap-1.5">
+                                  <Link
+                                    href={`/tasks/${child.id}`}
+                                    className="line-clamp-2 min-w-0 flex-1 text-2xs leading-snug hover:underline">
+                                    {child.title}
+                                  </Link>
+
+                                  {/* The same hover strip the parent carries, so
+                                      a subtask can be renamed, re-flagged and
+                                      deleted where it lives. Without it the only
+                                      way to rename one was to open it. */}
+                                  <TaskRowActions
+                                    taskId={child.id}
+                                    title={child.title}
+                                    priority={child.priority as TaskPriority | null}
+                                    assignable={assignable}
+                                    deletable={canDelete(child)}>
+                                    <TaskStatusSelect
+                                      taskId={child.id}
+                                      status={child.status}
+                                      viewer={seat(child)}
+                                      task={child}
+                                      resolutionMissing={!child.resolution?.trim()}
+                                      variant="compact"
+                                      align="end"
+                                    />
+                                  </TaskRowActions>
+                                </div>
+
+                                {/* Drawn only when there is something to say. A
+                                    subtask with no owner, date or priority keeps
+                                    the single line it had. */}
+                                {childPic || child.due_date || child.priority ? (
+                                  <span className="flex flex-wrap items-center gap-1.5">
+                                    <TaskPriorityBadge
+                                      priority={child.priority as TaskPriority | null}
+                                      className="h-4.5 px-1"
+                                    />
+                                    {childPic ? <Avatar name={childPic} title={`PIC ${childPic}`} /> : null}
+                                    {child.due_date ? (
+                                      <span
+                                        className={cn(
+                                          "inline-flex items-center gap-1 rounded-sm border px-1 py-0.5 text-2xs tabular-nums",
+                                          childLate
+                                            ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
+                                            : "border-border bg-muted text-muted-foreground",
+                                        )}>
+                                        <CalendarDays className="size-3 shrink-0" aria-hidden />
+                                        {child.start_date
+                                          ? `${formatDate(child.start_date)} – ${formatDate(child.due_date)}`
+                                          : formatDate(child.due_date)}
+                                        {/* Never colour alone. */}
+                                        {childLate ? " · overdue" : null}
+                                      </span>
+                                    ) : null}
+                                  </span>
+                                ) : null}
+                              </div>
+                            );
+                          })}
                         </BoardTaskGroup>
                       );
                     })

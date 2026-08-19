@@ -165,7 +165,9 @@ export function ComposerRow({
   return (
     <TableRow className="bg-accent/20 hover:bg-accent/20">
       {/*
-        Name + priority, mirroring the Task cell above it.
+        The name, under the Task heading — and only the name. The priority
+        picker used to sit in here beside it, which is why it appeared under
+        "Task" while the Priority column showed nothing.
 
         ⚠️ THE INPUT NEEDS A FLOOR OF ITS OWN — see `min-w-48` below.
 
@@ -181,36 +183,31 @@ export function ComposerRow({
         Task column would jump wider the moment somebody clicked "add task" and
         snap back when they cancelled.
       */}
-      <TableCell className="max-w-sm whitespace-normal">
-        <div className="flex items-center gap-2">
-          <Input
-            autoFocus
-            value={draft.title}
-            disabled={pending}
-            placeholder={parentId ? "Subtask name" : "Task name"}
-            aria-label={
-              parentId
-                ? "Subtask name"
-                : `Task name, added to ${TASK_STATUS_LABELS[status]}`
-            }
-            onChange={(event) => set("title", event.target.value)}
-            onKeyDown={onKeyDown}
-            // `min-w-48` overrides the primitive's `min-w-0` — cn is
-            // tailwind-merge, so the later class wins on the same property.
-            // Without it the input has no width of its own to insist on.
-            className="h-8 min-w-48 flex-1"
-          />
-          <PriorityField
-            value={draft.priority}
-            disabled={pending}
-            onChange={(next) => set("priority", next)}
-          />
-        </div>
+      {/* select — no checkbox on a row that does not exist yet. */}
+      <TableCell className="w-8 pr-0" />
 
-        {/* Below `xl` the cell holding Save is hidden with its column, so the
+      <TableCell className="max-w-sm whitespace-normal">
+        <Input
+          autoFocus
+          value={draft.title}
+          disabled={pending}
+          placeholder={parentId ? "Subtask name" : "Task name"}
+          aria-label={
+            parentId ? "Subtask name" : `Task name, added to ${TASK_STATUS_LABELS[status]}`
+          }
+          onChange={(event) => set("title", event.target.value)}
+          onKeyDown={onKeyDown}
+          // `min-w-48` overrides the primitive's `min-w-0` — cn is
+          // tailwind-merge, so the later class wins on the same property.
+          // Without it the input has no width of its own to insist on.
+          className="h-8 min-w-48 w-full"
+        />
+
+        {/* Below `2xl` the cell holding Save is hidden with its column, so the
             commit would go with it. Same buttons, inside the one cell that is
-            never hidden. */}
-        <div className="mt-2 xl:hidden">
+            never hidden. The breakpoint must track the Save cell's own — they
+            are the two halves of one control. */}
+        <div className="mt-2 2xl:hidden">
           <Actions
             submit={submit}
             cancel={onCancel}
@@ -220,8 +217,10 @@ export function ComposerRow({
         </div>
       </TableCell>
 
-      {/* PIC */}
-      <TableCell className="hidden md:table-cell">
+      {/* progress — a task with no subtasks has none, and it cannot have any yet. */}
+      <TableCell className="hidden lg:table-cell text-2xs text-foreground-faint">—</TableCell>
+
+      <TableCell className="hidden md:table-cell text-muted-foreground">
         <AssigneeField
           value={draft.assigneeId}
           people={assignable}
@@ -230,11 +229,15 @@ export function ComposerRow({
         />
       </TableCell>
 
-      {/* QA — a member does not appoint reviewers, and internal work needs none
-          (P7-13a). The dialog is where a lead sets one. */}
-      <TableCell className="hidden 2xl:table-cell text-2xs text-foreground-faint">—</TableCell>
-
       <TableCell className="hidden lg:table-cell">
+        <PriorityField
+          value={draft.priority}
+          disabled={pending}
+          onChange={(next) => set("priority", next)}
+        />
+      </TableCell>
+
+      <TableCell className="hidden xl:table-cell whitespace-nowrap">
         <DateField
           value={draft.startDate}
           label="Start"
@@ -244,7 +247,7 @@ export function ComposerRow({
         />
       </TableCell>
 
-      <TableCell className="hidden sm:table-cell">
+      <TableCell className="hidden sm:table-cell whitespace-nowrap">
         <DateField
           value={draft.dueDate}
           label="Due"
@@ -254,7 +257,12 @@ export function ComposerRow({
         />
       </TableCell>
 
-      <TableCell className="hidden lg:table-cell text-right">
+      {/* closed — it is being created, so there is nothing to say here ever. */}
+      <TableCell className="hidden 2xl:table-cell whitespace-nowrap text-2xs text-foreground-faint">
+        —
+      </TableCell>
+
+      <TableCell className="hidden xl:table-cell whitespace-nowrap text-right">
         <EstimateInlineField
           value={draft.estimateMinutes}
           disabled={pending}
@@ -262,15 +270,27 @@ export function ComposerRow({
         />
       </TableCell>
 
+      {/* tracked — nobody can have logged time against a task that is not saved. */}
+      <TableCell className="hidden xl:table-cell whitespace-nowrap text-right text-2xs text-foreground-faint">
+        —
+      </TableCell>
+
       {/* Save / Cancel, where the latest comment sits — the end of the row is
           where the eye finishes, which is where the commit belongs.
 
-          EXACTLY AS MANY CELLS AS THE HEADER HAS. The narrow-screen copy of these
-          buttons lives inside the first cell rather than in an eighth `<td>`: a
-          row with more cells than columns still LOOKS right, because the extra
-          one is `display:none` at the width it is not wanted, but the table then
-          announces a column that does not exist to anything reading the markup. */}
-      <TableCell className="hidden xl:table-cell">
+          ⚠️ ONE CELL PER COLUMN, IN THE COLUMN'S OWN ORDER AND WITH ITS OWN
+          RESPONSIVE CLASS. This row had SEVEN cells against the table's ELEVEN,
+          and the note here still claimed they matched — it was written when they
+          did, and `select`, `progress`, `closed`, `tracked` and `comment` were
+          added to the table afterwards without it. Every control had slid left
+          of its heading: the priority picker sat under Task, the assignee under
+          Progress, the start date under Priority.
+
+          A cell must also carry the SAME `hidden … :table-cell` breakpoint as
+          its column, or the two disagree about how many cells exist at a given
+          width and the row shifts again — which is the same bug arriving by a
+          different route. */}
+      <TableCell className="hidden 2xl:table-cell">
         <Actions submit={submit} cancel={onCancel} pending={pending} disabled={!draft.title.trim()} />
       </TableCell>
     </TableRow>

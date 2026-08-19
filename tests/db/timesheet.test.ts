@@ -3,7 +3,6 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, todayInAppZone } from "@/lib/dates";
 
 import {
-  ACCOUNTS,
   DEPARTMENTS,
   adminClient,
   dbTestsEnabled,
