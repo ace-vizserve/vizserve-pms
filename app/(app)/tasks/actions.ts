@@ -1044,6 +1044,44 @@ export async function getTaskAttachmentUrl(
   return { ok: true, data: { url } };
 }
 
+/**
+ * P7-22 — opening a file the CLIENT attached, from the task.
+ *
+ * A separate action from `getAttachmentDownloadUrl` in the requests module, and
+ * the difference is the whole point: that one opens with
+ * `requireRole("team_leader")` because it serves the Gate 1 review, which is a
+ * lead's screen. The person who most needs the client's reference images is the
+ * member doing the work, and they are not a team leader.
+ *
+ * No role check here at all, and that is not a relaxation. RLS on
+ * `vizserve_pms_request_attachments` is the gate — P7-22 widened its SELECT
+ * policy to anyone who can see the task the request became, so a row that comes
+ * back is a row this person is entitled to. A row they cannot see returns
+ * nothing and this refuses, exactly as `getTaskAttachmentUrl` above does.
+ */
+export async function getRequestAttachmentUrl(
+  attachmentId: string,
+): Promise<ActionResult<{ url: string }>> {
+  await requireAuthContextOrThrow();
+  const supabase = await createClient();
+
+  const { data: attachment } = await supabase
+    .from("vizserve_pms_request_attachments")
+    .select("storage_path")
+    .eq("id", attachmentId)
+    .maybeSingle();
+
+  if (!attachment) return { ok: false, error: "That file is not available." };
+
+  // Sixty seconds, matching every other signed URL in the app: long enough to
+  // click, short enough that a URL pasted into a chat is dead before anyone
+  // opens it.
+  const url = await signAttachmentUrl(attachment.storage_path, 60);
+  if (!url) return { ok: false, error: "That file could not be opened." };
+
+  return { ok: true, data: { url } };
+}
+
 export async function removeTaskAttachment(
   attachmentId: string,
   taskId: string,

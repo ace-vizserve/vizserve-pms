@@ -1,19 +1,20 @@
+import { ArrowLeft, ArrowRight } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ArrowRight } from "lucide-react";
 
+import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
+import { PageShell } from "@/components/page-shell";
+import { Chip, TaskPriorityBadge, TaskStatusBadge } from "@/components/status-badge";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { TASK_STATUS_LABELS, isTerminal } from "@/lib/schemas/tasks";
-import { Chip, TaskPriorityBadge, TaskStatusBadge } from "@/components/status-badge";
-import { CommentThread } from "../comment-thread";
-import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
-import { PageShell } from "@/components/page-shell";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/utils/supabase/server";
+import { CommentThread } from "../comment-thread";
 
+import { RequestAttachmentList } from "./client-files";
 import { TaskOutputs } from "./task-outputs";
 import { TaskWorkflow } from "./task-workflow";
 
@@ -71,7 +72,12 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     task.request_id
       ? supabase
           .from("vizserve_pms_requests")
-          .select("id, reference_no, requester_name, requester_email, target_date, form_id")
+          // `requester_org`, `description` and `submitted_at` added: the person
+          // doing the work was being shown a name and nothing else about who
+          // asked or when, and had to open the request to find out.
+          .select(
+            "id, reference_no, requester_name, requester_email, requester_org, description, target_date, submitted_at, form_id",
+          )
           .eq("id", task.request_id)
           .maybeSingle()
       : Promise.resolve({ data: null }),
@@ -87,6 +93,27 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       .eq("task_id", id)
       .order("created_at", { ascending: true }),
   ]);
+
+  /*
+   * WHAT THE CLIENT SENT WITH THE FORM.
+   *
+   * This page read `vizserve_pms_task_attachments` and nothing else, so the only
+   * files it could ever show were the ones the team PRODUCED. The brief,
+   * reference images and spec documents the client uploaded on the public form
+   * live in `vizserve_pms_request_attachments`, and from the task — the screen
+   * the work is actually done on — they were invisible. The PIC had to know the
+   * request existed, find it, and open it.
+   *
+   * Same RLS as the request itself: the policy scopes these to people who can
+   * see the request, so a task out of scope has already 404'd above.
+   */
+  const { data: clientFiles } = task.request_id
+    ? await supabase
+        .from("vizserve_pms_request_attachments")
+        .select("id, filename, mime_type, size_bytes")
+        .eq("request_id", task.request_id)
+        .order("created_at")
+    : { data: null };
 
   // The originating form's fields, including archived ones — a historical answer
   // must keep rendering with its label after the field is retired (D20/R5).
@@ -104,8 +131,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const viewer = {
     isPic: task.assignee_id === context.userId,
     isQa: task.qa_assignee_id === context.userId,
-    leadsDepartment:
-      context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
+    leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
     isAdmin: roleAtLeast(context.role, "admin"),
   };
 
@@ -127,8 +153,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
       <Link
         href="/tasks"
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-      >
+        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-3.5" />
         All tasks
       </Link>
@@ -202,16 +227,69 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             </Card>
           ) : null}
 
-          {/* What the client actually asked for. The QA reviewer checks the output
-              against this, so it sits above the resolution rather than behind a tab. */}
-          {fields && fields.length > 0 ? (
+          {/* What the client actually asked for. The QA reviewer checks the
+              output against this, so it sits above the resolution rather than
+              behind a tab.
+
+              ⚠️ THE CONDITION USED TO BE `fields.length > 0`, and that was the
+              bug. A form built with no custom fields — which is every form until
+              somebody adds one — made this whole card vanish, taking the
+              client's name, their email, their organisation, the date they asked
+              for and their uploaded files with it. The submission was not
+              "neglected" by the approval; it was collected, stored correctly,
+              and then never rendered.
+
+              The test is now simply "did this come from a request", because if
+              it did there is always something here worth showing. */}
+          {request ? (
             <Card size="sm">
               <CardHeader>
                 <CardTitle>From the request</CardTitle>
+                <CardDescription className="text-xs">
+                  {request.reference_no}
+                  {request.submitted_at ? ` · submitted ${formatDate(request.submitted_at)}` : null}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <dl className="text-sm">
-                  {fields.map((field) => {
+                  {/* WHO ASKED. Always present — these are columns on the
+                      request, not answers to a form the team may not have built
+                      yet — and they are what somebody needs when the brief is
+                      ambiguous and the answer is one email away. */}
+                  <div className="grid gap-0.5 border-b py-1.5 sm:grid-cols-[10rem_1fr] sm:gap-3">
+                    <dt className="text-xs text-muted-foreground">Requested by</dt>
+                    <dd className="min-w-0 wrap-break-word">
+                      {request.requester_name}
+                      {request.requester_org ? (
+                        <span className="text-muted-foreground"> · {request.requester_org}</span>
+                      ) : null}
+                    </dd>
+                  </div>
+
+                  {request.requester_email ? (
+                    <div className="grid gap-0.5 border-b py-1.5 sm:grid-cols-[10rem_1fr] sm:gap-3">
+                      <dt className="text-xs text-muted-foreground">Email</dt>
+                      <dd className="min-w-0 wrap-break-word">
+                        {/* A link, because the reason to show an address is to
+                            use it. */}
+                        <a href={`mailto:${request.requester_email}`} className="underline-offset-2 hover:underline">
+                          {request.requester_email}
+                        </a>
+                      </dd>
+                    </div>
+                  ) : null}
+
+                  {/* The client's own words, when the task's brief has been
+                      edited away from them. The TL may rewrite the description at
+                      Gate 1, and the original is the thing QA checks against. */}
+                  {request.description && request.description !== task.description ? (
+                    <div className="grid gap-0.5 border-b py-1.5 sm:grid-cols-[10rem_1fr] sm:gap-3">
+                      <dt className="text-xs text-muted-foreground">As they wrote it</dt>
+                      <dd className="min-w-0 whitespace-pre-wrap wrap-break-word">{request.description}</dd>
+                    </div>
+                  ) : null}
+
+                  {(fields ?? []).map((field) => {
                     const raw = values[field.field_key];
                     const rendered =
                       raw === null || raw === undefined || raw === ""
@@ -223,22 +301,35 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                     return (
                       <div
                         key={field.field_key}
-                        className="grid gap-0.5 border-b py-1.5 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3"
-                      >
+                        className="grid gap-0.5 border-b py-1.5 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3">
                         <dt className="text-xs text-muted-foreground">
                           {field.label}
-                          {!field.is_active ? (
-                            <span className="ml-1 text-2xs">(archived)</span>
-                          ) : null}
+                          {!field.is_active ? <span className="ml-1 text-2xs">(archived)</span> : null}
                         </dt>
                         <dd className="min-w-0 wrap-break-word">{rendered}</dd>
                       </div>
                     );
                   })}
-                  {request?.target_date ? (
-                    <div className="grid gap-0.5 border-t py-1.5 sm:grid-cols-[10rem_1fr] sm:gap-3">
+                  {request.target_date ? (
+                    <div className="grid gap-0.5 border-b py-1.5 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3">
                       <dt className="text-xs text-muted-foreground">Client asked for</dt>
                       <dd>{formatDate(request.target_date)}</dd>
+                    </div>
+                  ) : null}
+
+                  {/* THE FILES THE CLIENT SENT. Never shown on this page before
+                      — the only attachment list here read task attachments,
+                      which are the team's OUTPUTS. A brief with three reference
+                      images attached arrived at the person doing the work as a
+                      title and a sentence. */}
+                  {clientFiles && clientFiles.length > 0 ? (
+                    <div className="grid gap-0.5 py-1.5 sm:grid-cols-[10rem_1fr] sm:gap-3">
+                      <dt className="text-xs text-muted-foreground">
+                        {clientFiles.length === 1 ? "Attached file" : "Attached files"}
+                      </dt>
+                      <dd className="min-w-0">
+                        <RequestAttachmentList attachments={clientFiles} />
+                      </dd>
                     </div>
                   ) : null}
                 </dl>
@@ -261,9 +352,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             assigneeId={task.assignee_id}
             qaAssigneeId={task.qa_assignee_id}
             lists={lists ?? []}
-            candidates={(people ?? []).filter(
-              (person) => person.primary_department_id === task.department_id,
-            )}
+            candidates={(people ?? []).filter((person) => person.primary_department_id === task.department_id)}
             viewer={viewer}
             task={{ request_id: task.request_id, is_personal: task.is_personal }}
           />
@@ -275,9 +364,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             attachments={outputs ?? []}
             // Uploading is doing the work. A department lead can too, because they
             // are frequently the QA and sometimes the person picking up the pieces.
-            canUpload={
-              (viewer.isPic || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)
-            }
+            canUpload={(viewer.isPic || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)}
             uploaderNames={nameOf}
           />
 
@@ -337,10 +424,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                           {entry.from_status ? (
                             <>
                               {TASK_STATUS_LABELS[entry.from_status]}
-                              <ArrowRight
-                                className="size-3.5 shrink-0 text-foreground-faint"
-                                aria-hidden
-                              />
+                              <ArrowRight className="size-3.5 shrink-0 text-foreground-faint" aria-hidden />
                               {TASK_STATUS_LABELS[entry.to_status]}
                             </>
                           ) : (
@@ -357,9 +441,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                         </span>
                       </div>
                       {entry.comment ? (
-                        <p className="mt-0.5 whitespace-pre-wrap text-sm text-muted-foreground">
-                          {entry.comment}
-                        </p>
+                        <p className="mt-0.5 whitespace-pre-wrap text-sm text-muted-foreground">{entry.comment}</p>
                       ) : null}
                     </li>
                   ))}
