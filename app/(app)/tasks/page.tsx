@@ -1,42 +1,36 @@
+import { ListChecks, ListTree } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ListChecks, ListTree } from "lucide-react";
 
+import { DataTable, type Column } from "@/components/data-table";
+import { isTaskStatus } from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
+  isTerminal,
   TASK_CATEGORY_LABELS,
   TASK_PRIORITIES,
   TASK_STATUSES,
-  type TaskPriority,
-  isTerminal,
   taskCategory,
+  type TaskPriority,
 } from "@/lib/schemas/tasks";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
-import { isTaskStatus } from "@/components/status-badge";
-import { DataTable, type Column } from "@/components/data-table";
 
-import type { TaskComment } from "./comment-thread";
-import { LatestCommentCell } from "./latest-comment-cell";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
+import type { TaskComment } from "./comment-thread";
+import { LatestCommentCell } from "./latest-comment-cell";
 
+import { GroupComposer } from "./add-task";
 import { AssigneePicker } from "./assignees";
 import { TaskFilters } from "./filters";
-import {
-  InlineDate,
-  InlineEstimate,
-  InlinePriority,
-  SubtaskProgress,
-  TaskRowActions,
-} from "./inline";
-import { GroupComposer } from "./add-task";
+import { InlineDate, InlineEstimate, InlinePriority, SubtaskProgress, TaskRowActions } from "./inline";
 import { NewTaskButton } from "./new-task-button";
 import { TaskStatusGroup } from "./status-group";
 import { TaskStatusSelect } from "./status-select";
@@ -187,13 +181,11 @@ export default async function TasksPage({
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
 
-  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }] = await Promise.all(
-    [
-      query,
-      supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
-      supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
-    ],
-  );
+  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }] = await Promise.all([
+    query,
+    supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
+    supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
+  ]);
 
   const rows = (tasks ?? []) as TaskRow[];
   const taskIds = rows.map((task) => task.id);
@@ -238,10 +230,7 @@ export default async function TasksPage({
          * load. P7-09 is one level deep and trigger-enforced, so this is a
          * single flat query — no recursion, and no stored counter to drift.
          */
-        supabase
-          .from("vizserve_pms_tasks")
-          .select("id, parent_task_id, status")
-          .in("parent_task_id", taskIds),
+        supabase.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", taskIds),
 
         /*
          * P7-15 / K5 — TIME TRACKED CANNOT BE A PLAIN SUM. This is the trap.
@@ -265,10 +254,7 @@ export default async function TasksPage({
          * table as well as `assignee_id`. The table has its own policy; this is
          * scoped by `.in()` on ids the tasks policy has already returned.
          */
-        supabase
-          .from("vizserve_pms_task_assignees")
-          .select("task_id, user_id")
-          .in("task_id", taskIds),
+        supabase.from("vizserve_pms_task_assignees").select("task_id, user_id").in("task_id", taskIds),
 
         /*
          * K5 — DATE CLOSED, AND IT NEEDS NO COLUMN.
@@ -338,18 +324,12 @@ export default async function TasksPage({
   for (const row of closedRows ?? []) closedOn.set(row.task_id, row.created_at);
 
   const tracked = new Map(
-    ((trackedRows ?? []) as { task_id: string; minutes: number }[]).map((row) => [
-      row.task_id,
-      row.minutes,
-    ]),
+    ((trackedRows ?? []) as { task_id: string; minutes: number }[]).map((row) => [row.task_id, row.minutes]),
   );
 
-  const isFiltered =
-    Boolean(params.status || params.list || priorityFilter) || view !== "all" || kind !== "all";
+  const isFiltered = Boolean(params.status || params.list || priorityFilter) || view !== "all" || kind !== "all";
 
-  const grouped = new Map<VizservePmsTaskStatus, TaskRow[]>(
-    TASK_STATUSES.map((status) => [status, [] as TaskRow[]]),
-  );
+  const grouped = new Map<VizservePmsTaskStatus, TaskRow[]>(TASK_STATUSES.map((status) => [status, [] as TaskRow[]]));
   for (const task of rows) grouped.get(task.status)?.push(task);
 
   /**
@@ -390,9 +370,7 @@ export default async function TasksPage({
    * error message after the fact.
    */
   const assignableScope = new Set(
-    [context.primaryDepartmentId, ...context.managedDepartmentIds].filter(
-      (id): id is string => Boolean(id),
-    ),
+    [context.primaryDepartmentId, ...context.managedDepartmentIds].filter((id): id is string => Boolean(id)),
   );
 
   const assignable = (people ?? [])
@@ -425,8 +403,7 @@ export default async function TasksPage({
     return {
       isPic: task.assignee_id === context.userId,
       isQa: task.qa_assignee_id === context.userId,
-      leadsDepartment:
-        context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
+      leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
       isAdmin,
     };
   }
@@ -462,12 +439,7 @@ export default async function TasksPage({
                   everything marks nothing. */}
               <InlinePriority taskId={task.id} value={task.priority} />
 
-              <TaskRowActions
-                taskId={task.id}
-                title={task.title}
-                priority={task.priority}
-                assignable={assignable}
-              >
+              <TaskRowActions taskId={task.id} title={task.title} priority={task.priority} assignable={assignable}>
                 {/* The glyph, not the chip: the group heading right above this
                     row already says the status in words. */}
                 <TaskStatusSelect
@@ -492,10 +464,7 @@ export default async function TasksPage({
               {/* A subtask says so. Without it the list shows two rows that look
                   like peers when one is part of the other. */}
               {task.parent_task_id ? (
-                <Link
-                  href={`/tasks/${task.parent_task_id}`}
-                  className="inline-flex items-center gap-1 hover:underline"
-                >
+                <Link href={`/tasks/${task.parent_task_id}`} className="inline-flex items-center gap-1 hover:underline">
                   <ListTree className="size-3" aria-hidden />
                   subtask
                 </Link>
@@ -528,17 +497,11 @@ export default async function TasksPage({
       cell: (task) => (
         <AssigneePicker
           taskId={task.id}
-          pic={
-            task.assignee_id
-              ? { id: task.assignee_id, full_name: nameOf.get(task.assignee_id) ?? "—" }
-              : null
-          }
+          pic={task.assignee_id ? { id: task.assignee_id, full_name: nameOf.get(task.assignee_id) ?? "—" } : null}
           // P7-13. The join table is the whole reason this is fetched: a row
           // showing one name on a task three people are working on makes the
           // second and third invisible.
-          others={(extraAssignees.get(task.id) ?? []).filter(
-            (person) => person.id !== task.assignee_id,
-          )}
+          others={(extraAssignees.get(task.id) ?? []).filter((person) => person.id !== task.assignee_id)}
           // Scoped to the TASK'S department, not the viewer's — the join table's
           // own function refuses anybody outside it, so offering a wider list
           // would only produce an error after the click.
@@ -560,9 +523,7 @@ export default async function TasksPage({
       key: "start",
       header: "Start date",
       className: "hidden xl:table-cell whitespace-nowrap",
-      cell: (task) => (
-        <InlineDate taskId={task.id} field="start_date" value={task.start_date} label="Start" />
-      ),
+      cell: (task) => <InlineDate taskId={task.id} field="start_date" value={task.start_date} label="Start" />,
     },
     {
       key: "due",
@@ -601,11 +562,7 @@ export default async function TasksPage({
       className: "hidden 2xl:table-cell whitespace-nowrap text-muted-foreground",
       cell: (task) => {
         const closed = isTerminal(task.status) ? closedOn.get(task.id) : null;
-        return closed ? (
-          formatDate(closed.slice(0, 10))
-        ) : (
-          <span className="text-foreground-faint">—</span>
-        );
+        return closed ? formatDate(closed.slice(0, 10)) : <span className="text-foreground-faint">—</span>;
       },
     },
     {
@@ -641,8 +598,7 @@ export default async function TasksPage({
               over
                 ? `Over the estimate — ${formatCellDuration(minutes)} against ${formatCellDuration(task.estimate_minutes!)}`
                 : `${formatCellDuration(minutes)} logged`
-            }
-          >
+            }>
             {formatCellDuration(minutes)}
             {/* Never colour alone. */}
             {over ? <span className="ml-0.5 text-2xs">over</span> : null}
@@ -726,8 +682,7 @@ export default async function TasksPage({
                 count={group.length}
                 // A stage with nothing in it opens to one line. Closing it by
                 // default would hide the only thing it has to say.
-                defaultOpen
-              >
+                defaultOpen>
                 {/*
                   THE TABLE IS ALWAYS RENDERED, even for an empty stage, because
                   the composer is a `<tr>` inside it — a stage with nothing in it
@@ -749,11 +704,7 @@ export default async function TasksPage({
                   }
                   appendRow={
                     status === "FOR_CLIENT_APPROVAL" ? null : (
-                      <GroupComposer
-                        status={status}
-                        assignable={assignable}
-                        columnCount={columns.length}
-                      />
+                      <GroupComposer status={status} assignable={assignable} columnCount={columns.length} />
                     )
                   }
                 />
@@ -768,7 +719,6 @@ export default async function TasksPage({
                   with nobody to assign to, and settles that for itself rather
                   than the page guessing.
                 */}
-                {status === INITIAL_TASK_STATUS ? <NewTaskButton trigger="row" /> : null}
               </TaskStatusGroup>
             );
           })}

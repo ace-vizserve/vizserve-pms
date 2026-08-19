@@ -1,13 +1,13 @@
+import { FileText, Plus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { FileText, Plus } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/authorization";
-import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
+import { requireRole } from "@/lib/auth/authorization";
+import { createClient } from "@/utils/supabase/server";
 
 export const metadata: Metadata = { title: "Forms" };
 
@@ -77,13 +77,9 @@ export default async function FormsPage() {
       cell: (form) =>
         /* Status is never colour alone — the label carries it. */
         form.is_active ? (
-          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">
-            Live
-          </span>
+          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">Live</span>
         ) : (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-            Draft
-          </span>
+          <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">Draft</span>
         ),
     },
     {
@@ -93,9 +89,9 @@ export default async function FormsPage() {
       cell: (form) =>
         form.is_active && form.is_public ? (
           <Link
+            target="_blank"
             href={`/f/${form.slug}`}
-            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-          >
+            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
             /f/{form.slug}
           </Link>
         ) : (
@@ -124,10 +120,7 @@ export default async function FormsPage() {
             title="No forms yet"
             description="A form defines what a client must tell you before the team will accept the work. Every required field is a question you will never have to chase."
             action={
-              <Link
-                href="/forms/new"
-                className={buttonVariants({ size: "sm", variant: "outline" })}
-              >
+              <Link href="/forms/new" className={buttonVariants({ size: "sm", variant: "outline" })}>
                 Create the first form
               </Link>
             }
