@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { LayoutGrid, LayoutList } from "lucide-react";
 
+import { segmentedItem, segmentedTrack } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
 
 /**
@@ -80,13 +81,16 @@ const KINDS = [
   { value: "client", label: "Client" },
 ] as const;
 
-/** The segmented track. Flat — it is a place, not a control (elevation rule). */
-const TRACK = "flex shrink-0 items-center gap-1 rounded-lg border bg-muted p-1";
-
-/** The thumb is the only lifted thing in the group, which is what marks it. */
-const SEGMENT =
-  "inline-flex items-center gap-1.5 rounded-sm border border-transparent px-2.5 py-1 text-xs font-[550] whitespace-nowrap text-muted-foreground transition-all hover:text-foreground";
-const SEGMENT_ON = "border-border bg-card grade-raised text-foreground shadow-raised";
+/*
+ * The look comes from `components/ui/segmented.tsx`, which the theme toggle
+ * also uses. These segments stay `<Link>`s — they navigate, and dressing a
+ * navigation as a radio button would announce a choice where there is a page
+ * change — so they opt into the selected styling by carrying `data-checked`
+ * themselves. That attribute is all the shared class string looks for, so one
+ * definition dresses both controls and neither can drift from the other.
+ */
+const TRACK = segmentedTrack;
+const SEGMENT = cn(segmentedItem, "px-2.5 py-1");
 
 export function TaskToolbar({ view }: { view: "list" | "board" }) {
   const pathname = usePathname();
@@ -134,7 +138,8 @@ export function TaskToolbar({ view }: { view: "list" | "board" }) {
               key={item.href}
               href={withParams(item.href, item.carries)}
               aria-current={active ? "page" : undefined}
-              className={cn(SEGMENT, active && SEGMENT_ON)}
+              data-checked={active ? "" : undefined}
+              className={SEGMENT}
             >
               <Icon className="size-3.5" aria-hidden />
               {item.label}
@@ -166,7 +171,8 @@ export function TaskToolbar({ view }: { view: "list" | "board" }) {
               key={item.value}
               href={withKind(item.value)}
               aria-current={active ? "true" : undefined}
-              className={cn(SEGMENT, active && SEGMENT_ON)}
+              data-checked={active ? "" : undefined}
+              className={SEGMENT}
             >
               {item.label}
             </Link>
@@ -183,7 +189,8 @@ export function TaskToolbar({ view }: { view: "list" | "board" }) {
               key={item.value}
               href={withScope(item.value)}
               aria-current={active ? "true" : undefined}
-              className={cn(SEGMENT, active && SEGMENT_ON)}
+              data-checked={active ? "" : undefined}
+              className={SEGMENT}
             >
               {item.label}
             </Link>
