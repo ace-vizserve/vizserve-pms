@@ -34,7 +34,7 @@ update vizserve_pms_users
 -- this exists so /request/collateral-request renders before the builder is finished.
 insert into vizserve_pms_forms
   (id, name, slug, description, department_id, reference_prefix,
-   is_public, is_active, requires_attachment, sla_days)
+   is_public, is_active, requires_attachment, sla_minutes)
 values (
   'b1000000-0000-4000-8000-000000000001',
   'Collateral Request',
@@ -45,7 +45,7 @@ values (
   true,
   true,
   false,   -- flip to true once attachment upload (P1-09) is wired
-  5
+  2400     -- P7-31: minutes, 1d = 480. Five working days.
 )
 on conflict (id) do update
   set is_active = excluded.is_active,

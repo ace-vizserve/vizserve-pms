@@ -1,5 +1,11 @@
 import { z } from "zod";
 
+import {
+  MAX_SLA_MINUTES,
+  MIN_SLA_MINUTES,
+  parseSlaDuration,
+} from "@/lib/schemas/duration";
+
 /**
  * PHASE 1 CONTRACT.
  *
@@ -205,6 +211,35 @@ export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 // Staff-side: form settings (P1-04) and the builder (P1-03).
 // ---------------------------------------------------------------------------
 
+/**
+ * P7-31 — the SLA as a duration, not a count of days.
+ *
+ * Accepts `5d`, `8h`, `2d 4h`; stores MINUTES, where a day is 480 of them (a
+ * working day — see lib/schemas/duration.ts). A number is accepted unchanged
+ * so a caller already holding minutes can re-validate without formatting them
+ * back into a string first.
+ *
+ * The transform is why the form binds to `FormSettingsValues` below: what the
+ * input holds is a string, what the database gets is a number.
+ */
+const SLA_MESSAGE = "Use a duration like 5d, 8h or 2d 4h — up to 365d.";
+
+const slaMinutesField = z.union([z.string(), z.number()]).transform((raw, ctx) => {
+  const minutes = typeof raw === "number" ? raw : parseSlaDuration(raw);
+
+  if (
+    minutes === null ||
+    !Number.isInteger(minutes) ||
+    minutes < MIN_SLA_MINUTES ||
+    minutes > MAX_SLA_MINUTES
+  ) {
+    ctx.addIssue({ code: "custom", message: SLA_MESSAGE });
+    return z.NEVER;
+  }
+
+  return minutes;
+});
+
 export const formSettingsSchema = z.object({
   name: z.string().trim().min(1, "Give the form a name."),
   slug: z
@@ -221,7 +256,7 @@ export const formSettingsSchema = z.object({
   is_public: z.boolean().default(true),
   is_active: z.boolean().default(false),
   requires_attachment: z.boolean().default(false),
-  sla_days: z.coerce.number().int().min(1, "At least one day.").max(365),
+  sla_minutes: slaMinutesField,
   /**
    * Where approved requests from this form land (P2-06 / Q18).
    *
@@ -239,6 +274,15 @@ export const formSettingsSchema = z.object({
 });
 
 export type FormSettingsInput = z.infer<typeof formSettingsSchema>;
+
+/**
+ * The same settings AS TYPED, before parsing.
+ *
+ * `sla_minutes` is a string in the form and a number in the database, so the
+ * component binds to this and the server action reads `FormSettingsInput` out
+ * the other side of `safeParse`.
+ */
+export type FormSettingsValues = z.input<typeof formSettingsSchema>;
 
 /**
  * P7-29 — the same settings, on a form that does not exist yet.

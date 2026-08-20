@@ -23,7 +23,7 @@ function accepts(field: "slug" | "reference_prefix", value: string): boolean {
     slug: field === "slug" ? value : "a-form",
     reference_prefix: field === "reference_prefix" ? value : "AAA",
     department_id: null,
-    sla_days: 5,
+    sla_minutes: 2400,
   });
   return parsed.success;
 }

@@ -24,7 +24,9 @@ import {
   prefixFromName,
   slugFromName,
   type FormSettingsInput,
+  type FormSettingsValues,
 } from "@/lib/schemas/forms";
+import { formatSlaDuration } from "@/lib/schemas/duration";
 import { createForm, updateFormSettings } from "./actions";
 
 type Department = { id: string; name: string };
@@ -57,7 +59,7 @@ export function FormSettings({
     watch,
     setError,
     formState: { errors },
-  } = useForm<FormSettingsInput>({
+  } = useForm<FormSettingsValues>({
     /*
      * The schema's input type is looser than its output (zod defaults make
      * several keys optional before parsing), so the resolver is cast to the
@@ -71,7 +73,7 @@ export function FormSettings({
      */
     resolver: zodResolver(
       formId ? formSettingsSchema : formCreateSchema,
-    ) as unknown as Resolver<FormSettingsInput>,
+    ) as unknown as Resolver<FormSettingsValues>,
     defaultValues: {
       name: initial?.name ?? "",
       slug: initial?.slug ?? "",
@@ -81,7 +83,7 @@ export function FormSettings({
       is_public: initial?.is_public ?? true,
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
-      sla_days: initial?.sla_days ?? 5,
+      sla_minutes: formatSlaDuration(initial?.sla_minutes ?? 2400),
       default_list_id: initial?.default_list_id ?? null,
       client_approval_days: initial?.client_approval_days ?? 3,
     },
@@ -164,7 +166,7 @@ export function FormSettings({
     const showErrors = (error: string, fieldErrors?: Record<string, string[]>) => {
       setFormError(error);
       for (const [key, messages] of Object.entries(fieldErrors ?? {})) {
-        setError(key as keyof FormSettingsInput, { type: "server", message: messages[0] });
+        setError(key as keyof FormSettingsValues, { type: "server", message: messages[0] });
       }
     };
 
@@ -272,17 +274,24 @@ export function FormSettings({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="sla_days">SLA (days)</Label>
+          <Label htmlFor="sla_minutes">SLA</Label>
+          {/* P7-31 — a duration, not a count of days, so a form whose work
+              turns around in half a day can say so. TEXT, not type="number":
+              the value is `2d 4h`, which a number input would refuse to hold. */}
           <Input
-            id="sla_days"
-            type="number"
-            min={1}
-            aria-invalid={Boolean(errors.sla_days)}
-            {...register("sla_days")}
+            id="sla_minutes"
+            placeholder="e.g. 5d, 8h, 2d 4h"
+            aria-invalid={Boolean(errors.sla_minutes)}
+            {...register("sla_minutes")}
           />
-          {errors.sla_days ? (
-            <p className="text-xs text-destructive">{errors.sla_days.message}</p>
+          <p className="text-xs text-muted-foreground">
+            Turnaround standard for this form&rsquo;s work. 1d = 8 working hours. Internal
+            &mdash; the client never sees it.
+          </p>
+          {errors.sla_minutes ? (
+            <p className="text-xs text-destructive">{errors.sla_minutes.message}</p>
           ) : null}
+
         </div>
       </div>
 

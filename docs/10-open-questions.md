@@ -223,6 +223,114 @@ Also needs deciding: bucket layout, retention, and the size cap. Supabase Storag
 
 ---
 
+## Raised in the 20 Aug 2026 meeting
+
+Seven change requests came out of that meeting. **None of them reverses a settled
+decision.** Three were already built — deriving the slug and reference prefix
+from the name (P7-29), one list per form named after the form (P7-18), and the
+no-OTP email-only sign-off with attachments served in-app rather than as storage
+URLs (Q7 / P4). Two are actionable without a decision: the SLA notation, applied
+as **P7-31**, and folding the form-level `requires_attachment` into a required
+`file` field, which is a clean fix to a defect already written up in
+`app/request/[slug]/public-form.tsx`. The rest are below.
+
+---
+
+### Q19 — Should the SLA do anything, and should the client see it? `affects P7-31`
+
+`forms.sla_minutes` is written and never read. P7-31 fixed its *unit*; it did not
+give it teeth. Three shapes, cheapest first:
+
+- **Leave it inert.** A recorded standard with no enforcement. Honest, and the
+  status quo.
+- **A Gate 1 sanity check.** One line on the review panel when the agreed date is
+  tighter than the form's standard — the only moment anybody can still act on it.
+- **A full internal clock**, running from `sla_started_at` with a visible breach
+  state. Note `R4`: `WAITING_FOR_INFO` is named there as the obvious place for
+  the clock to be gamed, so a pause must be **logged with its duration**, not
+  silently subtracted.
+
+**Showing it to the client is a separate call, and the answer is probably no.**
+The work is usually agreed in chat or on a call before the TL sends the form, so
+a printed "typically 5 days" risks contradicting what was just promised — and it
+would read as a blanket commitment on every request. It is currently hidden by
+design and a test locks that shut.
+
+**Recommendation:** the Gate 1 sanity check, and keep it internal.
+
+---
+
+### Q20 — What exactly is an "internal form"? `blocks the client/internal split`
+
+The confirmed reading: **staff work-intake** — authenticated, no public URL,
+creating a task directly. HR approvals stay in `vizserve_pms_internal_requests`.
+On that reading it does **not** hit `01-updated-workflow.md` §0 ("Do not merge
+them into one generic forms table with a flag"), which forbids merging the fixed
+HR types into the client builder, not adding a second intake channel.
+
+Three things must be written down before it is built, because the wording is
+close enough that the next reader will assume the rule was broken:
+
+1. **A D-decision recording the boundary** — the builder covers client intake and
+   internal work intake, never HR approvals.
+2. **`D22` gains a fourth task origin.** Today: client via Gate 1, TL by hand,
+   personal. D22 says each has exactly one way to finish; internal-form tasks
+   finish via the QA reviewer, like other internal work.
+3. **P2-00 is not bypassed — it is not invoked.** There is no approval on this
+   path, so the "engine untouched" record stands.
+
+**The sharp edge:** `is_public = false` has no submission path at all today, and
+the slug unique index is **partial on `is_public and is_active`** — so two
+internal forms could take the same slug right now. Widen that index first.
+
+**Surveys are NOT this question and need their own answer.** A survey has no
+requester, no target date, no SLA and no task, so it fails the completeness
+rule's whole premise. "Creates a task directly" and "collects responses" cannot
+be one behaviour. `R7` applies; recommend deferring rather than folding in.
+
+---
+
+### Q21 — Cut the client approval token from 14 days to 7? `affects P4-01`
+
+Asked for in the meeting. Safe under `R2`, which requires *an* expiry rather than
+a length — but the 14 days was chosen deliberately so the token outlives the
+deadline it states, and the row carries **two clocks**: `expires_at` (14d) and
+`auto_complete_at` (`client_approval_days` business days, default 3 ≈ 5 calendar
+days). Seven leaves about two days of slack for a late click.
+
+`R6` is "auto-complete disputed by a client who never saw the email", and
+**P4-14 deliverability is still unverified** — the one item flagged as having no
+workaround if it fails late.
+
+**Recommendation:** hold at 14 until mail is confirmed to land, then revisit.
+Shortening the window before knowing whether the email arrives is the wrong
+order.
+
+---
+
+### Q22 — Which new internal request types are actually wanted? `blocks nothing yet`
+
+The meeting said "birthday, reimbursement, etc." Both already exist:
+**Reimbursement** has been a request type since Phase 5, and **Birthday** is one
+of the eight seeded rows in `vizserve_pms_leave_types` (P7-12). So the ask is
+unclear as stated.
+
+`D25` already routes anything new: **policy data** (a kind of leave) is a row in
+the leave-types table, zero migration; **structural** (a new approval shape with
+its own fields) is a new enum value plus its own CHECK branch, split across two
+migration files because Postgres forbids using a new enum value in the
+transaction that adds it — this has bitten the project three times.
+
+Benchmarking the Teams forms is fine under `D4` (Teams is being replaced, not
+integrated) — copying field lists is the same permitted category as `D21`'s
+ClickUp shape-borrowing. Any sync or parallel run is not. **Leave balances stay
+out of scope**, guarded by `tests/unit/no-leave-balance.test.ts`.
+
+**Needs:** the actual list from Amier, same posture as D25's "The list itself is
+owed by Amier."
+
+---
+
 ## Risk register
 
 | ID | Risk | Impact | Mitigation | Phase |

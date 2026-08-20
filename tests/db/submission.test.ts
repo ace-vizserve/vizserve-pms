@@ -45,7 +45,7 @@ describe.skipIf(!dbTestsEnabled)("P1 public submission", () => {
         reference_prefix: PREFIX,
         is_public: true,
         is_active: true,
-        sla_days: 3,
+        sla_minutes: 1440,
       })
       .select("id")
       .single();
@@ -538,7 +538,7 @@ describe.skipIf(!dbTestsEnabled)("P1 public submission", () => {
 
       expect(form).toHaveProperty("fields");
       expect(form).not.toHaveProperty("department_id");
-      expect(form).not.toHaveProperty("sla_days");
+      expect(form).not.toHaveProperty("sla_minutes");
       expect(form).not.toHaveProperty("created_by");
     });
   });

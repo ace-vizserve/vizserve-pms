@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 19 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 20 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -19,12 +19,13 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). P6-04/06/07/08/09 not begun |
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live — see below |
 
-`npm run verify` is green: **562 passed, 2 skipped, 0 failures** (19 Aug). The 2
-skips are the opt-in email deliverability tests. Unit tests are at 258, up from 233
-before the screens; `tests/db` is 286/286 across 12 files. Lint reports **0 errors
-and 7 warnings**, all pre-existing.
+`npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
+P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
+are at 366 across 19 files; `tests/db` is 381 across 18. Lint reports **0 errors
+and 4 warnings**, all pre-existing and all in the orphaned `supabase/middleware.ts`.
 
-That run closed one long-standing gap and found two pre-existing failures:
+The 19 Aug run — **562 passed, 2 skipped**, with 7 lint warnings — closed one
+long-standing gap and found two pre-existing failures:
 
 - **`p7_12`'s eight leave-type db cases executed for the first time** and all pass.
   They had been skipping on a stale PostgREST schema cache since 18 Aug, so the
@@ -407,6 +408,59 @@ they belong to, and dragging one to another column is the exact move the nesting
 prevents. The count comes from the unfiltered query, so a card reads "10
 subtasks" and unfolds the seven still outstanding.
 
+## P7-31 — the SLA is a duration, 20 Aug
+
+Applied. `vizserve_pms_forms.sla_days` is now **`sla_minutes`**, and the settings
+field takes ClickUp's notation — `5d`, `8h`, `2d 4h`. Came out of the 20 Aug
+meeting; D21 permits it, because what carries over is the *shape* of a feature
+people already know and never its data.
+
+**`1d` is 480 minutes, not 1440.** A working day, which is what "five days" has
+always meant on this field, and the working day this schema already assumes —
+D24 caps overtime at 960 because that is exactly `1440 − 480`. The default 5
+became 2400. Both live forms converted and read back as `5d`.
+
+**Why it was cheap, and why that stops being true.** Nothing reads this column.
+It is written in form settings, selected into two page queries, and never once
+used in a calculation — the task's deadline comes from the client instead
+(`coalesce(p_approved_target_date, target_date)`), and `sla_started_at` is
+stamped at submission and never read. No function, policy, index or `select *`
+touches it, so the rename could not break anything. **The day the SLA grows
+teeth, this is no longer true** — that is the moment to get the unit right, and
+it has now passed.
+
+**The parser is deliberately NOT `parseCellDuration`.** `lib/schemas/duration.ts`
+is separate, and the two grammars disagree:
+
+| | `parseCellDuration` (timesheet) | `parseSlaDuration` |
+|---|---|---|
+| bare `5` | 5 **hours** | 5 **days** |
+| units | `h` `m` `s` | `d` `h` `m` |
+| `2d 4` | 4 minutes | rejected |
+
+A cell holds part of one working day; an SLA is a turnaround standard in days,
+and reading `5` as five hours would have cut every existing SLA to an eighth.
+`tests/unit/duration.test.ts` has a `unit-divergence` block pinning both
+readings so nobody reconciles them without reading why. The `2d 4` case is
+stricter here on purpose: the timesheet resolves a unit-less number to minutes,
+but next to `d` there is no honest default and the gap is sixtyfold.
+
+**Still true after this, and load-bearing:** the SLA is invisible to the client.
+`vizserve_pms_get_public_form` does not return it and
+`tests/db/submission.test.ts` asserts so — *"Department, SLA and author are
+internal. A public endpoint that leaks the org chart is a small thing that
+compounds."*
+
+**Notation only.** Whether the SLA grows a clock, a breach state, or a line on
+the Gate 1 review panel is a separate decision and was left open. So is whether
+the client should see it at all — the work is usually agreed in chat before the
+form is even sent, so a printed turnaround risks contradicting what the TL just
+promised.
+
+`client_approval_days` was left alone: it is live, the hourly Gate 3 cron
+enforces it on PH business days, and hours there would need working-*hours*
+arithmetic rather than the business-*day* calendar that exists.
+
 ## ⚠️ The db tests share a project with the running app
 
 `npm run verify` creates and deletes tasks, requests and DTR rows in the **same Supabase project the app is browsed against**. A task can appear in somebody's timesheet picker and be deleted from under them mid-edit. That has already been reported once as a bug and was not one.
@@ -478,7 +532,7 @@ Every db suite **detects whether its migration has been applied** and skips with
 | P1-08 | Requester identity capture | ✅ Email mandatory, not staff-editable |
 | P1-09 | Attachment upload | ✅ Two-step receipt handshake — see below |
 | P1-10 | Reference numbers | ✅ `COL-2026-0142`, gapless per form per year |
-| P1-11 | SLA timer | ✅ `sla_started_at` set on submission. Nothing consumes it yet |
+| P1-11 | SLA timer | ✅ `sla_started_at` set on submission. **Nothing consumes it yet** — and `sla_minutes` (P7-31) is not read either |
 | P1-12 | TL notification | ✅ Notification row **and** email, now that P0-11 is wired |
 | P1-13 | Requests list | ✅ URL-based filters, server-side, sorted by target date |
 | P1-14 | Request detail | ✅ Renders archived fields with their labels; attachments download via signed URL |

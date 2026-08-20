@@ -23,7 +23,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, reference_prefix, is_public, is_active, requires_attachment, sla_days, default_list_id, client_approval_days",
+      "id, name, slug, description, department_id, reference_prefix, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days",
     )
     .eq("id", id)
     .maybeSingle();
@@ -145,7 +145,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
               is_public: form.is_public,
               is_active: form.is_active,
               requires_attachment: form.requires_attachment,
-              sla_days: form.sla_days,
+              sla_minutes: form.sla_minutes,
               default_list_id: form.default_list_id,
               client_approval_days: form.client_approval_days,
             }}

@@ -52,7 +52,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, name, sla_days, department_id, default_list_id")
+    .select("id, name, sla_minutes, department_id, default_list_id")
     .eq("id", request.form_id)
     .maybeSingle();
 
