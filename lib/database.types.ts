@@ -316,7 +316,7 @@ export type Database = {
           is_public: boolean;
           is_active: boolean;
           requires_attachment: boolean;
-          sla_days: number;
+          sla_minutes: number;
           /** Business days the client gets at Gate 3 before auto-completion. */
           client_approval_days: number;
           default_list_id: string | null;
@@ -334,7 +334,7 @@ export type Database = {
           is_public?: boolean;
           is_active?: boolean;
           requires_attachment?: boolean;
-          sla_days?: number;
+          sla_minutes?: number;
           client_approval_days?: number;
           default_list_id?: string | null;
           created_by?: string | null;
@@ -350,7 +350,7 @@ export type Database = {
           is_public: boolean;
           is_active: boolean;
           requires_attachment: boolean;
-          sla_days: number;
+          sla_minutes: number;
           client_approval_days: number;
           default_list_id: string | null;
         }>;

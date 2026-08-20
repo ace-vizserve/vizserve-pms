@@ -34,7 +34,7 @@ Enforcement lives in three places, per `02-data-model.md`. Client-side validatio
 | P1-01 | `vizserve_pms_forms` + `vizserve_pms_form_fields` migration | Per `02-data-model.md`. `is_required` defaults **true**; `field_key` immutable after first submission; `is_active` for soft-archive — forms are dynamic (D20), so these are migration-time decisions, not later cleanup | Ace |
 | P1-02 | `vizserve_pms_requests` + `vizserve_pms_request_attachments` migration | Include both `target_date` and `approved_target_date` from the start | Ace |
 | P1-03 | Form builder UI | Add/remove/reorder fields, set type, required toggle, options for selects. Keep it plain — this is not the product's differentiator | Kurt |
-| P1-04 | Form settings | Name, slug, description, owning department, default task list, public flag, `requires_attachment`, `sla_days`, active flag | Kurt |
+| P1-04 | Form settings | Name, slug, description, owning department, default task list, public flag, `requires_attachment`, `sla_minutes`, active flag | Kurt |
 | P1-05 | Forms list view | Staff-facing list of forms with status and public URL, per Amier 29:57 | Kurt |
 | P1-06 | Public form page | `/request/[slug]` (was `/f/[slug]`, which now 308s — P7-29). No session. Renders fields, client-side validation for UX only | Kurt |
 | P1-07 | Submission endpoint | `SECURITY DEFINER` function or server action. **Server-side required-field validation. Rejects partial submissions.** Returns field-level errors | Ace |

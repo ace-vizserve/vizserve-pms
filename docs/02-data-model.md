@@ -175,7 +175,7 @@ The many-to-many that makes a TL/manager's scope work. Amier, ~26:00: *"checkbox
 | is_public | bool | **true for client forms, false for internal.** The whole auth model hangs off this flag |
 | is_active | bool | |
 | requires_attachment | bool | true for collateral, false for user support — Amier, ~51:30 |
-| sla_days | int | drives the SLA timer |
+| sla_minutes | int | turnaround standard, MINUTES. 1d = 480 (a working day). P7-31 |
 | created_by | uuid fk | |
 
 ### `vizserve_pms_form_fields`

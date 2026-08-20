@@ -87,7 +87,7 @@ Three cheap mitigations that keep the rule intact:
 
 **Budget for the date maths.** The SIS repo bans date libraries — `lib/dates.ts` only. Business-day arithmetic with a PH holiday calendar is a real piece of work, not an import. See `11-stack-conventions.md`.
 
-**Also decide (Q6):** is "3 days" calendar days or business days? A ticket sent Friday 5pm auto-completes Monday 5pm on calendar days, having given the client roughly one working day. Recommend **business days**, and put it in `forms.sla_days`-style config rather than hardcoding it.
+**Also decide (Q6):** is "3 days" calendar days or business days? A ticket sent Friday 5pm auto-completes Monday 5pm on calendar days, having given the client roughly one working day. Recommend **business days**, and put it in per-form config rather than hardcoding it. (Built as `forms.client_approval_days`; the neighbouring turnaround setting is `forms.sla_minutes` since P7-31.)
 
 ---
 
