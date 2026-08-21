@@ -225,7 +225,24 @@ export default async function DashboardPage({
   ];
 
   return (
-    <div className="flex min-h-svh flex-col grade-ambient bg-background bg-no-repeat">
+    /*
+      ONE SCREEN, NO PAGE SCROLL from `lg` up.
+
+      This is the page you land on after signing in, and everything on it is a
+      glance: am I timed in, what is waiting, who is out. A glance that needs
+      scrolling is not one — the calendar was pushing the whole bento off the
+      bottom of a 1080p screen.
+
+      The height is bounded here (`h-svh` + `overflow-hidden`) and every
+      descendant that has to shrink carries `min-h-0`. A flex child defaults to
+      `min-height: auto` and refuses to shrink below its content, which is
+      exactly how a tall calendar pushes a bounded page taller anyway.
+
+      `svh`, not `vh`: on a phone `vh` measures the viewport with the browser
+      chrome hidden. Below `lg` none of this applies and the page scrolls
+      normally — a fixed viewport on a small screen is a trap.
+    */
+    <div className="flex min-h-svh flex-col grade-ambient bg-background bg-no-repeat lg:h-svh lg:overflow-hidden">
       {/*
         ITS OWN HEADER, because there is no shell around this page to supply one.
 
@@ -267,17 +284,26 @@ export default async function DashboardPage({
         are tall. `cn` is tailwind-merge, so the cap here replaces nothing and
         simply applies.
       */}
-      <PageShell className="mx-auto w-full max-w-7xl gap-3">
+      <PageShell className="mx-auto w-full max-w-7xl gap-2.5 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
         {/* A greeting, not a page label — there is no breadcrumb to repeat. */}
-        <div className="min-w-0">
-          <h1 className="text-xl font-semibold tracking-[-0.022em]">Hello, {firstName}</h1>
-          <p className="mt-0.5 text-xs text-muted-foreground">
+        {/* One line, not two. The greeting and the date now sit side by side —
+            it is a salutation, and giving it a heading block of its own cost
+            roughly a calendar row of the height the calendar needed. */}
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <h1 className="text-lg font-semibold tracking-[-0.022em]">Hello, {firstName}</h1>
+          <p className="text-xs text-muted-foreground">
             {formatDate(today)}
             {timeIn ? ` · timed in at ${formatAppTime(timeIn)}` : " · not timed in yet"}
           </p>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-6">
+        {/* The calendar is the one row that can give: the two card rows above it
+            are sized by their content, so `minmax(0,1fr)` on the third gives the
+            calendar whatever is left and nothing more. Its own cells are already
+            `auto-rows-fr`, so they shrink into that budget instead of overflowing
+            it. The `minmax(0,…)` matters as much as the `1fr` — a bare `1fr` is
+            floored at min-content and would not shrink at all. */}
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-6 lg:min-h-0 lg:flex-1 lg:grid-rows-[auto_auto_minmax(0,1fr)]">
           {/* ------------------------------------------------------ row 1 · 3+3 */}
           <Cell span="sm:col-span-3" label="Daily time record">
             <CellHead title="Daily time record">
@@ -287,7 +313,7 @@ export default async function DashboardPage({
                 className="ml-auto"
               />
             </CellHead>
-            <CellBody className="gap-3 p-3.5">
+            <CellBody className="gap-2 p-3">
               <PunchPanel initial={punchState} compact />
               <Link
                 href="/dtr"
@@ -317,7 +343,7 @@ export default async function DashboardPage({
               />
               <CellBody>
                 {waiting.length === 0 ? (
-                  <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                  <p className="m-auto px-4 py-3 text-center text-xs text-balance text-muted-foreground">
                     Nothing awaiting your decision. Requests appear here the moment somebody files
                     one.
                   </p>
@@ -366,7 +392,7 @@ export default async function DashboardPage({
               />
               <CellBody>
                 {(myOpenTasks.data ?? []).length === 0 ? (
-                  <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                  <p className="m-auto px-4 py-3 text-center text-xs text-balance text-muted-foreground">
                     Nothing is assigned to you right now. Work lands here when a Team Leader
                     approves a request or hands you something directly.
                   </p>
@@ -438,7 +464,7 @@ export default async function DashboardPage({
             <CellHead title="Out today" count={outToday.length} tone="info" />
             <CellBody>
               {outToday.length === 0 ? (
-                <p className="px-4 py-6 text-center text-xs text-muted-foreground">
+                <p className="m-auto px-4 py-3 text-center text-xs text-balance text-muted-foreground">
                   Everybody is in today.
                 </p>
               ) : (
@@ -470,7 +496,12 @@ export default async function DashboardPage({
           </Cell>
 
           {/* ------------------------------------------------------- row 3 · 6 */}
-          <LeaveCalendar month={month} today={today} spans={spans} className="sm:col-span-6" />
+          <LeaveCalendar
+            month={month}
+            today={today}
+            spans={spans}
+            className="sm:col-span-6 lg:min-h-0"
+          />
         </div>
       </PageShell>
     </div>

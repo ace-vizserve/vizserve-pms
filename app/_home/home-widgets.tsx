@@ -63,8 +63,11 @@ export function CellHead({
   } as const;
 
   return (
-    <div className="flex shrink-0 items-center gap-2 border-b px-4 py-2.5">
-      <h2 className="text-base font-semibold tracking-[-0.012em]">{title}</h2>
+    // py-1.5 and text-sm. Four cell headings plus the calendar's own is five of
+    // these stacked down the page, so a few pixels each is most of a calendar
+    // row — and at 14px the heading still outweighs the 12px content under it.
+    <div className="flex shrink-0 items-center gap-2 border-b px-3.5 py-1.5">
+      <h2 className="text-sm font-semibold tracking-[-0.012em]">{title}</h2>
       {typeof count === "number" ? (
         <span
           className={cn(
@@ -116,7 +119,10 @@ export function StatStrip({
           const inner = (
             <>
               <span className="text-2xs leading-4 text-muted-foreground">{stat.label}</span>
-              <span className="text-2xl font-semibold tracking-[-0.02em] tabular-nums">
+              {/* text-xl, not 2xl. These are three small counts, and at 30px
+                  they were the loudest thing on a page whose actual subject is
+                  the work underneath them. */}
+              <span className="text-xl font-semibold tracking-[-0.02em] tabular-nums">
                 {stat.value}
               </span>
             </>
@@ -126,7 +132,7 @@ export function StatStrip({
             <div
               key={stat.label}
               className={cn(
-                "flex min-w-0 flex-1 basis-0 flex-col justify-center gap-0.5 px-3 py-3",
+                "flex min-w-0 flex-1 basis-0 flex-col justify-center gap-0.5 px-3 py-2",
                 index < stats.length - 1 && "border-r",
               )}
             >

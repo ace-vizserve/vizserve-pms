@@ -90,8 +90,8 @@ export function LeaveCalendar({
         className,
       )}
     >
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-4 py-2.5">
-        <h2 className="text-base font-semibold tracking-[-0.012em]">Leave &amp; vacation</h2>
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2 border-b px-3.5 py-1.5">
+        <h2 className="text-sm font-semibold tracking-[-0.012em]">Leave &amp; vacation</h2>
         <p className="text-xs text-muted-foreground">{formatMonthYear(month)} · everyone</p>
 
         {/* Icons, not typed arrows. Each is a real link with an accessible name
@@ -114,7 +114,10 @@ export function LeaveCalendar({
         </div>
       </div>
 
-      <div className="flex flex-1 flex-col gap-1.5 p-3">
+      {/* min-h-0 so this can shrink inside the bounded page. Without it the
+          grid below holds its content height and the "no scroll" upstairs just
+          moves the overflow somewhere less visible. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-1 p-2.5">
         <div className="grid grid-cols-7 gap-1">
           {MONTH_GRID_WEEKDAYS.map((weekday) => (
             <div
@@ -137,7 +140,12 @@ export function LeaveCalendar({
               <div
                 key={day}
                 className={cn(
-                  "flex min-h-11 flex-col gap-0.5 rounded-md border p-1 px-1.5",
+                  // min-h-8, down from min-h-11. `auto-rows-fr` above shares the
+                  // leftover height between the six week rows, so this is only a
+                  // FLOOR — on a tall screen the cells still grow. Lowering it is
+                  // what lets six rows fit a 1080p viewport at all: at 44px the
+                  // grid alone demanded ~290px it did not have.
+                  "flex min-h-8 flex-col gap-0.5 overflow-hidden rounded-md border p-1 px-1.5",
                   // Order matters: today's ring wins over a leave tint, because
                   // "where am I" is the first question anyone asks of a
                   // calendar. The leave still reads from the name in the cell.
