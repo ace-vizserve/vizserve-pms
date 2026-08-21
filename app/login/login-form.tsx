@@ -7,7 +7,7 @@ import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { signInWithMicrosoft, signInWithPassword, type LoginState } from "./actions";
+import { signInWithPassword, type LoginState } from "./actions";
 
 function FieldError({ id, message }: { id: string; message?: string }) {
   if (!message) return null;
@@ -38,23 +38,18 @@ function SubmitButton() {
   );
 }
 
-function SsoButton() {
-  const { pending } = useFormStatus();
-  return (
-    <Button type="submit" variant="outline" size="lg" className="w-full" loading={pending}>
-      {pending ? null : (
-        <svg viewBox="0 0 23 23" aria-hidden className="size-4">
-          <path fill="#f35325" d="M1 1h10v10H1z" />
-          <path fill="#81bc06" d="M12 1h10v10H12z" />
-          <path fill="#05a6f0" d="M1 12h10v10H1z" />
-          <path fill="#ffba08" d="M12 12h10v10H12z" />
-        </svg>
-      )}
-      Continue with Microsoft
-    </Button>
-  );
-}
-
+/**
+ * NO MICROSOFT BUTTON, and its absence is deliberate rather than unbuilt.
+ *
+ * "Continue with Microsoft" and the `or` divider under it were removed on
+ * request: email and password is the only way in. The `signInWithMicrosoft`
+ * action went with them, so nothing here can start an Entra flow.
+ *
+ * `app/auth/callback/route.ts` STAYS — it is not the Entra callback any more,
+ * it is the password-reset callback. Both `forgot-password/actions.ts` and the
+ * admin's "send a reset link" point their `redirectTo` at it, and deleting it
+ * as OAuth leftovers would silently break password resets for everybody.
+ */
 export function LoginForm({ next, initialError }: { next: string; initialError?: string }) {
   const [state, formAction] = useActionState<LoginState, FormData>(signInWithPassword, {
     error: initialError,
@@ -65,17 +60,6 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
 
   return (
     <div className="space-y-6">
-      <form action={signInWithMicrosoft}>
-        <input type="hidden" name="next" value={next} />
-        <SsoButton />
-      </form>
-
-      <div className="flex items-center gap-3">
-        <span className="h-px flex-1 bg-border" />
-        <span className="text-2xs tracking-wide text-muted-foreground uppercase">or</span>
-        <span className="h-px flex-1 bg-border" />
-      </div>
-
       <form action={formAction} className="space-y-4" noValidate>
         <input type="hidden" name="next" value={next} />
 

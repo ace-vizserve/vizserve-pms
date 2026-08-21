@@ -3,14 +3,22 @@ import { NextResponse, type NextRequest } from "next/server";
 import { createClient } from "@/utils/supabase/server";
 
 /**
- * OAuth callback — exchanges the Entra authorization code for a session.
+ * Auth code callback — exchanges a one-time code for a session.
  *
- * Identity linking (P0-03) is Supabase-side: when the provider returns a
- * verified email that already belongs to a user, the identity is attached to
- * that user rather than creating a second one. That behaviour is a PROJECT
- * SETTING. If it is off, signing in with Entra on Monday and email/password on
- * Tuesday produces two auth.users rows, two profiles, and a person whose work
- * is split across both. Verify it before calling P0-03 done.
+ * THIS IS THE PASSWORD-RESET CALLBACK NOW. It was written for Entra, and the
+ * Microsoft sign-in was removed from the login page, but the route is still
+ * load-bearing: `resetPasswordForEmail` sends a link whose `redirectTo` lands
+ * here, from `app/forgot-password/actions.ts` and from the admin's "send a
+ * reset link" in `app/(app)/admin/users/actions.ts`. Delete it as OAuth
+ * leftovers and every password reset in the product silently 404s.
+ *
+ * `exchangeCodeForSession` is the same call either way — a PKCE code is a PKCE
+ * code, whether an identity provider or a reset email produced it.
+ *
+ * If Entra is ever restored: identity linking (P0-03) is a Supabase PROJECT
+ * SETTING, not something this route controls. With it off, signing in with
+ * Entra on Monday and email/password on Tuesday produces two auth.users rows,
+ * two profiles, and a person whose work is split across both.
  */
 export async function GET(request: NextRequest) {
   const { searchParams, origin } = request.nextUrl;

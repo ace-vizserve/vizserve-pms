@@ -1,7 +1,6 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { headers } from "next/headers";
 
 import { createClient } from "@/utils/supabase/server";
 import { loginSchema } from "@/lib/schemas/auth";
@@ -43,28 +42,28 @@ export async function signInWithPassword(
   redirect(safeNextPath(formData.get("next")));
 }
 
-export async function signInWithMicrosoft(formData: FormData) {
-  const supabase = await createClient();
-  const origin = (await headers()).get("origin") ?? process.env.NEXT_PUBLIC_SITE_URL!;
-  const next = safeNextPath(formData.get("next"));
-
-  const { data, error } = await supabase.auth.signInWithOAuth({
-    provider: "azure",
-    options: {
-      // `email` is required for identity linking to work: Supabase links an
-      // Entra identity to an existing email/password user only when the
-      // provider returns a verified email (P0-03, "one human, one profile").
-      scopes: "email openid profile",
-      redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(next)}`,
-    },
-  });
-
-  if (error || !data.url) {
-    redirect(`/login?error=${encodeURIComponent("Microsoft sign-in is unavailable right now.")}`);
-  }
-
-  redirect(data.url);
-}
+/*
+ * `signInWithMicrosoft` WAS HERE and was removed on request. Email and password
+ * is the only way in.
+ *
+ * Removing the button alone would have left a reachable server action — a
+ * `"use server"` export is a POST endpoint whether or not anything renders a
+ * form for it, so the flow would still have started for anyone who posted to
+ * it. The action had to go with the button.
+ *
+ * Two things it touched are deliberately still here:
+ *
+ *   * `app/auth/callback/route.ts`, which now serves password resets alone.
+ *     `forgot-password/actions.ts` and the admin's reset link both point their
+ *     `redirectTo` at it. Deleting it as OAuth leftovers breaks both.
+ *   * The app-access gate (`20260804120000_app_access_gate.sql`), which exists
+ *     because the auth pool is shared with other HFSE systems. That is a fact
+ *     about the pool, not about Entra, and it outlives this button.
+ *
+ * Restoring it is `supabase.auth.signInWithOAuth({ provider: "azure" })` with
+ * `scopes: "email openid profile"` — the email scope is what lets Supabase link
+ * the identity to an existing user instead of creating a second one (P0-03).
+ */
 
 export async function signOut() {
   const supabase = await createClient();
