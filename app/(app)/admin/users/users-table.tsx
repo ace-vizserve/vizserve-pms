@@ -4,10 +4,12 @@ import { useMemo, useState, useTransition } from "react";
 import { FileDown, KeyRound, Pencil, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
+import { Chip } from "@/components/status-badge";
 import {
   Select,
   SelectContent,
@@ -194,13 +196,14 @@ export function UsersTable({
           <span className="text-muted-foreground">—</span>
         ) : (
           <div className="flex flex-wrap gap-1">
+            {/* A LABEL, NOT A STATE — hence `Badge`, not `Chip`. A department
+                name has no status to carry, so it gets no dot; what it needs is
+                the brand tint that separates "leads these" from the plain text
+                in the column beside it. */}
             {user.managed_department_ids.map((id) => (
-              <span
-                key={id}
-                className="rounded-full bg-accent px-2 py-0.5 text-2xs font-medium text-accent-foreground"
-              >
+              <Badge key={id} variant="accent">
                 {departmentName.get(id) ?? "Unknown"}
-              </span>
+              </Badge>
             ))}
           </div>
         ),
@@ -208,16 +211,21 @@ export function UsersTable({
     {
       key: "status",
       header: "Status",
+      /*
+       * `Chip`, not a hand-rolled span. This is a real state, so it goes through
+       * the one component that owns tone→colour — and it picks up the second
+       * non-colour carrier for free: every chip has its label AND its dot, so
+       * "Active" and "Deactivated" stay distinguishable in greyscale, in a
+       * screenshot and on a printed staff list.
+       *
+       * The pair here were the last two flat `rounded-full` pills in the app,
+       * a different height and radius from every chip in the product.
+       */
       cell: (user) =>
-        /* State is never conveyed by colour alone — the label carries it. */
         user.is_active ? (
-          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">
-            Active
-          </span>
+          <Chip tone="success" label="Active" />
         ) : (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-            Deactivated
-          </span>
+          <Chip tone="neutral" label="Deactivated" />
         ),
     },
     {

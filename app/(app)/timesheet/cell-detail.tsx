@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { TimePicker } from "@/components/ui/time-picker";
 import {
   Popover,
   PopoverContent,
@@ -316,25 +317,23 @@ function EntryRow({
       {showTimes ? (
         <div className="flex items-center gap-1.5 pl-1 text-xs text-muted-foreground">
           <Clock className="size-3.5 shrink-0 text-foreground-faint" aria-hidden />
-          <Input
-            type="time"
+          <TimePicker
+            size="sm"
+            label="Start time"
             value={startTime}
             disabled={pending}
             readOnly={locked}
-            aria-label="Start time"
-            className="h-8 w-26 tabular-nums"
-            onChange={(event) => setStartTime(event.target.value)}
+            onChange={(next) => setStartTime(next ?? "")}
             onBlur={save}
           />
           <span aria-hidden>–</span>
-          <Input
-            type="time"
+          <TimePicker
+            size="sm"
+            label="End time"
             value={endTime}
             disabled={pending}
             readOnly={locked}
-            aria-label="End time"
-            className="h-8 w-26 tabular-nums"
-            onChange={(event) => setEndTime(event.target.value)}
+            onChange={(next) => setEndTime(next ?? "")}
             onBlur={save}
           />
           {/* The one error the pair can be in that the person has to fix
@@ -508,24 +507,22 @@ function AddEntry({ taskId, day }: { taskId: string; day: string }) {
           is still the fast path. */}
       <div className="flex items-center gap-2.5 border-b px-3 py-2 text-sm">
         <Timer className="size-4 shrink-0 text-foreground-faint" aria-hidden />
-        <Input
-          type="time"
+        <TimePicker
+          size="sm"
+          label="Start time"
           value={startTime}
           disabled={pending}
-          aria-label="Start time"
-          className="h-8 w-28 tabular-nums"
-          onChange={(event) => setStartTime(event.target.value)}
+          onChange={(next) => setStartTime(next ?? "")}
         />
         <span className="text-foreground-muted" aria-hidden>
           –
         </span>
-        <Input
-          type="time"
+        <TimePicker
+          size="sm"
+          label="End time"
           value={endTime}
           disabled={pending}
-          aria-label="End time"
-          className="h-8 w-28 tabular-nums"
-          onChange={(event) => setEndTime(event.target.value)}
+          onChange={(next) => setEndTime(next ?? "")}
         />
         {timed && derived !== null && derived <= 0 ? (
           <span className="text-xs text-destructive">End must be after the start.</span>
