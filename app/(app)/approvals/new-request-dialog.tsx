@@ -1,6 +1,7 @@
 "use client";
 
 import { Plus } from "lucide-react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -25,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { TimePicker } from "@/components/ui/time-picker";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { todayInAppZone } from "@/lib/dates";
 import { formatDays } from "@/lib/schemas/leave-balances";
@@ -37,6 +39,7 @@ import {
   INTERNAL_REQUEST_TYPES,
   MAX_OVERTIME_MINUTES,
   type InternalRequestType,
+  isTimeCorrectionType,
 } from "@/lib/schemas/internal-requests";
 import { toMinutes } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
@@ -69,6 +72,8 @@ export function NewRequestDialog({
   leaveTypes = [],
   balances = [],
   prefill,
+  hasDepartment = true,
+  isAdmin = false,
 }: {
   leaveTypes?: PickableLeaveType[];
   /**
@@ -98,7 +103,26 @@ export function NewRequestDialog({
    * clicked "Time-in missing?" on a DTR row has already decided; making them
    * press "New request" again on arrival would leave the whole trip pointless.
    */
-  prefill?: { type?: InternalRequestType; date?: string; openOnMount?: boolean };
+  prefill?: { type?: InternalRequestType; date?: string; time?: string; openOnMount?: boolean };
+  /**
+   * Whether the filer has a `primary_department_id`.
+   *
+   * ⚠️ THE REQUEST CANNOT ROUTE WITHOUT ONE. `vizserve_pms_submit_internal_request`
+   * resolves the approving department from the caller's own row and raises when
+   * it is null — correctly, since a request with no department has no queue to
+   * land in and no lead to notify. What was wrong was WHERE you found out:
+   * after picking a type, a day, a time and writing a reason, as a red toast
+   * that threw the form away.
+   */
+  hasDepartment?: boolean;
+  /**
+   * Only to choose the wording. The database rule is identical either way.
+   *
+   * An admin hitting "Ask an admin to set your department" is being told to ask
+   * themselves — which is what this screen did, and it reads as a dead end
+   * rather than as a two-click fix.
+   */
+  isAdmin?: boolean;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(Boolean(prefill?.openOnMount));
@@ -126,6 +150,13 @@ export function NewRequestDialog({
   const [startDate, setStartDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
   const [correctionDate, setCorrectionDate] = useState<string | null>(null);
+  /**
+   * P7-40. Seeded from the DTR link's `?time=` — the SCHEDULED time — and then
+   * fully the person's to change. It is an attestation about when they actually
+   * started, so the prefill is a starting point, never a submitted default
+   * nobody read.
+   */
+  const [correctionTime, setCorrectionTime] = useState<string | null>(prefill?.time ?? null);
   const [startHalf, setStartHalf] = useState<DayHalf>("MORNING");
   const [endHalf, setEndHalf] = useState<DayHalf>("AFTERNOON");
 
@@ -240,6 +271,29 @@ export function NewRequestDialog({
         </DialogHeader>
 
         <form action={submit} className="space-y-4">
+          {/*
+           * BEFORE the fields, not beside the submit button, because it decides
+           * whether filling them in is worth anything. This screen used to let
+           * you pick a type, a day, a time and write a reason, and only then
+           * throw a red toast that discarded the lot.
+           */}
+          {!hasDepartment ? (
+            <p
+              id="no-department"
+              role="alert"
+              className="rounded-md border border-destructive-border bg-destructive-subtle px-3 py-2 text-xs text-destructive"
+            >
+              You have no department set, so a request from you has nobody to route to.{" "}
+              {isAdmin ? (
+                <Link href="/admin/users" className="font-medium underline underline-offset-2">
+                  Set your department in Users
+                </Link>
+              ) : (
+                "Ask an admin to set your department."
+              )}
+            </p>
+          ) : null}
+
           <div className="space-y-2">
             <Label>Type</Label>
             {/* REAL RADIOS, not `aria-pressed` buttons. This is one choice from
@@ -275,6 +329,10 @@ export function NewRequestDialog({
                     onChange={() => {
                       setType(option);
                       setErrors({});
+                      // A time typed for one end of the day is wrong for the
+                      // other, so switching between the correction types starts
+                      // clean rather than carrying it across.
+                      setCorrectionTime(null);
                     }}
                     className="size-3.5 shrink-0 accent-primary"
                   />
@@ -509,7 +567,7 @@ export function NewRequestDialog({
             </div>
           ) : null}
 
-          {type === "NO_TIME_IN" || type === "NO_TIME_OUT" ? (
+          {isTimeCorrectionType(type) ? (
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="work_date">Which day</Label>
@@ -529,9 +587,37 @@ export function NewRequestDialog({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="correction_time">
-                  {type === "NO_TIME_IN" ? "Time you started" : "Time you finished"}
+                  {type === "NO_TIME_IN" || type === "TIME_IN_CORRECTION"
+                    ? "Time you started"
+                    : "Time you finished"}
                 </Label>
-                <Input id="correction_time" name="correction_time" type="time" />
+                {/*
+                 * P7-40 — DEFAULT VALUE, NOT A CONTROLLED ONE, and the
+                 * distinction is the whole ethics of this field.
+                 *
+                 * The DTR link arrives carrying the SCHEDULED time, so the
+                 * field opens saying what the record should have said. But this
+                 * is an attestation about when somebody actually started work,
+                 * and a value they cannot edit — or one that snaps back — would
+                 * turn a statement into a rubber stamp, leaving the approver
+                 * signing off a number the system invented. `defaultValue`
+                 * seeds it and then gets out of the way.
+                 *
+                 * `key` so that switching type re-mounts the input rather than
+                 * carrying a time typed for the other end of the day.
+                 */}
+                <TimePicker
+                  id="correction_time"
+                  name="correction_time"
+                  label={
+                    type === "NO_TIME_IN" || type === "TIME_IN_CORRECTION"
+                      ? "Time you started"
+                      : "Time you finished"
+                  }
+                  value={correctionTime}
+                  onChange={setCorrectionTime}
+                  invalid={Boolean(errors.correction_time?.length)}
+                />
                 <FieldError messages={errors.correction_time} />
               </div>
             </div>
@@ -568,7 +654,17 @@ export function NewRequestDialog({
             <Button type="button" variant="ghost" onClick={() => setOpen(false)}>
               Cancel
             </Button>
-            <Button type="submit" loading={pending}>
+            {/*
+             * `aria-describedby` points at the notice above, so the disabled
+             * state is never the sole explanation — the reason is announced with
+             * the button rather than left sitting further up the form.
+             */}
+            <Button
+              type="submit"
+              loading={pending}
+              disabled={!hasDepartment}
+              aria-describedby={!hasDepartment ? "no-department" : undefined}
+            >
               Submit request
             </Button>
           </div>

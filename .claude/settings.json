@@ -18,7 +18,8 @@
       "Bash(mv \"app/\\(app\\)/dashboard/leave-calendar.tsx\" \"app/\\(app\\)/_home/leave-calendar.tsx\")",
       "Bash(mv \"app/\\(app\\)/dashboard/page.tsx\" \"app/\\(app\\)/page.tsx\")",
       "Bash(sed -n '1,20p' \"C:/Users/Ace/.claude/plans/shiny-beaming-crab.md\")",
-      "Bash(npx vitest *)"
+      "Bash(npx vitest *)",
+      "Bash(node --env-file=.env -e ' *)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Ace\\.claude\\plans"

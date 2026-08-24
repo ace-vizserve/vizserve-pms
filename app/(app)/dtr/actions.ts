@@ -122,7 +122,7 @@ export async function exportDtrCsv(
         // payroll CSV has been failing too; it just failed into an error toast
         // rather than an empty screen.
         .select(
-          "work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey(full_name, email)",
+          "work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey(full_name, email, work_start, work_end)",
         )
         .gte("work_date", from)
         .lte("work_date", to)
@@ -188,7 +188,13 @@ export async function exportDtrCsv(
     time_out: string | null;
     corrected_at: string | null;
     user_id: string;
-    vizserve_pms_users: { full_name: string; email: string } | null;
+    vizserve_pms_users: {
+      full_name: string;
+      email: string;
+      /** P7-36. `HH:MM:SS` or null. Sliced for the export; payroll wants HH:MM. */
+      work_start: string | null;
+      work_end: string | null;
+    } | null;
   };
 
   type LeaveRequestRow = {
@@ -231,6 +237,14 @@ export async function exportDtrCsv(
     hours: string;
     leave: string;
     corrected: string;
+    /**
+     * P7-36. The schedule this day was measured against, exported so that a
+     * lateness figure computed from this file can be checked against the same
+     * numbers the screen used. Blank for anybody with no fixed schedule — which
+     * payroll must read as "not applicable", never as 00:00.
+     */
+    scheduledIn: string;
+    scheduledOut: string;
   };
 
   const lines: Line[] = [];
@@ -258,6 +272,8 @@ export async function exportDtrCsv(
       // double-count the date in any per-day tally payroll runs on this file.
       leave: onLeave ? describeLeaveDay(onLeave) : "",
       corrected: row.corrected_at ? "yes" : "",
+      scheduledIn: row.vizserve_pms_users?.work_start?.slice(0, 5) ?? "",
+      scheduledOut: row.vizserve_pms_users?.work_end?.slice(0, 5) ?? "",
     });
   }
 
@@ -281,6 +297,13 @@ export async function exportDtrCsv(
       hours: "",
       leave: describeLeaveDay(day),
       corrected: "",
+      // Blank on a leave-only line even for somebody who HAS a schedule. The
+      // columns describe what a day was measured against, and an approved
+      // absence is not measured against anything — printing 09:00 beside a day
+      // off invites exactly the "they were late" reading the row exists to
+      // prevent.
+      scheduledIn: "",
+      scheduledOut: "",
     });
   }
 
@@ -302,6 +325,8 @@ export async function exportDtrCsv(
     "Time in",
     "Time out",
     "Hours",
+    "Scheduled in",
+    "Scheduled out",
     "Leave",
     "Corrected",
   ];
@@ -317,6 +342,8 @@ export async function exportDtrCsv(
         csvCell(line.timeIn),
         csvCell(line.timeOut),
         csvCell(line.hours),
+        csvCell(line.scheduledIn),
+        csvCell(line.scheduledOut),
         csvCell(line.leave),
         csvCell(line.corrected),
       ].join(","),

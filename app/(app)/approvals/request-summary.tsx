@@ -41,6 +41,13 @@ export function requestDetail(request: InternalRequestRow): string {
       return `${formatDate(request.work_date)} · ${formatCellDuration(request.overtime_minutes ?? 0)}`;
     case "NO_TIME_IN":
     case "NO_TIME_OUT":
+    // P7-39. The same sentence for all four: what a correction asks for is a
+    // day and a time, whether it is filling a blank or replacing a recorded
+    // value. WHICH of those it is comes from the type pill beside this line,
+    // not from the line itself — repeating it here would say it twice on every
+    // row and still not say it on the rows that only render the summary.
+    case "TIME_IN_CORRECTION":
+    case "TIME_OUT_CORRECTION":
       return `${formatDate(request.work_date)} at ${formatDateTime(request.correction_at).split(", ")[1] ?? "—"}`;
     default: {
       /**

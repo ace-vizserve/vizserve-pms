@@ -137,3 +137,46 @@ export async function signIn(account: AccountKey): Promise<SignedInClient> {
 export function isPermissionDenied(error: { message?: string } | null): boolean {
   return Boolean(error?.message?.includes("permission denied"));
 }
+
+/**
+ * The values a Postgres enum currently holds, read from PostgREST's own OpenAPI
+ * description.
+ *
+ * ⚠️ THIS EXISTS BECAUSE THE OBVIOUS PROBE IS SILENTLY WRONG. The intuitive way
+ * to ask whether an enum has gained a value is to filter on it:
+ *
+ *   .from("...").select("id").eq("request_type", "TIME_IN_CORRECTION")
+ *
+ * That does NOT error on an unknown label. PostgREST returns an empty result and
+ * a null error, so the probe reports "migration applied" against a database
+ * where the value does not exist — and the cases it guards then run and fail
+ * with something unrelated. Measured against this project on 24 Aug 2026, not
+ * assumed.
+ *
+ * A column probe is still the better guard where a migration adds one (see the
+ * P7-04 and P7-12 probes in phase5.test.ts, and the reasoning there). This is
+ * for the case where a migration adds an enum value and NO column, which
+ * P7-38/P7-39 do.
+ *
+ * Returns an empty array if the spec cannot be read or the type is unknown —
+ * a probe that throws at module load takes the whole file down with it, and the
+ * honest failure mode is "skipped, loudly", not "collection error".
+ */
+export async function enumValues(table: string, column: string): Promise<string[]> {
+  if (!url || !secretKey) return [];
+
+  try {
+    const response = await fetch(`${url}/rest/v1/`, {
+      headers: { apikey: secretKey, Authorization: `Bearer ${secretKey}` },
+    });
+    if (!response.ok) return [];
+
+    const spec = (await response.json()) as {
+      definitions?: Record<string, { properties?: Record<string, { enum?: string[] }> }>;
+    };
+
+    return spec.definitions?.[table]?.properties?.[column]?.enum ?? [];
+  } catch {
+    return [];
+  }
+}

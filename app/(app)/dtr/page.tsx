@@ -11,7 +11,22 @@ import {
   todayInAppZone,
   workedMinutes,
 } from "@/lib/dates";
+import {
+  correctionTypeFor,
+  describeDeviation,
+  deviation as computeDeviation,
+  effectiveEnd,
+  scheduleFor,
+  type Deviation,
+} from "@/lib/dtr-schedule";
 import { loadPunchState } from "@/lib/dtr-server";
+import {
+  INTERNAL_REQUEST_LABELS,
+  isTimeCorrectionType,
+  TIME_CORRECTION_TYPES,
+  type TimeCorrectionType,
+} from "@/lib/schemas/internal-requests";
+import { loadAppSettings } from "@/lib/settings-server";
 import {
   describeLeaveDay,
   expandLeaveDays,
@@ -22,6 +37,7 @@ import {
 } from "@/lib/leave";
 import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
+import { InternalStatusBadge } from "@/components/status-badge";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
@@ -74,7 +90,8 @@ export default async function DtrPage({
 
   const isLead = roleAtLeast(context.role, "team_leader");
 
-  const [punchState, entriesResult, leaveResult, peopleResult] = await Promise.all([
+  const [punchState, entriesResult, leaveResult, peopleResult, requestsResult, settings] =
+    await Promise.all([
     loadPunchState(context.userId),
     (() => {
       // ONE MORE THAN WE RENDER.
@@ -106,7 +123,7 @@ export default async function DtrPage({
       // Left embed rather than `!inner`, for the same reason as the timesheet:
       // a row whose person is out of scope should lose its name, not its hours.
         .select(
-          "id, work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey(full_name)",
+          "id, work_date, time_in, time_out, corrected_at, user_id, vizserve_pms_users!vizserve_pms_dtr_entries_user_id_fkey(full_name, work_start, work_end)",
         )
         .gte("work_date", from)
         .lte("work_date", to)
@@ -163,6 +180,42 @@ export default async function DtrPage({
           .eq("is_active", true)
           .order("full_name")
       : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
+
+    /*
+     * P7-40 — THE REQUESTS ATTACHED TO THESE DAYS.
+     *
+     * Amier asked for the approval to be visible from the record it changes:
+     * "user can only see their own approval link, and team manager/leader and
+     * admin as well". That visibility rule needs no code — it is already the
+     * RLS on `vizserve_pms_internal_requests`, `requester_id = auth.uid() or
+     * manages_department(department_id)`, which is the same shape as the DTR's
+     * own policy. So this query carries NO user filter and no role branch, and
+     * the two screens agree by construction rather than by both remembering.
+     *
+     * Corrections AND approved overtime, in one round trip. They land in the
+     * same column because they answer the same question — "is there paperwork
+     * on this day?" — and because a second query for at most a handful of rows
+     * is latency spent on tidiness.
+     *
+     * `correction_at` comes back so a pending correction can say what it is
+     * asking for. Reading it before anybody decides is the point: a lead
+     * scanning the table sees "they say 09:00" beside the 09:26 that was
+     * recorded.
+     */
+    (() => {
+      let query = supabase
+        .from("vizserve_pms_internal_requests")
+        .select("id, request_type, status, work_date, requester_id, correction_at, overtime_minutes")
+        .in("request_type", [...TIME_CORRECTION_TYPES, "OVERTIME"])
+        .gte("work_date", from)
+        .lte("work_date", to)
+        .order("created_at", { ascending: false });
+
+      if (selectedUser) query = query.eq("requester_id", selectedUser);
+      return query;
+    })(),
+
+    loadAppSettings(),
   ]);
 
   type PunchRow = {
@@ -172,7 +225,23 @@ export default async function DtrPage({
     time_out: string | null;
     corrected_at: string | null;
     user_id: string;
-    vizserve_pms_users: { full_name: string } | null;
+    vizserve_pms_users: {
+      full_name: string;
+      /** P7-36. `HH:MM:SS` or null — normalised through `scheduleFor`. */
+      work_start: string | null;
+      work_end: string | null;
+    } | null;
+  };
+
+  /** P7-40. A correction or an approved overtime filed against a day. */
+  type DayRequest = {
+    id: string;
+    request_type: string;
+    status: "PENDING_REVIEW" | "APPROVED" | "REJECTED";
+    work_date: string | null;
+    requester_id: string;
+    correction_at: string | null;
+    overtime_minutes: number | null;
   };
 
   /**
@@ -183,7 +252,20 @@ export default async function DtrPage({
    * record show two entries for a date that only happened once. On a row with
    * no punch it is the whole reason the row exists.
    */
-  type Entry = PunchRow & { leave: LeaveDay | null; isLeaveOnly: boolean };
+  type Entry = PunchRow & {
+    leave: LeaveDay | null;
+    isLeaveOnly: boolean;
+    /** Every request filed against this person on this day, newest first. */
+    requests: DayRequest[];
+    /**
+     * P7-40. How far off schedule the punches landed, once grace and approved
+     * overtime are accounted for. Null in both slots is the ordinary case AND
+     * the no-schedule case — deliberately indistinguishable here, because the
+     * table has nothing to say about either.
+     */
+    deviationIn: Deviation | null;
+    deviationOut: Deviation | null;
+  };
 
   const fetched = (entriesResult.data ?? []) as unknown as PunchRow[];
   // The extra row is a signal, not data. Drop it before anything is counted.
@@ -222,11 +304,60 @@ export default async function DtrPage({
 
   const punchedKeys = new Set(punchRows.map((row) => leaveKey(row.user_id, row.work_date)));
 
-  const punchEntries: Entry[] = punchRows.map((row) => ({
-    ...row,
-    leave: leaveDays.get(leaveKey(row.user_id, row.work_date)) ?? null,
-    isLeaveOnly: false,
-  }));
+  /*
+   * Requests indexed by person and day, the same `user|date` key the leave map
+   * uses so both lookups read alike.
+   *
+   * Approved overtime is pulled out separately because it does two jobs: it
+   * shows on the row, AND it extends the day's scheduled end so that working
+   * the hours you were authorised to work is not then reported as a deviation.
+   * Summed rather than taken singly — one day can carry more than one approved
+   * overtime request.
+   */
+  const requestRows = (requestsResult.data ?? []) as unknown as DayRequest[];
+
+  const requestsByDay = new Map<string, DayRequest[]>();
+  const overtimeByDay = new Map<string, number>();
+
+  for (const row of requestRows) {
+    if (!row.work_date) continue;
+    const key = leaveKey(row.requester_id, row.work_date);
+
+    const forDay = requestsByDay.get(key) ?? [];
+    forDay.push(row);
+    requestsByDay.set(key, forDay);
+
+    if (row.request_type === "OVERTIME" && row.status === "APPROVED") {
+      overtimeByDay.set(key, (overtimeByDay.get(key) ?? 0) + (row.overtime_minutes ?? 0));
+    }
+  }
+
+  const punchEntries: Entry[] = punchRows.map((row) => {
+    const key = leaveKey(row.user_id, row.work_date);
+    const schedule = scheduleFor(row.vizserve_pms_users ?? {});
+    const end = effectiveEnd(schedule.workEnd, overtimeByDay.get(key) ?? 0);
+    const onLeave = leaveDays.get(key) ?? null;
+
+    return {
+      ...row,
+      leave: onLeave,
+      isLeaveOnly: false,
+      requests: requestsByDay.get(key) ?? [],
+      /*
+       * NOT COMPUTED ON A DAY SOMEBODY WAS APPROVED TO BE AWAY. A half day of
+       * leave legitimately shifts when a person clocks in and out, and telling
+       * someone on approved leave that they arrived four hours late is both
+       * wrong and insulting. The absence is the explanation; the schedule does
+       * not apply to it.
+       */
+      deviationIn: onLeave
+        ? null
+        : computeDeviation("in", row.time_in, schedule.workStart, settings.graceMinutes),
+      deviationOut: onLeave
+        ? null
+        : computeDeviation("out", row.time_out, end, settings.graceMinutes),
+    };
+  });
 
   /*
    * The absences with no punch behind them. These are the rows that did not
@@ -247,9 +378,19 @@ export default async function DtrPage({
         time_out: null,
         corrected_at: null,
         user_id: userId,
-        vizserve_pms_users: nameOf.has(userId) ? { full_name: nameOf.get(userId)! } : null,
+        vizserve_pms_users: nameOf.has(userId)
+          ? { full_name: nameOf.get(userId)!, work_start: null, work_end: null }
+          : null,
         leave: day,
         isLeaveOnly: true,
+        // The requests still show: an approved absence can perfectly well have a
+        // correction or an overtime filed against the same date, and hiding
+        // them here would make a row that exists to explain a day explain less
+        // of it than a punched row does.
+        requests: requestsByDay.get(key) ?? [],
+        // A day off is never off schedule. There is no punch to judge.
+        deviationIn: null,
+        deviationOut: null,
       };
     });
 
@@ -359,6 +500,14 @@ export default async function DtrPage({
           {!entry.time_in && !entry.isLeaveOnly && isMine(entry) ? (
             <CorrectionLink type="NO_TIME_IN" date={entry.work_date} label="Time-in missing?" />
           ) : null}
+          {/* P7-40. The deviation, in words, on the number it describes. THE
+              LABEL CARRIES THE STATE — an amber tint alone would leave a
+              colour-blind reader with a time and no idea it was flagged. */}
+          {entry.deviationIn ? (
+            <p className="mt-0.5 text-2xs font-medium text-warning">
+              {describeDeviation(entry.deviationIn)}
+            </p>
+          ) : null}
         </>
       ),
     },
@@ -384,8 +533,99 @@ export default async function DtrPage({
               ) : null}
             </>
           ) : null}
+          {entry.deviationOut ? (
+            <p className="mt-0.5 text-2xs font-medium text-warning">
+              {describeDeviation(entry.deviationOut)}
+            </p>
+          ) : null}
         </>
       ),
+    },
+    /*
+     * P7-40 — THE PAPERWORK ON THIS DAY.
+     *
+     * Placed BEFORE `worked` on purpose. The footer renders the range total in
+     * the LAST cell and spans everything before it with
+     * `colSpan={columns.length - 1}`; a column appended after `worked` would
+     * quietly put the total under the wrong heading.
+     *
+     * What appears here is scoped by RLS, not by anything below. A member sees
+     * only rows they filed; a team leader, manager or admin sees their
+     * department's. There is no role check in this cell because there is no
+     * role check in the query — the rows that arrive are already the rows this
+     * viewer may see.
+     */
+    {
+      key: "request",
+      header: "Request",
+      className: "whitespace-nowrap",
+      cell: (entry) => {
+        // Newest first, and at most two shown: a day realistically carries a
+        // time-in correction and a time-out correction. More than that is a
+        // person iterating on a request, and the detail page is where that
+        // history belongs.
+        const shown = entry.requests.slice(0, 2);
+
+        if (shown.length > 0) {
+          return (
+            <div className="flex flex-col gap-1">
+              {shown.map((request) => (
+                <Link
+                  key={request.id}
+                  href={`/approvals/${request.id}`}
+                  className="group flex items-center gap-1.5 text-2xs underline-offset-2 hover:underline"
+                >
+                  <InternalStatusBadge status={request.status} />
+                  <span className="text-muted-foreground group-hover:text-foreground">
+                    {INTERNAL_REQUEST_LABELS[
+                      request.request_type as keyof typeof INTERNAL_REQUEST_LABELS
+                    ] ?? request.request_type}
+                    {/* What it is asking for, so a lead can compare the claim
+                        against the recorded time without opening it. */}
+                    {isTimeCorrectionType(request.request_type) && request.correction_at
+                      ? ` · ${formatAppTime(request.correction_at)}`
+                      : null}
+                    {request.request_type === "OVERTIME" && request.overtime_minutes
+                      ? ` · ${formatDuration(request.overtime_minutes)}`
+                      : null}
+                  </span>
+                </Link>
+              ))}
+              {entry.requests.length > shown.length ? (
+                <span className="text-2xs text-muted-foreground">
+                  +{entry.requests.length - shown.length} more
+                </span>
+              ) : null}
+            </div>
+          );
+        }
+
+        /*
+         * Nothing filed yet, and the row is off schedule — so offer the fix.
+         *
+         * OWN ROWS ONLY, for the reason `isMine` documents: the submit function
+         * resolves the requester from the caller, so a lead clicking this on a
+         * member's row would file a correction against their own record.
+         *
+         * The time carried in the URL is the SCHEDULED one, which is a
+         * suggestion the dialog leaves editable — not a claim. See
+         * `narrowRequestPrefill`.
+         */
+        const pending = entry.deviationIn ?? entry.deviationOut;
+
+        if (pending && isMine(entry)) {
+          return (
+            <CorrectionLink
+              type={correctionTypeFor(pending.side)}
+              date={entry.work_date}
+              time={pending.scheduled}
+              label="Request correction"
+            />
+          );
+        }
+
+        return <span className="text-muted-foreground">—</span>;
+      },
     },
     {
       key: "worked",
@@ -676,15 +916,23 @@ export default async function DtrPage({
 function CorrectionLink({
   type,
   date,
+  time,
   label,
 }: {
-  type: "NO_TIME_IN" | "NO_TIME_OUT";
+  /**
+   * P7-39 widened this from the missing-punch pair. The four types differ in
+   * what they claim, not in what this link does with them — narrowing happens
+   * again on arrival, so an unknown value opens the plain dialog.
+   */
+  type: TimeCorrectionType;
   date: string;
+  /** P7-40. The scheduled time, prefilled as a SUGGESTION the dialog keeps editable. */
+  time?: string;
   label: string;
 }) {
   return (
     <Link
-      href={`/approvals?type=${type}&date=${date}`}
+      href={`/approvals?type=${type}&date=${date}${time ? `&time=${encodeURIComponent(time)}` : ""}`}
       className="mt-0.5 block text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
     >
       {label}

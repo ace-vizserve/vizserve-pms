@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
+import { INTERNAL_REQUEST_TYPES, narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 
 /**
  * P7-F — the DTR shortcut's query parameters.
@@ -15,6 +15,7 @@ describe("narrowRequestPrefill", () => {
     expect(narrowRequestPrefill({ type: "NO_TIME_IN", date: "2026-08-18" })).toEqual({
       type: "NO_TIME_IN",
       date: "2026-08-18",
+      time: undefined,
     });
   });
 
@@ -22,6 +23,7 @@ describe("narrowRequestPrefill", () => {
     expect(narrowRequestPrefill({ type: "SICK_DAY", date: "2026-08-18" })).toEqual({
       type: undefined,
       date: "2026-08-18",
+      time: undefined,
     });
   });
 
@@ -37,14 +39,20 @@ describe("narrowRequestPrefill", () => {
     expect(narrowRequestPrefill({ type: "NO_TIME_IN", date: "nope" })).toEqual({
       type: "NO_TIME_IN",
       date: undefined,
+      time: undefined,
     });
   });
 
   it("returns nothing at all when neither is present", () => {
-    expect(narrowRequestPrefill({})).toEqual({ type: undefined, date: undefined });
-    expect(narrowRequestPrefill({ type: null, date: null })).toEqual({
+    expect(narrowRequestPrefill({})).toEqual({
       type: undefined,
       date: undefined,
+      time: undefined,
+    });
+    expect(narrowRequestPrefill({ type: null, date: null, time: null })).toEqual({
+      type: undefined,
+      date: undefined,
+      time: undefined,
     });
   });
 
@@ -59,9 +67,35 @@ describe("narrowRequestPrefill", () => {
   it("accepts every launch type, so the list cannot drift", () => {
     // Walks the real constant. A type added to INTERNAL_REQUEST_TYPES without a
     // thought for the shortcut fails here rather than silently never prefilling.
-    for (const type of ["LEAVE", "NO_TIME_IN", "NO_TIME_OUT", "REIMBURSEMENT", "OVERTIME"]) {
+    // P7-39: walks the CONSTANT rather than a copy of it. The old version
+    // hardcoded five names, so the two new correction types would have been
+    // added to the app without this ever noticing they could not be linked to.
+    for (const type of INTERNAL_REQUEST_TYPES) {
       expect(narrowRequestPrefill({ type }).type).toBe(type);
     }
+  });
+
+  it("passes through a 24-hour HH:MM time", () => {
+    // P7-40. The DTR sends the SCHEDULED time so the correction dialog opens
+    // saying what the record should have said.
+    expect(narrowRequestPrefill({ type: "TIME_IN_CORRECTION", date: "2026-08-24", time: "09:00" })).toEqual(
+      { type: "TIME_IN_CORRECTION", date: "2026-08-24", time: "09:00" },
+    );
+  });
+
+  it("drops a time that is not a 24-hour HH:MM", () => {
+    for (const time of ["9:00", "09:00:00", "25:00", "09:60", "9am", "banana", ""]) {
+      expect(narrowRequestPrefill({ time }).time).toBeUndefined();
+    }
+  });
+
+  it("accepts the edges of the clock", () => {
+    expect(narrowRequestPrefill({ time: "00:00" }).time).toBe("00:00");
+    expect(narrowRequestPrefill({ time: "23:59" }).time).toBe("23:59");
+  });
+
+  it("refuses a repeated time parameter, like the others", () => {
+    expect(narrowRequestPrefill({ time: ["09:00", "10:00"] }).time).toBeUndefined();
   });
 
   it("takes a shape-valid but impossible date — the schema catches it, not this", () => {

@@ -1,0 +1,48 @@
+-- ---------------------------------------------------------------------------
+-- P7-38 — two request types, and nothing else in this file.
+--
+-- ⚠️ THIS FILE IS ONE STATEMENT SHORT OF USELESS ON PURPOSE. Postgres refuses to
+-- USE a new enum value in the same transaction that adds it, and every migration
+-- here is pasted into the Supabase SQL editor as exactly one transaction. Fold
+-- the constraint and the functions from P7-39 into this file and the paste fails
+-- on a step that looks trivial:
+--
+--   unsafe use of new value "TIME_IN_CORRECTION" of enum type
+--
+-- This is the FOURTH time the project has met that rule — p5_05's notification
+-- type, p7_03/p7_04 for OVERTIME, p7_07/p7_08 for 'commented', and now. p7_03's
+-- header predicted a third meeting. Apply this file, then P7-39.
+--
+-- WHY NEW VALUES RATHER THAN REUSING NO_TIME_IN / NO_TIME_OUT. The payload is
+-- identical and the DTR write-back is identical, so reuse was the cheap option.
+-- The two situations are not the same thing to the person approving them:
+--
+--   NO_TIME_IN          there is no punch. The record has a hole in it.
+--   TIME_IN_CORRECTION  there IS a punch and it is wrong — usually because
+--                       somebody arrived, started working, and clocked in
+--                       twenty minutes later.
+--
+-- A lead deciding the second one is being asked to accept a claim that
+-- contradicts a recorded time; a lead deciding the first is filling a blank.
+-- Collapsing them would also make "how often are we late" unanswerable, because
+-- the two would be indistinguishable in the queue and in the audit log.
+--
+-- ONE TYPE FOR BOTH TIME-OUT DIRECTIONS. Clocking out before the scheduled end
+-- and clocking out after it are both TIME_OUT_CORRECTION. Late-out is NOT routed
+-- to OVERTIME: overtime is requested and approved in advance as its own thing
+-- (P7-04), and a DTR that quietly turned a forgotten clock-out into an overtime
+-- claim would be manufacturing entitlement out of forgetfulness.
+--
+-- ⚠️ APPLY BY HAND, in the Supabase SQL editor. After P7-37, before P7-39.
+-- ---------------------------------------------------------------------------
+
+-- Appended, not placed with `before 'NO_TIME_OUT'`. Sorting the labels beside
+-- their cousins would be tidier to look at and buys nothing — nothing in the
+-- schema or the app orders by request_type — while making the physical enum
+-- order stop matching the order things were built in. OVERTIME appended too.
+--
+-- `if not exists` because this file is pasted by hand and a half-applied paste
+-- gets re-pasted. Two `add value` statements in one transaction are fine; the
+-- restriction is on using them, not on adding them.
+alter type vizserve_pms_internal_request_type add value if not exists 'TIME_IN_CORRECTION';
+alter type vizserve_pms_internal_request_type add value if not exists 'TIME_OUT_CORRECTION';

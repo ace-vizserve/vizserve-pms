@@ -7,7 +7,7 @@ import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
-import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
+import { INTERNAL_REQUEST_LABELS, isTimeCorrectionType } from "@/lib/schemas/internal-requests";
 import { createClient } from "@/utils/supabase/server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
@@ -124,12 +124,13 @@ export default async function InternalRequestPage({ params }: { params: Promise<
               </>
             ) : null}
 
-            {request.request_type === "NO_TIME_IN" || request.request_type === "NO_TIME_OUT" ? (
+            {isTimeCorrectionType(request.request_type) ? (
               <>
                 <Field label="Day being corrected" value={formatDate(request.work_date)} />
                 <Field
                   label={
-                    request.request_type === "NO_TIME_IN"
+                    request.request_type === "NO_TIME_IN" ||
+                    request.request_type === "TIME_IN_CORRECTION"
                       ? "Should have started"
                       : "Should have finished"
                   }
@@ -168,10 +169,19 @@ export default async function InternalRequestPage({ params }: { params: Promise<
           is the difference between this and a chat message saying "ok". */}
       {canDecide ? (
         <>
-          {request.request_type === "NO_TIME_IN" || request.request_type === "NO_TIME_OUT" ? (
+          {isTimeCorrectionType(request.request_type) ? (
             <p className="rounded-sm border border-info/30 bg-info-subtle px-3 py-2 text-xs">
               Approving this writes {formatDateTime(request.correction_at)} into the DTR for{" "}
               {formatDate(request.work_date)}.
+              {/* P7-39. On the two *_CORRECTION types there is already a
+                  recorded time, and approving REPLACES it. Saying so is the
+                  difference between a lead filling a blank and a lead agreeing
+                  to overwrite a machine-captured fact with a colleague's
+                  account of it — which is a bigger thing to sign. */}
+              {request.request_type === "TIME_IN_CORRECTION" ||
+              request.request_type === "TIME_OUT_CORRECTION" ? (
+                <span className="font-medium"> This replaces the time already recorded.</span>
+              ) : null}
             </p>
           ) : null}
           <DecisionPanel requestId={request.id} />

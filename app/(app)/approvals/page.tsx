@@ -119,7 +119,12 @@ export default async function ApprovalsPage({
    * than throwing: a mangled link should open the plain dialog, not an error
    * page. Same posture `/timesheet` takes with `?week=banana`.
    */
-  searchParams: Promise<{ type?: string | string[]; date?: string | string[] }>;
+  searchParams: Promise<{
+    type?: string | string[];
+    date?: string | string[];
+    /** P7-40. The scheduled time the DTR suggests. A seed, not an assertion. */
+    time?: string | string[];
+  }>;
 }) {
   const context = await requireAuthContext();
   const supabase = await createClient();
@@ -184,11 +189,20 @@ export default async function ApprovalsPage({
         <NewRequestDialog
           leaveTypes={leaveTypes ?? []}
           balances={balances ?? []}
+          // Read from the resolved auth context rather than re-queried: it is
+          // the same row the submit function will consult, so the form cannot
+          // disagree with the rule that refuses it.
+          hasDepartment={Boolean(context.primaryDepartmentId)}
+          isAdmin={context.role === "admin"}
           prefill={{
             ...prefill,
             // Opened only when something survived narrowing. Landing on
             // /approvals with no parameters must not pop a dialog over the queue
             // somebody came to read.
+            // `time` is deliberately NOT in this test. A URL carrying only a
+            // time names no day and no kind of request — there is nothing to
+            // open the dialog onto, and doing so would present an empty form
+            // with one field mysteriously filled.
             openOnMount: Boolean(prefill.type || prefill.date),
           }}
         />

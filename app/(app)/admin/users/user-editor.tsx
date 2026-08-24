@@ -24,6 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { TimePicker } from "@/components/ui/time-picker";
 import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import { ROLE_ORDER, type Role } from "@/lib/auth/roles";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
@@ -62,6 +63,12 @@ export type EditableUser = {
   is_active: boolean;
   /** Which HFSE applications they may enter. See the access toggle below. */
   app_access: string[];
+  /**
+   * P7-36. `HH:MM:SS` from Postgres, or null for no fixed schedule. Sliced to
+   * `HH:MM` for the time inputs below, which reject the seconds.
+   */
+  work_start: string | null;
+  work_end: string | null;
   managed_department_ids: string[];
   /** P7-33. `leave_type_id` → days allocated for `balanceYear`. Sparse. */
   leave_allocations: Record<string, number>;
@@ -169,6 +176,13 @@ function UserForm({
   const [managed, setManaged] = useState<string[]>(
     user?.managed_department_ids ?? [],
   );
+  /**
+   * P7-36. Sliced to `HH:MM` because `<input type="time">` silently rejects the
+   * `HH:MM:SS` Postgres returns — the field renders blank, the admin saves, and
+   * a schedule that was set reads as cleared.
+   */
+  const [workStart, setWorkStart] = useState(user?.work_start?.slice(0, 5) ?? "");
+  const [workEnd, setWorkEnd] = useState(user?.work_end?.slice(0, 5) ?? "");
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
   const [hasAppAccess, setHasAppAccess] = useState(
     user ? user.app_access.includes(APP_ACCESS_KEY) : true,
@@ -253,6 +267,10 @@ function UserForm({
       role,
       primary_department_id: primaryDepartmentId,
       managed_department_ids: scopeApplies ? managed : [],
+      // The empty string is how a cleared time input reports itself. The schema
+      // turns it into null — "no fixed schedule" — rather than a parse error.
+      work_start: workStart,
+      work_end: workEnd,
     };
 
     startTransition(async () => {
@@ -416,6 +434,64 @@ function UserForm({
               </p>
             )}
           </div>
+        </div>
+
+        {/* ------------------------------------------------------------------
+            P7-36 — the scheduled working day.
+
+            OPTIONAL, and the helper text says so in as many words. This is the
+            one field on this form whose blank state is a real answer rather
+            than an unfinished record: plenty of people here work no fixed
+            hours, and setting a schedule for them would have the DTR start
+            judging their punches against a start time nobody agreed.
+
+            Two `TimePicker`s. The value is a wall-clock time with no date
+            attached, and the control shows it the way people say it — "9:00 AM"
+            — while emitting the 24-hour string the schema and the `time` column
+            expect.
+            ------------------------------------------------------------------ */}
+        <div className="space-y-2">
+          <Label htmlFor="work_start">Work hours</Label>
+          <div className="flex items-center gap-2">
+            <TimePicker
+              id="work_start"
+              label="Scheduled start"
+              value={workStart}
+              onChange={(next) => setWorkStart(next ?? "")}
+              invalid={Boolean(fieldErrors.work_start || fieldErrors.work_end)}
+            />
+            <span className="text-sm text-muted-foreground">to</span>
+            <TimePicker
+              label="Scheduled end"
+              value={workEnd}
+              onChange={(next) => setWorkEnd(next ?? "")}
+              invalid={Boolean(fieldErrors.work_end)}
+            />
+            {workStart || workEnd ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onClick={() => {
+                  setWorkStart("");
+                  setWorkEnd("");
+                }}
+              >
+                Clear
+              </Button>
+            ) : null}
+          </div>
+          {fieldErrors.work_end ?? fieldErrors.work_start ? (
+            <p className="text-xs text-destructive">
+              {(fieldErrors.work_end ?? fieldErrors.work_start)?.[0]}
+            </p>
+          ) : (
+            <p className="text-xs text-muted-foreground">
+              Optional. Leave both blank for no fixed schedule — the DTR then says nothing about
+              when this person clocks in or out. With hours set, a punch more than the company
+              grace period away from them prompts a correction request.
+            </p>
+          )}
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">

@@ -5,12 +5,25 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { formatAppTime, formatDate, formatDuration, workedMinutes } from "@/lib/dates";
+import {
+  deviation as computeDeviation,
+  effectiveEnd,
+  type Deviation,
+  type WorkSchedule,
+} from "@/lib/dtr-schedule";
+import { OffScheduleDialog } from "./off-schedule-dialog";
 import { punch } from "./actions";
 
 export type PunchState = {
   today: { work_date: string; time_in: string | null; time_out: string | null } | null;
   /** Yesterday, only when it has a time-in and no time-out. */
   openYesterday: { work_date: string; time_in: string } | null;
+  /** P7-36. Both fields null when this person works no fixed hours. */
+  schedule: WorkSchedule;
+  /** P7-37. The company-wide tolerance, in minutes. */
+  graceMinutes: number;
+  /** P7-04. Overtime already approved for TODAY, which extends the day's end. */
+  approvedOvertimeMinutes: number;
 };
 
 /**
@@ -24,6 +37,11 @@ export type PunchState = {
  * a punch the returned row replaces local state. A DTR that says "timed in"
  * because a button was pressed, while the server captured nothing, is worse than
  * no shortcut at all.
+ *
+ * P7-40 adds the one judgement it makes: whether what the server recorded is
+ * where the schedule said it should be. That judgement runs on the RETURNED row,
+ * never on the button press, for the same reason — a prompt about a punch that
+ * was not captured would be a prompt about nothing.
  */
 export function PunchPanel({
   initial,
@@ -34,9 +52,16 @@ export function PunchPanel({
 }) {
   const [state, setState] = useState(initial);
   const [pending, startTransition] = useTransition();
+  const [offSchedule, setOffSchedule] = useState<{
+    deviation: Deviation;
+    workDate: string;
+    punchedAt: string;
+  } | null>(null);
 
   const timeIn = state.today?.time_in ?? null;
   const timeOut = state.today?.time_out ?? null;
+
+  const scheduledEnd = effectiveEnd(state.schedule.workEnd, state.approvedOvertimeMinutes);
 
   function run(direction: "in" | "out", workDate?: string) {
     startTransition(async () => {
@@ -62,7 +87,7 @@ export function PunchPanel({
       setState((previous) =>
         punched.work_date === previous.today?.work_date || !previous.today
           ? {
-              openYesterday: previous.openYesterday,
+              ...previous,
               today: {
                 work_date: punched.work_date,
                 time_in: punched.time_in,
@@ -71,8 +96,30 @@ export function PunchPanel({
             }
           : // The punch closed yesterday, so today is untouched and yesterday is
             // no longer open.
-            { today: previous.today, openYesterday: null },
+            { ...previous, today: previous.today, openYesterday: null },
       );
+
+      // ⚠️ ONLY ON A PUNCH THAT WAS ACTUALLY CAPTURED, and only for today.
+      //
+      // `captured: false` means the server kept an earlier time-in and ignored
+      // this press — judging the value it kept would prompt about a punch made
+      // hours ago every time somebody pressed the button twice.
+      //
+      // Closing YESTERDAY is skipped too: approvedOvertimeMinutes was loaded for
+      // today, so a yesterday deviation would be measured against the wrong end
+      // time. That day still offers the correction link in the DTR table, which
+      // is the quieter surface and the right one for a shift somebody is only
+      // now getting round to closing.
+      if (!punched.captured) return;
+      if (punched.work_date !== initial.today?.work_date) return;
+
+      const punchedAt = direction === "in" ? punched.time_in : punched.time_out;
+      const target = direction === "in" ? state.schedule.workStart : scheduledEnd;
+      const found = computeDeviation(direction, punchedAt, target, state.graceMinutes);
+
+      if (found && punchedAt) {
+        setOffSchedule({ deviation: found, workDate: punched.work_date, punchedAt });
+      }
     });
   }
 
@@ -89,6 +136,19 @@ export function PunchPanel({
           <p className="mt-0.5 text-xs text-muted-foreground">
             {formatDate(state.today?.work_date ?? null)}
           </p>
+          {/* The schedule these punches are judged against, shown where they
+              are. Somebody prompted about being six minutes late should be able
+              to see what they were six minutes late FOR without opening another
+              screen — and somebody with no schedule set should be able to tell
+              that this is why they are never prompted. */}
+          {state.schedule.workStart && state.schedule.workEnd ? (
+            <p className="mt-0.5 text-2xs text-muted-foreground">
+              Scheduled {state.schedule.workStart}–{state.schedule.workEnd}
+              {state.approvedOvertimeMinutes > 0 && scheduledEnd
+                ? ` · to ${scheduledEnd} with approved overtime`
+                : ""}
+            </p>
+          ) : null}
         </div>
       ) : null}
 
@@ -143,6 +203,13 @@ export function PunchPanel({
           </Button>
         </div>
       ) : null}
+
+      <OffScheduleDialog
+        deviation={offSchedule?.deviation ?? null}
+        workDate={offSchedule?.workDate ?? ""}
+        punchedAt={offSchedule?.punchedAt ?? ""}
+        onDismiss={() => setOffSchedule(null)}
+      />
     </div>
   );
 }

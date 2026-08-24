@@ -61,7 +61,8 @@ export type NavIconName =
   | "reports"
   | "inbox"
   | "users"
-  | "calendar-off";
+  | "calendar-off"
+  | "settings";
 
 export const NAV_ITEMS: NavItem[] = [
   {
@@ -168,6 +169,16 @@ export const NAV_ITEMS: NavItem[] = [
     enabled: true,
     icon: "calendar-off",
   },
+  {
+    label: "Settings",
+    href: "/admin/settings",
+    minRole: "admin",
+    // P7-37. Company-wide rules, read by everybody and written by nobody else.
+    // Sits with Holidays for the same reason: both are policy an admin sets
+    // once and the whole app then obeys silently.
+    enabled: true,
+    icon: "settings",
+  },
 ];
 
 const ROLE_ORDER: Role[] = ["member", "team_leader", "manager", "admin"];
@@ -222,7 +233,7 @@ export const NAV_GROUPS: NavGroup[] = [
   // them side by side in the rail in the first place.
   { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
   { label: "Manage", hrefs: ["/forms", "/reports"] },
-  { label: "Admin", hrefs: ["/admin/users", "/admin/holidays"], pinBottom: true },
+  { label: "Admin", hrefs: ["/admin/users", "/admin/holidays", "/admin/settings"], pinBottom: true },
 ];
 
 /**

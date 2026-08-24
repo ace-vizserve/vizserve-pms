@@ -23,7 +23,7 @@ export default function Loading() {
           </div>
         </div>
 
-        <TableSkeleton columns={4} rows={8} />
+        <TableSkeleton columns={5} rows={8} />
       </div>
     </PageShell>
   );

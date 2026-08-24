@@ -55,10 +55,18 @@ export type VizservePmsDayHalf = "MORNING" | "AFTERNOON";
  */
 export type VizservePmsGender = "MALE" | "FEMALE";
 
+/**
+ * P7-38 added the last two. NO_TIME_* means there is no punch to read;
+ * *_CORRECTION means there is one and it is wrong. Same payload, same DTR
+ * write-back, different claim — see the migration's header for why they are not
+ * one type.
+ */
 export type VizservePmsInternalRequestType =
   | "LEAVE"
   | "NO_TIME_IN"
   | "NO_TIME_OUT"
+  | "TIME_IN_CORRECTION"
+  | "TIME_OUT_CORRECTION"
   | "REIMBURSEMENT"
   | "OVERTIME";
 
@@ -168,6 +176,15 @@ export type Database = {
            * nobody has opened since the column landed, not a refusal.
            */
           gender: VizservePmsGender | null;
+          /**
+           * P7-36. `HH:MM:SS` Manila wall-clock, both or neither. NULL means no
+           * schedule is recorded, so nothing computes lateness for this person —
+           * a supported state, not missing data. Normalise through
+           * `scheduleFor()` in `lib/dtr-schedule.ts` rather than reading the raw
+           * value: Postgres returns seconds that no comparison here wants.
+           */
+          work_start: string | null;
+          work_end: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -180,6 +197,8 @@ export type Database = {
           is_active?: boolean;
           app_access?: string[];
           gender?: VizservePmsGender | null;
+          work_start?: string | null;
+          work_end?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -192,6 +211,8 @@ export type Database = {
           is_active?: boolean;
           app_access?: string[];
           gender?: VizservePmsGender | null;
+          work_start?: string | null;
+          work_end?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -320,6 +341,43 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
+      };
+      /**
+       * P7-37. ONE ROW, ALWAYS — `id` is a boolean primary key with
+       * `check (id)`, so a second insert collides rather than creating a second
+       * truth. Read it with `.single()`; there is no case where a caller wants a
+       * list of settings rows.
+       *
+       * No Delete shape is expressible here, and that matches the database: the
+       * table has separate INSERT and UPDATE policies and no DELETE policy at
+       * all, because a missing row means "the grace period is unknown".
+       */
+      vizserve_pms_app_settings: {
+        Row: {
+          id: boolean;
+          grace_minutes: number;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          id?: boolean;
+          grace_minutes?: number;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Update: {
+          grace_minutes?: number;
+          updated_at?: string;
+          updated_by?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_app_settings_updated_by_fkey";
+            columns: ["updated_by"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
       };
       vizserve_pms_forms: {
         Row: {
