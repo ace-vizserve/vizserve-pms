@@ -210,7 +210,9 @@ Amier, 19:10–21:00. Rules as stated:
 
 Fixed types at launch: **Leave**, **No Time-In**, **No Time-Out**, **Reimbursement**. Amier, 22:00–23:30.
 
-Leave balances are **deliberately out of scope for v1** — HR / Sir Joel counts manually. Amier, 22:40: *"tayo naman ngayon, ma-implement lang ng pinakamabilis... Ang mahalaga lang, may record."* Resist the urge to build balance accrual. It is the classic scope trap and he explicitly waved it off.
+Leave balances were **deliberately out of scope for v1** — HR / Sir Joel counted manually. Amier, 22:40: *"tayo naman ngayon, ma-implement lang ng pinakamabilis... Ang mahalaga lang, may record."*
+
+**Reversed on 24 Aug 2026 — see `D27`.** Balances now exist, per leave type, as an allocation an admin types plus usage computed from approved requests. What stayed waved off is the part he was actually warning about: **accrual, carry-over and pro-rating**. Nothing earns days over time, nothing rolls anything into next year, and nothing refuses a request that overdraws. That line is still the scope trap; only the allocation crossed it.
 
 ### Timesheet
 

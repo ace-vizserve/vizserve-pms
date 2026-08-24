@@ -78,25 +78,31 @@ const DEPARTMENTS = {
  *
  * Two members per department on purpose: Phase 2 sets both a PIC and a QA, and
  * Phase 3's QA gate is only meaningfully tested when they are different people.
+ *
+ * P7-32 — every spec carries a gender, ALTERNATED rather than chosen, because
+ * these are fixtures and any pattern in them would be read as meaning something.
+ * The admin form requires the field, so seeded accounts that lacked one would be
+ * the only rows in the system that could not be saved without an extra choice —
+ * which is a fixture behaving unlike the thing it stands in for.
  */
 const USERS = [
-  { email: "test.admin@example.com", name: "Test Admin", role: "admin", dept: null, manages: [] },
-  { email: "test.manager@example.com", name: "Test Manager", role: "manager", dept: null, manages: ["VizAssists", "VizBooks"] },
-  { email: "test.manager.all@example.com", name: "Test Manager (All)", role: "manager", dept: null, manages: ["VizBytes", "VizAssists", "VizBooks", "VizMedia"] },
+  { email: "test.admin@example.com", name: "Test Admin", role: "admin", gender: "MALE", dept: null, manages: [] },
+  { email: "test.manager@example.com", name: "Test Manager", role: "manager", gender: "FEMALE", dept: null, manages: ["VizAssists", "VizBooks"] },
+  { email: "test.manager.all@example.com", name: "Test Manager (All)", role: "manager", gender: "MALE", dept: null, manages: ["VizBytes", "VizAssists", "VizBooks", "VizMedia"] },
 
-  { email: "test.tl.vizbytes@example.com", name: "TL VizBytes", role: "team_leader", dept: "VizBytes", manages: ["VizBytes"] },
-  { email: "test.tl.vizassists@example.com", name: "TL VizAssists", role: "team_leader", dept: "VizAssists", manages: ["VizAssists"] },
-  { email: "test.tl.vizbooks@example.com", name: "TL VizBooks", role: "team_leader", dept: "VizBooks", manages: ["VizBooks"] },
-  { email: "test.tl.vizmedia@example.com", name: "TL VizMedia", role: "team_leader", dept: "VizMedia", manages: ["VizMedia"] },
+  { email: "test.tl.vizbytes@example.com", name: "TL VizBytes", role: "team_leader", gender: "FEMALE", dept: "VizBytes", manages: ["VizBytes"] },
+  { email: "test.tl.vizassists@example.com", name: "TL VizAssists", role: "team_leader", gender: "MALE", dept: "VizAssists", manages: ["VizAssists"] },
+  { email: "test.tl.vizbooks@example.com", name: "TL VizBooks", role: "team_leader", gender: "FEMALE", dept: "VizBooks", manages: ["VizBooks"] },
+  { email: "test.tl.vizmedia@example.com", name: "TL VizMedia", role: "team_leader", gender: "MALE", dept: "VizMedia", manages: ["VizMedia"] },
 
-  { email: "test.member1.vizbytes@example.com", name: "Member One VizBytes", role: "member", dept: "VizBytes", manages: [] },
-  { email: "test.member2.vizbytes@example.com", name: "Member Two VizBytes", role: "member", dept: "VizBytes", manages: [] },
-  { email: "test.member1.vizassists@example.com", name: "Member One VizAssists", role: "member", dept: "VizAssists", manages: [] },
-  { email: "test.member2.vizassists@example.com", name: "Member Two VizAssists", role: "member", dept: "VizAssists", manages: [] },
-  { email: "test.member1.vizbooks@example.com", name: "Member One VizBooks", role: "member", dept: "VizBooks", manages: [] },
-  { email: "test.member2.vizbooks@example.com", name: "Member Two VizBooks", role: "member", dept: "VizBooks", manages: [] },
-  { email: "test.member1.vizmedia@example.com", name: "Member One VizMedia", role: "member", dept: "VizMedia", manages: [] },
-  { email: "test.member2.vizmedia@example.com", name: "Member Two VizMedia", role: "member", dept: "VizMedia", manages: [] },
+  { email: "test.member1.vizbytes@example.com", name: "Member One VizBytes", role: "member", gender: "FEMALE", dept: "VizBytes", manages: [] },
+  { email: "test.member2.vizbytes@example.com", name: "Member Two VizBytes", role: "member", gender: "MALE", dept: "VizBytes", manages: [] },
+  { email: "test.member1.vizassists@example.com", name: "Member One VizAssists", role: "member", gender: "FEMALE", dept: "VizAssists", manages: [] },
+  { email: "test.member2.vizassists@example.com", name: "Member Two VizAssists", role: "member", gender: "MALE", dept: "VizAssists", manages: [] },
+  { email: "test.member1.vizbooks@example.com", name: "Member One VizBooks", role: "member", gender: "FEMALE", dept: "VizBooks", manages: [] },
+  { email: "test.member2.vizbooks@example.com", name: "Member Two VizBooks", role: "member", gender: "MALE", dept: "VizBooks", manages: [] },
+  { email: "test.member1.vizmedia@example.com", name: "Member One VizMedia", role: "member", gender: "FEMALE", dept: "VizMedia", manages: [] },
+  { email: "test.member2.vizmedia@example.com", name: "Member Two VizMedia", role: "member", gender: "MALE", dept: "VizMedia", manages: [] },
 ];
 
 // NOTE: test.client@example.com is deliberately NOT here. The Phase 4 approval
@@ -140,6 +146,7 @@ async function upsertUser(spec) {
       id: authUser.id,
       email: spec.email,
       full_name: spec.name,
+      gender: spec.gender,
       role: spec.role,
       primary_department_id: spec.dept ? DEPARTMENTS[spec.dept] : null,
       is_active: true,

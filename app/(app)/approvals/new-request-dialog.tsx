@@ -25,7 +25,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { todayInAppZone } from "@/lib/dates";
+import { formatDays } from "@/lib/schemas/leave-balances";
 import {
   DAY_HALF_LABELS,
   DAY_HALVES,
@@ -65,9 +67,24 @@ function FieldError({ messages }: { messages?: string[] }) {
 
 export function NewRequestDialog({
   leaveTypes = [],
+  balances = [],
   prefill,
 }: {
   leaveTypes?: PickableLeaveType[];
+  /**
+   * P7-33 — the filer's own allocated / used / remaining, per type.
+   *
+   * Shown beside the type they picked, and ADVISORY ONLY: a request that would
+   * overdraw still submits, because entitlement is HR's call and this schema
+   * models none of the reasons they might allow it. Disabling the submit button
+   * on a negative figure would make the app the authority on a question it
+   * cannot answer, and would strand anybody whose allocation simply has not
+   * been set yet.
+   *
+   * Empty when the summary could not be read, which renders as nothing rather
+   * than as zero — a hint that is missing is better than one that is wrong.
+   */
+  balances?: LeaveBalanceSummaryRow[];
   /**
    * F — where the DTR shortcut lands.
    *
@@ -115,6 +132,7 @@ export function NewRequestDialog({
   const leaveTypeItems = Object.fromEntries(
     leaveTypes.map((option) => [option.id, option.label]),
   );
+  const balance = balances.find((row) => row.leave_type_id === leaveTypeId);
   const halfItems = Object.fromEntries(
     DAY_HALVES.map((half) => [half, DAY_HALF_LABELS[half]]),
   );
@@ -316,6 +334,36 @@ export function NewRequestDialog({
                   </SelectContent>
                 </Select>
                 <FieldError messages={errors.leave_type_id} />
+
+                {/* P7-33. Only once a type is chosen — a summary of all eight
+                    above an empty form is a table nobody asked for, and the
+                    question "how many do I have left" is only meaningful about
+                    the one being filed.
+
+                    The figures are for the CURRENT year and count APPROVED
+                    leave only, so a pending request is not deducted twice over
+                    once it is decided. Both facts are said out loud rather than
+                    left to be inferred from a number that looks too high.
+
+                    State is never conveyed by colour alone (a project rule), so
+                    an overdraw reads "over your allocation by" and does not
+                    rely on the destructive tint to carry it. */}
+                {balance ? (
+                  <p className="text-xs text-muted-foreground">
+                    {balance.days_remaining < 0 ? (
+                      <span className="font-medium text-destructive">
+                        {formatDays(-balance.days_remaining)} over your allocation
+                      </span>
+                    ) : (
+                      <span className="font-medium text-foreground">
+                        {formatDays(balance.days_remaining)} left
+                      </span>
+                    )}{" "}
+                    — {formatDays(balance.days_allocated)} allocated, {formatDays(balance.days_used)}{" "}
+                    approved so far this year. Filing more than you have left is allowed; your lead
+                    decides.
+                  </p>
+                ) : null}
               </div>
 
               {/*

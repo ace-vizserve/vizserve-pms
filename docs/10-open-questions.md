@@ -323,8 +323,10 @@ transaction that adds it — this has bitten the project three times.
 
 Benchmarking the Teams forms is fine under `D4` (Teams is being replaced, not
 integrated) — copying field lists is the same permitted category as `D21`'s
-ClickUp shape-borrowing. Any sync or parallel run is not. **Leave balances stay
-out of scope**, guarded by `tests/unit/no-leave-balance.test.ts`.
+ClickUp shape-borrowing. Any sync or parallel run is not. **Leave balances came
+into scope on 24 Aug 2026** (`D27`) as an allocation per type plus computed
+usage; the guard test that used to enforce their absence is gone. Accrual,
+carry-over and pro-rating did NOT come in with them.
 
 **Needs:** the actual list from Amier, same posture as D25's "The list itself is
 owed by Amier."

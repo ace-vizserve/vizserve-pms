@@ -125,7 +125,7 @@ export default async function ApprovalsPage({
   const supabase = await createClient();
   const prefill = narrowRequestPrefill(await searchParams);
 
-  const [{ data, error: requestsError }, { data: leaveTypes }] = await Promise.all([
+  const [{ data, error: requestsError }, { data: leaveTypes }, { data: balances }] = await Promise.all([
     supabase
       .from("vizserve_pms_internal_requests")
       .select("*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)")
@@ -148,6 +148,18 @@ export default async function ApprovalsPage({
       .select("id, label")
       .eq("is_active", true)
       .order("sort_order"),
+
+    // P7-33 — the caller's own remaining days, per type.
+    //
+    // No arguments: the function defaults to the caller and to the current year
+    // in Manila. Passing the user id explicitly would be the same query with one
+    // more thing that can be wrong, and the function checks authority either way
+    // — it raises for a caller who is not the subject, their lead, or an admin.
+    //
+    // A failure here is left to fall through as `null`. The balance is a hint
+    // beside a field; the page it decorates is somebody's approval queue, and
+    // that must render whether or not the entitlement figures came back.
+    supabase.rpc("vizserve_pms_leave_balance_summary", {}),
   ]);
 
   const fetched = (data ?? []) as unknown as Row[];
@@ -165,11 +177,13 @@ export default async function ApprovalsPage({
     <PageShell className="gap-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
-          Leave, time corrections and reimbursements. Leave balances are counted by HR — this is the
-          record, not an entitlement check.
+          Leave, time corrections and reimbursements. Your remaining leave shows as you file — it is
+          what HR allocated for the year less what you have had approved, and nothing here refuses a
+          request that would overdraw it.
         </p>
         <NewRequestDialog
           leaveTypes={leaveTypes ?? []}
+          balances={balances ?? []}
           prefill={{
             ...prefill,
             // Opened only when something survived narrowing. Landing on

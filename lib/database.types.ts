@@ -47,6 +47,14 @@ export type VizservePmsApprovalDecision = "approved" | "returned" | "rejected";
  */
 export type VizservePmsDayHalf = "MORNING" | "AFTERNOON";
 
+/**
+ * P7-32. An enum rather than text so the first report that groups by it is not
+ * counting "M", "male" and "Male " as three answers. NULL on the column means
+ * "not recorded yet" — the auth trigger creates profile rows with no gender to
+ * supply — never "declined to say".
+ */
+export type VizservePmsGender = "MALE" | "FEMALE";
+
 export type VizservePmsInternalRequestType =
   | "LEAVE"
   | "NO_TIME_IN"
@@ -154,6 +162,12 @@ export type Database = {
            * user can rewrite through GoTrue with their own token (D18).
            */
           app_access: string[];
+          /**
+           * P7-32. Required by the admin form, nullable here — see the column
+           * comment in 20260824090000_p7_32_gender.sql. NULL is an account
+           * nobody has opened since the column landed, not a refusal.
+           */
+          gender: VizservePmsGender | null;
           created_at: string;
           updated_at: string;
         };
@@ -165,6 +179,7 @@ export type Database = {
           primary_department_id?: string | null;
           is_active?: boolean;
           app_access?: string[];
+          gender?: VizservePmsGender | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -176,6 +191,7 @@ export type Database = {
           primary_department_id?: string | null;
           is_active?: boolean;
           app_access?: string[];
+          gender?: VizservePmsGender | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -965,6 +981,54 @@ export type Database = {
         }>;
         Relationships: [];
       };
+      /**
+       * P7-33. What HR ALLOCATED, per person per leave type per year. Reverses
+       * the Phase 5 exclusion; see D27.
+       *
+       * There is no `days_used` and there never should be. Usage is computed
+       * from approved requests by `vizserve_pms_leave_balance_summary`, so a
+       * rejected, cancelled or edited request needs no re-credit path and the
+       * figure cannot drift out of step with the requests it describes.
+       *
+       * Admin-writable only — a lead who could set the allowance and then
+       * approve leave against it would be on both sides of the question.
+       */
+      vizserve_pms_leave_balances: {
+        Row: {
+          id: string;
+          user_id: string;
+          leave_type_id: string;
+          balance_year: number;
+          /** Half-day granularity, matching what a request can consume. */
+          days_allocated: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          leave_type_id: string;
+          balance_year: number;
+          days_allocated?: number;
+        };
+        Update: Partial<{
+          days_allocated: number;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_leave_balances_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_leave_balances_leave_type_id_fkey";
+            columns: ["leave_type_id"];
+            referencedRelation: "vizserve_pms_leave_types";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       /** The legal-transition table as data. Mirrored in lib/schemas/tasks.ts. */
       /**
        * P7-13. Additional people on a task. Written only through
@@ -1403,6 +1467,55 @@ export type Database = {
           end_date: string;
         }[];
       };
+      /**
+       * P7-33. Allocated / used / remaining per leave type, for one person in
+       * one year.
+       *
+       * Both arguments default: no `p_user_id` means the caller, no `p_year`
+       * means the current year in Manila. SECURITY DEFINER with its own
+       * authority check inside — it RAISES for a caller who is not the subject,
+       * their department lead, or an admin, rather than returning zeroes.
+       */
+      vizserve_pms_leave_balance_summary: {
+        Args: { p_user_id?: string | null; p_year?: number | null };
+        Returns: {
+          leave_type_id: string;
+          code: string;
+          label: string;
+          is_active: boolean;
+          days_allocated: number;
+          days_used: number;
+          /** Allocated − used. Goes NEGATIVE on an overdraw; nothing blocks. */
+          days_remaining: number;
+        }[];
+      };
+      /**
+       * P7-34. One row per person per leave type for one year — the leave
+       * audit. Scoped by what the caller LEADS: an admin gets everyone, a lead
+       * gets their departments, a member gets an empty set rather than an
+       * error, because "you lead nobody" is a true answer to this question.
+       *
+       * Includes leavers who took leave in the year, flagged by `is_active`.
+       * Their absences are part of the year being audited whether or not they
+       * are still on the payroll.
+       */
+      vizserve_pms_leave_report: {
+        Args: { p_year?: number | null };
+        Returns: {
+          user_id: string;
+          full_name: string;
+          email: string;
+          is_active: boolean;
+          department_name: string | null;
+          leave_type_id: string;
+          code: string;
+          label: string;
+          sort_order: number;
+          days_allocated: number;
+          days_used: number;
+          days_remaining: number;
+        }[];
+      };
       vizserve_pms_submit_request: {
         Args: {
           p_slug: string;
@@ -1708,6 +1821,7 @@ export type Database = {
       vizserve_pms_internal_request_type: VizservePmsInternalRequestType;
       vizserve_pms_internal_request_status: VizservePmsInternalRequestStatus;
       vizserve_pms_timesheet_week_status: VizservePmsTimesheetWeekStatus;
+      vizserve_pms_gender: VizservePmsGender;
     };
     CompositeTypes: Record<never, never>;
   };
@@ -1721,6 +1835,11 @@ export type DtrEntryRow = Database["public"]["Tables"]["vizserve_pms_dtr_entries
 export type InternalRequestRow =
   Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];
 export type LeaveTypeRow = Database["public"]["Tables"]["vizserve_pms_leave_types"]["Row"];
+export type LeaveBalanceRow =
+  Database["public"]["Tables"]["vizserve_pms_leave_balances"]["Row"];
+/** One line of the P7-33 summary: a type, what was allocated, and what is left. */
+export type LeaveBalanceSummaryRow =
+  Database["public"]["Functions"]["vizserve_pms_leave_balance_summary"]["Returns"][number];
 export type TimesheetEntryRow =
   Database["public"]["Tables"]["vizserve_pms_timesheet_entries"]["Row"];
 export type TaskCommentRow =

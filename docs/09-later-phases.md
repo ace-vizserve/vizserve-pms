@@ -46,9 +46,11 @@ Recommended constraints, for Amier to confirm (Q4):
 
 Fixed list at launch: **Leave**, **No Time-In**, **No Time-Out**, **Reimbursement**. Amier, 22:00–23:30.
 
-**Leave balances are deliberately out of scope.** Amier, 22:40: *"actually yung mga leave, komplikado rin, may mga leave balance, pero tayo naman ngayon, ma-implement lang ng pinakamabilis... si HR muna, ang, or si Sir Joel muna, yung mag-manual count... Ang mahalaga lang, may record."*
+**Leave balances were deliberately out of scope.** Amier, 22:40: *"actually yung mga leave, komplikado rin, may mga leave balance, pero tayo naman ngayon, ma-implement lang ng pinakamabilis... si HR muna, ang, or si Sir Joel muna, yung mag-manual count... Ang mahalaga lang, may record."*
 
-This is the single easiest place for scope to explode. Accrual rules, carry-over, pro-rating, holiday calendars — all of it is a project on its own. He waved it off. Keep it waved off.
+This is the single easiest place for scope to explode. Accrual rules, carry-over, pro-rating, holiday calendars — all of it is a project on its own.
+
+**Partially reversed on 24 Aug 2026 (`D27`), and the split is the point.** What came in is the ALLOCATION: a number per person per leave type per year, typed by an admin, with usage computed from approved requests rather than stored. What stayed out is everything in the paragraph above — accrual, carry-over, pro-rating — plus any notion of the app REFUSING a request that overdraws. `tests/unit/no-leave-balance.test.ts` was deleted as part of that work, which is what the test itself asked for; `tests/unit/leave-balances.test.ts` replaces it and pins the validation instead.
 
 ## Backlog
 

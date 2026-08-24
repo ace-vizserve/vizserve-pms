@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
@@ -26,9 +26,11 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import { ROLE_ORDER, type Role } from "@/lib/auth/roles";
-import { ROLE_LABELS } from "@/lib/schemas/users";
+import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
+import { formatDays } from "@/lib/schemas/leave-balances";
+import { GENDER_LABELS, type Gender, ROLE_LABELS } from "@/lib/schemas/users";
 
-import { createUser, updateUser } from "./actions";
+import { createUser, readLeaveBalances, setLeaveAllocations, updateUser } from "./actions";
 
 /**
  * P0-04 — the create/edit dialog.
@@ -46,31 +48,45 @@ import { createUser, updateUser } from "./actions";
 
 export type Department = { id: string; name: string };
 
+/** P7-33 — the pickable leave types, in the list's own `sort_order`. */
+export type AllocatableLeaveType = { id: string; label: string };
+
 export type EditableUser = {
   id: string;
   email: string;
   full_name: string;
+  /** P7-32. NULL on accounts nobody has opened since the column landed. */
+  gender: Gender | null;
   role: Role;
   primary_department_id: string | null;
   is_active: boolean;
   /** Which HFSE applications they may enter. See the access toggle below. */
   app_access: string[];
   managed_department_ids: string[];
+  /** P7-33. `leave_type_id` → days allocated for `balanceYear`. Sparse. */
+  leave_allocations: Record<string, number>;
 };
 
 // Most privileged first — an admin scanning this list is usually looking for
 // the exception, not the default.
 const ROLE_OPTIONS = [...ROLE_ORDER].reverse();
 
+const GENDER_OPTIONS: Gender[] = ["MALE", "FEMALE"];
+
 const NO_DEPARTMENT = "__none__";
 
 export function UserEditor({
   departments,
+  leaveTypes,
+  balanceYear,
   user,
   open,
   onOpenChange,
 }: {
   departments: Department[];
+  leaveTypes: AllocatableLeaveType[];
+  /** Which year the allocations below cover. Manila's year, from the server. */
+  balanceYear: number;
   /** Absent for create. */
   user?: EditableUser;
   open: boolean;
@@ -78,7 +94,7 @@ export function UserEditor({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
         {/*
           Keyed on who is being edited, and unmounted while closed, so the form
           state is SEEDED rather than SYNCED. An effect that copies props into
@@ -90,6 +106,8 @@ export function UserEditor({
           <UserForm
             key={user?.id ?? "new"}
             departments={departments}
+            leaveTypes={leaveTypes}
+            balanceYear={balanceYear}
             user={user}
             onDone={() => onOpenChange(false)}
           />
@@ -101,10 +119,14 @@ export function UserEditor({
 
 function UserForm({
   departments,
+  leaveTypes,
+  balanceYear,
   user,
   onDone,
 }: {
   departments: Department[];
+  leaveTypes: AllocatableLeaveType[];
+  balanceYear: number;
   user?: EditableUser;
   onDone: () => void;
 }) {
@@ -113,6 +135,13 @@ function UserForm({
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [fullName, setFullName] = useState(user?.full_name ?? "");
+  /*
+   * P7-32. Null on an account that predates the column, and left null rather
+   * than defaulted to "Male" — a default here would be the app inventing a fact
+   * about a colleague, and it would do it silently on every save of an
+   * untouched record. The schema refuses null, so the admin has to choose.
+   */
+  const [gender, setGender] = useState<Gender | null>(user?.gender ?? null);
   const [role, setRole] = useState<Role>(user?.role ?? "member");
 
   /*
@@ -126,6 +155,9 @@ function UserForm({
    */
   const roleItems = Object.fromEntries(
     ROLE_OPTIONS.map((option) => [option, ROLE_LABELS[option].label]),
+  );
+  const genderItems = Object.fromEntries(
+    GENDER_OPTIONS.map((option) => [option, GENDER_LABELS[option]]),
   );
   const departmentItems = {
     [NO_DEPARTMENT]: "No department",
@@ -143,6 +175,61 @@ function UserForm({
   );
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
+
+  /*
+   * P7-33 — leave allocations, held as STRINGS.
+   *
+   * A number-typed state would have to decide what "" means on every keystroke,
+   * and the honest answer is "the admin is mid-edit", not zero. Kept as typed
+   * text and coerced once at submit, where `allocatedDaysSchema` turns a blank
+   * or a stray letter into a sentence rather than a silent 0 written over
+   * somebody's entitlement.
+   *
+   * Seeded from props for the same reason everything else here is — see the key
+   * on <UserForm>. A type with no allocation row starts blank, not "0", so
+   * "nobody has set this" and "deliberately zero" look different on screen.
+   */
+  const [allocations, setAllocations] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      leaveTypes.map((type) => {
+        const days = user?.leave_allocations[type.id];
+        return [type.id, days === undefined ? "" : String(days)];
+      }),
+    ),
+  );
+
+  /*
+   * Used and remaining, fetched when the dialog opens.
+   *
+   * NOT PART OF THE PAGE QUERY. This is one RPC per person and the page renders
+   * the whole staff list; fetching it up front would be a few dozen round trips
+   * to fill a panel almost none of which is ever opened.
+   *
+   * Undefined means "still loading or never asked" and is rendered as such —
+   * showing 0 while it arrives would flash a wrong number in the one place a
+   * wrong number is most likely to be believed.
+   */
+  const [summary, setSummary] = useState<LeaveBalanceSummaryRow[] | undefined>();
+  const userId = user?.id;
+
+  useEffect(() => {
+    if (!userId) return;
+    let live = true;
+
+    void readLeaveBalances(userId, balanceYear).then((result) => {
+      // Guarded because the dialog can close mid-flight. A failure is left as
+      // undefined rather than toasted: the allocation inputs above still work,
+      // and an error toast about a read-only figure would look like the save
+      // failed.
+      if (live && result.ok) setSummary(result.data);
+    });
+
+    return () => {
+      live = false;
+    };
+  }, [userId, balanceYear]);
+
+  const usedByType = new Map((summary ?? []).map((row) => [row.leave_type_id, row.days_used]));
 
   // A member holds scope over nothing by definition, so the checkboxes are not
   // merely hidden — the values are dropped, and the server drops them again.
@@ -162,24 +249,76 @@ function UserForm({
 
     const payload = {
       full_name: fullName,
+      gender,
       role,
       primary_department_id: primaryDepartmentId,
       managed_department_ids: scopeApplies ? managed : [],
     };
 
     startTransition(async () => {
-      const result = user
-        ? await updateUser(user.id, {
-            ...payload,
-            is_active: isActive,
-            has_app_access: hasAppAccess,
-          })
-        : await createUser({ ...payload, email });
+      // Branched rather than a ternary, so `createUser`'s `{ id }` stays typed.
+      // A shared `result` would union it with `updateUser`'s void and need a
+      // cast to get the new user's id back out.
+      let savedId = user?.id;
 
-      if (!result.ok) {
-        setFormError(result.error);
-        setFieldErrors(result.fieldErrors ?? {});
-        return;
+      if (user) {
+        const result = await updateUser(user.id, {
+          ...payload,
+          is_active: isActive,
+          has_app_access: hasAppAccess,
+        });
+
+        if (!result.ok) {
+          setFormError(result.error);
+          setFieldErrors(result.fieldErrors ?? {});
+          return;
+        }
+      } else {
+        const result = await createUser({ ...payload, email });
+
+        if (!result.ok) {
+          setFormError(result.error);
+          setFieldErrors(result.fieldErrors ?? {});
+          return;
+        }
+
+        savedId = result.data.id;
+      }
+
+      /*
+       * P7-33. The profile saved; now the allocations.
+       *
+       * TWO ACTIONS BEHIND ONE BUTTON, and the order matters: on create there is
+       * no user id until `createUser` returns one, so allocations cannot go in
+       * the same call without the action learning to provision an auth identity
+       * and set entitlements in one transaction — which would put a leave figure
+       * on the critical path of "can this person sign in".
+       *
+       * The cost is a window where the profile saved and the allocations did
+       * not. That is reported rather than hidden, and it is recoverable by
+       * reopening and saving again: the upsert is idempotent, and the person
+       * exists either way. The reverse order would not be recoverable.
+       */
+      const entered = Object.entries(allocations).filter(([, days]) => days.trim() !== "");
+
+      if (savedId && entered.length > 0) {
+        const allocationResult = await setLeaveAllocations({
+          user_id: savedId,
+          balance_year: balanceYear,
+          allocations: entered.map(([leave_type_id, days_allocated]) => ({
+            leave_type_id,
+            days_allocated,
+          })),
+        });
+
+        if (!allocationResult.ok) {
+          setFormError(
+            `${user ? "Details saved" : "User created"}, but the leave allocation did not: ${allocationResult.error}`,
+          );
+          setFieldErrors(allocationResult.fieldErrors ?? {});
+          router.refresh();
+          return;
+        }
       }
 
       toast.success(user ? "User updated" : "User created");
@@ -228,19 +367,55 @@ function UserForm({
           </div>
         )}
 
-        <div className="space-y-2">
-          <Label htmlFor="full_name">Full name</Label>
-          <Input
-            id="full_name"
-            value={fullName}
-            onChange={(event) => setFullName(event.target.value)}
-            aria-invalid={Boolean(fieldErrors.full_name)}
-          />
-          {fieldErrors.full_name ? (
-            <p className="text-xs text-destructive">
-              {fieldErrors.full_name[0]}
-            </p>
-          ) : null}
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label htmlFor="full_name">Full name</Label>
+            <Input
+              id="full_name"
+              value={fullName}
+              onChange={(event) => setFullName(event.target.value)}
+              aria-invalid={Boolean(fieldErrors.full_name)}
+            />
+            {fieldErrors.full_name ? (
+              <p className="text-xs text-destructive">
+                {fieldErrors.full_name[0]}
+              </p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="gender">Gender</Label>
+            {/* P7-32. No placeholder-as-value and no default selection: the
+                trigger shows "Choose one…" until an admin picks, so an account
+                that predates this column cannot be saved carrying an answer
+                nobody gave. The schema refuses null, which is what makes the
+                blank state a prompt rather than a permanent gap. */}
+            <Select
+              items={genderItems}
+              value={gender}
+              onValueChange={(value) => value !== null && setGender(value as Gender)}
+            >
+              <SelectTrigger id="gender" aria-invalid={Boolean(fieldErrors.gender)}>
+                <SelectValue placeholder="Choose one…" />
+              </SelectTrigger>
+              <SelectContent>
+                {GENDER_OPTIONS.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {GENDER_LABELS[option]}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {fieldErrors.gender ? (
+              <p className="text-xs text-destructive">{fieldErrors.gender[0]}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {user && !user.gender
+                  ? "Not recorded on this account yet — choose one to save."
+                  : null}
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="grid gap-4 sm:grid-cols-2">
@@ -323,6 +498,101 @@ function UserForm({
             ))}
           </div>
         </div>
+
+        {/*
+          P7-33 — LEAVE ALLOCATION, per type, for one year.
+
+          Its own bordered block for the same reason the managed-department set
+          has one: it is a different kind of statement from the fields above.
+          Those describe who somebody is and what they may reach; this is HR
+          policy about them, and it is the only thing on this screen a team
+          leader is not allowed to change.
+
+          RENDERED ON CREATE TOO, unlike the Active switch. Setting the year's
+          allowance while adding a joiner is the natural moment, and the submit
+          path already has the new id by the time it writes them.
+
+          USED AND REMAINING ARE READ-ONLY and arrive separately — see the
+          effect above. Nothing here decrements: usage is computed from approved
+          requests every time it is read, which is why an admin can change an
+          allocation without anything needing to be recalculated.
+        */}
+        {leaveTypes.length > 0 ? (
+          <div className="space-y-3 rounded-lg border p-4">
+            <div>
+              <Label>Leave allocation for {balanceYear}</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Days HR allows per type this year. Whole or half days. Blank means nobody has set
+                one yet, which reads as zero. This is a record, not a limit — a request that would
+                overdraw still submits and can still be approved.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              {leaveTypes.map((type) => {
+                const entered = allocations[type.id] ?? "";
+                const used = usedByType.get(type.id);
+                const allocated = Number(entered);
+                // Only meaningful once both halves are known. `used` is
+                // undefined while the summary is in flight, and an empty box is
+                // not a zero allocation — it is an unanswered question.
+                const remaining =
+                  used === undefined || entered.trim() === "" || Number.isNaN(allocated)
+                    ? undefined
+                    : allocated - used;
+
+                return (
+                  <div key={type.id} className="flex items-center gap-3">
+                    <Label
+                      htmlFor={`allocation-${type.id}`}
+                      className="min-w-0 flex-1 truncate font-normal"
+                    >
+                      {type.label}
+                    </Label>
+
+                    <Input
+                      id={`allocation-${type.id}`}
+                      type="number"
+                      inputMode="decimal"
+                      min="0"
+                      max="366"
+                      // Half days, matching what P7-16 lets a request consume.
+                      step="0.5"
+                      placeholder="not set"
+                      value={entered}
+                      onChange={(event) =>
+                        setAllocations((current) => ({
+                          ...current,
+                          [type.id]: event.target.value,
+                        }))
+                      }
+                      className="w-24 text-center tabular-nums"
+                    />
+
+                    {/* State is never conveyed by colour alone (a project rule),
+                        so an overdraw says "over by" rather than only turning
+                        red. Fixed width so the inputs stay in a column. */}
+                    <span className="w-32 shrink-0 text-right text-2xs tabular-nums">
+                      {used === undefined ? null : remaining === undefined ? (
+                        <span className="text-muted-foreground">{formatDays(used)} taken</span>
+                      ) : remaining < 0 ? (
+                        <span className="font-medium text-destructive">
+                          over by {formatDays(-remaining)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">{formatDays(remaining)} left</span>
+                      )}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            {fieldErrors.allocations ? (
+              <p className="text-xs text-destructive">{fieldErrors.allocations[0]}</p>
+            ) : null}
+          </div>
+        ) : null}
 
         {user ? (
           <div className="flex items-start justify-between gap-4 rounded-lg border p-4">

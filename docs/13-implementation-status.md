@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 20 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 24 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -17,7 +17,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). P6-04/06/07/08/09 not begun |
-| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live — see below |
+| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live. **Three more written and NOT yet applied**: P7-32 gender, P7-33 leave balances, P7-34 leave audit PDF — see below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -408,6 +408,108 @@ they belong to, and dragging one to another column is the exact move the nesting
 prevents. The count comes from the unfiltered query, so a card reads "10
 subtasks" and unfolds the seven still outstanding.
 
+## P7-34 — the leave audit PDF, 24 Aug
+
+**Written, NOT YET APPLIED** — `20260824110000_p7_34_leave_report.sql`, by hand
+in the Supabase SQL editor like every other P7 migration. The button exists and
+will fail on a missing function until it is pasted.
+
+**Why it exists.** Run it in December, before January, to see how much unused
+leave each person is carrying so bonuses can be settled. It gets printed,
+checked against HR's manual count, signed and filed — so it is a FILE, not a
+screen, and the page states the rules it counted by. Without that, when the two
+counts disagree there is no way to tell which is wrong.
+
+**One function, not thirty calls.** `vizserve_pms_leave_report(p_year)` returns a
+row per person per leave type in one pass.
+`vizserve_pms_leave_balance_summary` answers "what is MY balance" and does an
+authority check per call; looping it over the staff list would be thirty round
+trips and thirty checks to build one table.
+
+**Scope is by what the caller leads** — admin everyone, lead their departments,
+member an empty set rather than an error. **Leavers are included** where they
+took leave in the year and flagged `is_active = false`, because their absences
+belong to the year being audited. See `D30`.
+
+**The PDF is written here, with no dependency** — see `D29`. `lib/pdf.ts` is a
+minimal PDF 1.4 writer: text, rules, a shaded band, Helvetica and
+Helvetica-Bold, which are base-14 and need no embedding.
+`lib/reports/leave-report.ts` does the layout and knows nothing about bytes.
+Table: Employee · Leave type · Allocated · Used · Unused, blocked by person with
+a total, and **a person is never split across a page break** — a name on one
+sheet and a total on the next is how a bonus gets calculated against the wrong
+employee.
+
+**Types with no allocation and no usage are dropped from the print** (eight lines
+of zeroes per person would make a three-page audit fifteen), but **a person with
+nothing still gets a line saying so** — an absence from an audit table cannot be
+told apart from somebody being missed.
+
+**Returned as base64 across the server-action boundary.** A `Uint8Array` does not
+survive it, and a "binary string" gets re-encoded as UTF-8 somewhere in the
+middle and arrives as a subtly unopenable file.
+
+**Tests.** `tests/unit/leave-report.test.ts`, 32 cases. The one that matters
+walks the cross-reference table and asserts every byte offset lands on the
+object it claims — which is exactly what a reader does, and the only failure
+mode worth automating, since a malformed PDF opens blank with no diagnosis.
+Stream lengths, bracket escaping and Latin-1 byte counts are pinned too. Unit
+suite is 410 across 20 files. **No `tests/db` coverage** for the function until
+the migration is applied.
+
+## P7-32 / P7-33 — gender and leave balances, 24 Aug
+
+**Written, NOT YET APPLIED.** Two migrations —
+`20260824090000_p7_32_gender.sql` and `20260824100000_p7_33_leave_balances.sql`
+— are in the repo and, like every other P7 migration, have to be pasted into the
+Supabase SQL editor by hand. Until that happens the screens below will fail on a
+missing column and a missing function. Nothing else in the app reads either.
+
+**P7-33 reverses a standing decision, and the reversal is the headline.**
+Balances were waved off in Phase 5 and guarded by a build-failing test. Amier
+asked for them per leave type on 24 Aug; the guard was deleted in the same
+commit, which is what the test itself instructed. See `D27`.
+
+**Nothing decrements.** `vizserve_pms_leave_balances` stores one fact — days
+ALLOCATED, per person per type per year — and
+`vizserve_pms_leave_balance_summary` computes usage from approved requests on
+every read. A stored counter would have to stay correct across approve, reject,
+reverse, edit and reassign, and the first path anybody forgets leaves an
+entitlement figure that is wrong and quoted at people. There is consequently no
+re-credit path anywhere, because there is nothing to credit back.
+
+**Still out of scope: accrual, carry-over, pro-rating** — and any notion of
+REFUSING an overdraw. A request past somebody's allocation submits, approves,
+and shows a negative remaining figure to the three people entitled to see it.
+HR is the authority on entitlement; this is the record of what they decided.
+
+**Working days, in halves.** `vizserve_pms_leave_days` counts weekdays minus
+proclaimed holidays, sharing `vizserve_pms_holidays` with P4's
+`add_business_days` so the two cannot drift, and deducts a half only when the
+day it describes was itself counted. The asymmetry from P7-16 holds: MORNING is
+a whole first day and half a last one.
+
+**Where it surfaces.** `/admin/users` — an allocation panel per leave type in
+the editor dialog, with used/remaining fetched by `readLeaveBalances` when the
+dialog opens rather than for every row on the page. `/approvals` — the filer
+sees their own remaining days beside the type they picked. **Not yet on
+`/approvals/[id]`**, where the lead deciding a request would arguably want it
+most; that is the obvious next hook and was left out of this pass deliberately.
+
+**P7-32 is unrelated and small.** `vizserve_pms_users.gender`, an enum of
+`MALE`/`FEMALE`. **Required in the form, nullable in the database** — the auth
+trigger creates profile rows the moment an Entra identity signs in and has
+nothing to supply, so NOT NULL there would surface as "SSO is broken". Existing
+accounts read "Not set" in the list and are filled in one at a time by an admin
+who knows the answer. The 16 seeded test accounts carry alternating values. See
+`D28`.
+
+**Tests.** `tests/unit/no-leave-balance.test.ts` deleted;
+`tests/unit/leave-balances.test.ts` added in its place, pinning the validation
+that lives in TypeScript rather than duplicating the SQL arithmetic. Unit suite
+is 378 across 19 files. **No `tests/db` coverage yet** for either migration —
+it cannot be written honestly until they are applied.
+
 ## P7-31 — the SLA is a duration, 20 Aug
 
 Applied. `vizserve_pms_forms.sla_days` is now **`sla_minutes`**, and the settings
@@ -668,10 +770,10 @@ The Phase 2 acceptance test was "a throwaway second request type routing end to 
 - [x] An OT shift ending 01:00 lands on the prior work date
 - [x] All four internal request types submit and route correctly
 - [x] An approved No Time-In actually corrects the DTR record
-- [x] No leave-balance logic exists anywhere — asserted by `tests/unit/no-leave-balance.test.ts`
+- [x] ~~No leave-balance logic exists anywhere — asserted by `tests/unit/no-leave-balance.test.ts`~~ **Withdrawn 24 Aug 2026 (`D27`).** Balances are in scope per type; the guard test was deleted deliberately, as it asked to be. Green when the phase closed, and recorded rather than removed because a criterion that was met and later reversed is different from one that never existed
 - [x] Payroll can export a month of DTR as CSV
 
-All six green as of 17 Aug 2026: `tests/db/phase5.test.ts` runs its 20 cases against the live project rather than skipping.
+All six were green as of 17 Aug 2026: `tests/db/phase5.test.ts` runs its 20 cases against the live project rather than skipping. The fifth has since been withdrawn — see above.
 
 ### Open questions this phase built past
 
