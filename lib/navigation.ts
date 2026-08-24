@@ -60,7 +60,8 @@ export type NavIconName =
   | "timesheet"
   | "reports"
   | "inbox"
-  | "users";
+  | "users"
+  | "calendar-off";
 
 export const NAV_ITEMS: NavItem[] = [
   {
@@ -156,6 +157,17 @@ export const NAV_ITEMS: NavItem[] = [
     enabled: true,
     icon: "users",
   },
+  {
+    label: "Holidays",
+    href: "/admin/holidays",
+    minRole: "admin",
+    // P7-35. Admin-only to EDIT — but what it produces is read by everybody, on
+    // the shared calendar on the home page. That is why there is no member-level
+    // entry for it: there is nothing to navigate to, the result is already
+    // where they are looking.
+    enabled: true,
+    icon: "calendar-off",
+  },
 ];
 
 const ROLE_ORDER: Role[] = ["member", "team_leader", "manager", "admin"];
@@ -210,7 +222,7 @@ export const NAV_GROUPS: NavGroup[] = [
   // them side by side in the rail in the first place.
   { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
   { label: "Manage", hrefs: ["/forms", "/reports"] },
-  { label: "Admin", hrefs: ["/admin/users"], pinBottom: true },
+  { label: "Admin", hrefs: ["/admin/users", "/admin/holidays"], pinBottom: true },
 ];
 
 /**

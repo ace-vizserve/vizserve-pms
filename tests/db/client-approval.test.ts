@@ -600,22 +600,32 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
   // =========================================================================
   describe("the approval window", () => {
     it.skipIf(!migrationApplied)(
-      "lib/dates.ts holidays match vizserve_pms_holidays",
+      "vizserve_pms_holidays still contains every seeded 2026 regular holiday",
       async () => {
-        // Two copies again, and the same discipline: the DATABASE computes the
-        // deadline that governs auto-completion, and the TS copy exists so a
-        // screen can say "closes Thursday" without a round trip. Drift here
-        // means the page promises one date and the cron enforces another.
+        /*
+         * A SUBSET, NOT AN EQUALITY, and the change is deliberate.
+         *
+         * This asserted the two were identical, which was correct while only a
+         * migration could write the table. P7-35 made it admin-editable, so
+         * special non-working days and future years arrive by proclamation and
+         * legitimately have no counterpart in `PH_HOLIDAYS` — equality would now
+         * fail on an admin doing exactly what the screen is for.
+         *
+         * What is still worth guarding is the other direction: a statutory
+         * holiday going MISSING. That would quietly close client tickets a day
+         * early and lengthen everybody\u2019s leave by a day, and nothing else
+         * would say so.
+         */
         const { data: rows } = await adminClient()
           .from("vizserve_pms_holidays")
           .select("holiday_date")
           .gte("holiday_date", "2026-01-01")
           .lte("holiday_date", "2026-12-31");
 
-        const fromDb = (rows ?? []).map((row) => row.holiday_date).sort();
-        const fromTs = [...PH_HOLIDAYS].sort();
+        const fromDb = new Set((rows ?? []).map((row) => row.holiday_date));
+        const missing = PH_HOLIDAYS.filter((date) => !fromDb.has(date));
 
-        expect(fromTs).toEqual(fromDb);
+        expect(missing).toEqual([]);
       },
     );
 

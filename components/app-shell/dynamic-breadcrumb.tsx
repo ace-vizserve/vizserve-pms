@@ -74,6 +74,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   timesheet: "Timesheet",
   admin: "Admin",
   users: "Users",
+  holidays: "Holidays",
 };
 
 /** Anything that is plainly an id rather than a readable segment. */

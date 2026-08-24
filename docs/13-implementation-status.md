@@ -17,7 +17,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). P6-04/06/07/08/09 not begun |
-| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live. **Three more written and NOT yet applied**: P7-32 gender, P7-33 leave balances, P7-34 leave audit PDF — see below |
+| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live. **Three more written and NOT yet applied**: P7-32 gender, P7-33 leave balances, P7-34 leave audit PDF. **P7-35 holiday calendar needs no migration** and works as deployed — see below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -408,6 +408,59 @@ they belong to, and dragging one to another column is the exact move the nesting
 prevents. The count comes from the unfiltered query, so a card reads "10
 subtasks" and unfolds the seven still outstanding.
 
+## P7-35 — the holiday calendar, 24 Aug
+
+**NO MIGRATION.** `vizserve_pms_holidays` has existed since P4 and its RLS
+already said the right thing — readable by any active user, writable by an
+admin. All that was missing was a screen. This is the only one of the four
+24 Aug items that works the moment it is deployed.
+
+**Why now.** Two reasons, and the second is the one that made it urgent.
+Movable Philippine holidays are proclaimed annually, so 2027 needs a list
+nobody has and only a migration could previously supply. And P7-33 made this
+table decide how many working days a leave request consumes — so what is in it
+now decides what the December audit says people have left.
+
+**`/admin/holidays`**, one year at a time with the year in the URL so the view
+is linkable. Add, rename, remove. **The date is not editable** — it is the
+primary key and the identity, so moving one is a remove and an add, which is
+what it actually is and what the audit log should say. The list flags a
+holiday that falls on a weekend as changing nothing, because it genuinely
+does not and an admin would otherwise think the entry failed to save.
+
+**Every employee sees it** on the shared calendar on `/`, which already showed
+approved leave (P7-10) and your own pending leave. Holidays are a third kind
+of entry rather than a third kind of absence: leave is a fact about a person,
+a holiday is a fact about the day, so it paints the cell and names itself.
+**A holiday outranks leave in the cell, and today outranks both** — a day
+nobody works is not a day somebody is absent, but "where am I" is still the
+first question anyone asks of a calendar. Read through a plain select, not a
+`SECURITY DEFINER` function: nothing about which days the company is shut is
+private, which is the whole contrast with the leave query beside it.
+
+**⚠️ THE REAL HAZARD, and it is not the CRUD.** Leave usage is computed on
+every read (`D27`), so removing a holiday from a closed year silently adds a
+used day to every leave request spanning it — and the audit PDF stops matching
+the copy that was filed. Not blocked, because a wrongly-entered date has to be
+fixable. Instead: the year is marked closed on the list, the delete dialog
+names the consequence instead of saying "cannot be undone", and every change
+writes an audit row carrying the full `before`. See `D32`.
+
+**`PH_HOLIDAYS` is demoted.** `lib/dates.ts` carried a hardcoded mirror of the
+table, and `tests/db/client-approval.test.ts` asserted the two were EQUAL —
+correct while only a migration could write it, and broken by the first admin
+edit. It is now documented as the seeded 2026 BASELINE, the table is the sole
+authority, and the test asserts a SUBSET: a statutory holiday going missing
+still fails, adding a proclaimed one does not. `isBusinessDay` and
+`addBusinessDays` are marked approximate for any year but 2026 — nothing in
+`app/` calls them, and anything needing the real answer reads the table.
+
+**Tests.** `tests/unit/holidays.test.ts`, 16 cases, mostly on dates that look
+valid and are not — 31 February, 29 February in a non-leap year, a value
+carrying a time. That last one matters because every consumer compares these
+as STRINGS: the calendar decides which cell a day lands in with `start <= day`,
+which only works while the format sorts lexicographically. Unit suite is 426
+across 21 files.
 ## P7-34 — the leave audit PDF, 24 Aug
 
 **Written, NOT YET APPLIED** — `20260824110000_p7_34_leave_report.sql`, by hand

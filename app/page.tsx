@@ -23,7 +23,7 @@ import { createClient } from "@/utils/supabase/server";
 import { signOut } from "@/app/login/actions";
 
 import { PunchPanel } from "@/app/(app)/dtr/punch-panel";
-import { LeaveCalendar, type LeaveSpan } from "./_home/leave-calendar";
+import { LeaveCalendar, type Holiday, type LeaveSpan } from "./_home/leave-calendar";
 import { Cell, CellBody, CellHead, StatStrip, initials } from "./_home/home-widgets";
 
 export const metadata: Metadata = { title: "Home" };
@@ -96,6 +96,7 @@ export default async function DashboardPage({
     myOpenTasks,
     approvedLeave,
     myPendingLeave,
+    holidayRows,
   ] = await Promise.all([
     loadPunchState(context.userId),
 
@@ -167,6 +168,25 @@ export default async function DashboardPage({
       .eq("requester_id", context.userId)
       .eq("request_type", "LEAVE")
       .eq("status", "PENDING_REVIEW"),
+
+    /*
+     * P7-35 — the holidays, maintained by an admin at /admin/holidays.
+     *
+     * A PLAIN SELECT, not a function, and the contrast with the leave query
+     * above is the point: that one needs SECURITY DEFINER because a leave row
+     * carries a reason it must withhold. A holiday has nothing private in it —
+     * the policy on `vizserve_pms_holidays` already lets every active user read
+     * it, which is exactly the audience of this calendar.
+     *
+     * The same month-either-side window as the leave spans, because the grid
+     * shows trailing days of the previous month and leading days of the next,
+     * and a holiday landing on one of those cells still has to paint it.
+     */
+    supabase
+      .from("vizserve_pms_holidays")
+      .select("holiday_date, name")
+      .gte("holiday_date", gridFrom)
+      .lte("holiday_date", gridTo),
   ]);
 
   // ---------------------------------------------------------------- waiting
@@ -199,6 +219,11 @@ export default async function DashboardPage({
         pending: true,
       })),
   ];
+
+  const holidays: Holiday[] = (holidayRows.data ?? []).map((row) => ({
+    date: row.holiday_date,
+    name: row.name,
+  }));
 
   // Out today comes from the SAME spans the calendar paints, so the widget and
   // the grid can never disagree about who is away.
@@ -500,6 +525,7 @@ export default async function DashboardPage({
             month={month}
             today={today}
             spans={spans}
+            holidays={holidays}
             className="sm:col-span-6 lg:min-h-0"
           />
         </div>

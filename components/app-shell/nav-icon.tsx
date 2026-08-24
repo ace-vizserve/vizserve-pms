@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  CalendarOff,
   CheckSquare,
   ClipboardList,
   Clock,
@@ -24,6 +25,7 @@ const ICONS = {
   reports: BarChart3,
   inbox: Inbox,
   users: Users,
+  "calendar-off": CalendarOff,
 } satisfies Record<NavIconName, React.ComponentType<{ className?: string }>>;
 
 export function NavIcon({ name, className }: { name: NavIconName; className?: string }) {

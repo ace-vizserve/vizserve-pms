@@ -1424,7 +1424,14 @@ export type Database = {
       vizserve_pms_write_audit_log: {
         Args: {
           p_entity_type: string;
-          p_entity_id: string;
+          /**
+           * Nullable, and the SQL always was — `vizserve_pms_audit_logs.entity_id`
+           * is a plain `uuid` column with no NOT NULL. P7-35 is the first
+           * caller to need it: a holiday is identified by its DATE, so there is no
+           * uuid to pass, and the date travels in the payload rather than being
+           * coerced into something it is not.
+           */
+          p_entity_id: string | null;
           p_action: string;
           p_actor_id?: string | null;
           p_before?: Json | null;

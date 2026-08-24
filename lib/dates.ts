@@ -300,17 +300,29 @@ export const MONTH_GRID_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "S
 // ---------------------------------------------------------------------------
 
 /**
- * Philippine regular holidays, as a mirror of `vizserve_pms_holidays`.
+ * The 2026 regular Philippine holidays, as SEEDED. Not a live mirror.
  *
- * The DATABASE IS THE AUTHORITY — `vizserve_pms_add_business_days` computes the
- * deadline that actually governs auto-completion, and it reads the table. This
- * copy exists so a screen can say "closes on Thursday" without a round trip.
+ * ⚠️ THIS WAS A MIRROR OF `vizserve_pms_holidays` AND IS NO LONGER ONE. P7-35
+ * made that table admin-editable, so it now holds special non-working days and
+ * future years that no migration put there and this list cannot know about. The
+ * TABLE IS THE AUTHORITY, without qualification:
  *
- * Movable holidays (Eid, and any special non-working days) are proclaimed
- * annually and are not derivable, which is why this is a list rather than an
- * algorithm. When a new year is proclaimed, both this and the table need it —
- * `tests/db/client-approval.test.ts` asserts they agree, so forgetting one
- * fails a test rather than quietly closing tickets a day early.
+ *   `vizserve_pms_add_business_days` computes the client-approval deadline,
+ *   `vizserve_pms_is_working_day` and `vizserve_pms_leave_days` decide how many
+ *   days of leave a request consumes,
+ *
+ * and all three read the table. What survives here is a BASELINE: the statutory
+ * dates the P4 migration seeded, which `tests/db/client-approval.test.ts` still
+ * asserts are present — so deleting Good Friday from the calendar fails a test,
+ * while ADDING a proclaimed non-working day does not. Equality was the right
+ * assertion while only a migration could write the table; a subset is the right
+ * one now.
+ *
+ * `isBusinessDay` and `addBusinessDays` below are built on it and are therefore
+ * APPROXIMATE for any year but 2026. Nothing in `app/` calls them today. Anything
+ * that needs the real answer must read the table — through
+ * `vizserve_pms_is_working_day` on the server, or by selecting the holidays for
+ * the range and checking against them, which is what the home calendar does.
  */
 export const PH_HOLIDAYS: readonly string[] = [
   "2026-01-01",
@@ -327,7 +339,13 @@ export const PH_HOLIDAYS: readonly string[] = [
 
 const HOLIDAY_SET = new Set(PH_HOLIDAYS);
 
-/** Is this a working day in Manila? Weekends and regular holidays are not. */
+/**
+ * Is this a working day in Manila? Weekends and the SEEDED 2026 holidays are not.
+ *
+ * Read the caveat on `PH_HOLIDAYS`: this does not know about anything an admin
+ * has added, so it is a hint for a screen and never an authority. The server
+ * functions that decide deadlines and leave days consult the table.
+ */
 export function isBusinessDay(value: string): boolean {
   const date = parseDateOnly(value);
   if (!date) return false;
