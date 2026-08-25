@@ -12,6 +12,7 @@ import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { TASK_STATUS_LABELS, isTerminal, taskCategory } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
+import { fetchJoinedTaskIdSet } from "@/lib/tasks-server";
 import { CommentThread } from "../comment-thread";
 
 import { RequestAttachmentList } from "./client-files";
@@ -201,7 +202,18 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const category = taskCategory({ request_id: task.request_id, is_personal: task.is_personal });
 
   const viewer = {
-    isPic: task.assignee_id === context.userId,
+    /*
+     * P7-13 / P7-43 — the column OR the join table, mirroring
+     * `vizserve_pms_transition_task`'s `v_is_pic` and both tasks policies.
+     *
+     * This page gates canEdit, canAdd and canUpload on it, so while it was the
+     * column alone a second assignee opened the task they had been handed and
+     * found it read-only — no edits, no attachments, no comments — on work the
+     * database would have let them do all three to.
+     */
+    isAssignee:
+      task.assignee_id === context.userId ||
+      (await fetchJoinedTaskIdSet(context.userId)).has(task.id),
     isQa: task.qa_assignee_id === context.userId,
     leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
     isAdmin: roleAtLeast(context.role, "admin"),
@@ -244,7 +256,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               // list but not from its own page is the kind of difference nobody
               // reports and everybody works around. A name is metadata; closing
               // the work does not make it wrong.
-              canEdit={viewer.isPic || viewer.isQa || viewer.leadsDepartment}
+              canEdit={viewer.isAssignee || viewer.isQa || viewer.leadsDepartment}
             />
             <TaskStatusBadge status={task.status} />
             <TaskPriorityBadge priority={task.priority} />
@@ -454,7 +466,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               .map((person) => ({ id: person.id, full_name: person.full_name }))}
             // Same test as uploading an output: doing the work, or leading the
             // department it belongs to. A finished task takes no new children.
-            canAdd={(viewer.isPic || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)}
+            canAdd={(viewer.isAssignee || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)}
           />
 
           {/* The output files belong with the work, not with the trail — they
@@ -464,7 +476,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             attachments={outputs ?? []}
             // Uploading is doing the work. A department lead can too, because they
             // are frequently the QA and sometimes the person picking up the pieces.
-            canUpload={(viewer.isPic || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)}
+            canUpload={(viewer.isAssignee || viewer.isQa || viewer.leadsDepartment) && !isTerminal(task.status)}
             uploaderNames={nameOf}
           />
 

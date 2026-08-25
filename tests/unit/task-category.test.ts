@@ -21,8 +21,8 @@ const CLIENT = { request_id: "0c0ffee0-0000-4000-8000-000000000001", is_personal
 const INTERNAL = { request_id: null, is_personal: false };
 const PERSONAL = { request_id: null, is_personal: true };
 
-const PIC = { isPic: true, isQa: false, leadsDepartment: false, isAdmin: false };
-const QA = { isPic: false, isQa: true, leadsDepartment: false, isAdmin: false };
+const PIC = { isAssignee: true, isQa: false, leadsDepartment: false, isAdmin: false };
+const QA = { isAssignee: false, isQa: true, leadsDepartment: false, isAdmin: false };
 
 function targets(transitions: { to: string }[]): string[] {
   return transitions.map((transition) => transition.to).sort();
@@ -104,7 +104,7 @@ describe("availableTransitions — every category has exactly one way to finish"
   });
 
   it("still refuses somebody who holds neither seat", () => {
-    const stranger = { isPic: false, isQa: false, leadsDepartment: false, isAdmin: false };
+    const stranger = { isAssignee: false, isQa: false, leadsDepartment: false, isAdmin: false };
     expect(availableTransitions("ONGOING", stranger, PERSONAL)).toHaveLength(0);
     expect(availableTransitions("QA_IN_PROGRESS", stranger, INTERNAL)).toHaveLength(0);
   });
@@ -140,8 +140,8 @@ describe("the transition table itself", () => {
  * the function is choosing between them, never adding to them.
  */
 describe("nextStep", () => {
-  const QA_LEAD = { isPic: false, isQa: true, leadsDepartment: true, isAdmin: false };
-  const ADMIN = { isPic: true, isQa: true, leadsDepartment: true, isAdmin: true };
+  const QA_LEAD = { isAssignee: false, isQa: true, leadsDepartment: true, isAdmin: false };
+  const ADMIN = { isAssignee: true, isQa: true, leadsDepartment: true, isAdmin: true };
 
   it("walks client work down the approved flow, one gate at a time", () => {
     expect(nextStep("OPEN", PIC, CLIENT)).toMatchObject({ to: "ONGOING", label: "Start work" });
@@ -225,7 +225,7 @@ describe("nextStep", () => {
   });
 
   it("has nothing to say to somebody holding neither seat", () => {
-    const stranger = { isPic: false, isQa: false, leadsDepartment: false, isAdmin: false };
+    const stranger = { isAssignee: false, isQa: false, leadsDepartment: false, isAdmin: false };
     for (const task of [CLIENT, INTERNAL, PERSONAL]) {
       expect(nextStep("ONGOING", stranger, task)).toBeNull();
     }
@@ -261,7 +261,7 @@ describe("nextStep — off the category's own path", () => {
     // `vizserve_pms_force_task_status` does not consult the transition table,
     // so a lead can strand work with no client at FOR_CLIENT_APPROVAL. Free
     // movement is the way back and this is the button for it.
-    const lead = { isPic: true, isQa: false, leadsDepartment: true, isAdmin: false };
+    const lead = { isAssignee: true, isQa: false, leadsDepartment: true, isAdmin: false };
     expect(nextStep("FOR_CLIENT_APPROVAL", lead, INTERNAL)).toMatchObject({ to: "COMPLETED" });
   });
 });

@@ -27,6 +27,7 @@ import {
 } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
+import { fetchJoinedTaskIds, fetchJoinedTaskIdSet, mineFilter } from "@/lib/tasks-server";
 
 import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
@@ -95,6 +96,14 @@ export default async function TaskBoardPage({
   const params = await searchParams;
   const supabase = await createClient();
 
+  /**
+   * P7-13 / P7-43 — the tasks this person is on without being named in
+   * `assignee_id`. Widens "Mine" and feeds `seat()`. `cache()`d, so the two
+   * helpers below are one query between them.
+   */
+  const joinedTaskIds = await fetchJoinedTaskIds(context.userId);
+  const joinedTaskIdSet = await fetchJoinedTaskIdSet(context.userId);
+
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
@@ -153,7 +162,8 @@ export default async function TaskBoardPage({
   // The same three scopes the toolbar offers on both views. The board used to
   // read `mine` and silently ignore `qa`, which is what a control living on only
   // one of the two routes gets you.
-  if (params.view === "mine") query = query.eq("assignee_id", context.userId);
+  // P7-43 — same rule as the list view, through the same helper.
+  if (params.view === "mine") query = query.or(mineFilter(context.userId, joinedTaskIds));
   if (params.view === "qa") {
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
@@ -221,7 +231,7 @@ export default async function TaskBoardPage({
         .limit(FINISHED_PER_COLUMN * 2 + 1);
 
       if (listId) done = done.eq("list_id", listId);
-      if (params.view === "mine") done = done.eq("assignee_id", context.userId);
+      if (params.view === "mine") done = done.or(mineFilter(context.userId, joinedTaskIds));
       if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
       if (kind === "client") done = done.not("request_id", "is", null);
       if (kind === "internal") done = done.is("request_id", null);
@@ -312,9 +322,18 @@ export default async function TaskBoardPage({
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
   const isAdmin = roleAtLeast(context.role, "admin");
-  function seat(task: { assignee_id: string | null; qa_assignee_id: string | null; department_id: string }) {
+  function seat(task: {
+    id: string;
+    assignee_id: string | null;
+    qa_assignee_id: string | null;
+    department_id: string;
+  }) {
     return {
-      isPic: task.assignee_id === context.userId,
+      // Mirrors vizserve_pms_transition_task's v_is_pic: the column OR the
+      // join table. See lib/tasks-server.ts for why this is not the column
+      // alone.
+      isAssignee:
+        task.assignee_id === context.userId || joinedTaskIdSet.has(task.id),
       isQa: task.qa_assignee_id === context.userId,
       leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
       isAdmin,

@@ -56,6 +56,34 @@ export default async function TimesheetPage({
   const days = weekDates(monday);
   const sunday = days[6];
 
+  /**
+   * P7-13 — the tasks this person is on WITHOUT being the accountable name.
+   *
+   * THE PICKER USED TO ASK FOR PIC-OR-QA AND NOTHING ELSE, which was stricter
+   * than the rule it exists to mirror. `vizserve_pms_may_log_time` is
+   * `vizserve_pms_is_on_task`, and that is PIC **or** QA **or** a row in
+   * `vizserve_pms_task_assignees`. So a second assignee could be handed work,
+   * be fully able to move it, comment on it and edit it — and then find the
+   * timesheet picker empty, because this one query disagreed with the database
+   * about who is on a task. Their hours had nowhere to go.
+   *
+   * P7-13's own header warned about the mirror image of this ("a second assignee
+   * is offered the task in the picker and refused by the INSERT policy") and
+   * fixed `may_log_time` accordingly. The picker was never widened to match.
+   *
+   * Fetched BEFORE the batch below rather than inside it: PostgREST has no way
+   * to say "or exists in that other table", so the ids have to be in hand to
+   * build the filter. One extra round trip, and it is the honest shape — the
+   * alternative is an embed that turns the picker into an inner join and drops
+   * the PIC's own tasks.
+   */
+  const { data: alsoOnRows } = await supabase
+    .from("vizserve_pms_task_assignees")
+    .select("task_id")
+    .eq("user_id", context.userId);
+
+  const alsoOnTaskIds = (alsoOnRows ?? []).map((row) => row.task_id);
+
   const [
     entriesResult,
     tasksResult,
@@ -91,13 +119,27 @@ export default async function TimesheetPage({
       .order("work_date")
       .order("created_at"),
 
-    // The picker. Tasks this person is the PIC or the QA reviewer on — the same
-    // test `vizserve_pms_may_log_time` applies on write, so the list cannot
-    // offer something the insert would then refuse.
+    // The picker. Every task this person is ON — as the accountable name, as the
+    // QA reviewer, or as one of several assignees. This is the same test
+    // `vizserve_pms_may_log_time` applies on write, so the list neither offers
+    // something the insert would refuse nor hides something it would accept.
+    //
+    // The three clauses ARE `vizserve_pms_is_on_task`, spelled out because a
+    // policy function cannot be called from a PostgREST filter. If that function
+    // ever gains a fourth way to be on a task, this is the line that has to
+    // learn about it — there is no way to make the two share one definition.
     supabase
       .from("vizserve_pms_tasks")
       .select("id, title, status, list_id, department_id")
-      .or(`assignee_id.eq.${context.userId},qa_assignee_id.eq.${context.userId}`)
+      .or(
+        [
+          `assignee_id.eq.${context.userId}`,
+          `qa_assignee_id.eq.${context.userId}`,
+          // Omitted entirely when empty: `id.in.()` is a syntax error, not an
+          // empty set.
+          ...(alsoOnTaskIds.length > 0 ? [`id.in.(${alsoOnTaskIds.join(",")})`] : []),
+        ].join(","),
+      )
       .order("due_date", { ascending: true, nullsFirst: false }),
 
     // P7-05 — this week, if it has been handed in.

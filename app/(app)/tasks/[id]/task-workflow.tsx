@@ -128,7 +128,7 @@ export function TaskWorkflow({
   trackedMinutes: number;
   lists: List[];
   candidates: Person[];
-  viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
+  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
   /**
    * Where the task came from. Decides which endings are legal: a client request
    * finishes at Gate 3, internal work is closed by its QA reviewer, and a
@@ -174,7 +174,7 @@ export function TaskWorkflow({
   const qaItems = { [NONE]: "No QA reviewer", ...peopleItems };
 
   const transitions = availableTransitions(status, viewer, task);
-  const canEdit = viewer.isPic || viewer.isQa || viewer.leadsDepartment;
+  const canEdit = viewer.isAssignee || viewer.isQa || viewer.leadsDepartment;
   /**
    * The SAVED resolution, not the draft in the box.
    *

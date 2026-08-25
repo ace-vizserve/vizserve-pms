@@ -102,6 +102,7 @@ export function AssigneePicker({
   others,
   candidates,
   canEdit = true,
+  showPic = true,
   align = "start",
 }: {
   taskId: string;
@@ -112,6 +113,21 @@ export function AssigneePicker({
   /** Who may be added — this task's own department, resolved server-side. */
   candidates: Person[];
   canEdit?: boolean;
+  /**
+   * P7-43 — whether this task HAS a person in charge.
+   *
+   * True on a CLIENT task, where somebody has to be answerable to the person who
+   * filed the request. FALSE ON AN INTERNAL TASK, where the work belongs to the
+   * team and everyone on it is an equal assignee.
+   *
+   * `pic` is still passed either way, because `assignee_id` is still set and
+   * still means something to notifications, board ordering and both tasks
+   * policies. What this decides is whether the SCREEN draws a rank the data no
+   * longer claims: with it false, that person is listed and removable like
+   * anyone else, and `vizserve_pms_remove_task_assignee` promotes the next
+   * assignee into the column on the way out.
+   */
+  showPic?: boolean;
   align?: "start" | "center" | "end";
 }) {
   const router = useRouter();
@@ -133,9 +149,12 @@ export function AssigneePicker({
 
   const assigned = useMemo(() => {
     const needle = query.trim().toLowerCase();
-    const all = [...(pic ? [{ ...pic, isPic: true }] : []), ...others.map((p) => ({ ...p, isPic: false }))];
+    const all = [
+      ...(pic ? [{ ...pic, isPic: showPic }] : []),
+      ...others.map((p) => ({ ...p, isPic: false })),
+    ];
     return all.filter((person) => !needle || person.full_name.toLowerCase().includes(needle));
-  }, [pic, others, query]);
+  }, [pic, others, query, showPic]);
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
     startTransition(async () => {
@@ -152,7 +171,13 @@ export function AssigneePicker({
   const trigger = (
     <span className="inline-flex items-center">
       {pic ? (
-        <Monogram id={pic.id} name={pic.full_name} label={`${pic.full_name} — person in charge`} />
+        <Monogram
+          id={pic.id}
+          name={pic.full_name}
+          // No "person in charge" on an internal task — there isn't one, and a
+          // tooltip is not the place to invent a rank.
+          label={showPic ? `${pic.full_name} — person in charge` : pic.full_name}
+        />
       ) : null}
       {others.slice(0, 2).map((person, index) => (
         <Monogram
@@ -237,6 +262,10 @@ export function AssigneePicker({
                   {person.isPic ? (
                     // The word, not a tint. Removing the accountable name is a
                     // reassignment and does not belong in this control.
+                    //
+                    // P7-43: reached only on a CLIENT task. On an internal one
+                    // `showPic` is false, this branch never runs, and the same
+                    // person gets the remove button below like everybody else.
                     <span className="shrink-0 text-2xs text-muted-foreground">PIC</span>
                   ) : (
                     <button

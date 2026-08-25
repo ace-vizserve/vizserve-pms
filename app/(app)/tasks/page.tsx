@@ -20,6 +20,7 @@ import { formatCellDuration } from "@/lib/schemas/timesheet";
 
 import { EmptyState } from "@/components/empty-state";
 import { loadPendingRequests } from "@/lib/pending-requests-server";
+import { fetchJoinedTaskIds, mineFilter } from "@/lib/tasks-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
@@ -138,6 +139,13 @@ export default async function TasksPage({
   const params = await searchParams;
   const supabase = await createClient();
 
+  /**
+   * P7-13 / P7-43 — the tasks this person is on without being named in
+   * `assignee_id`. Needed twice below: once to widen "Mine", once by `seat()`
+   * to decide whether to draw the controls. `cache()`d, so this is one query.
+   */
+  const joinedTaskIds = await fetchJoinedTaskIds(context.userId);
+
   const view = params.view === "mine" || params.view === "qa" ? params.view : "all";
 
   /*
@@ -210,7 +218,10 @@ export default async function TasksPage({
   if (priorityFilter) query = query.eq("priority", priorityFilter);
   if (kind === "client") query = query.not("request_id", "is", null);
   if (kind === "internal") query = query.is("request_id", null);
-  if (view === "mine") query = query.eq("assignee_id", context.userId);
+  // P7-43. "Mine" is the accountable name PLUS, on internal tasks only, being
+  // on the task at all — internal work has no person in charge, so membership
+  // is the whole of the claim. Client tasks keep the column as the answer.
+  if (view === "mine") query = query.or(mineFilter(context.userId, joinedTaskIds));
   // P3-08 — the QA queue is a view of this list, not a separate screen with a
   // separate set of rules that can drift from it.
   if (view === "qa") {
@@ -563,9 +574,27 @@ export default async function TasksPage({
     );
   }
 
+  /**
+   * Where the viewer sits on a task.
+   *
+   * `isAssignee` MIRRORS `vizserve_pms_transition_task`'s `v_is_pic`, which is
+   * `assignee_id = actor OR a row in vizserve_pms_task_assignees`. It used to be
+   * the column alone, and that was the same defect as the timesheet picker: a
+   * second assignee could be handed work, and be fully able to edit and move it
+   * as far as the database was concerned, while every control on this page was
+   * hidden from them because one comparison disagreed.
+   *
+   * It is named `isAssignee` rather than `isPic` because on an INTERNAL task
+   * there is no person in charge (P7-43) — everyone on it is an equal assignee,
+   * and a field called `isPic` would be claiming a rank the data no longer has.
+   * On a CLIENT task the accountable name still exists; it is simply not what
+   * this flag is asking about.
+   */
   function seat(task: TaskRow) {
     return {
-      isPic: task.assignee_id === context.userId,
+      isAssignee:
+        task.assignee_id === context.userId ||
+        (extraAssignees.get(task.id) ?? []).some((person) => person.id === context.userId),
       isQa: task.qa_assignee_id === context.userId,
       leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
       isAdmin,
@@ -742,7 +771,10 @@ export default async function TasksPage({
           // own function refuses anybody outside it, so offering a wider list
           // would only produce an error after the click.
           candidates={byDepartment.get(task.department_id) ?? []}
-          canEdit={seat(task).isPic || seat(task).isQa || seat(task).leadsDepartment}
+          canEdit={seat(task).isAssignee || seat(task).isQa || seat(task).leadsDepartment}
+          // P7-43. A client task has a person in charge; an internal one does
+          // not, and `request_id` is the same test `taskCategory` uses.
+          showPic={task.request_id !== null}
         />
       ),
     },
