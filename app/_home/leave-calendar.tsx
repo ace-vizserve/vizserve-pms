@@ -11,6 +11,9 @@ import {
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 
+import { LeaveEntry, MoreLeaveTooltip } from "./leave-entry";
+import type { LeaveSpan } from "./leave-entry";
+
 /**
  * P7-10 — who is out, and when.
  *
@@ -42,15 +45,35 @@ import { buttonVariants } from "@/components/ui/button";
  * A HOLIDAY OUTRANKS LEAVE in the cell, because a day nobody works is not a day
  * somebody is absent. Leave spanning a holiday still lists its names — the
  * request genuinely covers it — but the day reads as closed first.
+ *
+ * P7-42 — AND A HOVER CARD, which moved the line this component had held since
+ * P7-10. The cells still carry a shortened name and nothing else; the halves and
+ * the leave type now live one hover away, in `leave-entry.tsx`.
+ *
+ * THE LINE IS DRAWN IN POSTGRES, NOT HERE, and that is the part worth keeping
+ * straight. `vizserve_pms_leave_types.calendar_visibility` gives every type one
+ * of three levels, and the function applies them before a row reaches this file:
+ *
+ *   FULL          name, real label, dates and halves
+ *   LABEL_HIDDEN  name and dates; `typeLabel` arrives null and reads "On leave"
+ *   HIDDEN        the row does not arrive at all
+ *
+ * So THE CALENDAR IS INCOMPLETE ON PURPOSE. Special Leave for Women and VAWC
+ * leave are statutory confidences (RA 9710; RA 9262 §44, which attaches a
+ * penalty to disclosure), and a colleague will believe those people are in the
+ * office. That is the accepted price, the legend admits it in as many words, and
+ * the absence is still visible to the requester, to the lead deciding it, and in
+ * the DTR and the payroll export.
+ *
+ * Your own leave is exempt from every level — the rule keys off `auth.uid()` —
+ * so you always see your own row in full on your own calendar.
  */
 
-export type LeaveSpan = {
-  userId: string;
-  name: string;
-  start: string;
-  end: string;
-  pending?: boolean;
-};
+/**
+ * Re-exported from the client leaf that owns it, so the dependency runs one way
+ * and `app/page.tsx` keeps importing the type from the component it feeds.
+ */
+export type { LeaveSpan } from "./leave-entry";
 
 /** P7-35. A day nobody is scheduled to work. `date` is `YYYY-MM-DD`. */
 export type Holiday = { date: string; name: string };
@@ -68,14 +91,6 @@ function spansByDay(spans: LeaveSpan[], days: string[]): Map<string, LeaveSpan[]
   }
 
   return byDay;
-}
-
-/** `Rina Cruz` → `R. Cruz`. A full name does not fit a calendar cell. */
-function shortName(name: string): string {
-  const parts = name.trim().split(/\s+/).filter(Boolean);
-  if (parts.length < 2) return parts[0] ?? "—";
-
-  return `${parts[0]![0]!.toUpperCase()}. ${parts[parts.length - 1]}`;
 }
 
 export function LeaveCalendar({
@@ -134,10 +149,7 @@ export function LeaveCalendar({
         </div>
       </div>
 
-      {/* min-h-0 so this can shrink inside the bounded page. Without it the
-          grid below holds its content height and the "no scroll" upstairs just
-          moves the overflow somewhere less visible. */}
-      <div className="flex min-h-0 flex-1 flex-col gap-1 p-2.5">
+      <div className="flex flex-1 flex-col gap-1 p-2.5">
         <div className="grid grid-cols-7 gap-1">
           {MONTH_GRID_WEEKDAYS.map((weekday) => (
             <div
@@ -149,23 +161,40 @@ export function LeaveCalendar({
           ))}
         </div>
 
-        <div className="grid flex-1 auto-rows-fr grid-cols-7 gap-1">
+        {/* `minmax(3.5rem,auto)`, NOT `auto-rows-fr`.
+
+            `auto-rows-fr` expands to `minmax(0,1fr)`, and the zero is the whole
+            problem: it lets a row shrink to nothing while each cell's own
+            `overflow-hidden` quietly amputates the names inside it. That is the
+            "cramped" grid — six rows squeezed to ~36px, drawing the top half of
+            a name and no more.
+
+            `auto` as the maximum rather than `1fr` because the page scrolls now.
+            A row takes the height its fullest cell needs, so a week where three
+            people are out is taller than an empty one instead of every row
+            paying for the worst case, and 3.5rem keeps an empty week from
+            collapsing to a line of dates. */}
+        <div className="grid auto-rows-[minmax(3.5rem,auto)] grid-cols-7 gap-1">
           {days.map((day) => {
             const inMonth = isSameMonth(day, month);
             const hits = byDay.get(day) ?? [];
             const pendingOnly = hits.length > 0 && hits.every((span) => span.pending);
             const isToday = day === today;
             const holiday = holidayByDay.get(day);
+            // Named once rather than written as `holiday ? 1 : 2` in three
+            // places — the slice and the counter that reads it have to agree,
+            // and they are eight lines apart.
+            const shown = holiday ? 1 : 2;
 
             return (
               <div
                 key={day}
                 className={cn(
-                  // min-h-8, down from min-h-11. `auto-rows-fr` above shares the
-                  // leftover height between the six week rows, so this is only a
-                  // FLOOR — on a tall screen the cells still grow. Lowering it is
-                  // what lets six rows fit a 1080p viewport at all: at 44px the
-                  // grid alone demanded ~290px it did not have.
+                  // The real floor is the row's `minmax(3.5rem,auto)` above; this
+                  // min-h-8 is the older, smaller one and now only matters if
+                  // that ever changes. `overflow-hidden` stays for the truncated
+                  // holiday name, NOT to absorb a squeeze — the row grows to its
+                  // content, so there is nothing left for it to cut vertically.
                   "flex min-h-8 flex-col gap-0.5 overflow-hidden rounded-md border p-1 px-1.5",
                   // Order matters: today's ring wins over a leave tint, because
                   // "where am I" is the first question anyone asks of a
@@ -219,24 +248,15 @@ export function LeaveCalendar({
                 {/* Two names, then a count. Three names in a 90px cell is three
                     truncated names, which tells you less than "+2 more". One
                     fewer on a holiday cell, since the holiday name took a line. */}
-                {hits.slice(0, holiday ? 1 : 2).map((span) => (
-                  <span
-                    key={`${span.userId}-${span.start}`}
-                    title={`${span.name}${span.pending ? " — pending" : ""}`}
-                    className={cn(
-                      "truncate text-2xs font-medium",
-                      span.pending ? "text-warning" : "text-info",
-                    )}
-                  >
-                    {shortName(span.name)}
-                  </span>
+                {hits.slice(0, shown).map((span) => (
+                  <LeaveEntry key={`${span.userId}-${span.start}`} span={span} day={day} />
                 ))}
                 {/* Counted from what was actually rendered rather than a fixed 2,
-                    which is what keeps this number true on a holiday cell. */}
-                {hits.length > (holiday ? 1 : 2) ? (
-                  <span className="text-2xs text-muted-foreground">
-                    +{hits.length - (holiday ? 1 : 2)} more
-                  </span>
+                    which is what keeps this number true on a holiday cell. P7-42
+                    made it hoverable: the names behind it have nowhere else to be
+                    read, because a cell deliberately links to nothing. */}
+                {hits.length > shown ? (
+                  <MoreLeaveTooltip spans={hits.slice(shown)} day={day} />
                 ) : null}
               </div>
             );
@@ -276,7 +296,17 @@ export function LeaveCalendar({
             />
             Today
           </span>
-          <span className="ml-auto">Names and dates only — never the reason.</span>
+          {/* P7-42 rewrote this line, and the second clause is the load-bearing
+              half: a calendar that withholds two leave types outright owes its
+              readers one sentence saying so, or it is quietly wrong about who is
+              in. KEPT TO ONE LINE, and that is a layout constraint rather than a
+              stylistic one — the grid above is `flex-1` over six `auto-rows-fr`
+              rows with a `min-h-8` floor, so it cannot give height back. A
+              legend that wraps to two lines does not shrink the grid, it pushes
+              the sixth week under the panel's `overflow-hidden`. The first
+              attempt at this sentence ran to 88 characters and did exactly
+              that. */}
+          <span className="ml-auto">Hover a name for details · some leave is private</span>
         </div>
       </div>
     </section>

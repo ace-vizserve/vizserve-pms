@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowRight, Clock, LayoutDashboard, LogOut, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
+import type { DayHalf } from "@/lib/leave";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { listWaitingOnYou } from "@/lib/approvals-queue-server";
 import { loadPunchState } from "@/lib/dtr-server";
@@ -24,6 +25,7 @@ import { signOut } from "@/app/login/actions";
 
 import { PunchPanel } from "@/app/(app)/dtr/punch-panel";
 import { LeaveCalendar, type Holiday, type LeaveSpan } from "./_home/leave-calendar";
+import { LeaveTooltip } from "./_home/leave-entry";
 import { Cell, CellBody, CellHead, StatStrip, initials } from "./_home/home-widgets";
 
 export const metadata: Metadata = { title: "Home" };
@@ -162,9 +164,15 @@ export default async function DashboardPage({
     // pending appears anywhere: a request that has not been decided is not yet
     // a fact, and broadcasting it tells the company you asked for time off
     // before your own lead has seen it.
+    //
+    // P7-42 — the halves and the type come too, and NO MASKING APPLIES. These
+    // are your own rows, reaching you through the ordinary policy rather than
+    // through the calendar function, so the rule that hides a confidential type
+    // from your colleagues has nothing to say about showing it to you. The
+    // embedded select mirrors the one already proven in app/(app)/dtr/page.tsx.
     supabase
       .from("vizserve_pms_internal_requests")
-      .select("id, start_date, end_date")
+      .select("id, start_date, end_date, start_half, end_half, vizserve_pms_leave_types(label)")
       .eq("requester_id", context.userId)
       .eq("request_type", "LEAVE")
       .eq("status", "PENDING_REVIEW"),
@@ -195,6 +203,11 @@ export default async function DashboardPage({
   const waitingTotal = waiting.length;
 
   // ----------------------------------------------------------------- leave
+  //
+  // P7-42. `type_label` arrives null for two reasons this page cannot tell apart
+  // and must not try to — leave filed before P7-12 had no type, and a
+  // LABEL_HIDDEN type is withholding one. Both read "On leave" downstream. A
+  // HIDDEN type never appears in `approvedLeave` at all unless it is yours.
   const spans: LeaveSpan[] = [
     ...(
       (approvedLeave.data ?? []) as {
@@ -202,12 +215,18 @@ export default async function DashboardPage({
         full_name: string;
         start_date: string;
         end_date: string;
+        start_half: DayHalf | null;
+        end_half: DayHalf | null;
+        type_label: string | null;
       }[]
     ).map((row) => ({
       userId: row.user_id,
       name: row.full_name,
       start: row.start_date,
       end: row.end_date,
+      startHalf: row.start_half,
+      endHalf: row.end_half,
+      typeLabel: row.type_label,
     })),
     ...(myPendingLeave.data ?? [])
       .filter((row) => row.start_date && row.end_date)
@@ -216,6 +235,11 @@ export default async function DashboardPage({
         name: context.fullName,
         start: row.start_date!,
         end: row.end_date!,
+        startHalf: row.start_half,
+        endHalf: row.end_half,
+        // An object, not an array: `leave_type_id` is a single FK, and PostgREST
+        // embeds a to-one relationship as one row.
+        typeLabel: row.vizserve_pms_leave_types?.label ?? null,
         pending: true,
       })),
   ];
@@ -262,16 +286,26 @@ export default async function DashboardPage({
       scrolling is not one — the calendar was pushing the whole bento off the
       bottom of a 1080p screen.
 
-      The height is bounded here (`h-svh` + `overflow-hidden`) and every
-      descendant that has to shrink carries `min-h-0`. A flex child defaults to
-      `min-height: auto` and refuses to shrink below its content, which is
-      exactly how a tall calendar pushes a bounded page taller anyway.
+      THE PAGE SCROLLS NOW, and that reverses the paragraph above.
+
+      It used to be bounded to `h-svh` with `overflow-hidden`, and every
+      descendant that had to shrink carried `min-h-0`. The bento above the
+      calendar is sized by its content, so all of that pressure landed on the
+      calendar: it was handed "whatever is left" and squashed its six week rows
+      into it. On a 1080p window that left roughly 245px for a grid that needs
+      about 430px to draw a date and two names per cell, and `auto-rows-fr` is
+      `minmax(0,1fr)` — rows shrink BELOW their content rather than overflowing —
+      so the shortfall was spent clipping names through the middle of the glyphs.
+
+      A calendar that has to hide who is out is not doing the job the calendar
+      exists for, so the height clamp lost the argument. `min-h-svh` still makes
+      a short page fill the window; nothing caps it any more.
 
       `svh`, not `vh`: on a phone `vh` measures the viewport with the browser
-      chrome hidden. Below `lg` none of this applies and the page scrolls
-      normally — a fixed viewport on a small screen is a trap.
+      chrome hidden. The sticky header keeps the way out reachable at any scroll
+      depth, which is what its own comment below already anticipated.
     */
-    <div className="flex min-h-svh flex-col grade-ambient bg-background bg-no-repeat lg:h-svh lg:overflow-hidden">
+    <div className="flex min-h-svh flex-col grade-ambient bg-background bg-no-repeat">
       {/*
         ITS OWN HEADER, because there is no shell around this page to supply one.
 
@@ -313,7 +347,7 @@ export default async function DashboardPage({
         are tall. `cn` is tailwind-merge, so the cap here replaces nothing and
         simply applies.
       */}
-      <PageShell className="mx-auto w-full max-w-7xl gap-2.5 lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+      <PageShell className="mx-auto w-full max-w-7xl gap-2.5">
         {/* A greeting, not a page label — there is no breadcrumb to repeat. */}
         {/* One line, not two. The greeting and the date now sit side by side —
             it is a salutation, and giving it a heading block of its own cost
@@ -326,13 +360,13 @@ export default async function DashboardPage({
           </p>
         </div>
 
-        {/* The calendar is the one row that can give: the two card rows above it
-            are sized by their content, so `minmax(0,1fr)` on the third gives the
-            calendar whatever is left and nothing more. Its own cells are already
-            `auto-rows-fr`, so they shrink into that budget instead of overflowing
-            it. The `minmax(0,…)` matters as much as the `1fr` — a bare `1fr` is
-            floored at min-content and would not shrink at all. */}
-        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-6 lg:min-h-0 lg:flex-1 lg:grid-rows-[auto_auto_minmax(0,1fr)]">
+        {/* THREE CONTENT-SIZED ROWS. The third used to be `minmax(0,1fr)`, which
+            handed the calendar whatever the two rows above had not taken and let
+            it shrink below its own content — the `minmax(0,…)` was doing that,
+            not the `1fr`. Every row now takes the height it needs and the page
+            scrolls, so the calendar states its own size instead of being told
+            one. */}
+        <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-6">
           {/* ------------------------------------------------------ row 1 · 3+3 */}
           <Cell span="sm:col-span-3" label="Daily time record">
             <CellHead title="Daily time record">
@@ -505,14 +539,18 @@ export default async function DashboardPage({
                     <span className="flex size-7 shrink-0 items-center justify-center rounded-full border border-accent-border bg-accent text-2xs font-semibold text-accent-foreground grade-chip">
                       {initials(span.name)}
                     </span>
-                    <span className="min-w-0">
+                    {/* P7-42. The same hover card as the calendar cell below,
+                        from the same component — the two are built from one
+                        `spans` array, and sharing the card is what stops them
+                        wording one absence two ways. */}
+                    <LeaveTooltip span={span} day={today} className="block min-w-0">
                       <span className="block truncate text-sm font-medium">{span.name}</span>
                       <span className="block truncate text-2xs text-muted-foreground">
                         {span.start === span.end
                           ? "Today only"
                           : `${formatDate(span.start)} – ${formatDate(span.end)}`}
                       </span>
-                    </span>
+                    </LeaveTooltip>
                   </div>
                 ))
               )}
@@ -530,7 +568,7 @@ export default async function DashboardPage({
             today={today}
             spans={spans}
             holidays={holidays}
-            className="sm:col-span-6 lg:min-h-0"
+            className="sm:col-span-6"
           />
         </div>
       </PageShell>
