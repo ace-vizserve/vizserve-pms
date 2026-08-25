@@ -17,7 +17,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). P6-04/06/07/08/09 not begun |
-| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live. **Three more applied 25 Aug**: P7-32 gender, P7-33 leave balances, P7-34 leave audit PDF. **P7-35 holiday calendar needs no migration** — see below |
+| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-six migrations live, P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -408,7 +408,81 @@ they belong to, and dragging one to another column is the exact move the nesting
 prevents. The count comes from the unfiltered query, so a card reads "10
 subtasks" and unfolds the seven still outstanding.
 
-## P7-36 — VAWC leave, 25 Aug
+## P7-36 – P7-40 — the smart DTR, 24–25 Aug
+
+**Applied and verified end to end.** All four migrations are live; the shape
+constraint was checked in both directions from a script (a well-formed
+`TIME_IN_CORRECTION` accepted, one carrying an `amount` refused, an `OVERTIME`
+carrying a `correction_at` refused), and the settings singleton reads
+`grace_minutes = 5`.
+
+**The DTR write-back was confirmed by hand on 25 Aug** — a correction filed,
+approved by a second account, and the recorded time actually moved. That is the
+one thing no automated test on this machine could prove, because both request
+functions resolve the caller from `auth.uid()` and every `tests/db` file signs in
+as a seeded account that production cannot have. It is also the failure that
+would have looked like success: had any of the seven type references in
+`vizserve_pms_decide_internal_request` been missed, the approval would still have
+reported `ok`, still written `corrected_at` and an audit row, still returned a
+`dtr_entry_id` — and left the DTR unchanged. It did not.
+
+The eight P7-39 cases in `tests/db/phase5.test.ts` remain the regression guard
+for the next person who edits that function; they run wherever a seeded
+non-production environment exists.
+
+### What it does
+
+The DTR knew what people punched and never what they were *supposed* to punch.
+Five pieces close that:
+
+| ID | What |
+|---|---|
+| P7-36 | `vizserve_pms_users.work_start` / `work_end`, optional `time` columns, both-or-neither, admin-editable in the staff dialog |
+| P7-37 | `vizserve_pms_app_settings` — the first settings table this app has had. One singleton row, `grace_minutes` default 5, admin-only at `/admin/settings` |
+| P7-38 | `TIME_IN_CORRECTION` / `TIME_OUT_CORRECTION` enum values |
+| P7-39 | Shape constraint + both request functions widened to the new types |
+| P7-40 | The UI: the off-schedule dialog after a punch, the deviation notes, and the **Request** column on the DTR table |
+
+### Four decisions worth not relitigating
+
+- **A late clock-out is a time-out correction, NOT overtime.** Overtime is agreed
+  in advance (P7-04); turning a forgotten clock-out into an overtime claim would
+  manufacture entitlement out of forgetfulness. Amier, 24 Aug.
+- **Approved overtime extends the day instead.** `effectiveEnd()` moves the
+  scheduled finish by any approved OT on that date, so doing exactly what you
+  were authorised to do is never flagged. That is what "surface approved
+  overtime in the DTR" turned into.
+- **Grace applies at BOTH ends and in both directions**, but an *early* time-in
+  is never a deviation — arriving early needs no paperwork.
+- **The new types are separate from `NO_TIME_*`.** Same payload, same write-back,
+  different claim: one fills a blank, the other overwrites a machine-captured
+  time. Collapsing them would make "how often are we late" unanswerable. The old
+  pair was relabelled "Missing time-in/out" so the four are distinguishable.
+
+### Visibility needed no code
+
+Amier asked that a member see only their own approval link and leads/admins see
+their team's. That is already the RLS on `vizserve_pms_internal_requests`
+(`requester_id = auth.uid() or manages_department(department_id)`), so the DTR's
+new Request column queries with **no user filter and no role branch** — the rows
+that arrive are the rows that viewer may see.
+
+### Two traps recorded
+
+- **`vizserve_pms_decide_internal_request` names the correction types in SEVEN
+  places.** Widening the outer guard and missing one of the four `case` sites
+  fails *silently*: the `case` has no `else`, so it yields null, the upsert
+  writes the existing time back, and `corrected_at`, the audit row and a non-null
+  `dtr_entry_id` all report success. P7-39 replaces all seven with two booleans
+  for that reason, and `tests/db/phase5.test.ts` has a case that moves a
+  time-out EARLIER — the only one that catches it.
+- **⚠️ Filtering on an unknown enum value does NOT error.** PostgREST returns an
+  empty result and a null error, so the obvious "has this enum value landed"
+  probe reports success against a database that has never seen it. Measured on
+  this project, 24 Aug. `tests/db/helpers.ts` now has `enumValues()`, which reads
+  PostgREST's own schema description instead.
+
+## P7-41 — VAWC leave, 25 Aug
 
 **Applied.** One row in `vizserve_pms_leave_types`: Anti-Violence Against Women
 and Their Children Leave (RA 9262), `code = VAWC`, sort_order 90. Inserted into
@@ -440,6 +514,12 @@ somebody is a victim of domestic violence.
 
 **No allocation is seeded.** The statute grants it to those it covers; an admin
 sets the days per person under D27.
+
+**Numbered 41, not 36.** This was written as P7-36 on a branch that did not yet
+have the smart-DTR run, which had already taken 36 through 40 — two migrations
+called `p7_36` met in the merge. Theirs is the work-hours migration that P7-37
+through P7-40 build on and that a dozen comments cite; this one is a single
+INSERT that nothing references, so it was the cheap side to move.
 
 ## P7-35 — the holiday calendar, 24 Aug
 

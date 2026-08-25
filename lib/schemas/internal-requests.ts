@@ -20,6 +20,8 @@ export const INTERNAL_REQUEST_TYPES = [
   "LEAVE",
   "NO_TIME_IN",
   "NO_TIME_OUT",
+  "TIME_IN_CORRECTION",
+  "TIME_OUT_CORRECTION",
   "REIMBURSEMENT",
   "OVERTIME",
 ] as const;
@@ -27,36 +29,50 @@ export const INTERNAL_REQUEST_TYPES = [
 export type InternalRequestType = (typeof INTERNAL_REQUEST_TYPES)[number];
 
 /**
- * A readable label for a type this build does not know about.
+ * P7-39 RELABELLED THE ORIGINAL PAIR. "No time-in" was unambiguous while it was
+ * the only kind of time correction; next to "Time-in correction" it reads as a
+ * near-synonym. "Missing" versus "correction" is the distinction that actually
+ * matters to the person approving: one fills a blank, the other overwrites a
+ * recorded time with a claim that contradicts it.
  *
- * ⚠️ THIS IS NOT DEFENSIVE PROGRAMMING, it is a guard against a drift that has
- * already happened. The `vizserve_pms_internal_request_type` enum is edited by
- * hand in the Supabase SQL editor — every P7 migration landed that way — so the
- * database can hold a value this file has never heard of. It currently holds
- * `TIME_IN_CORRECTION`, which appears in no migration in this repo and in no
- * list below.
+ * The enum values are untouched — this is display only.
+ */
+export const INTERNAL_REQUEST_LABELS: Record<InternalRequestType, string> = {
+  LEAVE: "Leave",
+  NO_TIME_IN: "Missing time-in",
+  NO_TIME_OUT: "Missing time-out",
+  TIME_IN_CORRECTION: "Time-in correction",
+  TIME_OUT_CORRECTION: "Time-out correction",
+  REIMBURSEMENT: "Reimbursement",
+  OVERTIME: "Overtime",
+};
+
+/**
+ * The label, or a readable fallback for a type this build has not heard of.
  *
- * Looking one of those up in `INTERNAL_REQUEST_LABELS` returns undefined, and
- * the badge then renders an EMPTY PILL — a request whose type is invisible on
- * the one screen that exists to show it. Falling back to the humanised enum
- * value is worse than a real label and far better than nothing, and it fails
- * loudly enough to be noticed and fixed properly.
+ * ⚠️ THE MAP ABOVE IS COMPLETE TODAY AND THAT IS NOT THE POINT. P7-38 added
+ * `TIME_IN_CORRECTION` and `TIME_OUT_CORRECTION` properly — enum, migration and
+ * labels together — which is exactly the right fix. This exists because of how
+ * the gap arose in the first place:
+ *
+ * `TIME_IN_CORRECTION` was live in the database for a day BEFORE the migration
+ * that declares it reached this repo, because P7 enum values are pasted into
+ * the Supabase SQL editor by hand. During that day the type badge rendered an
+ * EMPTY PILL — a request whose kind was invisible on the one screen built to
+ * show it, and nothing anywhere said why.
+ *
+ * That ordering is not going to change, so the next hand-applied enum value
+ * will do the same thing. A humanised fallback is worse than a real label and
+ * far better than a blank, and it is visibly wrong enough to get fixed.
  */
 export function internalRequestLabel(type: string): string {
   return (
     INTERNAL_REQUEST_LABELS[type as InternalRequestType] ??
-    // NO_TIME_IN -> "No time in". Sentence case, matching the labels below.
+    // TIME_IN_CORRECTION -> "Time in correction". Sentence case, matching the
+    // map above closely enough that a stray one does not look like a bug.
     type.charAt(0).toUpperCase() + type.slice(1).toLowerCase().replaceAll("_", " ")
   );
 }
-
-export const INTERNAL_REQUEST_LABELS: Record<InternalRequestType, string> = {
-  LEAVE: "Leave",
-  NO_TIME_IN: "No time-in",
-  NO_TIME_OUT: "No time-out",
-  REIMBURSEMENT: "Reimbursement",
-  OVERTIME: "Overtime",
-};
 
 export const INTERNAL_REQUEST_BLURBS: Record<InternalRequestType, string> = {
   LEAVE:
@@ -64,10 +80,33 @@ export const INTERNAL_REQUEST_BLURBS: Record<InternalRequestType, string> = {
   NO_TIME_IN:
     "You worked but no time-in was captured. Approval writes the corrected time into your DTR.",
   NO_TIME_OUT: "You forgot to time out, or the shift ran past the 18-hour cut-off.",
+  TIME_IN_CORRECTION:
+    "A time-in was captured but it is wrong — usually you started work and clocked in later. Approval overwrites the recorded time.",
+  TIME_OUT_CORRECTION:
+    "A time-out was captured but it is wrong, in either direction. For extra hours you agreed in advance, file overtime instead.",
   REIMBURSEMENT: "Money you spent on the company's behalf.",
   OVERTIME:
     "Extra hours on a given day, agreed before you work them. Approval is what stops that day reading as over-logged on your timesheet.",
 };
+
+/**
+ * The four types that resolve to a corrected instant on a DTR row. One list,
+ * exported, because the dialog, the DTR table and the approvals detail all ask
+ * "is this a time correction" and three copies would drift the moment a fifth
+ * type arrives.
+ */
+export const TIME_CORRECTION_TYPES = [
+  "NO_TIME_IN",
+  "NO_TIME_OUT",
+  "TIME_IN_CORRECTION",
+  "TIME_OUT_CORRECTION",
+] as const satisfies readonly InternalRequestType[];
+
+export type TimeCorrectionType = (typeof TIME_CORRECTION_TYPES)[number];
+
+export function isTimeCorrectionType(value: string): value is TimeCorrectionType {
+  return (TIME_CORRECTION_TYPES as readonly string[]).includes(value);
+}
 
 /**
  * Why you are asking.
@@ -156,12 +195,18 @@ export const leaveRequestSchema = z
   });
 
 /**
- * The DTR correction pair. These two exist because P5-02 makes a punch
+ * The DTR corrections. All four exist because P5-02 makes a punch
  * unoverwritable on purpose — this is the only way back, and it needs somebody
  * else's signature.
+ *
+ * ONE SCHEMA FOR FOUR TYPES, unlike the migration's four separate CHECK
+ * branches. The database keeps them apart because a branch covering several
+ * types is how a payload rule goes missing (p7_04); here the payload genuinely
+ * is one shape and a discriminated union of four identical members would be
+ * four places to forget a field.
  */
 export const timeCorrectionSchema = z.object({
-  request_type: z.enum(["NO_TIME_IN", "NO_TIME_OUT"]),
+  request_type: z.enum(TIME_CORRECTION_TYPES),
   reason: internalReasonSchema,
   work_date: dateOnly,
   correction_time: timeOfDay,
@@ -214,6 +259,23 @@ export const internalRequestSchema = z.discriminatedUnion("request_type", [
 export type InternalRequestInput = z.infer<typeof internalRequestSchema>;
 
 /**
+ * The same question as `isTimeCorrectionType`, asked of a whole payload so that
+ * TypeScript NARROWS THE UNION rather than just the string.
+ *
+ * Both exist because they are used in different places: the type-level guard is
+ * for a `request_type` read off a database row, where there is no union to
+ * narrow; this one is for the submit action, where narrowing is the entire
+ * reason `work_date` and `correction_time` can be read without a cast. A cast
+ * there would be the thing that lets a fifth correction type through with a
+ * null time.
+ */
+export function isTimeCorrectionRequest(
+  value: InternalRequestInput,
+): value is Extract<InternalRequestInput, { correction_time: string }> {
+  return isTimeCorrectionType(value.request_type);
+}
+
+/**
  * The decision payload. Approve carries nothing; reject requires a reason.
  *
  * No `returned` member — P5-08 specifies approve or reject only. The engine
@@ -255,12 +317,14 @@ export type InternalDecisionInput = z.infer<typeof internalDecisionSchema>;
 export function narrowRequestPrefill(params: {
   type?: string | string[] | null;
   date?: string | string[] | null;
-}): { type?: InternalRequestType; date?: string } {
+  time?: string | string[] | null;
+}): { type?: InternalRequestType; date?: string; time?: string } {
   // Next hands back `string[]` when a parameter appears twice. Taking the first
   // would silently honour `?type=LEAVE&type=OVERTIME`; a repeated parameter is
   // not a choice, so neither is honoured.
   const type = typeof params.type === "string" ? params.type : undefined;
   const date = typeof params.date === "string" ? params.date : undefined;
+  const time = typeof params.time === "string" ? params.time : undefined;
 
   return {
     type: INTERNAL_REQUEST_TYPES.includes(type as InternalRequestType)
@@ -270,6 +334,17 @@ export function narrowRequestPrefill(params: {
     // — `2026-02-31` matches this regex and is refused later, which is the
     // right place for it: this is a URL guard, not a calendar.
     date: date && /^\d{4}-\d{2}-\d{2}$/.test(date) ? date : undefined,
+    /**
+     * P7-40. The SCHEDULED time, so a correction opens saying what the record
+     * should have said rather than an empty field.
+     *
+     * ⚠️ A SUGGESTION, NOT A CLAIM, and the dialog must keep it editable. The
+     * whole point of the request is that a human is asserting when they actually
+     * started; prefilling their scheduled start and letting them submit it
+     * unread would turn an attestation into a rubber stamp, and the approver
+     * would be signing off a number the system invented.
+     */
+    time: time && /^([01]\d|2[0-3]):[0-5]\d$/.test(time) ? time : undefined,
   };
 }
 

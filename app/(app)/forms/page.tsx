@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
+import { Chip } from "@/components/status-badge";
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth/authorization";
@@ -76,11 +77,7 @@ export default async function FormsPage() {
       header: "Status",
       cell: (form) =>
         /* Status is never colour alone — the label carries it. */
-        form.is_active ? (
-          <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">Live</span>
-        ) : (
-          <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">Draft</span>
-        ),
+        form.is_active ? <Chip tone="success" label="Live" /> : <Chip tone="neutral" label="Draft" />,
     },
     {
       key: "url",

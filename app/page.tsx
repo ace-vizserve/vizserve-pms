@@ -244,6 +244,10 @@ export default async function DashboardPage({
     */
     { label: "File leave", href: "/approvals?type=LEAVE" },
     { label: "Log overtime", href: "/approvals?type=OVERTIME" },
+    // Still the MISSING-punch type, not the P7-39 correction pair. Somebody
+    // reaching for this from the home page has no row in front of them, and the
+    // ordinary reason to go looking is a gap. A wrong recorded time is found by
+    // reading the DTR, which is where the correction links live.
     { label: "Time correction", href: "/approvals?type=NO_TIME_IN" },
     { label: "Reimbursement", href: "/approvals?type=REIMBURSEMENT" },
     { label: "My timesheet", href: "/timesheet" },

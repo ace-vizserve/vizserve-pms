@@ -1,5 +1,12 @@
 -- ---------------------------------------------------------------------------
--- P7-36 — VAWC leave joins the list.
+-- P7-41 — VAWC leave joins the list.
+--
+-- NUMBERED 41, NOT 36. This was written as P7-36 on a branch that did not yet
+-- have the smart-DTR run, which had already taken 36 through 40 — two files
+-- called p7_36 met in a merge. Theirs is the work-hours migration that P7-37
+-- through P7-40 all build on and that a dozen comments cite; this one is a
+-- single INSERT nothing references. Renumbering the cheap side of a collision
+-- is the whole reason ids are worth having.
 --
 -- Anti-Violence Against Women and Their Children Leave, RA 9262: ten days of
 -- paid leave for a woman who is a victim of violence, to attend to the medical

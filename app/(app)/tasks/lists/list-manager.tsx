@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation";
 import { FolderPlus, Pencil, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { Badge } from "@/components/ui/badge";
+import { Chip } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -243,11 +245,7 @@ export function ListManager({
                           {folder.name}
                         </h3>
 
-                        {!folder.is_active ? (
-                          <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-                            Archived
-                          </span>
-                        ) : null}
+                        {!folder.is_active ? <Chip tone="neutral" label="Archived" /> : null}
 
                         {/* P7-25 — add a list straight into THIS folder.
                             Every folder takes lists, the reserved one included
@@ -366,16 +364,10 @@ function ListRows({
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">{list.name}</span>
               {/* Never colour alone — the word carries the state. */}
-              {!list.is_active ? (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-                  Archived
-                </span>
-              ) : null}
-              {list.form_id ? (
-                <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-                  From a form
-                </span>
-              ) : null}
+              {!list.is_active ? <Chip tone="neutral" label="Archived" /> : null}
+              {/* Provenance, not state — where this list came from does not
+                  change, so it is a `Badge` and carries no status dot. */}
+              {list.form_id ? <Badge variant="secondary">From a form</Badge> : null}
             </div>
             {list.description ? (
               <p className="mt-0.5 text-xs text-muted-foreground">{list.description}</p>

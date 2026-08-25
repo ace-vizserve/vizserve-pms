@@ -127,7 +127,7 @@ const CONTENT_WIDTH = A4_WIDTH - MARGIN * 2;
  * document somebody scans for the odd one out.
  *
  * THE LEAVE-TYPE COLUMN IS SIZED FOR THE LONGEST LABEL, not for a round number.
- * P7-36 added "Anti-Violence Against Women and Their Children (VAWC) Leave" —
+ * P7-41 added "Anti-Violence Against Women and Their Children (VAWC) Leave" —
  * 258pt at 9pt Helvetica, against the 160pt this column used to allow. It cut
  * to "…Women and The…", which drops the acronym that identifies it, in a
  * document whose entire job is to be checked line by line against HR's own.

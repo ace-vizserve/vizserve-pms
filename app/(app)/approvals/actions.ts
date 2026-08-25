@@ -5,7 +5,11 @@ import { z } from "zod";
 
 import { requireAuthContextOrThrow } from "@/lib/auth/authorization";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
-import { internalDecisionSchema, internalRequestSchema } from "@/lib/schemas/internal-requests";
+import {
+  internalDecisionSchema,
+  internalRequestSchema,
+  isTimeCorrectionRequest,
+} from "@/lib/schemas/internal-requests";
 import { createClient } from "@/utils/supabase/server";
 
 /**
@@ -74,15 +78,16 @@ export async function submitInternalRequest(input: unknown): Promise<ActionResul
     // pair alone — a mistake that would submit an overtime request with a null
     // date and get it refused by the shape CHECK.
     p_work_date:
-      value.request_type === "NO_TIME_IN" ||
-      value.request_type === "NO_TIME_OUT" ||
-      value.request_type === "OVERTIME"
+      isTimeCorrectionRequest(value) || value.request_type === "OVERTIME"
         ? value.work_date
         : null,
-    p_correction_time:
-      value.request_type === "NO_TIME_IN" || value.request_type === "NO_TIME_OUT"
-        ? value.correction_time
-        : null,
+    // ⚠️ P7-39 WIDENED THIS TO FOUR TYPES, through the shared predicate rather
+    // than a longer `||` chain. A fifth correction type added to
+    // TIME_CORRECTION_TYPES and forgotten here would submit with a null
+    // correction_time, and the error the user sees is the name of a check
+    // constraint — the compiler cannot help, because the parameter has a SQL
+    // default and is therefore optional to it.
+    p_correction_time: isTimeCorrectionRequest(value) ? value.correction_time : null,
     p_amount: value.request_type === "REIMBURSEMENT" ? value.amount : null,
     // ⚠️ The Args type makes this OPTIONAL, because the SQL parameter has a
     // default — so omitting it would NOT be a compile error. It would submit

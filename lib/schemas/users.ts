@@ -51,39 +51,106 @@ export const GENDER_LABELS: Record<Gender, string> = {
  */
 const managedDepartmentsSchema = z.array(z.uuid()).default([]);
 
-export const createUserSchema = z.object({
-  email: z.email("Enter a valid email address.").transform((value) => value.trim().toLowerCase()),
-  full_name: z.string().trim().min(1, "A full name is required."),
-  gender: genderSchema,
-  role: roleSchema,
-  primary_department_id: z.uuid().nullable().default(null),
-  managed_department_ids: managedDepartmentsSchema,
-});
+/**
+ * P7-36 — the scheduled working day.
+ *
+ * OPTIONAL, AND THE EMPTY STRING IS HOW A FORM SAYS NULL. An `<input type="time">`
+ * that has been cleared submits "", not undefined, so the coercion belongs here
+ * rather than in every caller.
+ *
+ * Both-or-neither is checked on the object below, not on the field, because a
+ * field cannot see its partner. The database says the same thing again in
+ * `vizserve_pms_users_work_hours_shape` — this layer is the sentence the admin
+ * reads, that one is the rule.
+ */
+const workClockSchema = z
+  .string()
+  .trim()
+  .regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use a 24-hour time, like 09:00.")
+  .nullable()
+  .default(null)
+  .or(z.literal("").transform(() => null));
+
+/**
+ * Both times or neither, and the end after the start.
+ *
+ * NO OVERNIGHT SCHEDULE. A 22:00–06:00 shift is a real thing that this app does
+ * not model yet (Q8, still open) — the DTR's punch path handles an overnight
+ * shift fine, but there is nowhere to record that it was SCHEDULED that way, and
+ * a 22:00–06:00 pair here would be read as a sixteen-hour day running backwards.
+ * Refused with a sentence rather than accepted and misread.
+ */
+function withWorkHourRules<T extends z.ZodObject<z.ZodRawShape>>(schema: T) {
+  return schema
+    .refine(
+      (value) =>
+        Boolean((value as { work_start?: string | null }).work_start) ===
+        Boolean((value as { work_end?: string | null }).work_end),
+      {
+        message: "Set both a start and an end, or leave both blank for no fixed schedule.",
+        path: ["work_end"],
+      },
+    )
+    .refine(
+      (value) => {
+        const start = (value as { work_start?: string | null }).work_start;
+        const end = (value as { work_end?: string | null }).work_end;
+        return !start || !end || end > start;
+      },
+      {
+        message: "The end of the day has to be after the start. Overnight schedules are not supported yet.",
+        path: ["work_end"],
+      },
+    );
+}
+
+export const createUserSchema = withWorkHourRules(
+  z.object({
+    email: z.email("Enter a valid email address.").transform((value) => value.trim().toLowerCase()),
+    full_name: z.string().trim().min(1, "A full name is required."),
+    gender: genderSchema,
+    role: roleSchema,
+    primary_department_id: z.uuid().nullable().default(null),
+    managed_department_ids: managedDepartmentsSchema,
+    work_start: workClockSchema,
+    work_end: workClockSchema,
+  }),
+);
 
 export type CreateUserInput = z.infer<typeof createUserSchema>;
 
-export const updateUserSchema = z.object({
-  full_name: z.string().trim().min(1, "A full name is required."),
-  /**
-   * Required on edit too, not just on create — which is what makes the existing
-   * unset accounts fill themselves in. An admin who opens a pre-P7-32 record to
-   * change anything at all is asked for this before it saves.
-   */
-  gender: genderSchema,
-  role: roleSchema,
-  primary_department_id: z.uuid().nullable().default(null),
-  managed_department_ids: managedDepartmentsSchema,
-  is_active: z.boolean().default(true),
-  /**
-   * Whether this person may enter THIS application.
-   *
-   * Separate from `is_active` on purpose. Deactivated means "no longer with us";
-   * this means "a real, current colleague who works in a different system". The
-   * auth pool is shared with other HFSE products and Entra admits the whole
-   * tenant, so the two are genuinely different states.
-   */
-  has_app_access: z.boolean().default(true),
-});
+export const updateUserSchema = withWorkHourRules(
+  z.object({
+    full_name: z.string().trim().min(1, "A full name is required."),
+    /**
+     * Required on edit too, not just on create — which is what makes the existing
+     * unset accounts fill themselves in. An admin who opens a pre-P7-32 record to
+     * change anything at all is asked for this before it saves.
+     */
+    gender: genderSchema,
+    role: roleSchema,
+    primary_department_id: z.uuid().nullable().default(null),
+    managed_department_ids: managedDepartmentsSchema,
+    is_active: z.boolean().default(true),
+    /**
+     * Whether this person may enter THIS application.
+     *
+     * Separate from `is_active` on purpose. Deactivated means "no longer with us";
+     * this means "a real, current colleague who works in a different system". The
+     * auth pool is shared with other HFSE products and Entra admits the whole
+     * tenant, so the two are genuinely different states.
+     */
+    has_app_access: z.boolean().default(true),
+    /**
+     * P7-36. Unlike gender, NOT required on edit: plenty of people here work no
+     * fixed hours, and forcing a schedule onto every record an admin happens to
+     * open would invent a start time for them — which the DTR would then judge
+     * their punches against.
+     */
+    work_start: workClockSchema,
+    work_end: workClockSchema,
+  }),
+);
 
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 

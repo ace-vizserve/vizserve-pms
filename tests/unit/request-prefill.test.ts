@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   INTERNAL_REQUEST_LABELS,
+  INTERNAL_REQUEST_TYPES,
   internalRequestLabel,
   narrowRequestPrefill,
 } from "@/lib/schemas/internal-requests";
@@ -19,6 +20,7 @@ describe("narrowRequestPrefill", () => {
     expect(narrowRequestPrefill({ type: "NO_TIME_IN", date: "2026-08-18" })).toEqual({
       type: "NO_TIME_IN",
       date: "2026-08-18",
+      time: undefined,
     });
   });
 
@@ -26,6 +28,7 @@ describe("narrowRequestPrefill", () => {
     expect(narrowRequestPrefill({ type: "SICK_DAY", date: "2026-08-18" })).toEqual({
       type: undefined,
       date: "2026-08-18",
+      time: undefined,
     });
   });
 
@@ -41,14 +44,20 @@ describe("narrowRequestPrefill", () => {
     expect(narrowRequestPrefill({ type: "NO_TIME_IN", date: "nope" })).toEqual({
       type: "NO_TIME_IN",
       date: undefined,
+      time: undefined,
     });
   });
 
   it("returns nothing at all when neither is present", () => {
-    expect(narrowRequestPrefill({})).toEqual({ type: undefined, date: undefined });
-    expect(narrowRequestPrefill({ type: null, date: null })).toEqual({
+    expect(narrowRequestPrefill({})).toEqual({
       type: undefined,
       date: undefined,
+      time: undefined,
+    });
+    expect(narrowRequestPrefill({ type: null, date: null, time: null })).toEqual({
+      type: undefined,
+      date: undefined,
+      time: undefined,
     });
   });
 
@@ -63,9 +72,35 @@ describe("narrowRequestPrefill", () => {
   it("accepts every launch type, so the list cannot drift", () => {
     // Walks the real constant. A type added to INTERNAL_REQUEST_TYPES without a
     // thought for the shortcut fails here rather than silently never prefilling.
-    for (const type of ["LEAVE", "NO_TIME_IN", "NO_TIME_OUT", "REIMBURSEMENT", "OVERTIME"]) {
+    // P7-39: walks the CONSTANT rather than a copy of it. The old version
+    // hardcoded five names, so the two new correction types would have been
+    // added to the app without this ever noticing they could not be linked to.
+    for (const type of INTERNAL_REQUEST_TYPES) {
       expect(narrowRequestPrefill({ type }).type).toBe(type);
     }
+  });
+
+  it("passes through a 24-hour HH:MM time", () => {
+    // P7-40. The DTR sends the SCHEDULED time so the correction dialog opens
+    // saying what the record should have said.
+    expect(narrowRequestPrefill({ type: "TIME_IN_CORRECTION", date: "2026-08-24", time: "09:00" })).toEqual(
+      { type: "TIME_IN_CORRECTION", date: "2026-08-24", time: "09:00" },
+    );
+  });
+
+  it("drops a time that is not a 24-hour HH:MM", () => {
+    for (const time of ["9:00", "09:00:00", "25:00", "09:60", "9am", "banana", ""]) {
+      expect(narrowRequestPrefill({ time }).time).toBeUndefined();
+    }
+  });
+
+  it("accepts the edges of the clock", () => {
+    expect(narrowRequestPrefill({ time: "00:00" }).time).toBe("00:00");
+    expect(narrowRequestPrefill({ time: "23:59" }).time).toBe("23:59");
+  });
+
+  it("refuses a repeated time parameter, like the others", () => {
+    expect(narrowRequestPrefill({ time: ["09:00", "10:00"] }).time).toBeUndefined();
   });
 
   it("takes a shape-valid but impossible date — the schema catches it, not this", () => {
@@ -81,24 +116,50 @@ describe("internalRequestLabel", () => {
     expect(internalRequestLabel("LEAVE")).toBe("Leave");
   });
 
+  it("prefers the real label once a type is properly declared", () => {
+    /*
+     * THIS CASE USED TO ASSERT THE FALLBACK, and the change is the point.
+     *
+     * `TIME_IN_CORRECTION` was live in the database for a day before the
+     * migration declaring it reached this repo — P7 enum values are pasted into
+     * the Supabase SQL editor by hand — and during that day its badge rendered
+     * blank. P7-38 then added it to the enum, the migration and the labels map
+     * together, which is the proper fix.
+     *
+     * So the assertion flips: a declared type must now resolve to its REAL
+     * label and never to the humanised guess, which would quietly show
+     * "Time in correction" beside a UI that everywhere else says
+     * "Time-in correction".
+     */
+    expect(internalRequestLabel("TIME_IN_CORRECTION")).toBe("Time-in correction");
+    expect(internalRequestLabel("TIME_OUT_CORRECTION")).toBe("Time-out correction");
+  });
+
   it("humanises a type the database has and this build does not", () => {
     /*
-     * NOT HYPOTHETICAL. The `vizserve_pms_internal_request_type` enum is edited
-     * by hand in the Supabase SQL editor — every P7 migration landed that way —
-     * and the live database currently holds `TIME_IN_CORRECTION`, which appears
-     * in no migration in this repo and in no list in `lib/schemas`.
-     *
-     * A bare `INTERNAL_REQUEST_LABELS[type]` returns undefined for it, and the
-     * badge then renders an EMPTY pill: a request whose type is invisible on the
-     * one screen built to show it.
+     * The hazard outlives the specific instance. Hand-applied enum values reach
+     * the database before the code that knows about them, so there is always a
+     * window where a live request has a type this build cannot name — and a bare
+     * `INTERNAL_REQUEST_LABELS[type]` lookup renders that as an EMPTY pill.
      */
-    expect(internalRequestLabel("TIME_IN_CORRECTION")).toBe("Time in correction");
+    expect(internalRequestLabel("SABBATICAL")).toBe("Sabbatical");
+    expect(internalRequestLabel("SOME_FUTURE_TYPE")).toBe("Some future type");
+  });
+
+  it("names every type the build declares, with no fallbacks left", () => {
+    // The complement of the case above: nothing currently in the union should
+    // be reaching the fallback at all. A type added to INTERNAL_REQUEST_TYPES
+    // without a label would otherwise ship looking almost right.
+    for (const type of INTERNAL_REQUEST_TYPES) {
+      expect(INTERNAL_REQUEST_LABELS[type]).toBeTruthy();
+      expect(internalRequestLabel(type)).toBe(INTERNAL_REQUEST_LABELS[type]);
+    }
   });
 
   it("never returns an empty string", () => {
     // The failure this exists to prevent is a blank badge, so the one thing the
     // fallback must never do is produce nothing.
-    for (const type of ["TIME_IN_CORRECTION", "SOMETHING_NEW", "X"]) {
+    for (const type of ["SABBATICAL", "SOMETHING_NEW", "X"]) {
       expect(internalRequestLabel(type).length).toBeGreaterThan(0);
     }
   });

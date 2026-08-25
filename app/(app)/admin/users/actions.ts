@@ -69,7 +69,9 @@ async function readProfileForAudit(
 ): Promise<AuditableProfile | null> {
   const { data: profile } = await admin
     .from("vizserve_pms_users")
-    .select("email, full_name, gender, role, primary_department_id, is_active, app_access")
+    .select(
+      "email, full_name, gender, role, primary_department_id, is_active, app_access, work_start, work_end",
+    )
     .eq("id", userId)
     .maybeSingle();
 
@@ -111,6 +113,27 @@ async function replaceManagedDepartments(
     .insert(departmentIds.map((department_id) => ({ user_id: userId, department_id })));
 
   return insertError?.message ?? null;
+}
+
+/**
+ * Every screen that reads a person's role, department or schedule.
+ *
+ * ⚠️ `/admin/users` ALONE IS NOT ENOUGH, and the gap was invisible until P7-36.
+ * A profile edit changes what `resolveAuth` returns, and half the app branches
+ * on that: `/approvals` decides from `primary_department_id` whether a request
+ * can route at all, `/dtr` and the punch panel read `work_start`/`work_end`, and
+ * the nav reads the role. Revalidating only the screen the admin is standing on
+ * left every one of those serving a cached payload — so setting somebody's
+ * department and sending them to file a request showed them the same "you have
+ * no department" notice they were sent there to clear.
+ */
+function revalidateProfileScreens(): void {
+  revalidatePath("/admin/users");
+  revalidatePath("/approvals");
+  revalidatePath("/dtr");
+  revalidatePath("/timesheet");
+  revalidatePath("/dashboard");
+  revalidatePath("/");
 }
 
 // ---------------------------------------------------------------------------
@@ -174,6 +197,10 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
       primary_department_id: values.primary_department_id,
       is_active: true,
       app_access: [APP_ACCESS_KEY],
+      // P7-36. Null means no fixed schedule, which is a supported state — the
+      // DTR simply says nothing about this person's punches.
+      work_start: values.work_start,
+      work_end: values.work_end,
     },
     { onConflict: "id" },
   );
@@ -193,7 +220,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
     p_after: await readProfileForAudit(admin, userId),
   });
 
-  revalidatePath("/admin/users");
+  revalidateProfileScreens();
   return { ok: true, data: { id: userId } };
 }
 
@@ -265,6 +292,11 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
       // Revoking this closes every table at once — vizserve_pms_current_role()
       // returns null without it, and every policy funnels through that.
       app_access: values.has_app_access ? [APP_ACCESS_KEY] : [],
+      // P7-36. Clearing both fields is a real edit, not a no-op: it turns off
+      // every lateness prompt for this person, which is the supported way to say
+      // "they do not work fixed hours".
+      work_start: values.work_start,
+      work_end: values.work_end,
     })
     .eq("id", userId);
 
@@ -288,7 +320,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
     });
   }
 
-  revalidatePath("/admin/users");
+  revalidateProfileScreens();
   return { ok: true, data: undefined };
 }
 

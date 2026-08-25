@@ -2,7 +2,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { todayInAppZone, yesterdayInAppZone } from "@/lib/dates";
 
-import { adminClient, dbTestsEnabled, signIn, skipReason } from "./helpers";
+import { adminClient, dbTestsEnabled, enumValues, signIn, skipReason } from "./helpers";
 
 /**
  * PHASE 5 EXIT CRITERIA — DTR and internal approvals.
@@ -87,6 +87,40 @@ if (run && !leaveTypesApplied) {
   announce(
     "phase5.test.ts — P7-12 leave-type cases SKIPPED." +
       " supabase/migrations/20260818150000_p7_12_leave_types.sql is not applied.",
+  );
+}
+
+/**
+ * P7-39 — the two off-schedule correction types.
+ *
+ * ⚠️ NOT PROBED BY FILTERING ON THE LABEL. That is the intuitive test and it is
+ * silently wrong: PostgREST returns an empty result and a NULL error for an
+ * unknown enum value in a filter, so the probe would report "applied" against a
+ * database that has never seen these types. Measured, not assumed — see
+ * `enumValues` in ./helpers.
+ *
+ * Probed on the enum itself, read from PostgREST's schema description. Both
+ * files 3 and 4 (p7_38, p7_39) have to be applied for the cases below to mean
+ * anything, and there is no column to probe because the new types reuse
+ * `work_date` and `correction_at`.
+ *
+ * WHAT THIS DOES NOT PROVE: that P7-39 ran. A database carrying the enum but not
+ * the constraint rewrite passes this and then fails the cases below with a
+ * check_violation. That is deliberate — the two files are a pair applied
+ * together, so a half-applied pair should be reported loudly rather than
+ * skipped into silence.
+ */
+const timeCorrectionsApplied = run
+  ? (await enumValues("vizserve_pms_internal_requests", "request_type")).includes(
+      "TIME_IN_CORRECTION",
+    )
+  : false;
+
+if (run && !timeCorrectionsApplied) {
+  announce(
+    "phase5.test.ts — P7-39 time-correction cases SKIPPED." +
+      " Apply supabase/migrations/20260824140000_p7_38_correction_types.sql then" +
+      " 20260824150000_p7_39_time_corrections.sql, in that order.",
   );
 }
 
@@ -1120,5 +1154,230 @@ describe.skipIf(!leaveTypesApplied)("P7-12 — leave types", () => {
     for (const row of (data ?? []) as Record<string, unknown>[]) {
       expect(Object.keys(row).sort()).toEqual(["end_date", "full_name", "start_date", "user_id"]);
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P7-39 — TIME_IN_CORRECTION / TIME_OUT_CORRECTION.
+//
+// The payload and the DTR write-back are identical to the NO_TIME_* pair, so
+// what these cases actually prove is that the widening landed in ALL SEVEN
+// places inside vizserve_pms_decide_internal_request. Six of the seven fail
+// loudly if missed; the four `case` expressions inside the upsert do not — they
+// have no `else`, so a missed one yields null, the upsert writes the existing
+// time straight back, and the approval still reports success with a non-null
+// dtr_entry_id. That is the failure these cases exist to catch.
+// ---------------------------------------------------------------------------
+
+describe.skipIf(!run || !timeCorrectionsApplied)("P7-39 — off-schedule corrections", () => {
+  it("overwrites a recorded time-in", async () => {
+    const member = await signIn("member1VizBytes");
+    await clearDtr(member.userId);
+
+    // Yesterday and seeded, for the clock-independence reason P5-09 records: a
+    // correction to a time that has not happened yet is refused, so a test
+    // written against today passes only after that time of day.
+    const recorded = `${yesterday}T01:26:00Z`; // 09:26 Manila — late.
+
+    await adminClient().from("vizserve_pms_dtr_entries").insert({
+      user_id: member.userId,
+      work_date: yesterday,
+      time_in: recorded,
+    });
+
+    const id = await submit(member.client, {
+      p_request_type: "TIME_IN_CORRECTION",
+      p_reason: "Started at nine, clocked in once I reached a machine.",
+      p_work_date: yesterday,
+      p_correction_time: "09:00",
+    });
+
+    const tl = await signIn("tlVizBytes");
+    const { data, error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+    });
+    expect(error).toBeNull();
+    expect((data as unknown as { dtr_entry_id: string | null }).dtr_entry_id).not.toBeNull();
+
+    const { data: after } = await adminClient()
+      .from("vizserve_pms_dtr_entries")
+      .select("time_in, corrected_at, corrected_by, correction_request_id")
+      .eq("user_id", member.userId)
+      .eq("work_date", yesterday)
+      .single();
+
+    // ⚠️ The assertion that catches a missed `case` site. Without it the row
+    // still has corrected_at, corrected_by and correction_request_id set, and
+    // every other expectation in this test passes.
+    expect(after!.time_in).not.toBe(recorded);
+    expect(new Date(after!.time_in!).toISOString()).toContain("T01:00");
+    expect(after!.corrected_by).toBe(tl.userId);
+    expect(after!.correction_request_id).toBe(id);
+  });
+
+  it("moves a time-out LATER", async () => {
+    const member = await signIn("member2VizBytes");
+    await clearDtr(member.userId);
+
+    await adminClient().from("vizserve_pms_dtr_entries").insert({
+      user_id: member.userId,
+      work_date: yesterday,
+      time_in: `${yesterday}T01:00:00Z`, // 09:00 Manila
+      time_out: `${yesterday}T09:00:00Z`, // 17:00 Manila
+    });
+
+    const id = await submit(member.client, {
+      p_request_type: "TIME_OUT_CORRECTION",
+      p_reason: "Worked until six, clocked out on the way past at five.",
+      p_work_date: yesterday,
+      p_correction_time: "18:00",
+    });
+
+    const tl = await signIn("tlVizBytes");
+    const { error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+    });
+    expect(error).toBeNull();
+
+    const { data: after } = await adminClient()
+      .from("vizserve_pms_dtr_entries")
+      .select("time_in, time_out")
+      .eq("user_id", member.userId)
+      .eq("work_date", yesterday)
+      .single();
+
+    expect(new Date(after!.time_out!).toISOString()).toContain("T10:00");
+    // The other end is untouched. A correction fixes ONE time.
+    expect(new Date(after!.time_in!).toISOString()).toContain("T01:00");
+  });
+
+  it("moves a time-out EARLIER — the write vizserve_pms_punch refuses", async () => {
+    /*
+     * ⚠️ THE CASE THAT PROVES THE UPSERT IS ASSIGNED AND NOT PROTECTED.
+     *
+     * vizserve_pms_punch closes a shift with `greatest(coalesce(time_out, now),
+     * now)`, so it can only ever move a time-out later. If that idiom — or a
+     * coalesce — ever gets copied into the correction path, THIS is the only
+     * case that fails: every other test here moves a time later or fills a
+     * blank, and all of them would still pass.
+     */
+    const member = await signIn("member1VizAssists");
+    await clearDtr(member.userId);
+
+    await adminClient().from("vizserve_pms_dtr_entries").insert({
+      user_id: member.userId,
+      work_date: yesterday,
+      time_in: `${yesterday}T01:00:00Z`, // 09:00 Manila
+      time_out: `${yesterday}T13:00:00Z`, // 21:00 Manila — clocked out far too late
+    });
+
+    const id = await submit(member.client, {
+      p_request_type: "TIME_OUT_CORRECTION",
+      p_reason: "Left at six, forgot to clock out until I got home.",
+      p_work_date: yesterday,
+      p_correction_time: "18:00",
+    });
+
+    const tl = await signIn("tlVizAssists");
+    const { error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+    });
+    expect(error).toBeNull();
+
+    const { data: after } = await adminClient()
+      .from("vizserve_pms_dtr_entries")
+      .select("time_out")
+      .eq("user_id", member.userId)
+      .eq("work_date", yesterday)
+      .single();
+
+    // 18:00 Manila is 10:00 UTC. A greatest() would have left this at 13:00.
+    expect(new Date(after!.time_out!).toISOString()).toContain("T10:00");
+  });
+
+  it("still refuses a time-out earlier than the recorded time-in", async () => {
+    // The ordering guard has to follow the new types too, and it has to speak a
+    // sentence rather than a constraint name.
+    const member = await signIn("member1VizBytes");
+    await clearDtr(member.userId);
+
+    await adminClient().from("vizserve_pms_dtr_entries").insert({
+      user_id: member.userId,
+      work_date: yesterday,
+      time_in: `${yesterday}T05:00:00Z`, // 13:00 Manila
+    });
+
+    const id = await submit(member.client, {
+      p_request_type: "TIME_OUT_CORRECTION",
+      p_reason: "Trying to close it at an impossible hour.",
+      p_work_date: yesterday,
+      p_correction_time: "09:00",
+    });
+
+    const tl = await signIn("tlVizBytes");
+    const { error } = await tl.client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+    });
+
+    expect(error).not.toBeNull();
+    expect(error!.message).toContain("before the recorded time-in");
+  });
+
+  it("keeps the other types' fields off a correction", async () => {
+    // Proves the two new CHECK branches discriminate rather than falling
+    // through into a branch that tolerates anything — the exact regression
+    // p7_04's `else false` was written to prevent.
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "TIME_IN_CORRECTION",
+        p_reason: "A correction carrying an amount.",
+        p_work_date: yesterday,
+        p_correction_time: "09:00",
+        p_amount: 500,
+      }),
+    ).rejects.toThrow();
+
+    await expect(
+      submit(client, {
+        p_request_type: "TIME_OUT_CORRECTION",
+        p_reason: "A correction carrying overtime minutes.",
+        p_work_date: yesterday,
+        p_correction_time: "18:00",
+        p_overtime_minutes: 120,
+      }),
+    ).rejects.toThrow();
+  });
+
+  it("demands both the day and the time", async () => {
+    // Proves the one-line widening in the submit function landed. Without it
+    // v_correction stays null and the error is a constraint name.
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "TIME_IN_CORRECTION",
+        p_reason: "No time given at all.",
+        p_work_date: yesterday,
+      }),
+    ).rejects.toThrow(/needs the date and the time/);
+  });
+
+  it("refuses a correction to a time that has not happened yet", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    await expect(
+      submit(client, {
+        p_request_type: "TIME_IN_CORRECTION",
+        p_reason: "Correcting tomorrow, somehow.",
+        p_work_date: today,
+        p_correction_time: "23:59",
+      }),
+    ).rejects.toThrow(/has not happened yet/);
   });
 });

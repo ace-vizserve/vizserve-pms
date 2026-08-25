@@ -8,6 +8,7 @@ import {
   Inbox,
   LayoutDashboard,
   ListChecks,
+  Settings,
   Timer,
   Users,
 } from "lucide-react";
@@ -26,6 +27,7 @@ const ICONS = {
   inbox: Inbox,
   users: Users,
   "calendar-off": CalendarOff,
+  settings: Settings,
 } satisfies Record<NavIconName, React.ComponentType<{ className?: string }>>;
 
 export function NavIcon({ name, className }: { name: NavIconName; className?: string }) {

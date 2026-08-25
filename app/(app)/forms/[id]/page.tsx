@@ -6,6 +6,7 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 import { requireRole, roleAtLeast } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
+import { Chip } from "@/components/status-badge";
 import { PageShell } from "@/components/page-shell";
 import { FormSettings } from "../form-settings";
 import { FieldBuilder, type FieldRow } from "./field-builder";
@@ -96,15 +97,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
         </Link>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <h1 className="text-xl font-semibold tracking-tight">{form.name}</h1>
-          {form.is_active ? (
-            <span className="rounded-full bg-success-subtle px-2 py-0.5 text-2xs font-medium text-success">
-              Live
-            </span>
-          ) : (
-            <span className="rounded-full bg-muted px-2 py-0.5 text-2xs font-medium text-muted-foreground">
-              Draft
-            </span>
-          )}
+          {form.is_active ? <Chip tone="success" label="Live" /> : <Chip tone="neutral" label="Draft" />}
           {form.is_active && form.is_public ? (
             <Link
               href={`/request/${form.slug}`}
