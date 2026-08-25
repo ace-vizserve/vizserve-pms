@@ -19,11 +19,12 @@ function PopoverContent({
   alignOffset = 0,
   side = "bottom",
   sideOffset = 4,
+  anchor,
   ...props
 }: PopoverPrimitive.Popup.Props &
   Pick<
     PopoverPrimitive.Positioner.Props,
-    "align" | "alignOffset" | "side" | "sideOffset"
+    "align" | "alignOffset" | "side" | "sideOffset" | "anchor"
   >) {
   return (
     <PopoverPrimitive.Portal>
@@ -32,6 +33,11 @@ function PopoverContent({
         alignOffset={alignOffset}
         side={side}
         sideOffset={sideOffset}
+        // Positions against something other than the trigger — or against an
+        // element with no trigger at all, which is what a suggestion hanging
+        // under a text field is. Forwarded rather than reached for directly so
+        // pages never import the Base UI positioner themselves.
+        anchor={anchor}
         className="isolate z-50"
       >
         <PopoverPrimitive.Popup

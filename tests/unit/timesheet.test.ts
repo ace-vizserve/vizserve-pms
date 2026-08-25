@@ -4,12 +4,20 @@ import { formatWeekRange, formatWeekday, startOfWeek, weekDates } from "@/lib/da
 import {
   addMinutesToTime,
   cellCommit,
+  clockAt,
   dayState,
   daySummary,
   formatCellDuration,
   fromMinutes,
   minutesBetween,
+  nearestQuarterHour,
   parseCellDuration,
+  spanFrom,
+  spellDuration,
+  withDuration,
+  withEnd,
+  withStart,
+  draftToEntry,
   isWeekLocked,
   timesheetEntrySchema,
   timesheetEntryUpdateSchema,
@@ -315,15 +323,11 @@ describe("P7-21 — start and end times on an entry", () => {
   });
 
   it("refuses an end before the start", () => {
-    expect(
-      timesheetEntrySchema.safeParse({ ...base, started_at: "11:30", ended_at: "09:00" }).success,
-    ).toBe(false);
+    expect(timesheetEntrySchema.safeParse({ ...base, started_at: "11:30", ended_at: "09:00" }).success).toBe(false);
   });
 
   it("refuses a zero-length span", () => {
-    expect(
-      timesheetEntrySchema.safeParse({ ...base, started_at: "09:00", ended_at: "09:00" }).success,
-    ).toBe(false);
+    expect(timesheetEntrySchema.safeParse({ ...base, started_at: "09:00", ended_at: "09:00" }).success).toBe(false);
   });
 
   it("refuses a duration that disagrees with the times", () => {
@@ -340,12 +344,8 @@ describe("P7-21 — start and end times on an entry", () => {
   });
 
   it("refuses a time that is not a time", () => {
-    expect(
-      timesheetEntrySchema.safeParse({ ...base, started_at: "9am", ended_at: "11:30" }).success,
-    ).toBe(false);
-    expect(
-      timesheetEntrySchema.safeParse({ ...base, started_at: "25:00", ended_at: "26:00" }).success,
-    ).toBe(false);
+    expect(timesheetEntrySchema.safeParse({ ...base, started_at: "9am", ended_at: "11:30" }).success).toBe(false);
+    expect(timesheetEntrySchema.safeParse({ ...base, started_at: "25:00", ended_at: "26:00" }).success).toBe(false);
   });
 
   it("applies the same rules when editing an existing row", () => {
@@ -353,13 +353,10 @@ describe("P7-21 — start and end times on an entry", () => {
     // so the two cannot drift into checking different things.
     const id = "22222222-2222-4222-8222-222222222222";
 
-    expect(
-      timesheetEntryUpdateSchema.safeParse({ ...base, id, started_at: "09:00", ended_at: "11:30" })
-        .success,
-    ).toBe(true);
-    expect(timesheetEntryUpdateSchema.safeParse({ ...base, id, started_at: "09:00" }).success).toBe(
-      false,
+    expect(timesheetEntryUpdateSchema.safeParse({ ...base, id, started_at: "09:00", ended_at: "11:30" }).success).toBe(
+      true,
     );
+    expect(timesheetEntryUpdateSchema.safeParse({ ...base, id, started_at: "09:00" }).success).toBe(false);
   });
 });
 
@@ -383,6 +380,122 @@ describe("minutesBetween / addMinutesToTime", () => {
 
   it("refuses to run past midnight", () => {
     expect(addMinutesToTime("23:00", 120)).toBeNull();
+  });
+});
+
+describe("clockAt / spanFrom — the clock a typed duration is stamped with", () => {
+  // 3:16pm Manila. Built from a UTC instant rather than a local string so the
+  // test says the same thing on a machine in another zone.
+  const at316pm = new Date("2026-08-25T07:16:00Z");
+
+  it("is the wall clock in app time, whatever day the cell is", () => {
+    expect(clockAt(at316pm)).toBe("15:16");
+  });
+
+  it("turns a start and a length into the pair the row stores", () => {
+    expect(spanFrom("15:16", 60)).toEqual({ started_at: "15:16", ended_at: "16:16" });
+    expect(spanFrom("08:00", 150)).toEqual({ started_at: "08:00", ended_at: "10:30" });
+  });
+
+  it("drops the seconds Postgres hands back", () => {
+    expect(spanFrom("09:00:00", 30)).toEqual({ started_at: "09:00", ended_at: "09:30" });
+  });
+
+  it("gives up on both rather than half a pair", () => {
+    // No start to begin with, and a span that would cross midnight. Both are
+    // rows the database refuses; neither is worth a start with no end.
+    expect(spanFrom(null, 60)).toEqual({ started_at: null, ended_at: null });
+    expect(spanFrom("23:00", 120)).toEqual({ started_at: null, ended_at: null });
+  });
+});
+
+describe("the draft transitions — two facts and a derivation", () => {
+  const at3pm = { duration: "", note: "", start: "15:00", end: "" };
+
+  it("moves the end when a length is typed", () => {
+    expect(withDuration(at3pm, "2h").end).toBe("17:00");
+    expect(withDuration(at3pm, "1.5").end).toBe("16:30");
+  });
+
+  it("leaves the end alone when there is no start to measure from", () => {
+    expect(withDuration({ ...at3pm, start: "" }, "2h")).toEqual({
+      duration: "2h",
+      note: "",
+      start: "",
+      end: "",
+    });
+  });
+
+  it("takes the end with it when the start moves, keeping the length", () => {
+    const twoHours = withDuration(at3pm, "2h");
+    const moved = withStart(twoHours, "08:00");
+
+    expect(moved).toMatchObject({ duration: "2h", start: "08:00", end: "10:00" });
+  });
+
+  it("recomputes the LENGTH when the end moves — 8:00 to 10:30 is 2h 30m", () => {
+    const moved = withEnd({ ...at3pm, start: "08:00", duration: "2h", end: "10:00" }, "10:30");
+
+    expect(moved.duration).toBe("2h 30m");
+  });
+
+  it("clears both clocks together, never half a pair", () => {
+    const both = withDuration(at3pm, "2h");
+
+    expect(withStart(both, "")).toMatchObject({ start: "", end: "" });
+  });
+
+  it("blanks the end rather than wrapping past midnight", () => {
+    // `addMinutesToTime` refuses to wrap; the row would be refused by the
+    // `ended_at > started_at` constraint if it did.
+    expect(withDuration({ ...at3pm, start: "23:00" }, "2h").end).toBe("");
+  });
+
+  it("builds the row the times state, not the length that was typed", () => {
+    // `1h 30m 5s` rounds to 90 minutes and the span does not round at all. The
+    // constraint compares them exactly, so the span is what gets written.
+    const built = draftToEntry({ duration: "1h 30m 5s", note: " ", start: "09:00", end: "10:30" });
+
+    expect(built).toEqual({
+      ok: true,
+      entry: { minutes: 90, note: null, started_at: "09:00", ended_at: "10:30" },
+    });
+  });
+
+  it("refuses half a pair, a length that means nothing, and an end before its start", () => {
+    expect(draftToEntry({ duration: "2h", note: "", start: "09:00", end: "" }).ok).toBe(false);
+    expect(draftToEntry({ duration: "banana", note: "", start: "", end: "" }).ok).toBe(false);
+    expect(draftToEntry({ duration: "2h", note: "", start: "11:00", end: "09:00" }).ok).toBe(false);
+  });
+
+  it("keeps a duration-only entry, which is what every entry was before P7-21", () => {
+    expect(draftToEntry({ duration: "90m", note: "standup", start: "", end: "" })).toEqual({
+      ok: true,
+      entry: { minutes: 90, note: "standup", started_at: null, ended_at: null },
+    });
+  });
+});
+
+describe("nearestQuarterHour — where a clock list opens", () => {
+  it("rounds to the closest quarter", () => {
+    expect(nearestQuarterHour("15:16")).toBe("15:15");
+    expect(nearestQuarterHour("15:23")).toBe("15:30");
+    expect(nearestQuarterHour("09:00")).toBe("09:00");
+    expect(nearestQuarterHour("00:07")).toBe("00:00");
+  });
+
+  it("caps rather than wrapping into a day that is not this one", () => {
+    expect(nearestQuarterHour("23:53")).toBe("23:45");
+  });
+});
+
+describe("spellDuration — the suggestion under the field", () => {
+  it("says it in words, so `1.5` cannot be read two ways", () => {
+    expect(spellDuration(90)).toBe("1 hour 30 minutes");
+    expect(spellDuration(60)).toBe("1 hour");
+    expect(spellDuration(120)).toBe("2 hours");
+    expect(spellDuration(1)).toBe("1 minute");
+    expect(spellDuration(45)).toBe("45 minutes");
   });
 });
 
@@ -474,19 +587,14 @@ describe("timesheetWeekDecisionSchema — approve or send back, never reject", (
 
   it("demands a reason to send a week back", () => {
     expect(timesheetWeekDecisionSchema.safeParse({ decision: "returned" }).success).toBe(false);
-    expect(
-      timesheetWeekDecisionSchema.safeParse({ decision: "returned", reason: "  " }).success,
-    ).toBe(false);
-    expect(
-      timesheetWeekDecisionSchema.safeParse({ decision: "returned", reason: "Tuesday is wrong" })
-        .success,
-    ).toBe(true);
+    expect(timesheetWeekDecisionSchema.safeParse({ decision: "returned", reason: "  " }).success).toBe(false);
+    expect(timesheetWeekDecisionSchema.safeParse({ decision: "returned", reason: "Tuesday is wrong" }).success).toBe(
+      true,
+    );
   });
 
   it("has no rejected branch — hours worked are not rejectable", () => {
-    expect(
-      timesheetWeekDecisionSchema.safeParse({ decision: "rejected", reason: "no thanks" }).success,
-    ).toBe(false);
+    expect(timesheetWeekDecisionSchema.safeParse({ decision: "rejected", reason: "no thanks" }).success).toBe(false);
   });
 });
 
