@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { STANDARD_DAY_MINUTES } from "@/lib/dates";
+import { formatAppTime, STANDARD_DAY_MINUTES } from "@/lib/dates";
 
 /**
  * PHASE 6 CONTRACT — timesheet entries (D3a, R11).
@@ -91,42 +91,41 @@ const timesheetEntryShape = z.object({
  * the database is the authority, and a round trip that fails on a constraint
  * name is a worse way to learn a rule than a sentence under the field.
  */
-function withTimeRules<T extends z.ZodType<{
-  minutes: number;
-  started_at: string | null;
-  ended_at: string | null;
-}>>(schema: T) {
-  return schema
-    // BOTH OR NEITHER — `vizserve_pms_timesheet_entries_times_paired`.
-    .refine((value) => (value.started_at === null) === (value.ended_at === null), {
-      message: "Give both a start and an end time, or neither.",
-      path: ["ended_at"],
-    })
-    .refine(
-      (value) =>
-        value.started_at === null || value.ended_at === null || value.ended_at > value.started_at,
-      {
+function withTimeRules<
+  T extends z.ZodType<{
+    minutes: number;
+    started_at: string | null;
+    ended_at: string | null;
+  }>,
+>(schema: T) {
+  return (
+    schema
+      // BOTH OR NEITHER — `vizserve_pms_timesheet_entries_times_paired`.
+      .refine((value) => (value.started_at === null) === (value.ended_at === null), {
+        message: "Give both a start and an end time, or neither.",
+        path: ["ended_at"],
+      })
+      .refine((value) => value.started_at === null || value.ended_at === null || value.ended_at > value.started_at, {
         // Work crossing midnight is deliberately not expressible — see the
         // migration, and Q8, which is still open on the same question for the
         // DTR. The duration alone still records those hours.
-        message:
-          "The end time has to be after the start. Work past midnight goes on as a duration.",
+        message: "The end time has to be after the start. Work past midnight goes on as a duration.",
         path: ["ended_at"],
-      },
-    )
-    .refine(
-      (value) =>
-        value.started_at === null ||
-        value.ended_at === null ||
-        minutesBetween(value.started_at, value.ended_at) === value.minutes,
-      {
-        // Should be unreachable from the UI — the editor derives the duration
-        // from the times the moment both are set. It is here because the
-        // database enforces it either way.
-        message: "The duration does not match the times.",
-        path: ["minutes"],
-      },
-    );
+      })
+      .refine(
+        (value) =>
+          value.started_at === null ||
+          value.ended_at === null ||
+          minutesBetween(value.started_at, value.ended_at) === value.minutes,
+        {
+          // Should be unreachable from the UI — the editor derives the duration
+          // from the times the moment both are set. It is here because the
+          // database enforces it either way.
+          message: "The duration does not match the times.",
+          path: ["minutes"],
+        },
+      )
+  );
 }
 
 export const timesheetEntrySchema = withTimeRules(timesheetEntryShape);
@@ -156,10 +155,195 @@ export function addMinutesToTime(start: string, minutes: number): string | null 
   return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`;
 }
 
+/**
+ * WHEN A DURATION IS TYPED, THE CLOCK IS ALREADY KNOWN.
+ *
+ * P7-21 made times optional and left them to be filled in by hand, which meant
+ * the fact easiest to capture — that the hour just logged is the hour just
+ * worked — was the one thing nobody ever recorded. Typing `1h` at 3:16pm marks
+ * the entry 3:16 to 4:16, and that is what it saves.
+ *
+ * ⚠️ THE DAY OF THE CELL DOES NOT CHANGE THIS. An earlier version stamped only
+ * cells dated today, arguing that Monday's work did not happen at Friday
+ * afternoon's clock time. That was overruled, and the reasoning behind the
+ * decision is what makes it work: the pair marks WHEN THE ENTRY WENT IN — when
+ * the task was done, touched, or written up — rather than reconstructing the
+ * day it belongs to. Both clocks stay editable, so anyone who does know the
+ * real hours can say so.
+ *
+ * `now` is a parameter rather than a call, so the callers and the tests all
+ * describe the same instant instead of racing the clock.
+ */
+export function clockAt(now: Date = new Date()): string {
+  return formatAppTime(now);
+}
+
+/**
+ * A start plus a length, as the pair the row stores.
+ *
+ * Returns the empty pair rather than a start on its own in the two cases that
+ * cannot be written: no start to begin with, and a span that would run past
+ * midnight — `addMinutesToTime` refuses to wrap, and the `ended_at > started_at`
+ * constraint refuses the row that wrapping would produce.
+ */
+export function spanFrom(
+  start: string | null | undefined,
+  minutes: number,
+): { started_at: string | null; ended_at: string | null } {
+  const empty = { started_at: null, ended_at: null };
+  if (!start) return empty;
+
+  // Postgres hands `time` back as `HH:MM:SS`; the seconds are not ours to keep.
+  const from = start.slice(0, 5);
+  const end = addMinutesToTime(from, minutes);
+
+  return end ? { started_at: from, ended_at: end } : empty;
+}
+
+/**
+ * The quarter hour a clock time is closest to. `15:16` → `15:15`.
+ *
+ * Where a list of quarter hours should be sitting when it opens on a field
+ * nobody has set yet. Opening at `12:00 am` — the top of the list — means
+ * scrolling past most of a day to reach the only part of it anyone is ever
+ * logging from, which is the hour they are in.
+ */
+export function nearestQuarterHour(clock: string): string {
+  const minutes = minutesBetween("00:00", clock);
+  // Capped rather than wrapped: 23:53 rounds up to a midnight that is not on
+  // this day and is not in the list.
+  const rounded = Math.min(Math.round(minutes / 15) * 15, 23 * 60 + 45);
+
+  return `${String(Math.floor(rounded / 60)).padStart(2, "0")}:${String(rounded % 60).padStart(2, "0")}`;
+}
+
+/**
+ * THE THREE FIELDS AN ENTRY IS EDITED THROUGH, AND THE ONE RULE BETWEEN THEM.
+ *
+ * `vizserve_pms_timesheet_entries_times_match_minutes` refuses a row whose
+ * length disagrees with its span, so a length and two clocks are not three
+ * independent facts — they are two, and a derivation. Which two is decided by
+ * whichever one was touched last:
+ *
+ *   type a length  → the end moves          (3:00pm + 2h = 5:00pm)
+ *   move the start → the end follows, length kept
+ *   move the end   → the LENGTH is recomputed from the span
+ *
+ * Pure transitions on a plain object, and NOT because purity is nice: this is
+ * edited from two places now — the popover and the expanded week row — and the
+ * one thing this repo has learnt the hard way is that a rule with two copies
+ * has two copies to drift. Tested without React, once, for both.
+ *
+ * Strings throughout, because that is what a half-typed field holds. `1h 3` is
+ * not a number yet and must not be rounded into one on the way past.
+ */
+export type EntryDraft = {
+  /** As typed. `1h 30m`, `90m`, `1.5` — anything `parseCellDuration` reads. */
+  duration: string;
+  note: string;
+  /** 24-hour `HH:MM`, or `""` for unset. Both or neither, like the column pair. */
+  start: string;
+  end: string;
+};
+
+/** Typing a length. The end moves, when there is a start to move it from. */
+export function withDuration(draft: EntryDraft, duration: string): EntryDraft {
+  const minutes = parseCellDuration(duration);
+  if (!draft.start || minutes === null || minutes <= 0) return { ...draft, duration };
+
+  // Null is a span that would cross midnight, which the constraint refuses.
+  // Blanking the end says so on screen rather than saving a row onto tomorrow.
+  return { ...draft, duration, end: addMinutesToTime(draft.start, minutes) ?? "" };
+}
+
+/** Moving the start. The length is what was meant, so the end comes along. */
+export function withStart(draft: EntryDraft, start: string): EntryDraft {
+  // Both or neither: clearing the start clears the end, so the pair is never
+  // half-saved and nobody has to work out which half to remove.
+  if (!start) return { ...draft, start, end: "" };
+
+  const minutes = parseCellDuration(draft.duration);
+  if (minutes === null || minutes <= 0) return { ...draft, start };
+
+  return { ...draft, start, end: addMinutesToTime(start, minutes) ?? "" };
+}
+
+/** Moving the end. The one field that overrides the length instead of obeying it. */
+export function withEnd(draft: EntryDraft, end: string): EntryDraft {
+  if (!draft.start || !end) return { ...draft, end };
+
+  const span = minutesBetween(draft.start, end);
+  // A negative span is somebody mid-correction, not an instruction to write a
+  // negative length. It stays on screen and `draftToEntry` names it on save.
+  return span > 0 ? { ...draft, end, duration: formatCellDuration(span) } : { ...draft, end };
+}
+
+/** The draft as the row would be written, or the sentence to show instead. */
+export function draftToEntry(
+  draft: EntryDraft,
+):
+  | { ok: true; entry: { minutes: number; note: string | null; started_at: string | null; ended_at: string | null } }
+  | { ok: false; error: string } {
+  // Half a pair. Usually somebody mid-edit — but it is also where a length that
+  // would run past midnight lands, because `addMinutesToTime` refuses to wrap
+  // rather than filing the work on tomorrow. Both readings get this sentence,
+  // and it names the second one.
+  if (Boolean(draft.start) !== Boolean(draft.end)) {
+    return {
+      ok: false,
+      error: "Give both a start and an end time, or neither. Work running past midnight goes on as a duration.",
+    };
+  }
+
+  let minutes = parseCellDuration(draft.duration);
+
+  if (minutes === null || minutes === 0) {
+    return { ok: false, error: "How long was it? Try 1h 30m, 90m or 1.5." };
+  }
+
+  if (draft.start && draft.end) {
+    const span = minutesBetween(draft.start, draft.end);
+    if (span <= 0) {
+      return { ok: false, error: "The end time has to be after the start. Work past midnight goes on as a duration." };
+    }
+
+    // The times win. They normally agree with the length already — the end was
+    // derived from it — but `1h 30m 5s` rounds and a span does not, and the
+    // constraint compares them exactly.
+    minutes = span;
+  }
+
+  return {
+    ok: true,
+    entry: {
+      minutes,
+      note: draft.note.trim() ? draft.note.trim() : null,
+      started_at: draft.start || null,
+      ended_at: draft.end || null,
+    },
+  };
+}
+
+/**
+ * `90` → "1 hour 30 minutes". The suggestion under the field, in words.
+ *
+ * Deliberately NOT `formatCellDuration`, which writes `1h 30m` — the two say
+ * the same thing in the same place and only one of them tells somebody who has
+ * just typed `1.5` which reading they got. Spelling it out is the point.
+ */
+export function spellDuration(minutes: number): string {
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+
+  const parts: string[] = [];
+  if (hours > 0) parts.push(`${hours} hour${hours === 1 ? "" : "s"}`);
+  if (rest > 0) parts.push(`${rest} minute${rest === 1 ? "" : "s"}`);
+
+  return parts.join(" ");
+}
+
 /** Editing an existing row. Same fields and the same rules, plus which row. */
-export const timesheetEntryUpdateSchema = withTimeRules(
-  timesheetEntryShape.extend({ id: z.uuid() }),
-);
+export const timesheetEntryUpdateSchema = withTimeRules(timesheetEntryShape.extend({ id: z.uuid() }));
 
 export type TimesheetEntryUpdateInput = z.infer<typeof timesheetEntryUpdateSchema>;
 
@@ -422,10 +606,7 @@ export type CellCommit =
   /** An entry existed and the cell was cleared. Zero means "remove it". */
   | { kind: "delete" };
 
-export function cellCommit(
-  typed: string,
-  cell: { total: number; entryCount: number },
-): CellCommit {
+export function cellCommit(typed: string, cell: { total: number; entryCount: number }): CellCommit {
   const minutes = parseCellDuration(typed);
 
   // null is "means nothing" — an empty string is 0, which is a real instruction.
@@ -506,7 +687,6 @@ export function daySummary(totalMinutes: number, approvedOvertimeMinutes = 0): D
     // overtime is not over by anything, and a negative "over" is not a number
     // anybody should have to render.
     overMinutes: Math.max(0, totalMinutes - capacityMinutes),
-    percentOfCapacity:
-      totalMinutes > 0 ? Math.round((totalMinutes / capacityMinutes) * 100) : 0,
+    percentOfCapacity: totalMinutes > 0 ? Math.round((totalMinutes / capacityMinutes) * 100) : 0,
   };
 }

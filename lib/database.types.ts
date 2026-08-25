@@ -48,6 +48,20 @@ export type VizservePmsApprovalDecision = "approved" | "returned" | "rejected";
 export type VizservePmsDayHalf = "MORNING" | "AFTERNOON";
 
 /**
+ * P7-42. How one leave type appears on the shared calendar to somebody who is
+ * NOT the requester.
+ *
+ *   FULL          name, real label, dates and halves
+ *   LABEL_HIDDEN  name and dates; the label reads "On leave"
+ *   HIDDEN        the row is not returned at all — the absence is withheld
+ *
+ * Declared low → high, like the role enum, so a `>=` comparison in SQL would
+ * mean what it looks like. The requester is exempt from every level on their
+ * own rows.
+ */
+export type VizservePmsLeaveCalendarVisibility = "FULL" | "LABEL_HIDDEN" | "HIDDEN";
+
+/**
  * P7-32. An enum rather than text so the first report that groups by it is not
  * counting "M", "male" and "Male " as three answers. NULL on the column means
  * "not recorded yet" — the auth trigger creates profile rows with no gender to
@@ -1021,6 +1035,12 @@ export type Database = {
           /** Retired, never deleted — historical requests keep pointing at it. */
           is_active: boolean;
           sort_order: number;
+          /**
+           * P7-42. What a colleague may see of this type on the shared calendar.
+           * HIDDEN on SPECIAL_WOMEN and VAWC (RA 9710; RA 9262 §44),
+           * LABEL_HIDDEN on MATERNITY, FULL on everything else — SICK included.
+           */
+          calendar_visibility: VizservePmsLeaveCalendarVisibility;
           created_at: string;
           updated_at: string;
         };
@@ -1030,12 +1050,14 @@ export type Database = {
           label: string;
           is_active?: boolean;
           sort_order?: number;
+          calendar_visibility?: VizservePmsLeaveCalendarVisibility;
         };
         Update: Partial<{
           code: string;
           label: string;
           is_active: boolean;
           sort_order: number;
+          calendar_visibility: VizservePmsLeaveCalendarVisibility;
         }>;
         Relationships: [];
       };
@@ -1450,6 +1472,19 @@ export type Database = {
             referencedRelation: "vizserve_pms_departments";
             referencedColumns: ["id"];
           },
+          /**
+           * P7-12 added this FK; nobody added it here, so PostgREST's embedded
+           * select `vizserve_pms_leave_types(label)` typed as a
+           * `SelectQueryError` and app/(app)/dtr/page.tsx bought its way past it
+           * with `as unknown as`. Declaring the relationship is the fix that
+           * cast was standing in for.
+           */
+          {
+            foreignKeyName: "vizserve_pms_internal_requests_leave_type_id_fkey";
+            columns: ["leave_type_id"];
+            referencedRelation: "vizserve_pms_leave_types";
+            referencedColumns: ["id"];
+          },
         ];
       };
     };
@@ -1518,10 +1553,16 @@ export type Database = {
        * `20260818130000_p7_10_leave_calendar.sql`.
        *
        * NOTE WHAT IS ABSENT: no `reason`, no `id`, no `department_id`. RLS
-       * cannot withhold one column, so the function projects only the four
-       * that are safe for everyone to see. Do not widen this signature without
-       * widening the SQL, and do not widen the SQL without a reason better
-       * than convenience.
+       * cannot withhold one column, so the function projects only what is safe
+       * for everyone to see. Do not widen this signature without widening the
+       * SQL, and do not widen the SQL without a reason better than convenience.
+       *
+       * P7-42 added the halves and `type_label`, and kept it in step with
+       * `20260825100000_p7_42_leave_calendar_details.sql`. `type_label` is null
+       * in two situations the caller cannot tell apart and must not try to: a
+       * row filed before P7-12 had no type at all, and a LABEL_HIDDEN type is
+       * withholding one. Both read "On leave". A HIDDEN type does not appear in
+       * this result at all unless the caller is its own requester.
        */
       vizserve_pms_leave_calendar: {
         Args: { p_from: string; p_to: string };
@@ -1530,6 +1571,9 @@ export type Database = {
           full_name: string;
           start_date: string;
           end_date: string;
+          start_half: VizservePmsDayHalf | null;
+          end_half: VizservePmsDayHalf | null;
+          type_label: string | null;
         }[];
       };
       /**

@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 24 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 25 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -16,7 +16,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **3 — Tasks + QA (Gate 2)** | **Done.** All exit criteria asserted and green |
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
-| **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). P6-04/06/07/08/09 not begun |
+| **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). **P7-44 rebuilt the entry editor on 25 Aug** — see below. P6-04/06/07/08/09 not begun |
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-six migrations live, P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
@@ -37,6 +37,90 @@ long-standing gap and found two pre-existing failures:
 - **`utils/supabase/middleware.test.ts` still asserted `/` was public**, which
   stopped being true when P7-10 made `/` the staff home and emptied
   `PUBLIC_EXACT`.
+
+---
+
+## P7-44 — the timesheet entry editor, 25 Aug
+
+**No migration.** Every column this uses was already there; what changed is that
+the app now fills one of them in by itself.
+
+### What it does
+
+Typing `1h` into a cell at 3:16pm saves the entry as **3:16–4:16**. That is the
+whole point of the change: `P7-21` added `started_at` / `ended_at` in August and
+left them to be filled in by hand, so the one fact that is free to capture — the
+hour just logged is the hour just worked — was the one nobody ever recorded.
+
+Around that:
+
+- **The cell popover is one form.** It was two — every existing entry carried its
+  own length field and its own note field, and the add form underneath carried a
+  second copy of both, so a cell with one entry showed two length boxes and two
+  note boxes with nothing on screen saying which was which. Entries are now a
+  list; clicking one loads it into the same form that adds them.
+- **A suggestion under the length field**, in words. `1.5` is 90 minutes and
+  reads as an hour and five to about half the people who type it; "1 hour 30
+  minutes" is a second opinion where `1h 30m` is only an echo. Clicking it also
+  seeds the clocks.
+- **Clock fields are quarter-hour selects** that open at the nearest quarter to
+  now rather than at `12:00 am`, and the end field only offers times after the
+  start — so "end before start" stops being a mistake anybody can make.
+- **A task row expands** into one row per entry, each independently editable,
+  with a `⋯` menu carrying *Change date*, *Move to task* and *Delete entry*.
+- **The task picker is a searchable combobox** (`Popover` + the vendored
+  `Command`), filtering on the title and the breadcrumb.
+
+### Four decisions worth not relitigating
+
+1. **The clock is stamped whatever day the cell is.** An earlier version stamped
+   only cells dated today, arguing that Monday's work did not happen at Friday
+   afternoon's clock time. That was **overruled**, and the reasoning is what makes
+   it work: the pair records *when the entry went in* — when the task was done,
+   touched, or written up — not a reconstruction of the day it belongs to. Both
+   clocks stay editable, so anyone who knows the real hours can say so.
+
+2. **The popover opens blank, even on a cell holding exactly one entry.**
+   Pointing the form at that entry looks like the helpful thing to do and was
+   tried; it shows the same `2h` twice — once in the row above, once in the form —
+   and highlights a row nobody clicked. Editing what is there is one click on it.
+
+3. **The derivation is four pure functions in `lib/schemas/timesheet.ts`**
+   (`withDuration` / `withStart` / `withEnd` / `draftToEntry`), not logic in a
+   component. Two places edit the same pair of columns now — the popover and the
+   expanded row — and a rule with two copies has two copies to drift. They carry
+   nine tests, including the cases that were previously only ever verified by
+   clicking: `1h 30m 5s` rounding while its span does not, clearing both clocks
+   together, and refusing to wrap past midnight.
+
+4. **`components/ui/popover.tsx` forwards `anchor`.** The suggestion hangs under
+   a field with no trigger of its own, and the week grid's `overflow-x-auto`
+   clips its other axis too — a dropdown drawn inside a cell is cut off on the
+   bottom row. One prop, so pages never reach for the Base UI positioner
+   themselves.
+
+### What ClickUp has that we do not
+
+Asked for and not built, each for a reason rather than an oversight:
+
+| | Why not |
+|---|---|
+| **Billable toggle** | no column. Needs a migration |
+| **Tags** | no column, no table. Needs a migration |
+| **Start timer** | `p7_21`'s `times_paired` constraint refuses a start with no end — *"a start with no end is an open interval, and this table has no concept of one"*. A live timer needs that dropped plus a running-entry concept |
+| **Open entry** (row menu) | the cell above already is that editor, and a second route to it is a second thing to keep in step |
+| **Remove from task** (row menu) | not expressible. `task_id` is `not null` with no default — *"there is deliberately no way to write a row that is not attached to real work"*. An entry with no task is a deleted entry |
+
+### ⚠️ There is no prettier config in this repo
+
+`npx prettier --write` on app code reformats it **wrongly**. The committed app
+style is `--print-width 120 --bracket-same-line`; prettier's defaults are 80 and
+`false`, and there is no `.prettierrc` to say otherwise. A bare `--write` over
+`app/(app)/timesheet/` during this work reformatted six files nobody had touched
+and had to be reverted. `components/ui/` is a third style again — vendored
+shadcn output, left as it arrives.
+
+Nothing enforces this. `npm run lint` does not check formatting.
 
 ---
 

@@ -72,14 +72,27 @@ export const LEAVE_PORTION_LABELS: Record<LeavePortion, string> = {
  * conditions cannot both hold: on a multi-day span they are different dates, and
  * on a single day `start_half > end_half` is refused by
  * `vizserve_pms_internal_requests_shape`.
+ *
+ * TAKES LOOSE FIELDS RATHER THAN A `LeaveSpan`, because P7-42 gave this rule a
+ * second caller: the leave calendar's hover card, whose rows come from
+ * `vizserve_pms_leave_calendar` and are camelCase. Re-deriving it there would be
+ * a second copy of the one genuinely subtle thing in this file, and the two
+ * would drift the first time somebody read a column comment differently.
  */
-function portionOn(date: string, span: LeaveSpan): LeavePortion {
-  const startsHere = date === span.start_date;
-  const endsHere = date === span.end_date;
-
-  if (startsHere && span.start_half === "AFTERNOON") return "afternoon";
-  if (endsHere && span.end_half === "MORNING") return "morning";
+export function portionOfDay(
+  date: string,
+  startDate: string,
+  endDate: string,
+  startHalf: DayHalf | null,
+  endHalf: DayHalf | null,
+): LeavePortion {
+  if (date === startDate && startHalf === "AFTERNOON") return "afternoon";
+  if (date === endDate && endHalf === "MORNING") return "morning";
   return "full";
+}
+
+function portionOn(date: string, span: LeaveSpan): LeavePortion {
+  return portionOfDay(date, span.start_date, span.end_date, span.start_half, span.end_half);
 }
 
 /** Two halves of one day, from two separate requests, are a whole day off. */

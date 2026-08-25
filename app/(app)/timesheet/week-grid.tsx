@@ -1,35 +1,49 @@
 "use client";
 
-import { Check, Plus, X } from "lucide-react";
+import { CalendarDays, Check, ChevronRight, Clock, FolderInput, MoreHorizontal, Plus, Trash2, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  useTransition,
-} from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { toast } from "sonner";
 
 import { TaskStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
 import {
   type CellCommit,
   type DayState,
+  type EntryDraft,
   cellCommit,
+  clockAt,
+  parseCellDuration,
   daySummary,
+  draftToEntry,
   formatCellDuration,
+  spanFrom,
+  withDuration,
+  withEnd,
+  withStart,
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
 import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
 import { CellDetail } from "./cell-detail";
+import { ClockSelect, clockLabel, normaliseClock } from "./clock-select";
+import { DurationSuggestion } from "./duration-suggestion";
 
 export type PickableTask = {
   id: string;
@@ -269,10 +283,7 @@ export function WeekGrid({
    */
   function dayNote(day: string): { state: DayState; mark: string; spoken: string } | null {
     const granted = approvedOvertime[day] ?? 0;
-    const { state, capacityMinutes, trackedMinutes, overMinutes } = daySummary(
-      dayTotal(day),
-      granted,
-    );
+    const { state, capacityMinutes, trackedMinutes, overMinutes } = daySummary(dayTotal(day), granted);
 
     if (state === "overtime") {
       return {
@@ -299,13 +310,33 @@ export function WeekGrid({
         mark: `over +${formatDuration(overMinutes)}`,
         spoken: `${formatDuration(trackedMinutes)} logged, ${formatDuration(
           overMinutes,
-        )} more than the ${formatDuration(capacityMinutes)} ${
-          granted > 0 ? "approved for this day" : "standard day"
-        }.`,
+        )} more than the ${formatDuration(capacityMinutes)} ${granted > 0 ? "approved for this day" : "standard day"}.`,
       };
     }
 
     return null;
+  }
+
+  /*
+   * WHICH TASKS ARE SHOWING THEIR WORKING.
+   *
+   * A row's cell holds one number and the entries behind it hold three facts
+   * each — how long, when, and what it was. Summing them is right for reading
+   * the week and useless for checking it, which is what somebody is doing when
+   * they open a row: reconciling a disputed day, or reconstructing their own.
+   *
+   * Local state, deliberately not remembered between visits like the extra-row
+   * list is. Expanding is a question being asked now ("what made up Tuesday's
+   * eight hours?"), not a preference about how the week is laid out.
+   */
+  const [expanded, setExpanded] = useState<ReadonlySet<string>>(() => new Set());
+
+  function toggleExpanded(taskId: string) {
+    setExpanded((current) => {
+      const next = new Set(current);
+      if (!next.delete(taskId)) next.add(taskId);
+      return next;
+    });
   }
 
   // Counted, not inferred from the week total: there is no 40-hour constant in
@@ -398,9 +429,28 @@ export function WeekGrid({
           </thead>
 
           <tbody>
-            {allRows.map((row) => (
-              <tr key={row.taskId} className="border-b last:border-b-0">
-                {/*
+            {allRows.map((row) => {
+              /*
+               * Every entry on the row, in the order the week runs.
+               *
+               * `days` is already Sunday-first, so the flat list needs no
+               * sorting between days — only within one, where two entries on
+               * the same day are ordered by when they started. An entry with no
+               * times sorts first: it is the older shape, from before a typed
+               * duration carried a clock, and it has nothing to sort by.
+               */
+              const rowEntries = days.flatMap((day) =>
+                [...(row.cells[day] ?? [])]
+                  .sort((a, b) => (a.started_at ?? "").localeCompare(b.started_at ?? ""))
+                  .map((entry) => ({ day, entry })),
+              );
+
+              const open = expanded.has(row.taskId);
+
+              return (
+                <Fragment key={row.taskId}>
+                  <tr className="border-b">
+                    {/*
                   `max-w-0` is what makes a table cell truncate at all; the
                   percentage is what stops it eating the week.
 
@@ -411,32 +461,56 @@ export function WeekGrid({
                   Percentages hold the proportions at any width; the table's
                   `min-w` is still the floor before it scrolls.
                 */}
-                <th scope="row" className="sticky left-0 z-10 w-[34%] max-w-0 bg-card px-3 py-2 text-left font-normal">
-                  <span className="flex items-center gap-1.5">
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate font-medium" title={row.title}>
-                        {row.title}
-                      </span>
+                    <th
+                      scope="row"
+                      className="sticky left-0 z-10 w-[34%] max-w-0 bg-card px-3 py-2 text-left font-normal">
+                      <span className="flex items-center gap-1.5">
+                        {/* The way into the row's working. A row with nothing on it
+                        keeps the space rather than the control, so every title
+                        in the column still starts at the same pixel. */}
+                        {rowEntries.length > 0 ? (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="-ml-1 shrink-0"
+                            aria-expanded={open}
+                            onClick={() => toggleExpanded(row.taskId)}>
+                            <ChevronRight className={cn("transition-transform", open && "rotate-90")} />
+                            <span className="sr-only">
+                              {open ? "Hide" : "Show"} the {rowEntries.length} time{" "}
+                              {rowEntries.length === 1 ? "entry" : "entries"} on {row.title}
+                            </span>
+                          </Button>
+                        ) : (
+                          <span className="-ml-1 w-7 shrink-0" aria-hidden />
+                        )}
 
-                      {/* The second line: what state the work is in and where it
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-medium" title={row.title}>
+                            {row.title}
+                          </span>
+
+                          {/* The second line: what state the work is in and where it
                           lives. Both come from the task, so both go quiet when
                           the task has left this person's scope — the hours are
                           still theirs, the context is not. */}
-                      {row.status || row.where ? (
-                        <span className="mt-0.5 flex min-w-0 items-center gap-2">
-                          {row.status ? <TaskStatusBadge status={row.status} className="h-5 px-1.5" /> : null}
-                          {row.where ? (
-                            <span className="truncate text-xs text-muted-foreground" title={row.where}>
-                              {row.where}
+                          {row.status || row.where ? (
+                            <span className="mt-0.5 flex min-w-0 items-center gap-2">
+                              {row.status ? <TaskStatusBadge status={row.status} className="h-5 px-1.5" /> : null}
+                              {row.where ? (
+                                <span className="truncate text-xs text-muted-foreground" title={row.where}>
+                                  {row.where}
+                                </span>
+                              ) : null}
                             </span>
                           ) : null}
                         </span>
-                      ) : null}
-                    </span>
 
-                    {row.finished ? <span className="shrink-0 text-2xs text-muted-foreground">finished</span> : null}
+                        {row.finished ? (
+                          <span className="shrink-0 text-2xs text-muted-foreground">finished</span>
+                        ) : null}
 
-                    {/* Only a row with nothing on it can be taken off the week.
+                        {/* Only a row with nothing on it can be taken off the week.
                         Removing a row with hours on it would have to mean
                         deleting them, and a close button is not consent.
 
@@ -444,37 +518,79 @@ export function WeekGrid({
                         week cannot be filled, so taking it off is the only thing
                         left to do with it — and it is a change to a week that is
                         no longer this person's to change. */}
-                    {rowTotal(row) === 0 && !locked ? (
-                      <Button
-                        variant="ghost"
-                        size="icon-xs"
-                        className="shrink-0"
-                        onClick={() => remember(extraTaskIds.filter((id) => id !== row.taskId))}>
-                        <X />
-                        <span className="sr-only">Take {row.title} off this week</span>
-                      </Button>
-                    ) : null}
-                  </span>
-                </th>
+                        {rowTotal(row) === 0 && !locked ? (
+                          <Button
+                            variant="ghost"
+                            size="icon-xs"
+                            className="shrink-0"
+                            onClick={() => remember(extraTaskIds.filter((id) => id !== row.taskId))}>
+                            <X />
+                            <span className="sr-only">Take {row.title} off this week</span>
+                          </Button>
+                        ) : null}
+                      </span>
+                    </th>
 
-                {days.map((day) => (
-                  <TimeCell
-                    key={day}
-                    taskId={row.taskId}
-                    taskTitle={row.title}
-                    day={day}
-                    entries={row.cells[day] ?? []}
-                    future={day > today}
-                    locked={locked}
-                    onEmptied={() => keepRow(row.taskId)}
-                  />
-                ))}
+                    {days.map((day) => (
+                      <TimeCell
+                        key={day}
+                        taskId={row.taskId}
+                        taskTitle={row.title}
+                        day={day}
+                        entries={row.cells[day] ?? []}
+                        future={day > today}
+                        locked={locked}
+                        onEmptied={() => keepRow(row.taskId)}
+                      />
+                    ))}
 
-                <td className="border-l px-2 py-1.5 text-right text-sm font-medium tabular-nums">
-                  {rowTotal(row) > 0 ? formatCellDuration(rowTotal(row)) : "—"}
-                </td>
-              </tr>
-            ))}
+                    <td className="border-l px-2 py-1.5 text-right text-sm font-medium tabular-nums">
+                      {rowTotal(row) > 0 ? formatCellDuration(rowTotal(row)) : "—"}
+                    </td>
+                  </tr>
+
+                  {/*
+                THE WORKING, ONE ROW PER ENTRY.
+
+                Read-only on purpose. Everything here is editable one click away
+                in the cell above — and an entry that can be changed from two
+                places at once is two places that have to agree about what
+                happens when somebody clears it.
+
+                ⚠️ SOLID `bg-muted`, not `bg-muted/40`. The first column is
+                sticky, and a translucent fill lets the cells scrolling
+                underneath show straight through it — the same trap the footer
+                row carries a note about.
+              */}
+                  {open ? (
+                    <tr className="border-b bg-muted">
+                      <th
+                        scope="row"
+                        className="sticky left-0 z-10 bg-muted py-1 pr-3 pl-11 text-left text-2xs font-medium text-muted-foreground">
+                        {rowEntries.length} time {rowEntries.length === 1 ? "entry" : "entries"}
+                      </th>
+                      <td className="bg-muted" colSpan={days.length + 1} />
+                    </tr>
+                  ) : null}
+
+                  {open
+                    ? rowEntries.map(({ day, entry }) => (
+                        <EntryRow
+                          key={entry.id}
+                          entry={entry}
+                          taskId={row.taskId}
+                          taskTitle={row.title}
+                          day={day}
+                          days={days}
+                          today={today}
+                          tasks={pickable}
+                          locked={locked}
+                        />
+                      ))
+                    : null}
+                </Fragment>
+              );
+            })}
 
             {/* Dropped entirely once the week is locked, rather than disabled.
                 Adding a row to a handed-in week can only ever produce an empty
@@ -518,8 +634,7 @@ export function WeekGrid({
                           : note?.state === "overtime"
                             ? "text-warning"
                             : undefined
-                      }
-                    >
+                      }>
                       {dayTotal(day) > 0 ? formatCellDuration(dayTotal(day)) : "—"}
                     </span>
 
@@ -533,8 +648,7 @@ export function WeekGrid({
                         className={cn(
                           "mt-0.5 block text-2xs leading-none font-medium",
                           note.state === "over" ? "text-destructive" : "text-warning",
-                        )}
-                      >
+                        )}>
                         {note.mark}
                       </span>
                     ) : null}
@@ -571,10 +685,7 @@ export function WeekGrid({
             <span className="font-medium text-destructive">
               {daysOver === 1 ? "1 day over" : `${daysOver} days over`}
             </span>{" "}
-            the standard day by{" "}
-            <span className="font-medium text-destructive">
-              {formatDuration(weekOverMinutes)}
-            </span>{" "}
+            the standard day by <span className="font-medium text-destructive">{formatDuration(weekOverMinutes)}</span>{" "}
             in total ·{" "}
           </>
         ) : null}
@@ -588,12 +699,356 @@ export function WeekGrid({
           <>
             Type <span className="font-medium text-foreground">1h 30m</span>,{" "}
             <span className="font-medium text-foreground">90m</span> or{" "}
-            <span className="font-medium text-foreground">1.5</span> into a cell. A bare number is
-            hours.
+            <span className="font-medium text-foreground">1.5</span> into a cell. A bare number is hours.
           </>
         )}
       </p>
     </div>
+  );
+}
+
+/**
+ * ONE ENTRY, EDITED WHERE IT IS READ.
+ *
+ * The expanded row started out as a read-only breakdown, on the argument that
+ * everything in it was one click away in the cell above. That was true and
+ * beside the point: the cell above holds the day's TOTAL, so an eight-hour
+ * Tuesday made of three entries cannot be corrected there at all — the cell
+ * goes read-only on a split precisely because it cannot choose between them.
+ * This row is the only place those three are separately addressable, which
+ * makes it the only place they can be separately fixed.
+ *
+ * The same two-way link as the popover, because it is literally the same
+ * functions: `withDuration` / `withStart` / `withEnd` in `lib/schemas`. Type a
+ * length and the end moves; move the end and the length is recomputed.
+ *
+ * SAVED ON CHANGE FOR THE CLOCKS, ON BLUR FOR THE LENGTH. A select has no
+ * half-picked state to protect — choosing 4:00 pm is the whole gesture — while
+ * a text field does, and `1h 3` on the way to `1h 30m` must not be written.
+ */
+function EntryRow({
+  entry,
+  taskId,
+  taskTitle,
+  day,
+  days,
+  today,
+  tasks,
+  locked,
+}: {
+  entry: CellEntry;
+  taskId: string;
+  taskTitle: string;
+  day: string;
+  days: string[];
+  today: string;
+  /** What "move to task" may offer — the same list the picker uses, which is
+      the same list RLS will accept a write against. */
+  tasks: PickableTask[];
+  locked: boolean;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+
+  const [draft, setDraft] = useState<EntryDraft>(() => ({
+    duration: formatCellDuration(entry.minutes),
+    note: entry.note ?? "",
+    start: normaliseClock(entry.started_at),
+    end: normaliseClock(entry.ended_at),
+  }));
+
+  /** What the row currently says, as the columns hold it. */
+  function saved(): EntryDraft {
+    return {
+      duration: formatCellDuration(entry.minutes),
+      note: entry.note ?? "",
+      start: normaliseClock(entry.started_at),
+      end: normaliseClock(entry.ended_at),
+    };
+  }
+
+  function commit(next: EntryDraft) {
+    setDraft(next);
+    if (locked) return;
+
+    const built = draftToEntry(next);
+
+    if (!built.ok) {
+      // Half a pair is somebody mid-edit, not a mistake to interrupt over —
+      // the clocks are being changed one at a time and the row waits. A length
+      // that does not parse is worth naming, and putting the row back is what
+      // stops the grid showing a number the database never accepted.
+      if (next.start && next.end) toast.error(built.error);
+      else if (parseCellDuration(next.duration) === null) {
+        toast.error(built.error);
+        setDraft(saved());
+      }
+      return;
+    }
+
+    const current = saved();
+    if (
+      built.entry.minutes === entry.minutes &&
+      built.entry.started_at === (current.start || null) &&
+      built.entry.ended_at === (current.end || null) &&
+      built.entry.note === entry.note
+    ) {
+      return;
+    }
+
+    startTransition(async () => {
+      const result = await updateTimeEntry({
+        id: entry.id,
+        task_id: taskId,
+        work_date: day,
+        ...built.entry,
+      });
+
+      if (!result.ok) {
+        toast.error(result.error);
+        setDraft(saved());
+        return;
+      }
+
+      router.refresh();
+    });
+  }
+
+  return (
+    <tr className={cn("border-b bg-muted", pending && "opacity-60")}>
+      <th scope="row" className="sticky left-0 z-10 max-w-0 bg-muted py-1 pr-3 pl-11 text-left font-normal">
+        <span className="flex min-w-0 items-center gap-2 text-xs">
+          <Clock className="size-3.5 shrink-0 text-foreground-faint" aria-hidden />
+
+          {locked ? (
+            /* The record, still readable. An entry logged before a typed
+               duration carried a clock has only its length, and a blank here
+               would read as a rendering fault rather than a fact. */
+            <span className="shrink-0 tabular-nums text-foreground-muted">
+              {draft.start && draft.end ? `${clockLabel(draft.start)} – ${clockLabel(draft.end)}` : "No times recorded"}
+            </span>
+          ) : (
+            <>
+              <ClockSelect
+                label={`Start time on ${formatWeekday(day)}`}
+                value={draft.start}
+                disabled={pending}
+                onChange={(next) => commit(withStart(draft, next))}
+              />
+              <span className="text-foreground-faint" aria-hidden>
+                –
+              </span>
+              <ClockSelect
+                label={`End time on ${formatWeekday(day)}`}
+                value={draft.end}
+                after={draft.start}
+                disabled={pending}
+                onChange={(next) => commit(withEnd(draft, next))}
+              />
+            </>
+          )}
+
+          {entry.note ? (
+            <span className="truncate text-muted-foreground" title={entry.note}>
+              {entry.note}
+            </span>
+          ) : null}
+        </span>
+      </th>
+
+      {days.map((column) => (
+        <td key={column} className="border-l bg-muted px-1 py-1 text-center">
+          {column !== day ? null : locked ? (
+            <span className="text-sm tabular-nums text-foreground-muted">{draft.duration}</span>
+          ) : (
+            /* A raw input, like the cell above it and for the same reason: a
+               bordered control per entry per day turns a breakdown into a
+               form. It is one of seven columns and only one of them is ever
+               filled in. */
+            <input
+              type="text"
+              inputMode="decimal"
+              value={draft.duration}
+              disabled={pending}
+              aria-label={`${taskTitle} — ${formatWeekday(day)} ${formatDate(day)}, ${
+                draft.start ? clockLabel(draft.start) : "this entry"
+              }`}
+              className={cn(
+                "h-7 w-full bg-transparent text-center text-sm tabular-nums text-foreground-muted",
+                "focus:ring-2 focus:ring-ring focus:outline-none",
+              )}
+              onChange={(event) => setDraft(withDuration(draft, event.target.value))}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") event.currentTarget.blur();
+                if (event.key === "Escape") setDraft(saved());
+              }}
+              onBlur={() => commit(draft)}
+            />
+          )}
+        </td>
+      ))}
+
+      <td className="border-l bg-muted px-1 py-1 text-right">
+        {locked ? null : (
+          <EntryMenu
+            entry={entry}
+            taskId={taskId}
+            taskTitle={taskTitle}
+            day={day}
+            days={days}
+            today={today}
+            tasks={tasks}
+            pending={pending}
+            onChanged={() => router.refresh()}
+          />
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/**
+ * THE ACTIONS AN ENTRY HAS, AND ONLY THOSE.
+ *
+ * ClickUp's row menu offers five. Three of them exist here:
+ *
+ *   Change date    `work_date` is a column and the week is right there, so the
+ *                  days are listed rather than hidden behind a date picker —
+ *                  moving an hour off Tuesday almost always means moving it to
+ *                  a day already on screen. A FUTURE day is not offered: the
+ *                  INSERT policy refuses one in Manila time, and a menu item
+ *                  that only ever produces an error is a bug with a label.
+ *
+ *   Move to task   `task_id` is a column, and the list is the same `pickable`
+ *                  the row picker uses — which is the list RLS will accept, so
+ *                  the menu cannot offer a write the database will refuse.
+ *
+ *   Delete entry   already had an action.
+ *
+ * The two that do not:
+ *
+ *   Open entry     the cell above IS that, and a second route to the same
+ *                  editor is a second thing to keep in step.
+ *   Remove from    not expressible. `task_id` is `not null` with no default —
+ *   task           "there is deliberately no way to write a row that is not
+ *                  attached to real work", per the migration. An entry with no
+ *                  task is a deleted entry, which is the item above it.
+ */
+function EntryMenu({
+  entry,
+  taskId,
+  taskTitle,
+  day,
+  days,
+  today,
+  tasks,
+  pending,
+  onChanged,
+}: {
+  entry: CellEntry;
+  taskId: string;
+  taskTitle: string;
+  day: string;
+  days: string[];
+  today: string;
+  tasks: PickableTask[];
+  pending: boolean;
+  onChanged: () => void;
+}) {
+  const [working, startTransition] = useTransition();
+
+  function move(next: { work_date?: string; task_id?: string }) {
+    startTransition(async () => {
+      const result = await updateTimeEntry({
+        id: entry.id,
+        task_id: next.task_id ?? taskId,
+        work_date: next.work_date ?? day,
+        minutes: entry.minutes,
+        // Everything the move is not about travels with it. A note left behind
+        // by a change of date is a note nobody rewrites.
+        note: entry.note,
+        started_at: entry.started_at,
+        ended_at: entry.ended_at,
+      });
+
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+
+      onChanged();
+    });
+  }
+
+  const elsewhere = tasks.filter((task) => task.id !== taskId);
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="ghost" size="icon-xs" disabled={pending || working} className="shrink-0">
+            <MoreHorizontal />
+            <span className="sr-only">
+              Actions for the {formatCellDuration(entry.minutes)} logged on {taskTitle}, {formatWeekday(day)}{" "}
+              {formatDate(day)}
+            </span>
+          </Button>
+        }
+      />
+
+      <DropdownMenuContent align="end" className="w-48">
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger>
+            <CalendarDays />
+            Change date
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent>
+            {days
+              .filter((option) => option <= today)
+              .map((option) => (
+                <DropdownMenuItem key={option} disabled={option === day} onClick={() => move({ work_date: option })}>
+                  {formatWeekday(option)} {formatDate(option)}
+                  {option === day ? <span className="ml-auto text-2xs text-muted-foreground">now</span> : null}
+                </DropdownMenuItem>
+              ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSub>
+          <DropdownMenuSubTrigger disabled={elsewhere.length === 0}>
+            <FolderInput />
+            Move to task
+          </DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="max-h-72 w-64 overflow-y-auto">
+            {elsewhere.map((task) => (
+              <DropdownMenuItem key={task.id} onClick={() => move({ task_id: task.id })}>
+                <span className="min-w-0 flex-1 truncate" title={task.title}>
+                  {task.title}
+                </span>
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          variant="destructive"
+          onClick={() =>
+            startTransition(async () => {
+              const result = await deleteTimeEntry(entry.id);
+              if (!result.ok) {
+                toast.error(result.error);
+                return;
+              }
+              onChanged();
+            })
+          }>
+          <Trash2 />
+          Delete entry
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -630,6 +1085,7 @@ function TimeCell({
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   const total = sum(entries);
   const split = entries.length > 1;
@@ -699,6 +1155,11 @@ function TimeCell({
         work_date: cell.day,
         minutes: plan.minutes,
         note: null,
+        // The hour just typed is the hour just logged: `1h` entered at 3:16
+        // marks the entry 3:16 to 4:16, whatever day the cell belongs to. See
+        // `clockAt` — the pair says when this went in, not what the day looked
+        // like, and both clocks stay editable in the popover.
+        ...spanFrom(clockAt(), plan.minutes),
       });
     }
 
@@ -716,6 +1177,11 @@ function TimeCell({
         // and retyping the note to correct the hours is the reason people stop
         // writing notes.
         note: cell.entries[0]!.note,
+        // The START survives, and the end moves to match the new length —
+        // correcting 1h to 2h says the work ran an hour longer, not that it
+        // began an hour earlier. An entry that never had times gets them now,
+        // so every duration in the grid ends up carrying a pair either way.
+        ...spanFrom(cell.entries[0]!.started_at ?? clockAt(), plan.minutes),
       });
     }
 
@@ -783,7 +1249,10 @@ function TimeCell({
       if (typed === null) return;
 
       const cell = cellRef.current;
-      const plan = cellCommit(typed, { total: cell.total, entryCount: cell.entries.length });
+      const plan = cellCommit(typed, {
+        total: cell.total,
+        entryCount: cell.entries.length,
+      });
 
       // Invalid and noop both drop the draft on the floor, and that is right: a
       // cell abandoned mid-word must not become a write nobody reviewed.
@@ -826,10 +1295,7 @@ function TimeCell({
         `aria-live="polite"` rather than a visual-only tick. Somebody using a
         screen reader gets the same confirmation, once, without the focus moving.
       */}
-      <span
-        aria-live="polite"
-        className="pointer-events-none absolute top-0.5 right-0.5 flex items-center"
-      >
+      <span aria-live="polite" className="pointer-events-none absolute top-0.5 right-0.5 flex items-center">
         {pending ? (
           <span className="text-2xs text-muted-foreground">···</span>
         ) : saved ? (
@@ -841,6 +1307,7 @@ function TimeCell({
       </span>
 
       <input
+        ref={inputRef}
         type="text"
         inputMode="decimal"
         value={display}
@@ -865,6 +1332,14 @@ function TimeCell({
         }}
         onBlur={commit}
       />
+
+      {/* What the cell heard, while it is still being typed into. `draft` and
+          not `display`: a cell showing what the server already holds has
+          nothing to suggest, and a suggestion sitting under an untouched cell
+          would appear on all seven of them at once. */}
+      {readOnly ? null : (
+        <DurationSuggestion anchor={inputRef} value={draft ?? ""} onAccept={() => inputRef.current?.blur()} />
+      )}
 
       {/* A day that has not happened cannot be logged — the INSERT policy says
           so in Manila time, and offering the control anyway just produces an
@@ -902,8 +1377,6 @@ function AddTaskRow({
 }) {
   const [open, setOpen] = useState(false);
 
-  const items: Record<string, string> = Object.fromEntries(tasks.map((task) => [task.id, task.title]));
-
   // Two ways to be empty, two different next steps — a dead end that only says
   // "nothing here" is the thing the design system calls out.
   if (tasks.length === 0) {
@@ -931,45 +1404,72 @@ function AddTaskRow({
     );
   }
 
-  if (!open) {
-    return (
-      <Button size="sm" className="-ml-2" onClick={() => setOpen(true)}>
-        <Plus />
-        Add task
-      </Button>
-    );
-  }
-
+  /*
+   * A SEARCH BOX, NOT A LIST OF EVERYTHING.
+   *
+   * This was a `Select`, which meant every task a person may log against — the
+   * open ones, the finished ones, every department they touch — in one scroll,
+   * ordered by nothing anybody could see. Fine at six tasks. It is not six.
+   *
+   * The filter runs over the title AND the breadcrumb, so "SIS" narrows to a
+   * project and "meeting" narrows to a kind of work, which are the two ways
+   * anybody actually looks for one of these.
+   */
   return (
-    <Select
-      items={items}
-      value={null}
-      onValueChange={(value) => {
-        if (!value) return;
-        onAdd(value);
-        setOpen(false);
-      }}>
-      <SelectTrigger className="h-9 w-full" autoFocus>
-        <SelectValue placeholder="Which task?" />
-      </SelectTrigger>
-      <SelectContent>
-        {/* Two lines per option, as in the picker the team already uses: the
-            task, then its state and where it lives. Several open tasks can share
-            a name across departments, and the title alone is not enough to pick
-            between them. `items` above still maps id → title, because the
-            TRIGGER shows one line. */}
-        {tasks.map((task) => (
-          <SelectItem key={task.id} value={task.id}>
-            <span className="flex min-w-0 flex-col gap-0.5">
-              <span className="truncate font-medium">{task.title}</span>
-              <span className="flex min-w-0 items-center gap-2">
-                <TaskStatusBadge status={task.status} className="h-5 px-1.5" />
-                {task.where ? <span className="truncate text-xs text-muted-foreground">{task.where}</span> : null}
-              </span>
-            </span>
-          </SelectItem>
-        ))}
-      </SelectContent>
-    </Select>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        render={
+          <Button size="sm" className="-ml-2">
+            <Plus />
+            Add task
+          </Button>
+        }
+      />
+
+      <PopoverContent align="start" className="w-112 gap-0 p-0">
+        <Command>
+          <CommandInput placeholder="Search tasks by name or project" />
+
+          {/* `p-1`, because these items are not in a `CommandGroup` and that
+              is where the primitive keeps its padding — without it every row
+              runs flush into the popover's edge and the rounded highlight has
+              nothing to sit inside. */}
+          <CommandList className="p-1">
+            {/* Says why, and what to do next — a bare "no results" is the dead
+                end the design system calls out. */}
+            <CommandEmpty>
+              No task matches that. Try the project name, or clear the search to see all {tasks.length} you can log
+              against.
+            </CommandEmpty>
+
+            {/* Two lines per option, as in the picker the team already uses: the
+                task, then its state and where it lives. Several open tasks can
+                share a name across departments, and the title alone is not
+                enough to pick between them.
+
+                `value` is what cmdk matches against, so the breadcrumb is in it
+                — and the id on the end, which keeps two identically-named tasks
+                in the same project from collapsing into one row. */}
+            {tasks.map((task) => (
+              <CommandItem
+                key={task.id}
+                value={`${task.title} ${task.where ?? ""} ${task.id}`}
+                onSelect={() => {
+                  onAdd(task.id);
+                  setOpen(false);
+                }}>
+                <span className="flex min-w-0 flex-col gap-0.5">
+                  <span className="truncate font-medium">{task.title}</span>
+                  <span className="flex min-w-0 items-center gap-2">
+                    <TaskStatusBadge status={task.status} className="h-5 px-1.5" />
+                    {task.where ? <span className="truncate text-xs text-muted-foreground">{task.where}</span> : null}
+                  </span>
+                </span>
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }

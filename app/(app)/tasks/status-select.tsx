@@ -89,7 +89,7 @@ export function TaskStatusSelect({
 }: {
   taskId: string;
   status: TaskStatus;
-  viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
+  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
   /** Which of the three kinds of work this is. It decides the whole menu. */
   task: { request_id: string | null; is_personal: boolean };
   /**

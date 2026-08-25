@@ -368,7 +368,7 @@ export function transitionsFrom(status: TaskStatus): Transition[] {
  */
 export function availableTransitions(
   status: TaskStatus,
-  viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
+  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
   // Required, not optional. An optional third argument would let every existing
   // call site keep compiling while silently offering buttons the server refuses
   // — the exact failure this mirror exists to prevent.
@@ -393,7 +393,7 @@ export function availableTransitions(
    * because there is no reviewer gate left for it to guard.
    */
   if (category !== "request") {
-    if (!(viewer.isPic || viewer.isQa || viewer.leadsDepartment)) return [];
+    if (!(viewer.isAssignee || viewer.isQa || viewer.leadsDepartment)) return [];
 
     return TASK_STATUSES.filter(
       (target) => target !== status && target !== "FOR_CLIENT_APPROVAL",
@@ -411,7 +411,7 @@ export function availableTransitions(
     // A rule written for work without a client cannot be borrowed by work with
     // one — the mirror of the server's own check.
     if (!scopeAllows(transition.appliesTo, category)) return false;
-    if (transition.actor === "pic") return viewer.isPic || viewer.leadsDepartment;
+    if (transition.actor === "pic") return viewer.isAssignee || viewer.leadsDepartment;
     if (transition.actor === "qa") return viewer.isQa || viewer.leadsDepartment;
     // The client and system rows belong to Phase 4's token flow.
     return viewer.isAdmin;
@@ -460,7 +460,7 @@ export function availableTransitions(
  */
 export function nextStep(
   status: TaskStatus,
-  viewer: { isPic: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
+  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
   task: { request_id: string | null; is_personal: boolean },
 ): Transition | null {
   // Nothing follows a finished task. Internal work can legally be reopened
