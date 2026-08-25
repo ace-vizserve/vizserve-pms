@@ -125,14 +125,34 @@ const CONTENT_WIDTH = A4_WIDTH - MARGIN * 2;
  * Numbers are RIGHT-aligned so the decimal points stack — a column of "12",
  * "7.5" and "0.5" left-aligned is unreadable at a glance, and this is a
  * document somebody scans for the odd one out.
+ *
+ * THE LEAVE-TYPE COLUMN IS SIZED FOR THE LONGEST LABEL, not for a round number.
+ * P7-36 added "Anti-Violence Against Women and Their Children (VAWC) Leave" —
+ * 258pt at 9pt Helvetica, against the 160pt this column used to allow. It cut
+ * to "…Women and The…", which drops the acronym that identifies it, in a
+ * document whose entire job is to be checked line by line against HR's own.
+ *
+ * The room comes from two places that had it spare: employee names are rarely
+ * past 120pt, and the three numeric columns each hold at most "366.5" — 28pt of
+ * digits sitting in an 80pt gap. Nothing was made narrower than its content.
  */
 const COLUMN = {
   name: MARGIN,
-  type: MARGIN + 210,
-  allocatedRight: MARGIN + 380,
-  usedRight: MARGIN + 460,
+  type: MARGIN + 150,
+  allocatedRight: MARGIN + 420,
+  usedRight: MARGIN + 472,
   remainingRight: MARGIN + CONTENT_WIDTH,
 } as const;
+
+/**
+ * How much room a label actually gets before it collides with the figures.
+ *
+ * Measured to where the NUMBERS start, not to the "Allocated" heading — the
+ * heading lives on its own band and never shares a row with a label, so sizing
+ * to it would waste 30pt for a collision that cannot happen.
+ */
+const TYPE_WIDTH = 240;
+const NAME_WIDTH = 140;
 
 const ROW_HEIGHT = 15;
 const HEADER_HEIGHT = 18;
@@ -311,7 +331,7 @@ export function renderLeaveReport(
           document.line(MARGIN, y, A4_WIDTH - MARGIN, y, { gray: 0.85, width: 0.4 });
         }
 
-        const name = truncateToWidth(line.person.full_name, 200, 9, "bold");
+        const name = truncateToWidth(line.person.full_name, NAME_WIDTH, 9, "bold");
         document.text(COLUMN.name + 4, baseline, name, { size: 9, font: "bold" });
 
         // Department and, where it applies, the fact that this person has left.
@@ -321,12 +341,12 @@ export function renderLeaveReport(
           .filter(Boolean)
           .join(" · ");
 
-        document.text(COLUMN.type, baseline, truncateToWidth(detail, 160, 7.5), {
+        document.text(COLUMN.type, baseline, truncateToWidth(detail, TYPE_WIDTH, 7.5), {
           size: 7.5,
           gray: 0.45,
         });
       } else if (line.kind === "type") {
-        document.text(COLUMN.type, baseline, truncateToWidth(line.label, 160, BODY_SIZE), {
+        document.text(COLUMN.type, baseline, truncateToWidth(line.label, TYPE_WIDTH, BODY_SIZE), {
           size: BODY_SIZE,
         });
         document.text(COLUMN.allocatedRight, baseline, formatDayCount(line.allocated), {

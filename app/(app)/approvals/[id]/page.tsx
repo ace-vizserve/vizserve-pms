@@ -7,10 +7,11 @@ import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
-import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
+import { internalRequestLabel } from "@/lib/schemas/internal-requests";
 import { createClient } from "@/utils/supabase/server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
+import { QueryError } from "@/components/query-error";
 import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DecisionPanel } from "../decision-panel";
@@ -38,7 +39,7 @@ export default async function InternalRequestPage({ params }: { params: Promise<
   const context = await requireAuthContext();
   const supabase = await createClient();
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("vizserve_pms_internal_requests")
     .select(
       // P7-12 — the leave type comes along as an embed rather than a second
@@ -52,9 +53,34 @@ export default async function InternalRequestPage({ params }: { params: Promise<
     .eq("id", id)
     .maybeSingle();
 
-  // A request outside your scope returns zero rows through RLS, not an error.
-  // Rendering that as 404 is correct and also the right thing to leak: "exists
-  // but not for you" is itself information.
+  /*
+   * AN ERROR IS NOT A 404, and conflating them cost an afternoon.
+   *
+   * This read `const { data } = ...` and threw the error away, so THREE very
+   * different situations all rendered as the same bare not-found page:
+   *
+   *   - the row is outside your scope (correct, and handled below),
+   *   - the row does not exist (correct),
+   *   - the query FAILED — a missing GRANT, an embed PostgREST could not
+   *     resolve, a dropped connection — which is a fault and not a 404 at all.
+   *
+   * The third is the one this project is most likely to hit: CLAUDE.md opens
+   * with "permission denied for table" being a grants diagnosis, and every new
+   * migration adds a table or an FK that an embed here could trip over. Silently
+   * showing 404 for it sends whoever is debugging to look at RLS, which is
+   * exactly where the answer is not.
+   */
+  if (error) {
+    return (
+      <PageShell className="mx-auto w-full max-w-3xl">
+        <QueryError what="this request" message={error.message} />
+      </PageShell>
+    );
+  }
+
+  // Zero rows through RLS, on the other hand, IS a 404 — and the right thing to
+  // leak, because "exists but not for you" is itself information. The scoped
+  // not-found.tsx beside this file says which of the two it was.
   if (!data) notFound();
 
   const request = data as unknown as Row;
@@ -71,7 +97,7 @@ export default async function InternalRequestPage({ params }: { params: Promise<
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. An internal request has no reference number, so
           its type is the most identifying thing it has. */}
-      <BreadcrumbLabel value={INTERNAL_REQUEST_LABELS[request.request_type]} />
+      <BreadcrumbLabel value={internalRequestLabel(request.request_type)} />
 
       <Link
         href="/approvals"
@@ -84,7 +110,7 @@ export default async function InternalRequestPage({ params }: { params: Promise<
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold tracking-tight">
-            {INTERNAL_REQUEST_LABELS[request.request_type]}
+            {internalRequestLabel(request.request_type)}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{requestDetail(request)}</p>
         </div>

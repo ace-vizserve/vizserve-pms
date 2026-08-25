@@ -974,38 +974,67 @@ describe.skipIf(!leaveTypesApplied)("P7-12 — leave types", () => {
       .select("id")
       .single();
 
-    const { client } = await signIn("member1VizBytes");
-    const existing = await submit(client, {
-      p_request_type: "LEAVE",
-      p_reason: "Filed while the type was live.",
-      p_start_date: today,
-      p_end_date: today,
-      p_leave_type_id: type!.id,
-    });
+    /*
+     * ⚠️ try/finally, AND IT IS LOAD-BEARING.
+     *
+     * The cleanup below used to be the last two statements of the test body, so
+     * it ran ONLY when everything above it passed. Anything that threw first —
+     * a failed expectation, or `signIn` hitting Supabase's auth rate limit,
+     * which happens on a full-suite run — abandoned the TEMP_ row in
+     * `vizserve_pms_leave_types`.
+     *
+     * That table is reference data, so `scripts/purge-test-data.mjs` KEEPS it by
+     * design and never swept them up. Three of them accumulated in the live
+     * project and appeared in the leave picker and the admin allocation panel as
+     * three rows called "Temporary" — visible to every member filing leave.
+     *
+     * A test that writes to a shared database has to clean up on the failure
+     * path, because the failure path is the one that actually happens.
+     */
+    let existing: string | undefined;
 
-    await admin.from("vizserve_pms_leave_types").update({ is_active: false }).eq("id", type!.id);
+    try {
+      const { client } = await signIn("member1VizBytes");
+      existing = await submit(client, {
+        p_request_type: "LEAVE",
+        p_reason: "Filed while the type was live.",
+        p_start_date: today,
+        p_end_date: today,
+        p_leave_type_id: type!.id,
+      });
 
-    const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
-      p_request_type: "LEAVE",
-      p_reason: "Filed after it was retired.",
-      p_start_date: today,
-      p_end_date: today,
-      p_leave_type_id: type!.id,
-    } as never);
+      await admin
+        .from("vizserve_pms_leave_types")
+        .update({ is_active: false })
+        .eq("id", type!.id);
 
-    expect(error?.message ?? "").toContain("no longer available");
+      const { error } = await client.rpc("vizserve_pms_submit_internal_request", {
+        p_request_type: "LEAVE",
+        p_reason: "Filed after it was retired.",
+        p_start_date: today,
+        p_end_date: today,
+        p_leave_type_id: type!.id,
+      } as never);
 
-    // The old one is untouched and still points at the retired type.
-    const { data: kept } = await admin
-      .from("vizserve_pms_internal_requests")
-      .select("leave_type_id")
-      .eq("id", existing)
-      .single();
+      expect(error?.message ?? "").toContain("no longer available");
 
-    expect(kept!.leave_type_id).toBe(type!.id);
+      // The old one is untouched and still points at the retired type.
+      const { data: kept } = await admin
+        .from("vizserve_pms_internal_requests")
+        .select("leave_type_id")
+        .eq("id", existing)
+        .single();
 
-    await admin.from("vizserve_pms_internal_requests").delete().eq("id", existing);
-    await admin.from("vizserve_pms_leave_types").delete().eq("id", type!.id);
+      expect(kept!.leave_type_id).toBe(type!.id);
+    } finally {
+      // Request first: `leave_type_id` is ON DELETE RESTRICT, so the type
+      // cannot go while a request still points at it. Guarded because the
+      // submit above may be the thing that threw.
+      if (existing) {
+        await admin.from("vizserve_pms_internal_requests").delete().eq("id", existing);
+      }
+      await admin.from("vizserve_pms_leave_types").delete().eq("id", type!.id);
+    }
   });
 
   it("refuses to delete a type that is in use", async () => {

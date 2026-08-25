@@ -17,7 +17,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). P6-04/06/07/08/09 not begun |
-| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live. **Three more written and NOT yet applied**: P7-32 gender, P7-33 leave balances, P7-34 leave audit PDF. **P7-35 holiday calendar needs no migration** and works as deployed — see below |
+| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Eighteen migrations live. **Three more applied 25 Aug**: P7-32 gender, P7-33 leave balances, P7-34 leave audit PDF. **P7-35 holiday calendar needs no migration** — see below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -408,6 +408,39 @@ they belong to, and dragging one to another column is the exact move the nesting
 prevents. The count comes from the unfiltered query, so a card reads "10
 subtasks" and unfolds the seven still outstanding.
 
+## P7-36 — VAWC leave, 25 Aug
+
+**Applied.** One row in `vizserve_pms_leave_types`: Anti-Violence Against Women
+and Their Children Leave (RA 9262), `code = VAWC`, sort_order 90. Inserted into
+the live project and written up as `20260825090000_p7_36_vawc_leave.sql` with
+`on conflict (code) do nothing`, so pasting the migration afterwards is a no-op
+rather than a duplicate-key failure.
+
+**This is the P7-12 argument paying off.** A leave type is policy data, so
+adding one is an INSERT — no enum value, no two-migration split, no redeployed
+function, no code change at all. The picker, the allocation panel and the audit
+report all read the table and picked it up on their own.
+
+**It did move one thing.** At 59 characters it is by far the longest label, and
+at 258pt it did not fit the audit PDF’s 160pt leave-type column: it cut to
+"...Women and The...", losing the acronym that identifies it, in a document whose
+whole job is to be checked line by line against HR’s own. The column is now
+240pt, taken from two places that had it spare — employee names rarely reach
+120pt, and each numeric column holds at most "366.5", which is 28pt of digits in
+an 80pt gap. It now cuts after the acronym, losing only the word "Leave", which
+is the least informative word in a column of leave types. The label ends at
+426pt and the figures start at 437pt. The admin allocation panel gained a
+`title` attribute for the same reason.
+
+**The shared calendar still does not show the type, and this row is the
+strongest case yet.** P7-12 counted four of the original eight as disclosures in
+their own right. VAWC is a fifth and the most sensitive of them: publishing it
+beside a name on a calendar every colleague can read would broadcast that
+somebody is a victim of domestic violence.
+
+**No allocation is seeded.** The statute grants it to those it covers; an admin
+sets the days per person under D27.
+
 ## P7-35 — the holiday calendar, 24 Aug
 
 **NO MIGRATION.** `vizserve_pms_holidays` has existed since P4 and its RLS
@@ -463,7 +496,7 @@ which only works while the format sorts lexicographically. Unit suite is 426
 across 21 files.
 ## P7-34 — the leave audit PDF, 24 Aug
 
-**Written, NOT YET APPLIED** — `20260824110000_p7_34_leave_report.sql`, by hand
+**Applied**, verified on 25 Aug — `20260824110000_p7_34_leave_report.sql`, pasted by hand
 in the Supabase SQL editor like every other P7 migration. The button exists and
 will fail on a missing function until it is pasted.
 
@@ -512,7 +545,7 @@ the migration is applied.
 
 ## P7-32 / P7-33 — gender and leave balances, 24 Aug
 
-**Written, NOT YET APPLIED.** Two migrations —
+**Applied**, verified against the live project on 25 Aug (the gender column and `vizserve_pms_leave_balances` both answer). Two migrations —
 `20260824090000_p7_32_gender.sql` and `20260824100000_p7_33_leave_balances.sql`
 — are in the repo and, like every other P7 migration, have to be pasted into the
 Supabase SQL editor by hand. Until that happens the screens below will fail on a

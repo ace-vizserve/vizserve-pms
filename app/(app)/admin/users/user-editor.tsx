@@ -94,7 +94,7 @@ export function UserEditor({
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-3xl">
         {/*
           Keyed on who is being edited, and unmounted while closed, so the form
           state is SEEDED rather than SYNCED. An effect that copies props into
@@ -543,11 +543,33 @@ function UserForm({
 
                 return (
                   <div key={type.id} className="flex items-center gap-3">
+                    {/*
+                      THE TEXT IS IN A SPAN, and that is not decoration.
+
+                      `truncate` was on the <Label> itself, and <Label> is
+                      `display: flex` (components/ui/label.tsx). Truncation on a
+                      FLEX CONTAINER does nothing to its text: the text becomes an
+                      anonymous flex item sized to its own content, so the label
+                      refused to shrink and pushed the whole row past the edge of
+                      the dialog — which is where the horizontal scrollbar came
+                      from once P7-36 added a 59-character leave type. Widening
+                      the dialog hid it at one size and not at others.
+
+                      `min-w-0 flex-1` on the label lets it shrink; `truncate` on
+                      the span is what actually ellipsises. The span shrinks
+                      because `overflow: hidden` resolves its automatic minimum
+                      size to zero.
+
+                      `title` carries the full text, since P7-36 is longer than
+                      this row will ever be — the same reason the holiday name on
+                      the shared calendar has one.
+                    */}
                     <Label
                       htmlFor={`allocation-${type.id}`}
-                      className="min-w-0 flex-1 truncate font-normal"
+                      title={type.label}
+                      className="min-w-0 flex-1 font-normal"
                     >
-                      {type.label}
+                      <span className="truncate">{type.label}</span>
                     </Label>
 
                     <Input

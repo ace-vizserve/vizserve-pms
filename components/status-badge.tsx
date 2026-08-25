@@ -17,7 +17,7 @@ import type {
   VizservePmsRequestStatus,
   VizservePmsTaskStatus,
 } from "@/lib/database.types";
-import { INTERNAL_REQUEST_LABELS } from "@/lib/schemas/internal-requests";
+import { internalRequestLabel } from "@/lib/schemas/internal-requests";
 import {
   TASK_CATEGORY_LABELS,
   TASK_PRIORITY_LABELS,
@@ -372,7 +372,10 @@ export function InternalTypeBadge({
   type: VizservePmsInternalRequestType;
   className?: string;
 }) {
-  return <Pill tone="neutral" label={INTERNAL_REQUEST_LABELS[type]} className={className} />;
+  // `internalRequestLabel` rather than a bare lookup: the database enum is
+  // edited by hand in the SQL editor, so it can hold a value this build has
+  // never heard of — and a bare lookup renders that as an EMPTY pill.
+  return <Pill tone="neutral" label={internalRequestLabel(type)} className={className} />;
 }
 
 /**

@@ -68,7 +68,10 @@ const includeForms = process.argv.includes("--forms");
  *   task_transitions                   the state machine — migration-owned, and
  *                                      tests/db/tasks.test.ts asserts it matches
  *                                      lib/schemas/tasks.ts row for row
- *   holidays / leave_types             reference data
+ *   holidays / leave_types             reference data — but see
+ *                                      `sweepTemporaryLeaveTypes` below, which
+ *                                      removes test residue from leave_types
+ *                                      without touching the seeded eight
  *   notification_type_settings         config
  *   attachment_rules                   config
  *   public_submission_limits           rate-limit config
@@ -261,8 +264,68 @@ async function main() {
   }
 
   await reensureFormLists(supabase, includeForms);
+  await sweepTemporaryLeaveTypes(supabase);
 
   console.log(`Done. ${total} rows deleted; accounts and configuration untouched.`);
+}
+
+/**
+ * Remove leave types left behind by the test suite.
+ *
+ * `vizserve_pms_leave_types` is in KEEP because it is reference data — the eight
+ * statutory types the P7-12 migration seeded must survive a purge. But
+ * `tests/db/phase5.test.ts` inserts a throwaway type per run to prove a RETIRED
+ * type is refused on new requests, and until that test was wrapped in try/finally
+ * every failed run abandoned one. Three accumulated in the live project and
+ * showed up in the leave picker as three rows called "Temporary".
+ *
+ * Narrow on purpose. Only the `TEMP_` prefix the test generates, and only rows
+ * NOTHING references — a type somebody actually filed leave against is history
+ * and stays, which is the same rule `on delete restrict` enforces in the schema.
+ * A broad "delete anything that looks like test data" here would eventually eat
+ * a real type somebody named badly.
+ */
+async function sweepTemporaryLeaveTypes(supabase) {
+  const { data: candidates, error } = await supabase
+    .from("vizserve_pms_leave_types")
+    .select("id, code, label")
+    .like("code", "TEMP\\_%");
+
+  if (error) {
+    console.log(`  leave-type sweep skipped (${error.message})`);
+    return;
+  }
+
+  if (!candidates?.length) return;
+
+  let removed = 0;
+  for (const type of candidates) {
+    const [{ count: requests }, { count: balances }] = await Promise.all([
+      supabase
+        .from("vizserve_pms_internal_requests")
+        .select("*", { count: "exact", head: true })
+        .eq("leave_type_id", type.id),
+      supabase
+        .from("vizserve_pms_leave_balances")
+        .select("*", { count: "exact", head: true })
+        .eq("leave_type_id", type.id),
+    ]);
+
+    if (requests || balances) {
+      console.log(`  kept ${type.code} — ${requests} request(s), ${balances} allocation(s) reference it`);
+      continue;
+    }
+
+    const { error: deleteError } = await supabase
+      .from("vizserve_pms_leave_types")
+      .delete()
+      .eq("id", type.id);
+
+    if (deleteError) console.log(`  could not remove ${type.code} — ${deleteError.message}`);
+    else removed += 1;
+  }
+
+  if (removed) console.log(`Removed ${removed} leftover test leave type(s).`);
 }
 
 /**

@@ -26,6 +26,30 @@ export const INTERNAL_REQUEST_TYPES = [
 
 export type InternalRequestType = (typeof INTERNAL_REQUEST_TYPES)[number];
 
+/**
+ * A readable label for a type this build does not know about.
+ *
+ * ⚠️ THIS IS NOT DEFENSIVE PROGRAMMING, it is a guard against a drift that has
+ * already happened. The `vizserve_pms_internal_request_type` enum is edited by
+ * hand in the Supabase SQL editor — every P7 migration landed that way — so the
+ * database can hold a value this file has never heard of. It currently holds
+ * `TIME_IN_CORRECTION`, which appears in no migration in this repo and in no
+ * list below.
+ *
+ * Looking one of those up in `INTERNAL_REQUEST_LABELS` returns undefined, and
+ * the badge then renders an EMPTY PILL — a request whose type is invisible on
+ * the one screen that exists to show it. Falling back to the humanised enum
+ * value is worse than a real label and far better than nothing, and it fails
+ * loudly enough to be noticed and fixed properly.
+ */
+export function internalRequestLabel(type: string): string {
+  return (
+    INTERNAL_REQUEST_LABELS[type as InternalRequestType] ??
+    // NO_TIME_IN -> "No time in". Sentence case, matching the labels below.
+    type.charAt(0).toUpperCase() + type.slice(1).toLowerCase().replaceAll("_", " ")
+  );
+}
+
 export const INTERNAL_REQUEST_LABELS: Record<InternalRequestType, string> = {
   LEAVE: "Leave",
   NO_TIME_IN: "No time-in",

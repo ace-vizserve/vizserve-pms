@@ -1,0 +1,63 @@
+-- ---------------------------------------------------------------------------
+-- P7-36 — VAWC leave joins the list.
+--
+-- Anti-Violence Against Women and Their Children Leave, RA 9262: ten days of
+-- paid leave for a woman who is a victim of violence, to attend to the medical
+-- and legal consequences. Asked for by Amier on 25 Aug 2026, and it belongs on
+-- the list for the same reason the other eight do — it is statutory, so it is
+-- not ours to decline.
+--
+-- THIS IS A ONE-LINE INSERT AND NOT A SCHEMA CHANGE, which is exactly what
+-- P7-12 was arguing for when it made leave types a TABLE rather than an enum:
+--
+--   "A leave type is POLICY DATA. It changes when HR says it changes, it will
+--    gain and lose members, and three migrations in this project have already
+--    had to be split in two because Postgres forbids using a new enum value in
+--    the transaction that adds it."
+--
+-- As an enum this would have been two migrations and a redeployed function. As
+-- a row it is this file. Nothing else in the codebase changes: no constraint,
+-- no function, no type — the picker, the allocation panel and the audit report
+-- all read the table and pick it up on their own.
+--
+-- ON CONFLICT DO NOTHING, and it matters here. This row was inserted into the
+-- live project on 25 Aug so the type would appear immediately, BEFORE this file
+-- existed. A plain insert would then fail on the unique constraint on `code`
+-- the moment somebody pastes this migration, and a migration that cannot be
+-- re-run is a migration nobody trusts to run at all. It is idempotent instead:
+-- applying it to a database that already has the row is a no-op, and applying
+-- it to a fresh one creates it.
+--
+-- sort_order 90, after SPECIAL_WOMEN. The list is ordered by roughly how often
+-- somebody picks it rather than alphabetically — Vacation and Sick first,
+-- because that is what almost everyone files — and this one sits at the end
+-- with the other rarely-used statutory entitlements. It is emphatically NOT a
+-- judgement about importance; it is about how far somebody has to scroll on an
+-- ordinary Tuesday.
+--
+-- ⚠️ APPLY BY HAND, in the Supabase SQL editor, and paste this file as it stands
+-- at that moment. Every P7 migration landed that way and none is recorded in
+-- `supabase_migrations.schema_migrations`.
+-- ---------------------------------------------------------------------------
+
+insert into vizserve_pms_leave_types (code, label, sort_order) values
+  ('VAWC', 'Anti-Violence Against Women and Their Children (VAWC) Leave', 90)
+on conflict (code) do nothing;
+
+-- ---------------------------------------------------------------------------
+-- WHAT DELIBERATELY DOES NOT CHANGE.
+--
+-- `vizserve_pms_leave_calendar` still returns names and dates and NOT the type,
+-- and this row is the strongest argument yet for keeping it that way. P7-12
+-- counted four of the eight types as disclosures in their own right — health,
+-- pregnancy, family structure, gynaecological. VAWC leave is a fifth and the
+-- most sensitive of them: publishing "on VAWC leave" beside somebody's name on
+-- a calendar every colleague can read would broadcast that they are a victim of
+-- domestic violence. The type stays visible to the requester and to the lead
+-- deciding it, through the ordinary policy, and nowhere else.
+--
+-- No allocation is seeded. `vizserve_pms_leave_balances` holds what HR decides
+-- per person per year (D27), and this migration has no business asserting that
+-- everybody now has ten days — the statute grants it to those it covers, and
+-- an admin sets it on the people it applies to.
+-- ---------------------------------------------------------------------------

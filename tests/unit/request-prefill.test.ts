@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
+import {
+  INTERNAL_REQUEST_LABELS,
+  internalRequestLabel,
+  narrowRequestPrefill,
+} from "@/lib/schemas/internal-requests";
 
 /**
  * P7-F — the DTR shortcut's query parameters.
@@ -68,5 +72,34 @@ describe("narrowRequestPrefill", () => {
     // 31 February. This is a URL guard, not a calendar; refusing it here would
     // duplicate a rule that already lives in the schema and the function.
     expect(narrowRequestPrefill({ date: "2026-02-31" }).date).toBe("2026-02-31");
+  });
+});
+
+describe("internalRequestLabel", () => {
+  it("uses the real label for a type this build knows", () => {
+    expect(internalRequestLabel("NO_TIME_IN")).toBe(INTERNAL_REQUEST_LABELS.NO_TIME_IN);
+    expect(internalRequestLabel("LEAVE")).toBe("Leave");
+  });
+
+  it("humanises a type the database has and this build does not", () => {
+    /*
+     * NOT HYPOTHETICAL. The `vizserve_pms_internal_request_type` enum is edited
+     * by hand in the Supabase SQL editor — every P7 migration landed that way —
+     * and the live database currently holds `TIME_IN_CORRECTION`, which appears
+     * in no migration in this repo and in no list in `lib/schemas`.
+     *
+     * A bare `INTERNAL_REQUEST_LABELS[type]` returns undefined for it, and the
+     * badge then renders an EMPTY pill: a request whose type is invisible on the
+     * one screen built to show it.
+     */
+    expect(internalRequestLabel("TIME_IN_CORRECTION")).toBe("Time in correction");
+  });
+
+  it("never returns an empty string", () => {
+    // The failure this exists to prevent is a blank badge, so the one thing the
+    // fallback must never do is produce nothing.
+    for (const type of ["TIME_IN_CORRECTION", "SOMETHING_NEW", "X"]) {
+      expect(internalRequestLabel(type).length).toBeGreaterThan(0);
+    }
   });
 });
