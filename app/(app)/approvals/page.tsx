@@ -6,6 +6,7 @@ import { requireAuthContext } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
+import { leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
@@ -148,9 +149,14 @@ export default async function ApprovalsPage({
     // reference it and must not be selectable for a new one, and the seeded
     // order puts Vacation and Sick first because that is what almost everybody
     // picks.
+    // P7-45 — `applies_to_gender` comes along so the picker can drop the types
+    // this person is not eligible for. Filtered BELOW rather than in the query,
+    // because "or the column is null" plus "or my gender is null" is a
+    // three-way condition that reads far better as the shared predicate than as
+    // a PostgREST `or=` string nobody can check.
     supabase
       .from("vizserve_pms_leave_types")
-      .select("id, label")
+      .select("id, label, applies_to_gender")
       .eq("is_active", true)
       .order("sort_order"),
 
@@ -166,6 +172,19 @@ export default async function ApprovalsPage({
     // that must render whether or not the entitlement figures came back.
     supabase.rpc("vizserve_pms_leave_balance_summary", {}),
   ]);
+
+  /*
+   * P7-45 — only the types this person may actually file.
+   *
+   * Maternity, Special Leave for Women and VAWC are FEMALE; Paternity is MALE;
+   * everything else applies to everyone. A gender that was never recorded sees
+   * the whole list — `leaveTypeApplies` and the database trigger agree on that,
+   * and they have to: a picker offering something the insert then refuses is
+   * worse than either rule on its own.
+   */
+  const pickableLeaveTypes = (leaveTypes ?? []).filter((type) =>
+    leaveTypeApplies(type.applies_to_gender, context.gender),
+  );
 
   const fetched = (data ?? []) as unknown as Row[];
   const truncated = fetched.length > APPROVALS_PAGE_SIZE;
@@ -187,7 +206,7 @@ export default async function ApprovalsPage({
           request that would overdraw it.
         </p>
         <NewRequestDialog
-          leaveTypes={leaveTypes ?? []}
+          leaveTypes={pickableLeaveTypes}
           balances={balances ?? []}
           // Read from the resolved auth context rather than re-queried: it is
           // the same row the submit function will consult, so the form cannot

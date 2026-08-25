@@ -8,6 +8,12 @@ import {
   isSameMonth,
   monthGrid,
 } from "@/lib/dates";
+import {
+  EVENT_CATEGORIES,
+  EVENT_CATEGORY_LABELS,
+  EVENT_CATEGORY_TONE,
+  type EventCategory,
+} from "@/lib/schemas/events";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
 
@@ -78,6 +84,23 @@ export type { LeaveSpan } from "./leave-entry";
 /** P7-35. A day nobody is scheduled to work. `date` is `YYYY-MM-DD`. */
 export type Holiday = { date: string; name: string };
 
+/**
+ * P7-46 — something HAPPENING on a day, as opposed to a day off.
+ *
+ * A span like leave, not a single date like a holiday, because an offsite
+ * runs Tuesday to Thursday. `scope` is what the cell prints — "Company-wide"
+ * or the department name — since for a department event the word "Department"
+ * says nothing the team name does not say better.
+ */
+export type CalendarEvent = {
+  id: string;
+  title: string;
+  category: EventCategory;
+  scope: string;
+  start: string;
+  end: string;
+};
+
 /** What lands on a given day, resolved once rather than per cell per span. */
 function spansByDay(spans: LeaveSpan[], days: string[]): Map<string, LeaveSpan[]> {
   const byDay = new Map<string, LeaveSpan[]>();
@@ -98,6 +121,7 @@ export function LeaveCalendar({
   today,
   spans,
   holidays = [],
+  events = [],
   className,
 }: {
   /** Any date in the month being shown. */
@@ -106,6 +130,8 @@ export function LeaveCalendar({
   spans: LeaveSpan[];
   /** P7-35. Admin-maintained at /admin/holidays; read-only here. */
   holidays?: Holiday[];
+  /** P7-46. Admin-maintained at /admin/events; read-only here. */
+  events?: CalendarEvent[];
   className?: string;
 }) {
   const days = monthGrid(month);
@@ -113,6 +139,20 @@ export function LeaveCalendar({
   // A Map rather than a scan per cell: the grid is 42 cells and the list is a
   // year of holidays, so this is one pass instead of 42 of them.
   const holidayByDay = new Map(holidays.map((holiday) => [holiday.date, holiday.name]));
+
+  /*
+   * P7-46 — events per day.
+   *
+   * Resolved once for the whole grid rather than filtered per cell, the same
+   * way `spansByDay` handles leave. A closed interval compared as strings works
+   * because `YYYY-MM-DD` sorts lexicographically — the one thing that format is
+   * good for, and the reason every date in this app is stored as one.
+   */
+  const eventsByDay = new Map<string, CalendarEvent[]>();
+  for (const day of days) {
+    const hits = events.filter((event) => event.start <= day && event.end >= day);
+    if (hits.length > 0) eventsByDay.set(day, hits);
+  }
 
   const previous = addMonths(month, -1);
   const next = addMonths(month, 1);
@@ -181,6 +221,7 @@ export function LeaveCalendar({
             const pendingOnly = hits.length > 0 && hits.every((span) => span.pending);
             const isToday = day === today;
             const holiday = holidayByDay.get(day);
+            const dayEvents = eventsByDay.get(day) ?? [];
             // Named once rather than written as `holiday ? 1 : 2` in three
             // places — the slice and the counter that reads it have to agree,
             // and they are eight lines apart.
@@ -245,6 +286,33 @@ export function LeaveCalendar({
                   </span>
                 ) : null}
 
+                {/* P7-46 — events, under any holiday name and above the leave
+                    names. The ordering is the cell's priority: a day nobody
+                    works outranks a thing happening on it, which outranks who
+                    happens to be away.
+
+                    Each carries its TITLE, so the category colour is never the
+                    only thing saying what it is, and a `title` attribute with
+                    the scope because "Q4 Town Hall" in a 90px cell is going to
+                    truncate however careful the wording. */}
+                {dayEvents.slice(0, 1).map((event) => (
+                  <span
+                    key={event.id}
+                    title={`${event.title} — ${event.scope}`}
+                    className={cn(
+                      "truncate text-2xs font-medium",
+                      EVENT_CATEGORY_TONE[event.category].text,
+                    )}
+                  >
+                    {event.title}
+                  </span>
+                ))}
+                {dayEvents.length > 1 ? (
+                  <span className="text-2xs text-muted-foreground">
+                    +{dayEvents.length - 1} event{dayEvents.length - 1 === 1 ? "" : "s"}
+                  </span>
+                ) : null}
+
                 {/* Two names, then a count. Three names in a 90px cell is three
                     truncated names, which tells you less than "+2 more". One
                     fewer on a holiday cell, since the holiday name took a line. */}
@@ -289,6 +357,25 @@ export function LeaveCalendar({
             />
             Holiday
           </span>
+
+          {/* P7-46. One swatch per category, and the label beside it is what
+              actually carries the meaning — the tints exist so a glance can
+              group them, not so colour alone has to be decoded. Rendered from
+              the same constant the admin screen and the event pills use, so a
+              fourth category could never appear in one place and not the
+              other. */}
+          {EVENT_CATEGORIES.map((category) => (
+            <span key={category} className="inline-flex items-center gap-1.5">
+              <span
+                aria-hidden
+                className={cn(
+                  "size-2.5 shrink-0 rounded-xs border",
+                  EVENT_CATEGORY_TONE[category].swatch,
+                )}
+              />
+              {EVENT_CATEGORY_LABELS[category].label}
+            </span>
+          ))}
           <span className="inline-flex items-center gap-1.5">
             <span
               aria-hidden

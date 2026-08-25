@@ -5,6 +5,7 @@ import {
   balanceYearSchema,
   currentBalanceYear,
   formatDays,
+  leaveTypeApplies,
   setLeaveAllocationsSchema,
 } from "@/lib/schemas/leave-balances";
 
@@ -159,5 +160,61 @@ describe("currentBalanceYear", () => {
     // everybody last year's allocation against this year's first request.
     expect(currentBalanceYear("2026-01-01")).toBe(2026);
     expect(currentBalanceYear("2026-12-31")).toBe(2026);
+  });
+});
+
+describe("leaveTypeApplies", () => {
+  /*
+   * P7-45 — which leave types a person may file.
+   *
+   * THIS PREDICATE AND `vizserve_pms_leave_type_applies_check` MUST AGREE. The
+   * trigger refuses the insert; this decides what the picker offers. If they
+   * disagree in the permissive direction the user picks something the database
+   * then rejects with a raw error, which is a worse experience than either rule
+   * on its own — so the two null cases below are the load-bearing ones.
+   */
+
+  it("offers an unrestricted type to everyone", () => {
+    // Vacation, Sick, Service Incentive, Birthday, Solo Parent. Solo Parent is
+    // deliberately unrestricted: RA 8972 covers solo parents of either sex.
+    expect(leaveTypeApplies(null, "MALE")).toBe(true);
+    expect(leaveTypeApplies(null, "FEMALE")).toBe(true);
+    expect(leaveTypeApplies(null, null)).toBe(true);
+  });
+
+  it("hides a female-only type from a man", () => {
+    // Maternity, Special Leave for Women, VAWC.
+    expect(leaveTypeApplies("FEMALE", "MALE")).toBe(false);
+  });
+
+  it("hides a male-only type from a woman", () => {
+    // Paternity.
+    expect(leaveTypeApplies("MALE", "FEMALE")).toBe(false);
+  });
+
+  it("offers a restricted type to the gender it applies to", () => {
+    expect(leaveTypeApplies("FEMALE", "FEMALE")).toBe(true);
+    expect(leaveTypeApplies("MALE", "MALE")).toBe(true);
+  });
+
+  it("offers everything when the person's gender was never recorded", () => {
+    /*
+     * THE CASE THAT DECIDES WHO GETS PUNISHED. P7-32 left `gender` nullable so
+     * the auth trigger could create a profile row the instant an Entra identity
+     * signs in — so "not recorded" means an ADMIN has not finished that record.
+     *
+     * Refusing here would block a colleague from filing leave because of
+     * somebody else's unfinished admin. The trigger takes the same view.
+     */
+    expect(leaveTypeApplies("FEMALE", null)).toBe(true);
+    expect(leaveTypeApplies("MALE", null)).toBe(true);
+    expect(leaveTypeApplies("FEMALE", undefined)).toBe(true);
+  });
+
+  it("treats undefined like null on both sides", () => {
+    // `undefined` arrives from a row selected without the column. It must not
+    // read as "restricted to nothing".
+    expect(leaveTypeApplies(undefined, "MALE")).toBe(true);
+    expect(leaveTypeApplies(undefined, undefined)).toBe(true);
   });
 });

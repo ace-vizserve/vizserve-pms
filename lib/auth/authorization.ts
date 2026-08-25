@@ -40,11 +40,25 @@ export { ROLE_ORDER, roleAtLeast, type Role };
 /** Re-exported so every authorization concern is imported from one module. */
 export { APP_ACCESS_KEY };
 
+import type { Gender } from "@/lib/schemas/users";
+
 export type AuthContext = {
   userId: string;
   email: string;
   fullName: string;
   role: Role;
+  /**
+   * P7-45. Decides which leave types this person may file. NULL means it was
+   * never recorded, which is a real state — the auth trigger creates profile
+   * rows with no gender to supply — and is treated as "offer everything"
+   * rather than "offer nothing".
+   *
+   * NOT AN AUTHORIZATION INPUT, despite living on the auth context. Nothing
+   * here grants or withholds access; it narrows a picker. It rides along
+   * because the profile row is already being read and a second query for one
+   * column on every leave screen would be waste.
+   */
+  gender: Gender | null;
   /** The department the user *belongs to*. Not the same as what they lead. */
   primaryDepartmentId: string | null;
   /** The departments they lead or oversee. Empty for a plain member. */
@@ -95,7 +109,9 @@ export const resolveAuth = cache(
 
     const { data: profile } = await supabase
       .from("vizserve_pms_users")
-      .select("id, email, full_name, role, primary_department_id, is_active, app_access")
+      .select(
+        "id, email, full_name, gender, role, primary_department_id, is_active, app_access",
+      )
       .eq("id", user.id)
       .maybeSingle();
 
@@ -133,6 +149,7 @@ export const resolveAuth = cache(
         userId: profile.id,
         email: profile.email,
         fullName: profile.full_name,
+        gender: profile.gender,
         role: profile.role,
         primaryDepartmentId: profile.primary_department_id,
         managedDepartmentIds: (managed ?? []).map((row) => row.department_id),

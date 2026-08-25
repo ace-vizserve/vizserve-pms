@@ -62,6 +62,7 @@ export type NavIconName =
   | "inbox"
   | "users"
   | "calendar-off"
+  | "calendar-days"
   | "settings";
 
 export const NAV_ITEMS: NavItem[] = [
@@ -170,6 +171,17 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "calendar-off",
   },
   {
+    label: "Events",
+    href: "/admin/events",
+    minRole: "admin",
+    // P7-46. Sits directly under Holidays because the two are the halves of
+    // "what is on the calendar that is not leave" — and because the difference
+    // between them matters: a holiday is a day off and changes leave
+    // arithmetic, an event is a thing happening and changes nothing.
+    enabled: true,
+    icon: "calendar-days",
+  },
+  {
     label: "Settings",
     href: "/admin/settings",
     minRole: "admin",
@@ -233,7 +245,11 @@ export const NAV_GROUPS: NavGroup[] = [
   // them side by side in the rail in the first place.
   { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
   { label: "Manage", hrefs: ["/forms", "/reports"] },
-  { label: "Admin", hrefs: ["/admin/users", "/admin/holidays", "/admin/settings"], pinBottom: true },
+  {
+    label: "Admin",
+    hrefs: ["/admin/users", "/admin/holidays", "/admin/events", "/admin/settings"],
+    pinBottom: true,
+  },
 ];
 
 /**

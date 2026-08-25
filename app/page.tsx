@@ -24,7 +24,13 @@ import { createClient } from "@/utils/supabase/server";
 import { signOut } from "@/app/login/actions";
 
 import { PunchPanel } from "@/app/(app)/dtr/punch-panel";
-import { LeaveCalendar, type Holiday, type LeaveSpan } from "./_home/leave-calendar";
+import { eventScopeLabel, type EventCategory } from "@/lib/schemas/events";
+import {
+  LeaveCalendar,
+  type CalendarEvent,
+  type Holiday,
+  type LeaveSpan,
+} from "./_home/leave-calendar";
 import { LeaveTooltip } from "./_home/leave-entry";
 import { Cell, CellBody, CellHead, StatStrip, initials } from "./_home/home-widgets";
 
@@ -99,6 +105,7 @@ export default async function DashboardPage({
     approvedLeave,
     myPendingLeave,
     holidayRows,
+    eventRows,
   ] = await Promise.all([
     loadPunchState(context.userId),
 
@@ -195,6 +202,25 @@ export default async function DashboardPage({
       .select("holiday_date, name")
       .gte("holiday_date", gridFrom)
       .lte("holiday_date", gridTo),
+
+    /*
+     * P7-46 — events, maintained by an admin at /admin/events.
+     *
+     * OVERLAP, not containment, and the same window the leave spans use. An
+     * offsite running 28 Aug – 3 Sep belongs on both months'' grids;
+     * `start_date >= gridFrom` would drop it from September, where people are
+     * still living through it.
+     *
+     * A plain select, like the holidays above and unlike the leave RPC: an
+     * event has nothing private in it, so the policy "any active user reads" is
+     * exactly the audience of this calendar.
+     */
+    supabase
+      .from("vizserve_pms_events")
+      .select("id, title, category, department_id, start_date, end_date, vizserve_pms_departments(name)")
+      .lte("start_date", gridTo)
+      .gte("end_date", gridFrom)
+      .order("start_date"),
   ]);
 
   // ---------------------------------------------------------------- waiting
@@ -247,6 +273,27 @@ export default async function DashboardPage({
   const holidays: Holiday[] = (holidayRows.data ?? []).map((row) => ({
     date: row.holiday_date,
     name: row.name,
+  }));
+
+  // The department name is embedded rather than fetched separately, because
+  // `eventScopeLabel` needs it to print "VizMedia" instead of the useless word
+  // "Department" on a cell.
+  const calendarEvents: CalendarEvent[] = (
+    (eventRows.data ?? []) as unknown as Array<{
+      id: string;
+      title: string;
+      category: EventCategory;
+      start_date: string;
+      end_date: string;
+      vizserve_pms_departments: { name: string } | null;
+    }>
+  ).map((row) => ({
+    id: row.id,
+    title: row.title,
+    category: row.category,
+    scope: eventScopeLabel(row.category, row.vizserve_pms_departments?.name),
+    start: row.start_date,
+    end: row.end_date,
   }));
 
   // Out today comes from the SAME spans the calendar paints, so the widget and
@@ -568,6 +615,7 @@ export default async function DashboardPage({
             today={today}
             spans={spans}
             holidays={holidays}
+            events={calendarEvents}
             className="sm:col-span-6"
           />
         </div>

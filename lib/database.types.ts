@@ -70,6 +70,14 @@ export type VizservePmsLeaveCalendarVisibility = "FULL" | "LABEL_HIDDEN" | "HIDD
 export type VizservePmsGender = "MALE" | "FEMALE";
 
 /**
+ * P7-46. An ENUM rather than a table, which is the other side of the P7-12
+ * argument: leave types are policy data HR edits, these three are structural.
+ * `DEPARTMENT` is the only one carrying a department_id, the shape constraint
+ * branches on that, and the calendar paints one colour per member.
+ */
+export type VizservePmsEventCategory = "COMPANY" | "MANAGEMENT" | "DEPARTMENT";
+
+/**
  * P7-38 added the last two. NO_TIME_* means there is no punch to read;
  * *_CORRECTION means there is one and it is wrong. Same payload, same DTR
  * write-back, different claim — see the migration's header for why they are not
@@ -1010,6 +1018,56 @@ export type Database = {
         ];
       };
       /** Mirrored in lib/dates.ts PH_HOLIDAYS; a test asserts they agree. */
+      /**
+       * P7-46. Things HAPPENING, not days off.
+       *
+       * ⚠️ Deliberately NOT `vizserve_pms_holidays`. That table decides working
+       * days — `vizserve_pms_leave_days` and `vizserve_pms_add_business_days`
+       * both read it — so a row there changes leave balances and client
+       * deadlines. Nothing here feeds any of that, and nothing ever should.
+       */
+      vizserve_pms_events: {
+        Row: {
+          id: string;
+          title: string;
+          description: string | null;
+          category: VizservePmsEventCategory;
+          /** Set on DEPARTMENT, null on COMPANY and MANAGEMENT. */
+          department_id: string | null;
+          start_date: string;
+          /** Inclusive. A single-day event has end_date === start_date. */
+          end_date: string;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          description?: string | null;
+          category: VizservePmsEventCategory;
+          department_id?: string | null;
+          start_date: string;
+          end_date: string;
+          created_by?: string | null;
+        };
+        Update: Partial<{
+          title: string;
+          description: string | null;
+          category: VizservePmsEventCategory;
+          department_id: string | null;
+          start_date: string;
+          end_date: string;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_events_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_holidays: {
         Row: { holiday_date: string; name: string; created_at: string };
         Insert: { holiday_date: string; name: string };
@@ -1041,6 +1099,13 @@ export type Database = {
            * LABEL_HIDDEN on MATERNITY, FULL on everything else — SICK included.
            */
           calendar_visibility: VizservePmsLeaveCalendarVisibility;
+          /**
+           * P7-45. NULL means the type applies to everyone, which is the
+           * default and the common case. A value restricts it — Maternity,
+           * Special Leave for Women and VAWC to FEMALE, Paternity to MALE —
+           * and is enforced by a trigger as well as filtered in the UI.
+           */
+          applies_to_gender: VizservePmsGender | null;
           created_at: string;
           updated_at: string;
         };
@@ -1051,6 +1116,7 @@ export type Database = {
           is_active?: boolean;
           sort_order?: number;
           calendar_visibility?: VizservePmsLeaveCalendarVisibility;
+          applies_to_gender?: VizservePmsGender | null;
         };
         Update: Partial<{
           code: string;
@@ -1058,6 +1124,7 @@ export type Database = {
           is_active: boolean;
           sort_order: number;
           calendar_visibility: VizservePmsLeaveCalendarVisibility;
+          applies_to_gender: VizservePmsGender | null;
         }>;
         Relationships: [];
       };
@@ -1931,6 +1998,7 @@ export type Database = {
       vizserve_pms_internal_request_status: VizservePmsInternalRequestStatus;
       vizserve_pms_timesheet_week_status: VizservePmsTimesheetWeekStatus;
       vizserve_pms_gender: VizservePmsGender;
+      vizserve_pms_event_category: VizservePmsEventCategory;
     };
     CompositeTypes: Record<never, never>;
   };
@@ -1944,6 +2012,7 @@ export type DtrEntryRow = Database["public"]["Tables"]["vizserve_pms_dtr_entries
 export type InternalRequestRow =
   Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];
 export type LeaveTypeRow = Database["public"]["Tables"]["vizserve_pms_leave_types"]["Row"];
+export type EventRow = Database["public"]["Tables"]["vizserve_pms_events"]["Row"];
 export type LeaveBalanceRow =
   Database["public"]["Tables"]["vizserve_pms_leave_balances"]["Row"];
 /** One line of the P7-33 summary: a type, what was allocated, and what is left. */

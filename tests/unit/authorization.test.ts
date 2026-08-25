@@ -27,6 +27,9 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
     userId: "00000000-0000-4000-8000-000000000001",
     email: "test.someone@example.com",
     fullName: "Test Someone",
+    // P7-45. Not an authorization input — it narrows the leave picker — but the
+    // context carries it, so the factory has to supply a default.
+    gender: null,
     primaryDepartmentId: null,
     managedDepartmentIds: [],
     ...overrides,

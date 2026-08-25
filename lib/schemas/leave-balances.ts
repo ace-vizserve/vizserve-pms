@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import type { VizservePmsGender } from "@/lib/database.types";
+
 /**
  * P7-33 CONTRACT — leave allocations.
  *
@@ -18,6 +20,29 @@ import { z } from "zod";
  * See D27 in docs/00-README.md for why balances exist at all, given that Phase 5
  * shipped a build-failing test to keep them out.
  */
+
+/**
+ * P7-45 — does this leave type apply to this person?
+ *
+ * ONE PREDICATE, TWO CALLERS: the filing picker and the admin allocation
+ * panel. Written once rather than as two inline conditions, for the reason the
+ * migration gives — a rule spelled out in several places goes stale in all but
+ * one of them.
+ *
+ * BOTH NULLS PASS, matching `vizserve_pms_leave_type_applies_check` exactly:
+ * a type with no restriction applies to everybody, and a person whose gender
+ * has never been recorded is offered everything rather than nothing. The UI and
+ * the trigger MUST agree — a picker that offers a type the database then
+ * refuses is worse than either rule on its own.
+ */
+export function leaveTypeApplies(
+  appliesToGender: VizservePmsGender | null | undefined,
+  personGender: VizservePmsGender | null | undefined,
+): boolean {
+  if (!appliesToGender) return true;
+  if (!personGender) return true;
+  return appliesToGender === personGender;
+}
 
 /**
  * Blank becomes NaN, which `z.number()` refuses.

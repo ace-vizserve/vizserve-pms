@@ -48,6 +48,29 @@
   --color-success: var(--success);
   --color-success-subtle: var(--success-subtle);
   --color-success-border: var(--success-border);
+
+  /*
+   * P7-46 — the three calendar event categories.
+   *
+   * THEIR OWN FAMILIES RATHER THAN REUSED SEMANTIC ONES, because the shared
+   * calendar had already spent every semantic colour it has: `info` is approved
+   * leave, `warning` is your own pending leave, `success` is a holiday and
+   * `accent` is today. Painting a company event in any of those would make it
+   * read as one of them at a glance, which on a calendar is the entire failure
+   * mode.
+   *
+   * Colour is never the only carrier here either — every event renders its
+   * title, and the legend names each category.
+   */
+  --color-event-company: var(--event-company);
+  --color-event-company-subtle: var(--event-company-subtle);
+  --color-event-company-border: var(--event-company-border);
+  --color-event-management: var(--event-management);
+  --color-event-management-subtle: var(--event-management-subtle);
+  --color-event-management-border: var(--event-management-border);
+  --color-event-department: var(--event-department);
+  --color-event-department-subtle: var(--event-department-subtle);
+  --color-event-department-border: var(--event-department-border);
   --color-warning: var(--warning);
   --color-warning-subtle: var(--warning-subtle);
   --color-warning-border: var(--warning-border);
@@ -291,6 +314,24 @@
   --success: #1c7a52;
   --success-subtle: #e8f3ee;
   --success-border: #bfdcce;
+
+  /*
+   * P7-46 — event categories. Violet, teal and amber-brown: three hues that are
+   * not the blue of `info`, the green of `success` or the orange of `warning`,
+   * and that stay distinguishable from each other for the common forms of colour
+   * blindness — deuteranopia collapses red/green, and none of these three is
+   * either. The foreground values are the ones measured against their own
+   * subtle background, since that is the only pairing the calendar uses.
+   */
+  --event-company: #6b3fa0;
+  --event-company-subtle: #f2ecfa;
+  --event-company-border: #d6c4ea;
+  --event-management: #0f6f7a;
+  --event-management-subtle: #e6f3f5;
+  --event-management-border: #b7dbe0;
+  --event-department: #8a5a12;
+  --event-department-subtle: #fbf1e2;
+  --event-department-border: #ecd6ae;
   --warning: #8a6206;
   --warning-subtle: #fbf2e0;
   --warning-border: #e8d6ac;
@@ -411,6 +452,19 @@
   --success: #4cb483;
   --success-subtle: #152720;
   --success-border: #264334;
+
+  /* P7-46. Same three hues, lifted for a dark ground the way every family
+     above is: the text tone brightens, the surface drops to near-black with a
+     trace of the hue, and the border sits between them. */
+  --event-company: #b794e8;
+  --event-company-subtle: #1d1630;
+  --event-company-border: #362a52;
+  --event-management: #5cc4d0;
+  --event-management-subtle: #0f2529;
+  --event-management-border: #1d4148;
+  --event-department: #d9a961;
+  --event-department-subtle: #2a1f10;
+  --event-department-border: #4a3819;
   --warning: #d8a94a;
   --warning-subtle: #2a2213;
   --warning-border: #463a1f;

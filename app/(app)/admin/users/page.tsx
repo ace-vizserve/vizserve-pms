@@ -33,37 +33,48 @@ export default async function UsersPage() {
   // would open on last year's allocations.
   const balanceYear = currentBalanceYear(todayInAppZone());
 
-  const [{ data: users }, { data: departments }, { data: managed }, { data: leaveTypes }, { data: allocations }] =
-    await Promise.all([
-      supabase
-        .from("vizserve_pms_users")
-        .select(
-          "id, email, full_name, gender, role, primary_department_id, is_active, app_access, work_start, work_end",
-        )
-        // Deactivated accounts sink to the bottom; the rest read alphabetically.
-        .order("is_active", { ascending: false })
-        .order("full_name"),
-      supabase.from("vizserve_pms_departments").select("id, name").order("name"),
-      supabase.from("vizserve_pms_user_managed_departments").select("user_id, department_id"),
+  const [
+    { data: users },
+    { data: departments },
+    { data: managed },
+    { data: leaveTypes },
+    { data: allocations },
+  ] = await Promise.all([
+    supabase
+      .from("vizserve_pms_users")
+      .select(
+        "id, email, full_name, gender, role, primary_department_id, is_active, app_access, work_start, work_end",
+      )
+      // Deactivated accounts sink to the bottom; the rest read alphabetically.
+      .order("is_active", { ascending: false })
+      .order("full_name"),
+    supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+    supabase
+      .from("vizserve_pms_user_managed_departments")
+      .select("user_id, department_id"),
 
-      // Active types only, in the list's own order — the same rule the filing
-      // dialog follows. A retired type must not be allocatable for next year,
-      // though an allocation already made against one keeps its row.
-      supabase
-        .from("vizserve_pms_leave_types")
-        .select("id, label")
-        .eq("is_active", true)
-        .order("sort_order"),
+    // Active types only, in the list's own order — the same rule the filing
+    // dialog follows. A retired type must not be allocatable for next year,
+    // though an allocation already made against one keeps its row.
+    supabase
+      // P7-45 — `applies_to_gender` rides along so the editor can hide the
+      // types the person being edited is not eligible for. Filtered in the
+      // browser rather than here, because it keys off the gender SELECTED IN THE
+      // FORM, which the server has not been told about yet.
+      .from("vizserve_pms_leave_types")
+      .select("id, label, applies_to_gender")
+      .eq("is_active", true)
+      .order("sort_order"),
 
-      // ALLOCATIONS ONLY, not the used/remaining summary. That summary is one
-      // RPC per person and this page is the whole staff list; it is fetched by
-      // the editor when a dialog actually opens. What lands here is the number
-      // an admin types, which the dialog needs seeded before it can render.
-      supabase
-        .from("vizserve_pms_leave_balances")
-        .select("user_id, leave_type_id, days_allocated")
-        .eq("balance_year", balanceYear),
-    ]);
+    // ALLOCATIONS ONLY, not the used/remaining summary. That summary is one
+    // RPC per person and this page is the whole staff list; it is fetched by
+    // the editor when a dialog actually opens. What lands here is the number
+    // an admin types, which the dialog needs seeded before it can render.
+    supabase
+      .from("vizserve_pms_leave_balances")
+      .select("user_id, leave_type_id, days_allocated")
+      .eq("balance_year", balanceYear),
+  ]);
 
   // Grouped in one pass rather than a query per user — this table is the whole
   // staff list and N+1 here is a visible page load.
@@ -95,8 +106,9 @@ export default async function UsersPage() {
           because it is the one thing the screen cannot show: the role ladder is
           inclusive, so the column reading "Manager" is a floor, not a set. */}
       <p className="text-xs text-muted-foreground">
-        Roles are inclusive — an admin can do everything a manager can, and so on down. What a
-        person can <em>reach</em> is decided by the departments they lead, not by the role alone.
+        Roles are inclusive — an admin can do everything a manager can, and so
+        on down. What a person can <em>reach</em> is decided by the departments
+        they lead, not by the role alone.
       </p>
 
       <UsersTable

@@ -28,7 +28,7 @@ import { TimePicker } from "@/components/ui/time-picker";
 import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import { ROLE_ORDER, type Role } from "@/lib/auth/roles";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
-import { formatDays } from "@/lib/schemas/leave-balances";
+import { formatDays, leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { GENDER_LABELS, type Gender, ROLE_LABELS } from "@/lib/schemas/users";
 
 import { createUser, readLeaveBalances, setLeaveAllocations, updateUser } from "./actions";
@@ -50,7 +50,12 @@ import { createUser, readLeaveBalances, setLeaveAllocations, updateUser } from "
 export type Department = { id: string; name: string };
 
 /** P7-33 — the pickable leave types, in the list's own `sort_order`. */
-export type AllocatableLeaveType = { id: string; label: string };
+export type AllocatableLeaveType = {
+  id: string;
+  label: string;
+  /** P7-45. NULL applies to everyone; a value restricts the type. */
+  applies_to_gender: Gender | null;
+};
 
 export type EditableUser = {
   id: string;
@@ -203,6 +208,23 @@ function UserForm({
    * on <UserForm>. A type with no allocation row starts blank, not "0", so
    * "nobody has set this" and "deliberately zero" look different on screen.
    */
+  /*
+   * P7-45 — the types this person is eligible for, derived from the gender
+   * SELECTED IN THIS FORM rather than the one on the saved record.
+   *
+   * That is what makes the list react: switch the picker above from Male to
+   * Female and Paternity disappears while Maternity, Special Leave for Women
+   * and VAWC appear, before anything is saved. Reading `user.gender` instead
+   * would show the previous answer until the dialog was reopened.
+   *
+   * Rows for types that no longer apply are HIDDEN, not deleted. An allocation
+   * already recorded against one stays in the database untouched — see the
+   * submit path, which only sends what is on screen.
+   */
+  const applicableLeaveTypes = leaveTypes.filter((type) =>
+    leaveTypeApplies(type.applies_to_gender, gender),
+  );
+
   const [allocations, setAllocations] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       leaveTypes.map((type) => {
@@ -593,7 +615,7 @@ function UserForm({
           requests every time it is read, which is why an admin can change an
           allocation without anything needing to be recalculated.
         */}
-        {leaveTypes.length > 0 ? (
+        {applicableLeaveTypes.length > 0 ? (
           <div className="space-y-3 rounded-lg border p-4">
             <div>
               <Label>Leave allocation for {balanceYear}</Label>
@@ -605,7 +627,7 @@ function UserForm({
             </div>
 
             <div className="space-y-2">
-              {leaveTypes.map((type) => {
+              {applicableLeaveTypes.map((type) => {
                 const entered = allocations[type.id] ?? "";
                 const used = usedByType.get(type.id);
                 const allocated = Number(entered);
