@@ -1,0 +1,171 @@
+<div
+  style="
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    color: #202020;
+  "
+>
+  <div style="font-size: 15px; line-height: 1.6">{{intro}}</div>
+
+  <div style="margin-top: 20px; padding: 16px; background-color: #4359a5; border-radius: 8px">
+    <div
+      style="
+        color: #ffffff;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        opacity: 0.85;
+      "
+    >
+      {{reference_no}}
+    </div>
+    <div style="color: #ffffff; font-size: 20px; font-weight: 700; margin-top: 4px">
+      {{status_label}}
+    </div>
+  </div>
+
+  <div
+    style="
+      margin-top: 20px;
+      padding: 16px;
+      background-color: #f7f8fa;
+      border-left: 3px solid #4359a5;
+      border-radius: 0 6px 6px 0;
+    "
+  >
+    <div
+      style="
+        color: #5f6368;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 6px;
+      "
+    >
+      What this means
+    </div>
+    <div style="color: #202020; font-size: 15px; line-height: 1.6; white-space: pre-wrap">
+      {{status_note}}
+    </div>
+  </div>
+
+  <div style="margin-top: 20px; padding: 15px; background-color: #f7f8fa; border-radius: 8px">
+    <table role="presentation" style="width: 100%; border-collapse: collapse">
+      <tr>
+        <td
+          style="
+            padding: 8px 0;
+            border-bottom: 1px solid #e4e6eb;
+            width: 38%;
+            vertical-align: top;
+          "
+        >
+          <strong style="color: #4359a5">Request:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          {{title}}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">From:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          {{requester_name}} &middot; {{requester_org}}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">Email:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          {{requester_email}}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">Form:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          {{form_name}}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">Date requested:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          {{target_date}}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; vertical-align: top">
+          <strong style="color: #4359a5">Submitted:</strong>
+        </td>
+        <td style="padding: 8px 0; vertical-align: top">{{submitted_at}}</td>
+      </tr>
+    </table>
+  </div>
+
+  <div
+    style="
+      margin-top: 20px;
+      padding: 15px 0;
+      border-width: 1px 0;
+      border-style: dashed;
+      border-color: #d9dce1;
+    "
+  >
+    <table role="presentation">
+      <tr>
+        <td style="vertical-align: top">
+          <div
+            style="
+              padding: 6px 10px;
+              margin: 0 10px 0 0;
+              background-color: #eef1f8;
+              border-radius: 5px;
+              font-size: 26px;
+            "
+            role="img"
+          >
+            📝
+          </div>
+        </td>
+        <td style="vertical-align: top">
+          <div style="color: #202020; font-size: 16px"><strong>{{requester_name}}</strong></div>
+          <div style="color: #9aa0a6; font-size: 13px">{{submitted_at}}</div>
+          <p
+            style="
+              font-size: 15px;
+              color: #333333;
+              line-height: 1.6;
+              white-space: pre-wrap;
+              margin: 8px 0 0;
+            "
+          >
+            {{description}}
+          </p>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <div
+    style="
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #fff3e0;
+      border-left: 4px solid #ff8930;
+      border-radius: 4px;
+    "
+  >
+    <p style="margin: 0; color: #666666; font-size: 13px; line-height: 1.6">
+      Quote <strong>{{reference_no}}</strong> in any reply about this request.
+    </p>
+  </div>
+
+  <p style="margin-top: 20px; color: #5f6368; font-size: 12px; line-height: 1.5">
+    Sent by VizServe PMS.
+  </p>
+</div>

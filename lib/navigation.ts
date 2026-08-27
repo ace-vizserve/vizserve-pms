@@ -193,6 +193,26 @@ export const NAV_ITEMS: NavItem[] = [
   },
 ];
 
+/**
+ * A count for a sidebar badge, or null when there is nothing to show.
+ *
+ * NULL AT ZERO, not "0". A badge reading zero is worse than no badge: it
+ * draws the eye to a row with nothing behind it, and after a week people stop
+ * looking at the one that does have something.
+ *
+ * Capped at "99+" because the sidebar rail is a fixed width and a four-digit
+ * count either truncates or pushes the label out of the row. Beyond about
+ * fifty the exact number changes nothing anybody does.
+ *
+ * Formatted HERE rather than in the sidebar, so a badge is a pre-rendered
+ * string by the time it reaches the component — arithmetic in a presentation
+ * component is how two badges end up capping differently.
+ */
+export function formatNavBadge(count: number): string | null {
+  if (count <= 0) return null;
+  return count > 99 ? "99+" : String(count);
+}
+
 const ROLE_ORDER: Role[] = ["member", "team_leader", "manager", "admin"];
 
 /**

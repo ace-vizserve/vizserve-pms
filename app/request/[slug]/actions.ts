@@ -3,6 +3,8 @@
 import { headers } from "next/headers";
 
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { sendRequestSubmittedEmail } from "@/lib/email/client-emails";
 import { uploadPendingAttachment, type UploadResult } from "@/lib/attachments-server";
 import {
   attachmentRefSchema,
@@ -64,7 +66,70 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
   }
 
   const result = submissionResultSchema.safeParse(data);
-  return result.success ? result.data : { ok: false, error: "validation_failed" };
+  if (!result.success) return { ok: false, error: "validation_failed" };
+  if (!result.data.ok) return result.data;
+
+  await acknowledge(result.data.request_id, result.data.reference_no);
+
+  return result.data;
+}
+
+/**
+ * P7-47 — tell the requester their request arrived.
+ *
+ * WHY THIS READS THE ROW BACK rather than using what was posted: the payload is
+ * dynamic (D20), so the field carrying the email is named differently on every
+ * form. `vizserve_pms_submit_request` is what resolves it into the typed
+ * `requester_email` column, so the database is the only place that knows the
+ * answer for certain.
+ *
+ * SERVICE ROLE, and it is safe precisely because of what is being read: the row
+ * this call just created, by the id the function just returned. `anon` holds no
+ * table privileges at all (CLAUDE.md), so the caller's own client cannot read
+ * it back — and giving `anon` a policy that could would open every request to
+ * anybody who could guess a uuid.
+ *
+ * NOT SENT THROUGH THE OUTBOX, for the structural reason the templates file
+ * gives: the outbox joins notifications to `vizserve_pms_users` for an address,
+ * and a client has no user row. Same direct-send path the Gate 1 decision
+ * emails use.
+ *
+ * ⚠️ EVERY FAILURE HERE IS SWALLOWED, deliberately. The request is COMMITTED by
+ * the time this runs. Reporting an email failure to the submitter would tell
+ * them their request did not go through when it did, and they would send it
+ * again — turning a missing email into a duplicate job somebody has to find and
+ * close. It is logged for whoever is on support instead.
+ */
+async function acknowledge(requestId: string, referenceNo: string): Promise<void> {
+  try {
+    const admin = createAdminClient();
+
+    const { data: request } = await admin
+      .from("vizserve_pms_requests")
+      .select("requester_name, requester_email, title")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    if (!request) {
+      console.error(`[submit] ${referenceNo}: acknowledgement skipped — request not readable`);
+      return;
+    }
+
+    const outcome = await sendRequestSubmittedEmail({
+      to: request.requester_email,
+      requesterName: request.requester_name,
+      referenceNo,
+      title: request.title,
+    });
+
+    if (outcome.status === "failed") {
+      console.error(`[submit] ${referenceNo}: acknowledgement failed — ${outcome.error}`);
+    }
+  } catch (error) {
+    // A throw here — a missing service key, a network fault — must not surface
+    // as a failed submission. See the header.
+    console.error(`[submit] ${referenceNo}: acknowledgement threw —`, error);
+  }
 }
 
 /**

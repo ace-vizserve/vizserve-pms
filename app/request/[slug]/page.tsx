@@ -4,6 +4,7 @@ import { Info } from "lucide-react";
 
 import { createClient } from "@/utils/supabase/server";
 import { publicFormSchema } from "@/lib/schemas/forms";
+import { emailJsConfig } from "@/lib/emailjs";
 import { PublicFormRenderer } from "./public-form";
 import { BrandLockup } from "@/components/brand-lockup";
 
@@ -71,7 +72,7 @@ export default async function PublicFormPage({ params }: { params: Promise<{ slu
               </p>
             </div>
 
-            <PublicFormRenderer form={form} />
+            <PublicFormRenderer form={form} emailJs={emailJsConfig()} />
           </div>
         </div>
 

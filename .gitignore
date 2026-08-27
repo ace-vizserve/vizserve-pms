@@ -46,3 +46,5 @@ supabase/.branches
 next-env.d.ts
 
 *.xlsx
+# Generated previews — regenerate with `node docs/emailjs/preview.mjs`
+docs/emailjs/preview-*.html

@@ -1,6 +1,6 @@
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { groupedNavItems } from "@/lib/navigation";
-import { formatUnreadBadge } from "@/lib/notifications";
+import { formatNavBadge } from "@/lib/navigation";
 import { createClient } from "@/utils/supabase/server";
 import { AppSidebar } from "@/components/app-shell/app-sidebar";
 import {
@@ -40,6 +40,27 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     .from("vizserve_pms_notifications")
     .select("id", { count: "exact", head: true })
     .is("read_at", null);
+
+  /*
+   * P7-50 — the Requests badge: how many are sitting at Gate 1.
+   *
+   * PENDING_REVIEW only. That is the one status where somebody is WAITING on a
+   * decision from whoever is reading the sidebar — approved, returned and
+   * rejected have all had their answer, and counting them would make the badge
+   * a total rather than a to-do.
+   *
+   * NO SCOPE FILTER, exactly as the unread count above. The policy on
+   * `vizserve_pms_requests` already decides what the caller can see, so a Team
+   * Leader gets their departments and an admin gets everyone — restating the
+   * filter here would imply the policy is optional, which is the rule this
+   * codebase enforces everywhere else.
+   *
+   * `head: true` — one indexable aggregate per navigation, no rows shipped.
+   */
+  const { count: awaitingReview } = await supabase
+    .from("vizserve_pms_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "PENDING_REVIEW");
 
   /*
    * The project tree — Department → Folder → List (P7-18).
@@ -183,7 +204,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         <SidebarProvider>
           <AppSidebar
             sections={sections}
-            badges={{ "/inbox": formatUnreadBadge(unread ?? 0) }}
+            badges={{
+              "/inbox": formatNavBadge(unread ?? 0),
+              "/requests": formatNavBadge(awaitingReview ?? 0),
+            }}
             spaces={spaces}
             canManageLists={roleAtLeast(context.role, "team_leader")}
             user={{

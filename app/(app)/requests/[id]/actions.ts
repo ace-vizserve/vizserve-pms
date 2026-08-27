@@ -1,11 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+
+import { formatDate } from "@/lib/dates";
 import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
 import {
+  sendRequestApprovedEmail,
   sendRequestRejectedEmail,
   sendRequestReturnedEmail,
 } from "@/lib/email/client-emails";
@@ -104,6 +107,52 @@ export async function decideOnRequest(
     // Draining them is deliberately OUTSIDE it — an email failure must not roll
     // back an approval.
     dispatchPendingEmailsInBackground();
+
+    /*
+     * P7-48 — and tell the REQUESTER.
+     *
+     * The line above drains the internal outbox, which reaches the PIC and the
+     * QA reviewer. It cannot reach the client: the outbox joins notifications to
+     * `vizserve_pms_users` for an address and a client has no user row. So this
+     * approval branch used to end here, and the person who actually asked for
+     * the work heard nothing.
+     *
+     * The row is read back rather than taken from `approveResultSchema`, which
+     * carries the reference and the agreed date but not the requester — through
+     * the RLS-scoped client, since the Team Leader deciding this can already see
+     * it and nothing here needs more reach than they have.
+     *
+     * Awaited but never fatal, exactly as the return/reject path below: the
+     * approval and its task are already committed, and unwinding them because a
+     * mail server was slow is not a trade worth making.
+     */
+    const { data: requester } = await supabase
+      .from("vizserve_pms_requests")
+      .select("requester_name, requester_email, title")
+      .eq("id", requestId)
+      .maybeSingle();
+
+    if (requester) {
+      const approvalEmail = await sendRequestApprovedEmail({
+        to: requester.requester_email,
+        requesterName: requester.requester_name,
+        referenceNo: result.data.reference_no,
+        title: requester.title,
+        approvedTargetDate: result.data.approved_target_date
+          ? formatDate(result.data.approved_target_date)
+          : null,
+      });
+
+      if (approvalEmail.status === "failed") {
+        console.error(
+          `[gate1] ${result.data.reference_no}: approval email failed — ${approvalEmail.error}`,
+        );
+      }
+    } else {
+      console.error(
+        `[gate1] ${result.data.reference_no}: approval email skipped — request not readable`,
+      );
+    }
 
     revalidatePath("/requests");
     revalidatePath(`/requests/${requestId}`);

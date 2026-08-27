@@ -24,6 +24,10 @@ import {
   type PublicForm,
   type PublicFormField,
 } from "@/lib/schemas/forms";
+import { formatDate, formatDateTime } from "@/lib/dates";
+import { sendClientEmail } from "@/lib/emailjs-client";
+import { receivedParams, type EmailJsConfig } from "@/lib/emailjs";
+
 import { submitPublicRequest, uploadPublicAttachment } from "./actions";
 
 function FieldShell({
@@ -73,7 +77,19 @@ type SubmissionFormValues = {
   field_values: Record<string, unknown>;
 };
 
-export function PublicFormRenderer({ form }: { form: PublicForm }) {
+export function PublicFormRenderer({
+  form,
+  emailJs,
+}: {
+  form: PublicForm;
+  /**
+   * P7-49. Read on the server from the `VITE_EMAILJS_*` keys and handed down,
+   * because that prefix is Vite's and means nothing to Next — those values are
+   * invisible to the browser otherwise. Null when EmailJS is not set up, which
+   * is a normal state: the form still works, the client just gets no email.
+   */
+  emailJs: EmailJsConfig | null;
+}) {
   const schema = useMemo(() => buildSubmissionSchema(form), [form]);
   const [submitted, setSubmitted] = useState<{ reference_no: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -163,6 +179,34 @@ export function PublicFormRenderer({ form }: { form: PublicForm }) {
     });
 
     if (result.ok) {
+      /*
+       * P7-49 — tell the requester their request arrived.
+       *
+       * AWAITED BEFORE THE SUCCESS SCREEN, deliberately. The alternative is to
+       * fire it and render immediately, but this is a browser send: navigating
+       * away kills it, and the success screen is exactly what invites somebody
+       * to close the tab. A second of waiting buys a delivered email.
+       *
+       * The outcome is ignored on purpose — `sendClientEmail` never throws and
+       * logs its own failure. The request is already committed, so surfacing a
+       * mail problem here would tell the client their submission failed when it
+       * did not, and their next move would be to submit it again.
+       */
+      await sendClientEmail(
+        emailJs,
+        receivedParams({
+          referenceNo: result.reference_no,
+          requesterName: String(values.requester_name ?? ""),
+          requesterEmail: String(values.requester_email ?? ""),
+          requesterOrg: String(values.requester_org ?? ""),
+          title: String(values.title ?? ""),
+          description: String(values.description ?? ""),
+          formName: form.name,
+          targetDate: values.target_date ? formatDate(String(values.target_date)) : null,
+          submittedAt: formatDateTime(new Date()),
+        }),
+      );
+
       setSubmitted({ reference_no: result.reference_no });
       return;
     }

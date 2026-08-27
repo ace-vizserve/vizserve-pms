@@ -9,6 +9,7 @@ import { RequestStatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { requireRole } from "@/lib/auth/authorization";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
+import { emailJsConfig } from "@/lib/emailjs";
 import { createClient } from "@/utils/supabase/server";
 
 import { AttachmentList } from "./attachment-list";
@@ -257,6 +258,13 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           requestTitle={request.title}
           requestDescription={request.description}
           targetDate={request.target_date}
+          referenceNo={request.reference_no}
+          requesterName={request.requester_name}
+          requesterEmail={request.requester_email}
+          requesterOrg={request.requester_org}
+          formName={form?.name ?? "a request form"}
+          submittedAt={formatDateTime(request.submitted_at)}
+          emailJs={emailJsConfig()}
           candidates={candidates.data ?? []}
           capacity={capacity.data ?? []}
           currentUserId={context.userId}

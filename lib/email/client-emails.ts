@@ -21,6 +21,106 @@ import { sendEmail, type SendOutcome } from "./send";
  * rests entirely on them reading one.
  */
 
+/**
+ * P7-47 — the acknowledgement. Sent the moment a public form is submitted.
+ *
+ * THE ONLY EMAIL THE REQUESTER GETS THAT IS NOT A DECISION, and the one that
+ * was missing. Until now a client filled in the form and heard nothing until a
+ * Team Leader got round to it: no reference number, no proof it arrived, no way
+ * to chase it. The predictable result is a second submission of the same job a
+ * day later, which is a duplicate somebody then has to spot and close.
+ *
+ * ⚠️ THE REFERENCE NUMBER IS THE POINT OF THIS EMAIL, not the pleasantry. It is
+ * the only handle the client has on the request — the approval gate quotes it,
+ * the return email quotes it, and support asks for it. Everything else here is
+ * framing for that one string.
+ *
+ * DELIBERATELY NO LINK. There is nothing for them to open: the request is not
+ * visible to a client, and the Phase 4 approval page is tokenised and does not
+ * exist yet at submission time. A button going nowhere useful would train them
+ * to ignore the one in the approval email, which is the email Phase 4 rests on.
+ *
+ * NO PROMISE OF A DATE either. Gate 1 may negotiate `target_date` down, and an
+ * acknowledgement that quoted the requested date as though it were agreed would
+ * be the app making a commitment no human has made.
+ */
+export function sendRequestSubmittedEmail(input: {
+  to: string;
+  requesterName: string;
+  referenceNo: string;
+  title: string;
+}): Promise<SendOutcome> {
+  return sendEmail({
+    to: input.to,
+    subject: `${input.referenceNo} — we have got your request`,
+    body: {
+      preheader: `${input.title} — received, and with the team now.`,
+      heading: "Request received",
+      paragraphs: [
+        `Hi ${firstName(input.requesterName)},`,
+        `Thanks for sending through "${input.title}". It has reached the team and somebody will review it shortly.`,
+        "You do not need to do anything else for now. We will email you if we need more detail, and again once it is under way.",
+      ],
+      facts: [
+        { label: "Reference", value: input.referenceNo },
+        { label: "Request", value: input.title },
+      ],
+      footnote: "Keep this reference number — quote it if you need to ask us about this request.",
+    },
+  });
+}
+/**
+ * P7-48 — approved, and the work has started.
+ *
+ * THE GAP THIS FILLS WAS THE LOUDEST ONE. A client who was returned or rejected
+ * heard from us; a client whose request was ACCEPTED heard nothing at all. From
+ * their side the silence after approval is indistinguishable from the silence
+ * of a form that never arrived, so the good outcome looked exactly like the
+ * broken one.
+ *
+ * ⚠️ THE AGREED DATE IS THE POINT OF THIS EMAIL. Gate 1 exists to negotiate
+ * `target_date` into `approved_target_date` — that delta is the metric proving
+ * the gate is doing something (D-note on the requests table). This is the only
+ * moment the client is ever told what was actually agreed, and if it differs
+ * from what they asked for they need to know now rather than on the day.
+ *
+ * NULL IS NOT "today" AND NOT THE REQUESTED DATE. An approval can be recorded
+ * without a date, and inventing one here would be the app committing on behalf
+ * of a team that deliberately did not. It says a date is coming instead.
+ */
+export function sendRequestApprovedEmail(input: {
+  to: string;
+  requesterName: string;
+  referenceNo: string;
+  title: string;
+  /** The NEGOTIATED date, not the requested one. Null when none was set. */
+  approvedTargetDate: string | null;
+}): Promise<SendOutcome> {
+  const dated = Boolean(input.approvedTargetDate);
+
+  return sendEmail({
+    to: input.to,
+    subject: `${input.referenceNo} — approved, we have started`,
+    body: {
+      preheader: `${input.title} — accepted and under way.`,
+      heading: "Your request is under way",
+      paragraphs: [
+        `Hi ${firstName(input.requesterName)},`,
+        `Good news — "${input.title}" has been approved and somebody is now working on it.`,
+        dated
+          ? "The date below is what the team has committed to. If that does not work for you, reply and tell us now rather than closer to the day."
+          : "We have not fixed a delivery date yet. We will confirm one with you shortly.",
+      ],
+      facts: dated
+        ? [
+            { label: "Reference", value: input.referenceNo },
+            { label: "Agreed delivery", value: input.approvedTargetDate! },
+          ]
+        : [{ label: "Reference", value: input.referenceNo }],
+      footnote: "You will hear from us again when there is something for you to review.",
+    },
+  });
+}
 type DecisionEmailInput = {
   to: string;
   requesterName: string;

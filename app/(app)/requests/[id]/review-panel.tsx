@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
 
+import { sendClientEmail } from "@/lib/emailjs-client";
+import { approvedParams, type EmailJsConfig } from "@/lib/emailjs";
+
 import {
   Collapsible,
   CollapsibleContent,
@@ -54,6 +57,13 @@ export function ReviewPanel({
   requestTitle,
   requestDescription,
   targetDate,
+  referenceNo,
+  requesterName,
+  requesterEmail,
+  requesterOrg,
+  formName,
+  submittedAt,
+  emailJs,
   candidates,
   capacity,
   currentUserId,
@@ -67,6 +77,22 @@ export function ReviewPanel({
   requestTitle: string;
   requestDescription: string;
   targetDate: string | null;
+  /**
+   * P7-49 — what the client-facing approval email needs.
+   *
+   * Passed down rather than returned by `decideOnRequest`, which reports only
+   * `{ taskId, status }`. Widening that action's result to carry the requester
+   * would put client-email plumbing into the approval contract; this page is
+   * already rendering every one of these values.
+   */
+  referenceNo: string;
+  requesterName: string;
+  requesterEmail: string;
+  requesterOrg: string;
+  formName: string;
+  submittedAt: string;
+  /** Null when EmailJS is not configured — the approval still works. */
+  emailJs: EmailJsConfig | null;
   /** Department members who can be PIC. */
   candidates: Person[];
   capacity: CapacityRow[];
@@ -161,9 +187,48 @@ export function ReviewPanel({
         return;
       }
 
+      /*
+       * P7-49 — tell the CLIENT their request was approved.
+       *
+       * Only on APPROVED. Returned and rejected already email the requester
+       * from the server action (P2-08/09), and doing it here as well would send
+       * two of each.
+       *
+       * Awaited before the toast so the Team Leader is still on the page while
+       * it goes: this is a browser send, and  immediately
+       * after is exactly the kind of navigation that kills an in-flight request.
+       *
+       * Never throws —  logs its own failure. The approval and
+       * its task are committed by now, and an email problem must not be
+       * reported as a failed approval.
+       */
+      if (result.data.status === "APPROVED") {
+        await sendClientEmail(
+          emailJs,
+          approvedParams(
+            {
+              referenceNo,
+              requesterName,
+              requesterEmail,
+              requesterOrg,
+              title: requestTitle,
+              description: requestDescription,
+              formName,
+              targetDate: targetDate ? formatDate(targetDate) : null,
+              submittedAt,
+            },
+            // The NEGOTIATED date off the form, not `targetDate` — that is what
+            // the client asked for, and Gate 1 exists to change it.
+            typeof payload.approved_target_date === "string"
+              ? formatDate(payload.approved_target_date)
+              : null,
+          ),
+        );
+      }
+
       toast.success(
         result.data.status === "APPROVED"
-          ? "Approved — the task is created and the PIC has been told."
+          ? "Approved — the task is created, and the PIC and the client have been told."
           : result.data.status === "RETURNED"
             ? "Returned. The requester has been emailed the reason."
             : "Rejected. The requester has been emailed the reason.",

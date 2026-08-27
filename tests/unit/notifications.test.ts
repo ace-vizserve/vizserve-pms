@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  formatUnreadBadge,
   isNotificationType,
   isReadFilter,
   NOTIFICATION_TYPE_LABELS,
   NOTIFICATION_TYPES,
 } from "@/lib/notifications";
+import { formatNavBadge } from "@/lib/navigation";
 
 /**
  * The type guard is the interesting one. `?type=` goes straight into
@@ -53,21 +53,23 @@ describe("NOTIFICATION_TYPE_LABELS", () => {
   });
 });
 
-describe("formatUnreadBadge", () => {
+// P7-50 renamed this to `formatNavBadge` and moved it to lib/navigation.ts —
+// it was never about notifications, and Requests now uses the same rule.
+describe("formatNavBadge", () => {
   it("returns null at zero, so no empty badge renders", () => {
-    expect(formatUnreadBadge(0)).toBeNull();
-    expect(formatUnreadBadge(-1)).toBeNull();
+    expect(formatNavBadge(0)).toBeNull();
+    expect(formatNavBadge(-1)).toBeNull();
   });
 
   it("shows the exact count up to 99", () => {
-    expect(formatUnreadBadge(1)).toBe("1");
-    expect(formatUnreadBadge(99)).toBe("99");
+    expect(formatNavBadge(1)).toBe("1");
+    expect(formatNavBadge(99)).toBe("99");
   });
 
   it("caps beyond 99", () => {
     // Not hypothetical — a real inbox here is already past 1,600, and four
     // digits push the label off its own row.
-    expect(formatUnreadBadge(100)).toBe("99+");
-    expect(formatUnreadBadge(1609)).toBe("99+");
+    expect(formatNavBadge(100)).toBe("99+");
+    expect(formatNavBadge(1609)).toBe("99+");
   });
 });

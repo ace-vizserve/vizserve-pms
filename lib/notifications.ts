@@ -60,7 +60,7 @@ export function isReadFilter(value: unknown): value is ReadFilter {
  * already past 1,600 — and a four-digit number does not fit a sidebar badge
  * without pushing the label off its own row.
  */
-export function formatUnreadBadge(count: number): string | null {
-  if (count <= 0) return null;
-  return count > 99 ? "99+" : String(count);
-}
+// `formatUnreadBadge` moved to lib/navigation.ts as `formatNavBadge` when
+// P7-50 gave Requests a badge too. It was never about notifications — it is
+// the rule for every count in the sidebar, and a second copy under a second
+// name is how two badges start disagreeing about what "99+" means.
