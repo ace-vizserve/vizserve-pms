@@ -19,6 +19,16 @@ const nextConfig: NextConfig = {
      * ⚠️ IF `max_bytes` IS RAISED, RAISE THIS TOO. They are two copies of one
      * number and nothing enforces that they agree.
      *
+     * ⚠️ SET ABOVE `max_bytes`, NOT EQUAL TO IT. This was "10mb" — exactly the
+     * 10 MiB the database allows — which left ZERO room for the multipart
+     * envelope. A request body is the file PLUS the boundary strings, the part
+     * headers, the filename and the other form fields, so a file at the app’s
+     * own limit always exceeded the body limit by a few hundred bytes. Next then
+     * TRUNCATED the stream and the parser failed with "Unexpected end of form" —
+     * a framework error pointing at <FileField>, naming neither the file nor the
+     * rule it broke. 12mb leaves ~2 MiB of headroom, which no envelope
+     * approaches.
+     *
      * PER FILE, NOT PER FORM. `<FileField>` uploads sequentially — one action
      * call per file, deliberately, so a client on office wifi does not start
      * five simultaneous uploads and collect five timeouts. So this bounds the
@@ -41,7 +51,7 @@ const nextConfig: NextConfig = {
      *     losing it. Not a change to make casually.
      */
     serverActions: {
-      bodySizeLimit: "10mb",
+      bodySizeLimit: "12mb",
     },
   },
 };

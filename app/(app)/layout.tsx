@@ -12,6 +12,20 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
+/**
+ * Pairs a formatted count with what it counts.
+ *
+ * The description is read only by a screen reader, which would otherwise
+ * announce "Requests 1" — a number with no noun, folded into the link name.
+ * Null passes straight through, so a zero count still renders no badge.
+ */
+function labelledBadge(
+  value: string | null,
+  description: string,
+): { value: string; description: string } | null {
+  return value === null ? null : { value, description };
+}
+
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContext();
   const sections = groupedNavItems(context.role);
@@ -205,8 +219,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <AppSidebar
             sections={sections}
             badges={{
-              "/inbox": formatNavBadge(unread ?? 0),
-              "/requests": formatNavBadge(awaitingReview ?? 0),
+              "/inbox": labelledBadge(formatNavBadge(unread ?? 0), "unread"),
+              "/requests": labelledBadge(
+                formatNavBadge(awaitingReview ?? 0),
+                "awaiting review",
+              ),
             }}
             spaces={spaces}
             canManageLists={roleAtLeast(context.role, "team_leader")}

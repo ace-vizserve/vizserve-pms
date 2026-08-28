@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { sendRequestSubmittedEmail } from "@/lib/email/client-emails";
+import { generateStatusToken, hashStatusToken, statusUrl } from "@/lib/request-status";
 import { uploadPendingAttachment, type UploadResult } from "@/lib/attachments-server";
 import {
   attachmentRefSchema,
@@ -69,9 +70,55 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
   if (!result.success) return { ok: false, error: "validation_failed" };
   if (!result.data.ok) return result.data;
 
-  await acknowledge(result.data.request_id, result.data.reference_no);
+  const trackingUrl = await issueTrackingLink(result.data.request_id, result.data.reference_no);
 
-  return result.data;
+  await acknowledge(result.data.request_id, result.data.reference_no, trackingUrl);
+
+  // Handed back so the browser can put it in the EmailJS parameters too —
+  // the raw token exists only here and is never stored, so this is the one
+  // moment it can be passed on.
+  return { ...result.data, status_url: trackingUrl ?? undefined };
+}
+
+/**
+ * P7-51 — mint the tracking token and store only its hash.
+ *
+ * ⚠️ THE RAW TOKEN IS RETURNED AND NEVER PERSISTED. The column holds a
+ * SHA-256; a dump of `vizserve_pms_requests` yields nothing replayable against
+ * the status endpoint. Same rule as P4's approval tokens.
+ *
+ * Issued HERE rather than inside `vizserve_pms_submit_request` for two
+ * reasons: that function is the authority on validation and should not grow a
+ * second job, and a token generated in Postgres would have to be returned
+ * through its jsonb result — which is logged in more places than a value that
+ * grants read access should ever appear.
+ *
+ * Returns null on any failure. A request without a tracking link is a slightly
+ * worse email; a submission that fails because a token could not be minted is
+ * a lost job.
+ */
+async function issueTrackingLink(
+  requestId: string,
+  referenceNo: string,
+): Promise<string | null> {
+  try {
+    const token = generateStatusToken();
+
+    const { error } = await createAdminClient()
+      .from("vizserve_pms_requests")
+      .update({ status_token_hash: hashStatusToken(token) })
+      .eq("id", requestId);
+
+    if (error) {
+      console.error(`[submit] ${referenceNo}: tracking token not stored — ${error.message}`);
+      return null;
+    }
+
+    return statusUrl(token);
+  } catch (error) {
+    console.error(`[submit] ${referenceNo}: tracking token threw —`, error);
+    return null;
+  }
 }
 
 /**
@@ -100,7 +147,11 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
  * again — turning a missing email into a duplicate job somebody has to find and
  * close. It is logged for whoever is on support instead.
  */
-async function acknowledge(requestId: string, referenceNo: string): Promise<void> {
+async function acknowledge(
+  requestId: string,
+  referenceNo: string,
+  trackingUrl: string | null,
+): Promise<void> {
   try {
     const admin = createAdminClient();
 
@@ -116,6 +167,7 @@ async function acknowledge(requestId: string, referenceNo: string): Promise<void
     }
 
     const outcome = await sendRequestSubmittedEmail({
+      statusUrl: trackingUrl,
       to: request.requester_email,
       requesterName: request.requester_name,
       referenceNo,

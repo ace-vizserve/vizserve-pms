@@ -80,6 +80,12 @@ export type RequestEmailSubject = {
   /** Already formatted for reading, or null. */
   targetDate: string | null;
   submittedAt: string;
+  /**
+   * P7-51. The tracking page, or null when the token could not be issued.
+   * Null renders as an empty string in the template, which is why the button
+   * markup there is wrapped rather than always present.
+   */
+  statusUrl?: string | null;
 };
 
 /** The flat `{{variable}}` bag EmailJS substitutes into the template. */
@@ -113,6 +119,9 @@ function base(subject: RequestEmailSubject): EmailJsParams {
     form_name: subject.formName,
     target_date: subject.targetDate ?? "Not specified",
     submitted_at: subject.submittedAt,
+    // Empty string rather than absent, so the template renders nothing instead
+    // of the literal text "undefined" in an href.
+    status_url: subject.statusUrl ?? "",
   };
 }
 
@@ -125,7 +134,7 @@ export function receivedParams(subject: RequestEmailSubject): EmailJsParams {
     intro: `Hi ${firstName(subject.requesterName)}, thanks for sending this through.`,
     status_label: "Received",
     status_note:
-      "It has reached the team and somebody will review it shortly. You do not need to do anything else for now — keep the reference above in case you need to ask us about it.",
+      "It has reached the team and somebody will review it shortly. You do not need to do anything else for now — you can check progress any time using the link below.",
   };
 }
 

@@ -57,13 +57,19 @@ export function AppSidebar({
   sections: SidebarSection[];
   user: { fullName: string; email: string; role: string; departments: string[] };
   /**
-   * Counts to hang off nav items, keyed by href — `{ "/inbox": "99+" }`.
+   * Counts to hang off nav items, keyed by href.
    *
    * Pre-formatted strings rather than numbers: the cap ("99+") is a
    * presentation decision that belongs with the thing that knows the real
    * count, and a sidebar badge is the wrong place to be doing arithmetic.
+   *
+   * ⚠️ `description` IS NOT OPTIONAL DECORATION. A bare number announces as
+   * "Requests 1", which a screen reader reads as part of the link name —
+   * so the badge has to say what it counts. It was hardcoded to "unread"
+   * while the Inbox was the only badge, and P7-50 made that wrong the
+   * moment Requests got one.
    */
-  badges?: Record<string, string | null>;
+  badges?: Record<string, { value: string; description: string } | null>;
   /**
    * The project tree — Department → Folder → List (P7-18).
    *
@@ -172,7 +178,7 @@ function NavSection({
 }: {
   section: SidebarSection;
   pathname: string;
-  badges?: Record<string, string | null>;
+  badges?: Record<string, { value: string; description: string } | null>;
   className?: string;
 }) {
   return (
@@ -330,10 +336,12 @@ function NavSection({
                   label. */}
               {badge ? (
                 <SidebarMenuBadge className="bg-primary/10 text-primary">
-                  {badge}
+                  {badge.value}
                   {/* The number alone reads as decoration to a screen reader,
-                      which announces the link as "Inbox 12". */}
-                  <span className="sr-only"> unread</span>
+                      which announces the link as "Inbox 12" — so the badge
+                      names what it counts. Per item, because "unread" is true
+                      of the Inbox and nonsense on Requests. */}
+                  <span className="sr-only"> {badge.description}</span>
                 </SidebarMenuBadge>
               ) : null}
             </SidebarMenuItem>

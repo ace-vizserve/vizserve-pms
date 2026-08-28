@@ -531,6 +531,8 @@ export type Database = {
         Update: Partial<{
           approved_target_date: string | null;
           status: VizservePmsRequestStatus;
+          /** P7-51. Set once, at submission. See the migration. */
+          status_token_hash: string | null;
           decision_reason: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
@@ -1699,6 +1701,17 @@ export type Database = {
           p_attachments?: Json;
           p_ip?: string | null;
         };
+        Returns: Json;
+      };
+      /**
+       * P7-51. The public tracking page, by unguessable token.
+       *
+       * Returns reference, title, dates and a stage timeline — never the
+       * brief, staff names, internal comments or any id. One error shape for
+       * every failure, so it cannot be used to probe for valid tokens.
+       */
+      vizserve_pms_get_request_status: {
+        Args: { p_token: string };
         Returns: Json;
       };
       vizserve_pms_get_public_form: {

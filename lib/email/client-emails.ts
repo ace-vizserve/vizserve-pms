@@ -49,6 +49,11 @@ export function sendRequestSubmittedEmail(input: {
   requesterName: string;
   referenceNo: string;
   title: string;
+  /**
+   * P7-51. The tracking page. Null when the token could not be issued — the
+   * email then simply has no button, rather than one going nowhere.
+   */
+  statusUrl?: string | null;
 }): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
@@ -65,6 +70,21 @@ export function sendRequestSubmittedEmail(input: {
         { label: "Reference", value: input.referenceNo },
         { label: "Request", value: input.title },
       ],
+      /*
+       * P7-51 — THE LINK THAT REPLACES THE "NO LINK" NOTE ABOVE.
+       *
+       * That note argued a button would train the client to ignore the one in
+       * the Gate 3 approval email, because there was nothing useful to open.
+       * Now there is: a tracking page that answers "where has it got to", which
+       * is the question that otherwise arrives as an email somebody has to
+       * answer by hand.
+       *
+       * A FULL URL, not a path, and that is safe: `absoluteUrl` passes anything
+       * already starting with http(s) straight through. It has to be absolute —
+       * `statusUrl()` supplies the origin, because a relative path means nothing
+       * in a mail client.
+       */
+      button: input.statusUrl ? { label: "Track this request", path: input.statusUrl } : undefined,
       footnote: "Keep this reference number — quote it if you need to ask us about this request.",
     },
   });

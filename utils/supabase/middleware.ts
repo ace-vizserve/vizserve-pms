@@ -23,6 +23,10 @@ const PUBLIC_PREFIXES = [
   "/f/",
   "/approve/", // client approval page (P4-04) — token-authenticated
   "/feedback/", // client feedback page (P4-10) — same token machinery
+  // P7-51. The tracking page the acknowledgement links to. Same posture as the
+  // three above: no login, an unguessable token in the URL, and the only route
+  // into the data is a SECURITY DEFINER function that projects safe columns.
+  "/status/",
   // Cron routes carry `Authorization: Bearer $CRON_SECRET` and no cookie.
   // Without this they redirect to /login, and Vercel's scheduler would follow
   // the 307 and report a cheerful 200 — so the jobs would silently never run.

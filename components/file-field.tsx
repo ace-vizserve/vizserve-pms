@@ -70,6 +70,27 @@ export function FileField({
       // Sequential, not parallel. Five simultaneous 10 MB uploads from a client
       // on office wifi is how you get five timeouts instead of five files.
       for (const file of batch) {
+        /*
+         * SIZE CHECKED HERE, BEFORE THE POST, and this is not merely a
+         * courtesy like the `accept` filter is.
+         *
+         * An oversize file is not rejected cleanly by the server — the request
+         * body exceeds Next’s Server Action limit, the multipart stream is
+         * TRUNCATED, and the parser fails with “Unexpected end of form”. That
+         * surfaces as a framework stack trace pointing at this component rather
+         * than at the file, so the person uploading has no idea what went wrong.
+         *
+         * The server still enforces the real rule against the actual bytes
+         * (`uploadPendingAttachment`); this exists so the common case gets a
+         * sentence instead of a crash.
+         */
+        if (maxBytes && file.size > maxBytes) {
+          setError(
+            `${file.name} is ${formatBytes(file.size)} — the limit is ${formatBytes(maxBytes)}.`,
+          );
+          break;
+        }
+
         const formData = new FormData();
         formData.set("form_id", formId);
         if (fieldKey) formData.set("field_key", fieldKey);

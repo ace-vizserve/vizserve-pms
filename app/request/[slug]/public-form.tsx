@@ -204,6 +204,12 @@ export function PublicFormRenderer({
           formName: form.name,
           targetDate: values.target_date ? formatDate(String(values.target_date)) : null,
           submittedAt: formatDateTime(new Date()),
+          // P7-51. The tracking page. Issued by the server action a moment ago —
+          // the raw token exists only in that response, so this is the only
+          // place the browser can learn it. Undefined when it could not be
+          // minted, and the template drops the button rather than linking to
+          // nowhere.
+          statusUrl: result.status_url,
         }),
       );
 

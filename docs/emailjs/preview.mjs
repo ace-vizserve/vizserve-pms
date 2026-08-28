@@ -60,6 +60,10 @@ const request = {
   form_name: "Design Request",
   target_date: "5 Aug 2026",
   submitted_at: "25 Aug 2026, 2:14 PM",
+  // P7-51. The tracking page. preview-04 deliberately omits it, which is what a
+  // request whose token could not be minted looks like: a button linking to
+  // nowhere. That is the case worth seeing.
+  status_url: "https://pms.vizserve.com/status/kQ7x2mVn8pLr4TzYbW1sJdHgFcAeRuNi",
 };
 
 const VARIANTS = [

@@ -197,6 +197,16 @@ export const submissionResultSchema = z.union([
     ok: z.literal(true),
     request_id: z.uuid(),
     reference_no: z.string(),
+    /**
+     * P7-51. The tracking page URL, added by the server action AFTER the
+     * database function returns — the raw token exists for one instant and is
+     * never stored, so it cannot come out of `vizserve_pms_submit_request`.
+     *
+     * Optional because the token issue is best-effort: if it fails, the
+     * request is still submitted and the email simply carries no link. A
+     * missing tracking page must never fail a submission.
+     */
+    status_url: z.string().optional(),
   }),
   z.object({
     ok: z.literal(false),
