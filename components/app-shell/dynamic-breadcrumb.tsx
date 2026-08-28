@@ -76,6 +76,9 @@ const SEGMENT_LABELS: Record<string, string> = {
   users: "Users",
   holidays: "Holidays",
   events: "Events",
+  // Two words, so the fallback title-caser cannot produce it — "Audit" alone
+  // reads as a verb on a page whose whole point is that it is a record.
+  audit: "Audit trail",
 };
 
 /** Anything that is plainly an id rather than a readable segment. */

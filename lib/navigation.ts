@@ -63,7 +63,8 @@ export type NavIconName =
   | "users"
   | "calendar-off"
   | "calendar-days"
-  | "settings";
+  | "settings"
+  | "history";
 
 export const NAV_ITEMS: NavItem[] = [
   {
@@ -191,6 +192,19 @@ export const NAV_ITEMS: NavItem[] = [
     enabled: true,
     icon: "settings",
   },
+  {
+    label: "Audit trail",
+    href: "/admin/audit",
+    minRole: "admin",
+    // P0-09. The table has been written to since Phase 0 by every server action
+    // and by a dozen SQL functions; this is the first thing that reads it.
+    //
+    // LAST in the group, and that is the ordering rule rather than an accident:
+    // everything above it is a screen you change something on, and this is the
+    // one you open to find out what somebody already changed.
+    enabled: true,
+    icon: "history",
+  },
 ];
 
 /**
@@ -267,7 +281,13 @@ export const NAV_GROUPS: NavGroup[] = [
   { label: "Manage", hrefs: ["/forms", "/reports"] },
   {
     label: "Admin",
-    hrefs: ["/admin/users", "/admin/holidays", "/admin/events", "/admin/settings"],
+    hrefs: [
+      "/admin/users",
+      "/admin/holidays",
+      "/admin/events",
+      "/admin/settings",
+      "/admin/audit",
+    ],
     pinBottom: true,
   },
 ];

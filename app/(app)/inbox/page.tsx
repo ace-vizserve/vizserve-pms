@@ -21,8 +21,8 @@ import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { ListSearch } from "@/components/list-search";
 import { InboxFilters } from "./inbox-filters";
-import { InboxSearch } from "./inbox-search";
 
 export const metadata: Metadata = { title: "Inbox" };
 
@@ -241,7 +241,13 @@ export default async function InboxPage({
         touch.
       */}
       <div className="flex flex-wrap items-end gap-3">
-        <InboxSearch initial={term} className="w-full sm:w-64 lg:w-72" />
+        <ListSearch
+          initial={term}
+          basePath="/inbox"
+          id="inbox-search"
+          placeholder="Search notifications"
+          className="w-full sm:w-64 lg:w-72"
+        />
 
         <InboxFilters type={type} read={read} />
 

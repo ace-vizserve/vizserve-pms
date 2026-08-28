@@ -853,7 +853,7 @@ Every db suite **detects whether its migration has been applied** and skips with
 | P0-06 | RLS policies | ✅ …plus a follow-up grants migration, see *The grants incident* |
 | P0-07 | App shell + role nav | ✅ Unbuilt modules render disabled with their phase |
 | P0-08 | Dashboard | ✅ Pending-approvals and unread counts are real; tickets card is a placeholder until Phase 3 |
-| P0-09 | Audit log | ✅ Table + `vizserve_pms_write_audit_log()`. Called on submission, user create/edit, and every Gate 1 decision |
+| P0-09 | Audit log | ✅ Table + `vizserve_pms_write_audit_log()`. Called on submission, user create/edit, and every Gate 1 decision. **`/admin/audit` reads it** — admin only, filtered by record type, actor and period, with a before/after diff per entry |
 | P0-10 | Notifications + inbox | ✅ Table, per-type `send_email` settings, `vizserve_pms_notify()`, `/inbox` |
 | P0-11 | Transactional email | ✅ Outbox drain + cron + templates. ⚠️ **nobody has confirmed one landing in an inbox** |
 | P0-12 | Seed + scope tests | ✅ 15 accounts seeded; the scope suite is written and green |

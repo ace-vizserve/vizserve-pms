@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Clock,
   FileText,
+  History,
   Inbox,
   LayoutDashboard,
   ListChecks,
@@ -30,6 +31,7 @@ const ICONS = {
   "calendar-off": CalendarOff,
   "calendar-days": CalendarDays,
   settings: Settings,
+  history: History,
 } satisfies Record<NavIconName, React.ComponentType<{ className?: string }>>;
 
 export function NavIcon({ name, className }: { name: NavIconName; className?: string }) {

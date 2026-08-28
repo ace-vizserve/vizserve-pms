@@ -556,7 +556,7 @@ export async function exportLeaveReportPdf(
  * credential between the user and GoTrue.
  */
 export async function sendPasswordReset(userId: string): Promise<ActionResult> {
-  await requireRole("admin");
+  const context = await requireRole("admin");
 
   const admin = createAdminClient();
   const { data: profile } = await admin
@@ -575,6 +575,25 @@ export async function sendPasswordReset(userId: string): Promise<ActionResult> {
   });
 
   if (error) return { ok: false, error: error.message };
+
+  // Audited, and it is the one admin action on this screen that was not.
+  //
+  // Nothing about the account changes here, which is exactly why it was missed
+  // — and exactly why it belongs in the trail. This is one admin causing a
+  // credential-reset mail to reach another person's inbox; if that person later
+  // asks who triggered it, the answer has to exist somewhere. There is no
+  // before/after because no stored value moved: the action IS the record.
+  await admin.rpc("vizserve_pms_write_audit_log", {
+    p_entity_type: "user",
+    p_entity_id: userId,
+    p_action: "password_reset_sent",
+    p_actor_id: context.userId,
+    p_before: null,
+    // The address the link went to. Not the token and not the link — those are
+    // the credential, and an audit trail an admin can read must never carry a
+    // way to take over the account it is recording.
+    p_after: { email: profile.email },
+  });
 
   return { ok: true, data: undefined };
 }

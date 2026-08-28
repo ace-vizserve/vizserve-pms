@@ -10,10 +10,15 @@ import { Label } from "@/components/ui/label";
 import { MAX_SEARCH_LENGTH } from "@/lib/search";
 
 /**
- * Inbox search. Debounced, and the term lives in the URL like every other
- * filter in the app.
+ * The debounced, URL-backed search box every list route uses.
  *
- * Two things this has to get right:
+ * This was `app/(app)/inbox/inbox-search.tsx` with `/inbox` hard-coded in three
+ * places. The audit trail needed the same control, and a second copy of a
+ * debounced search is exactly how two lists end up with different debounce
+ * windows and only one of them resetting the page — so it moved here and took a
+ * `basePath` instead.
+ *
+ * Two things it has to get right:
  *
  *   1. **Reset the page.** Searching from page 4 must land on page 1 of the new
  *      results, not page 4 — which is usually past the end and renders empty.
@@ -22,7 +27,23 @@ import { MAX_SEARCH_LENGTH } from "@/lib/search";
  *      mount; re-syncing it from the URL on every navigation would move the
  *      caret mid-word once the debounced push lands.
  */
-export function InboxSearch({ initial, className }: { initial: string; className?: string }) {
+export function ListSearch({
+  initial,
+  basePath,
+  id,
+  label = "Search",
+  placeholder,
+  className,
+}: {
+  initial: string;
+  /** e.g. `/inbox`. Other filters in the URL are preserved. */
+  basePath: string;
+  /** Unique on the page — it wires the visible label to the input. */
+  id: string;
+  label?: string;
+  placeholder?: string;
+  className?: string;
+}) {
   const router = useRouter();
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
@@ -46,7 +67,7 @@ export function InboxSearch({ initial, className }: { initial: string; className
     next.delete("page");
 
     const query = next.toString();
-    startTransition(() => router.push(query ? `/inbox?${query}` : "/inbox"));
+    startTransition(() => router.push(query ? `${basePath}?${query}` : basePath));
   }
 
   function onChange(term: string) {
@@ -64,17 +85,16 @@ export function InboxSearch({ initial, className }: { initial: string; className
   }
 
   return (
-    // Same shape as the Type and Status columns: a small label over a control,
-    // in a `space-y-1.5` stack. It used to be a bare input with an sr-only
-    // label, so it sat a label's height higher than everything beside it — the
-    // row lined up on the bottom and still read as crooked, because the tops
-    // did not.
+    // Same shape as the filter columns beside it: a small label over a control,
+    // in a `space-y-1.5` stack. A bare input with an sr-only label sits a
+    // label's height higher than everything next to it — the row lines up on
+    // the bottom and still reads as crooked, because the tops do not.
     //
-    // Width is the caller's business: the page is full-bleed, and a search box
-    // stretched across a 1600px monitor is a worse target than a short one.
+    // Width is the caller's business: these pages are full-bleed, and a search
+    // box stretched across a 1600px monitor is a worse target than a short one.
     <div className={cn("space-y-1.5", className)}>
-      <Label htmlFor="inbox-search" className="text-xs text-muted-foreground">
-        Search
+      <Label htmlFor={id} className="text-xs text-muted-foreground">
+        {label}
       </Label>
 
       <div className="relative">
@@ -84,14 +104,14 @@ export function InboxSearch({ initial, className }: { initial: string; className
         />
 
         <Input
-          id="inbox-search"
+          id={id}
           type="search"
           // `search` inputs render a native clear affordance in some browsers;
           // the explicit button below is the one that is keyboard-reachable and
           // present everywhere.
           value={value}
           maxLength={MAX_SEARCH_LENGTH}
-          placeholder="Search notifications"
+          placeholder={placeholder}
           className="pr-9 pl-9"
           onChange={(event) => onChange(event.target.value)}
           onKeyDown={(event) => {
