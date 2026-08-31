@@ -49,6 +49,75 @@
     </div>
   </div>
 
+  <!--
+    P7-51 — the SAME progress trail the tracking page shows, inline.
+
+    Here so the client does not have to click to learn where their request
+    stands. The wording is mirrored from `vizserve_pms_get_request_status`
+    (20260825150000_p7_51_request_status_page.sql) — an email and a page that
+    describe the same stage in different words is how a client ends up asking
+    which one is right.
+
+    The block below is EmailJS's LOOP form of the same section syntax the button
+    uses: it repeats once per array item, and the label, detail and at
+    placeholders resolve against each ITEM rather than the top-level bag. It
+    renders nothing when the array is empty or absent, so it needs no guard.
+
+    ⚠️ NO PLACEHOLDER SYNTAX IN THESE COMMENTS. An HTML comment is not a
+    template comment — EmailJS parses the whole file, so a section marker
+    written here as an example opens a real block, and everything down to the
+    next matching close tag is swallowed. That is not hypothetical: the first
+    draft of this comment did exactly that and ate the progress trail.
+
+    A TABLE PER ROW, not a bulleted list. Outlook draws through Word, which
+    ignores `list-style` on a styled `ul` and collapses the markers — a table is
+    the only construct that lays out reliably in every client.
+
+    The dot is a text character, not a background colour: state is never carried
+    by colour alone, and a client reading this in plain text or greyscale still
+    gets the order and the labels.
+  -->
+  <!--
+    Its own scalar rather than a heading inside the loop below — a heading in
+    the loop repeats once per stage. It is set only when there are stages to
+    show, so an email without a trail gets neither the heading nor a gap.
+  -->
+  {{#progress_title}}
+  <div
+    style="
+      color: #5f6368;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 24px 0 4px;
+    "
+  >
+    {{progress_title}}
+  </div>
+  {{/progress_title}}
+
+  {{#timeline}}
+  <table
+    role="presentation"
+    cellpadding="0"
+    cellspacing="0"
+    style="width: 100%; border-collapse: collapse; margin-top: 12px"
+  >
+    <tr>
+      <td style="width: 18px; vertical-align: top; padding: 0; color: #4359a5; font-size: 15px">
+        &bull;
+      </td>
+      <td style="vertical-align: top; padding: 0">
+        <div style="color: #202020; font-size: 15px; font-weight: 600">{{label}}</div>
+        <div style="color: #5f6368; font-size: 13px; line-height: 1.5; margin-top: 2px">
+          {{detail}}
+        </div>
+        <div style="color: #9aa0a6; font-size: 12px; margin-top: 2px">{{at}}</div>
+      </td>
+    </tr>
+  </table>
+  {{/timeline}}
+
   <div style="margin-top: 20px; padding: 15px; background-color: #f7f8fa; border-radius: 8px">
     <table role="presentation" style="width: 100%; border-collapse: collapse">
       <tr>
@@ -151,6 +220,19 @@
     </table>
   </div>
 
+  <!--
+    WRAPPED, and it has to be. EmailJS renders an unresolved variable as an
+    empty string and reports no error, so an unguarded button ships as a
+    full-size blue call to action with href="" — a dead link in a client's
+    inbox, which is worse than no button at all. The wrapper below is EmailJS's
+    section syntax: the block renders only when the variable is truthy, and an
+    empty string is not.
+
+    Three comments in the codebase already claimed this guard existed before it
+    did — lib/emailjs.ts, the README, and the call site in public-form.tsx.
+    preview-04-missing-values.html was the proof that it did not.
+  -->
+  {{#status_url}}
   <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top: 24px">
     <tr>
       <td style="border-radius: 6px; background: #4359a5">
@@ -171,6 +253,7 @@
       </td>
     </tr>
   </table>
+  {{/status_url}}
 
   <div
     style="

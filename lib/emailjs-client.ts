@@ -37,7 +37,12 @@ export async function sendClientEmail(
     return { status: "skipped", reason: "EmailJS is not configured" };
   }
 
-  const recipient = params.to_email?.trim();
+  // Narrowed, not asserted. The params bag now also carries the timeline array
+  // for the template's loop, so `to_email` is `string | EmailTimelineEntry[]`
+  // to the type system even though only a builder in `lib/emailjs.ts` fills it.
+  // A wrong-typed recipient falls through to the skip below rather than
+  // reaching EmailJS as `[object Object]`.
+  const recipient = typeof params.to_email === "string" ? params.to_email.trim() : undefined;
 
   if (!recipient || !recipient.includes("@")) {
     return { status: "skipped", reason: `not an email address: ${recipient ?? "(none)"}` };

@@ -88,8 +88,53 @@ export type RequestEmailSubject = {
   statusUrl?: string | null;
 };
 
-/** The flat `{{variable}}` bag EmailJS substitutes into the template. */
-export type EmailJsParams = Record<string, string>;
+/**
+ * One stage in the progress trail, as the template's `{{#timeline}}` loop reads
+ * it. The property names ARE the template's variable names.
+ */
+export type EmailTimelineEntry = {
+  label: string;
+  detail: string;
+  /** Already formatted for reading — EmailJS does no date formatting. */
+  at: string;
+};
+
+/**
+ * The `{{variable}}` bag EmailJS substitutes into the template.
+ *
+ * Mostly strings, plus the one array the timeline loop iterates. EmailJS caps
+ * the combined size of dynamic variables at 50KB; a trail of six stages is
+ * nowhere near it, but a loop is the first thing here that could grow, so the
+ * limit is worth knowing about.
+ */
+export type EmailJsParams = Record<string, string | EmailTimelineEntry[]>;
+
+/**
+ * The client-facing stage wording.
+ *
+ * ⚠️ MIRRORED FROM `vizserve_pms_get_request_status`
+ * (`20260825150000_p7_51_request_status_page.sql`), which is the source of
+ * truth — it is what `/status/[token]` renders. An email and a page describing
+ * the same stage in different words is how a client ends up asking which one is
+ * right, so these strings are pinned by a test rather than left to memory.
+ *
+ * Only the two stages an EmailJS send can reach are here. The later ones
+ * (in progress, QA, sent for approval, completed) are reached by task movement,
+ * which does not send through this module — see the header note on the
+ * client/internal split.
+ */
+export const STAGE_RECEIVED = {
+  label: "Request received",
+  detail: "We have your request and it is queued for review.",
+} as const;
+
+export const STAGE_APPROVED = {
+  label: "Approved — work scheduled",
+  detail: "A team member has been assigned and work is scheduled.",
+} as const;
+
+/** The heading above the trail. Absent when there are no stages to show. */
+const PROGRESS_TITLE = "Progress so far";
 
 /**
  * `Maria Santos` → `Maria`. A greeting uses a first name; the full name in the
@@ -108,8 +153,12 @@ function firstName(fullName: string): string {
  * Building the bag in one place means the fallbacks cannot be forgotten at a
  * call site.
  */
-function base(subject: RequestEmailSubject): EmailJsParams {
+function base(subject: RequestEmailSubject, timeline: EmailTimelineEntry[]): EmailJsParams {
   return {
+    // The trail, and the heading that only exists when the trail does — a
+    // heading inside the loop would repeat once per stage.
+    timeline,
+    progress_title: timeline.length > 0 ? PROGRESS_TITLE : "",
     reference_no: subject.referenceNo,
     requester_name: subject.requesterName,
     requester_email: subject.requesterEmail,
@@ -128,7 +177,11 @@ function base(subject: RequestEmailSubject): EmailJsParams {
 /** "Received" — sent the moment the public form is submitted. */
 export function receivedParams(subject: RequestEmailSubject): EmailJsParams {
   return {
-    ...base(subject),
+    // One stage, because one stage is all that has happened. The trail is not
+    // padded with the stages still to come: an email listing "In quality check"
+    // against a request nobody has picked up yet promises a schedule that does
+    // not exist.
+    ...base(subject, [{ ...STAGE_RECEIVED, at: subject.submittedAt }]),
     to_email: subject.requesterEmail,
     reply_to: CLIENT_REPLY_TO,
     intro: `Hi ${firstName(subject.requesterName)}, thanks for sending this through.`,
@@ -145,13 +198,25 @@ export function receivedParams(subject: RequestEmailSubject): EmailJsParams {
  * Gate 1 exists to move `target_date` to `approved_target_date`, and this is the
  * only moment the client is told what was actually agreed. Passing the requested
  * date here would be the app confirming a commitment nobody made.
+ *
+ * `decidedAt` is when the approval happened, for the trail's second stage.
+ * Formatted by the caller, like every other date in this bag — EmailJS does no
+ * date formatting and a raw ISO string in a client's email reads as a fault.
  */
 export function approvedParams(
   subject: RequestEmailSubject,
   agreedDate: string | null,
+  decidedAt: string,
 ): EmailJsParams {
   return {
-    ...base(subject),
+    // Two stages: what the client already saw in their acknowledgement, plus
+    // what just happened. Repeating the first is deliberate — this email is
+    // read on its own, often weeks later, and a trail starting at "Approved"
+    // gives no sense of how long it took.
+    ...base(subject, [
+      { ...STAGE_RECEIVED, at: subject.submittedAt },
+      { ...STAGE_APPROVED, at: decidedAt },
+    ]),
     to_email: subject.requesterEmail,
     reply_to: CLIENT_REPLY_TO,
     intro: `Hi ${firstName(subject.requesterName)}, there is an update on your request.`,

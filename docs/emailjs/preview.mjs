@@ -36,7 +36,53 @@ function escapeHtml(value) {
     .replaceAll('"', "&quot;");
 }
 
-function render(template, values) {
+/**
+ * Truthiness the way EmailJS's section blocks judge it.
+ *
+ * An EMPTY STRING IS FALSE, and that is the case that matters: `lib/emailjs.ts`
+ * deliberately passes `status_url: ""` rather than omitting the key, so a
+ * missing tracking link and an absent one behave identically. If this returned
+ * true for `""` the preview would show a button the real email drops.
+ */
+function isTruthy(value) {
+  if (value === undefined || value === null || value === false) return false;
+  if (value === "") return false;
+  return !(Array.isArray(value) && value.length === 0);
+}
+
+/**
+ * `{{#name}}…{{/name}}` — EmailJS's section syntax, and `{{^name}}` its inverse.
+ *
+ * Run BEFORE variable substitution, or the `{{#status_url}}` marker would be
+ * replaced by the variable's value and the block would never be recognised.
+ *
+ * Non-nested, because the template has no nested sections. A nested one needs a
+ * real parser rather than a regex, and would fail visibly here — the inner
+ * `{{/name}}` closing the outer block — rather than silently.
+ */
+function renderSections(template, values) {
+  return template
+    .replace(/\{\{#\s*([a-z_]+)\s*\}\}([\s\S]*?)\{\{\/\s*\1\s*\}\}/g, (_match, name, body) => {
+      const value = values[name];
+
+      // AN ARRAY IS A LOOP, not a conditional — the block repeats once per
+      // item, and `{{label}}` inside it resolves against THAT item rather than
+      // the top-level bag. Rendering it once with the outer values, which is
+      // what a conditional-only implementation would do, would draw a single
+      // empty timeline row and hide the fact that the loop works.
+      if (Array.isArray(value)) {
+        return value.map((item) => substitute(body, item)).join("");
+      }
+
+      return isTruthy(value) ? body : "";
+    })
+    .replace(/\{\{\^\s*([a-z_]+)\s*\}\}([\s\S]*?)\{\{\/\s*\1\s*\}\}/g, (_match, name, body) =>
+      isTruthy(values[name]) ? "" : body,
+    );
+}
+
+/** `{{name}}` substitution against one bag. Shared by the loop and the page. */
+function substitute(template, values) {
   return template.replace(/\{\{\s*([a-z_]+)\s*\}\}/g, (_match, name) => {
     // Unresolved renders EMPTY, exactly as EmailJS does — which is the failure
     // this preview is most useful for catching. A missing variable leaves a
@@ -44,6 +90,10 @@ function render(template, values) {
     if (!(name in values)) return "";
     return escapeHtml(values[name]);
   });
+}
+
+function render(template, values) {
+  return substitute(renderSections(template, values), values);
 }
 
 /** Shared between both variants — the request itself does not change. */
@@ -61,9 +111,24 @@ const request = {
   target_date: "5 Aug 2026",
   submitted_at: "25 Aug 2026, 2:14 PM",
   // P7-51. The tracking page. preview-04 deliberately omits it, which is what a
-  // request whose token could not be minted looks like: a button linking to
-  // nowhere. That is the case worth seeing.
+  // request whose token could not be minted looks like: NO BUTTON. Before the
+  // section wrap went into the template that preview rendered a full blue call
+  // to action with href="" — which is why it is still generated.
   status_url: "https://pms.vizserve.com/status/kQ7x2mVn8pLr4TzYbW1sJdHgFcAeRuNi",
+  progress_title: "Progress so far",
+};
+
+/**
+ * The first stage, shared by every variant that has a trail at all.
+ *
+ * Wording mirrored from `vizserve_pms_get_request_status` — see the note on
+ * `STAGE_RECEIVED` in `lib/emailjs.ts`. If these previews and the tracking page
+ * ever disagree, the SQL is right and both of the others are wrong.
+ */
+const RECEIVED = {
+  label: "Request received",
+  detail: "We have your request and it is queued for review.",
+  at: "25 Aug 2026, 2:14 PM",
 };
 
 const VARIANTS = [
@@ -77,6 +142,7 @@ const VARIANTS = [
       intro: `${request.requester_name} submitted a request. It is in the queue waiting for a Team Leader.`,
       status_label: "New request",
       status_note: "Nobody has picked this up yet.",
+      timeline: [RECEIVED],
     },
   },
   {
@@ -90,6 +156,7 @@ const VARIANTS = [
       status_label: "Received",
       status_note:
         "It has reached the team and somebody will review it shortly. You do not need to do anything else for now.",
+      timeline: [RECEIVED],
     },
   },
   {
@@ -103,6 +170,17 @@ const VARIANTS = [
       status_label: "We need a bit more before we start",
       status_note:
         "Could you confirm the page count? The brief says four pages but the outline lists five sections.\n\nSend that back and it goes straight into the queue.",
+      // TWO stages, and the variant worth looking at hardest now: it is the one
+      // that proves the loop repeats its body rather than rendering it once.
+      timeline: [
+        RECEIVED,
+        {
+          label: "More information needed",
+          detail:
+            "Could you confirm the page count? The brief says four pages but the outline lists five sections.",
+          at: "26 Aug 2026, 9:02 AM",
+        },
+      ],
     },
   },
   {

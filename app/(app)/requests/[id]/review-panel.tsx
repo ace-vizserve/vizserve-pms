@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { formatDate, isOverdue } from "@/lib/dates";
+import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import type { CapacityRow } from "@/lib/schemas/approvals";
 
 import { saveList } from "../../tasks/actions";
@@ -222,6 +222,9 @@ export function ReviewPanel({
             typeof payload.approved_target_date === "string"
               ? formatDate(payload.approved_target_date)
               : null,
+            // When this decision happened, for the trail's second stage. Now,
+            // to the second — the approval committed a moment ago.
+            formatDateTime(new Date()),
           ),
         );
       }

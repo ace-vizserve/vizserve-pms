@@ -48,6 +48,53 @@ blank row in a client's email and nothing says why. Always pass a fallback:
 | `form_name` | `Design Request` |
 | `target_date` | the date the client **asked for**, not one anybody agreed to |
 | `submitted_at` | format it yourself; EmailJS does no date formatting |
+| `status_url` | P7-51 tracking page. **Optional** — see the section block below |
+| `progress_title` | `Progress so far`, or `""` when there is no trail to head |
+| `timeline` | **An array**, not a string — the progress trail. See below |
+
+### The progress trail
+
+`timeline` is the only non-string variable, and the only loop:
+
+```html
+{{#timeline}}  …a row using {{label}}, {{detail}} and {{at}}…  {{/timeline}}
+```
+
+Inside the block those three resolve against **each item**, not the top-level
+bag. It repeats once per stage and renders nothing when the array is empty, so
+it needs no guard — `progress_title` carries the heading precisely because a
+heading inside the loop would repeat once per stage.
+
+⚠️ **The wording is mirrored from `vizserve_pms_get_request_status`**
+(`20260825150000_p7_51_request_status_page.sql`), which is the source of truth —
+it is what `/status/[token]` renders. An email and a page describing the same
+stage in different words is how a client ends up asking which one is right.
+`tests/unit/emailjs-template.test.ts` pins both sides.
+
+### The one conditional block
+
+`status_url` is the only variable the template guards:
+
+```html
+{{#status_url}}  …the "Track this request" button…  {{/status_url}}
+```
+
+`{{#var}}…{{/var}}` is EmailJS's section syntax: the block renders only when the
+variable is truthy, and **an empty string is not truthy**. That is why
+`lib/emailjs.ts` passes `status_url: ""` rather than omitting the key — both
+behave the same, and passing the empty string keeps the params bag one shape.
+
+Without the guard the button ships as a full-size blue call to action with
+`href=""`. A dead CTA in a client's inbox is worse than no button, and nothing
+in EmailJS warns you: an unresolved variable is an empty string, never an error.
+
+### ⚠️ Never write `{{…}}` inside an HTML comment in `template.html`
+
+**An HTML comment is not a template comment.** EmailJS parses the whole file, so
+a section marker written in a comment *as an example* opens a real block — and
+everything down to the next matching close tag is swallowed. It cost the entire
+progress trail once already. Describe the syntax in prose; the test suite fails
+the build if a `{{` reappears in a comment.
 
 `{{like_this}}` is HTML-escaped by EmailJS, so a description containing `<` is
 safe. Do not switch to `{{{triple}}}` — that disables escaping and lets a
