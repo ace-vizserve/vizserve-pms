@@ -9,63 +9,35 @@ import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { FileField } from "@/components/file-field";
 import {
-  buildSubmissionSchema,
-  type AttachmentRef,
-  type PublicForm,
-  type PublicFormField,
-} from "@/lib/schemas/forms";
+  FieldRuntimeProvider,
+  InterpreterFields,
+  initialEntityValues,
+  useFormInterpreterStore,
+} from "@/lib/form-builder/components";
+import { schemaFromPublicFields } from "@/lib/form-builder/schema";
+import {
+  mergeSubmissionPayload,
+  routeFieldErrors,
+  type FieldValues,
+} from "@/lib/form-builder/values";
+import { requestCoreSchema, type AttachmentRef, type PublicForm } from "@/lib/schemas/forms";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { sendClientEmail } from "@/lib/emailjs-client";
 import { receivedParams, type EmailJsConfig } from "@/lib/emailjs";
 
 import { submitPublicRequest, uploadPublicAttachment } from "./actions";
 
-function FieldShell({
-  field,
-  error,
-  children,
-}: {
-  field: PublicFormField;
-  error?: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="space-y-2">
-      <Label htmlFor={field.field_key}>
-        {field.label}
-        {field.is_required ? (
-          <span className="ml-0.5 text-destructive" aria-label="required">
-            *
-          </span>
-        ) : (
-          <span className="ml-1 text-xs font-normal text-muted-foreground">(optional)</span>
-        )}
-      </Label>
-      {field.help_text ? <p className="text-xs text-muted-foreground">{field.help_text}</p> : null}
-      {children}
-      {error ? (
-        <p className="text-sm text-destructive" role="alert">
-          {error}
-        </p>
-      ) : null}
-    </div>
-  );
-}
-
 /**
- * The value shape is stable even though the schema is generated: core fields
- * plus an open bag of per-form answers. Typing it concretely keeps `register`
- * and `setError` honest, which `as never` everywhere does not.
+ * The value shape is stable even though the form is not: the five fixed fields
+ * every client request carries (docs/01-updated-workflow.md §2.2), plus
+ * `requester_org`. Typing it concretely keeps `register` and `setError` honest,
+ * which `as never` everywhere does not.
+ *
+ * ⚠️ `field_values` IS GONE FROM HERE — see the note on the two state owners
+ * below. The dynamic answers are the interpreter store's, not
+ * `react-hook-form`'s.
  */
 type SubmissionFormValues = {
   requester_name: string;
@@ -74,8 +46,42 @@ type SubmissionFormValues = {
   title: string;
   description: string;
   target_date: string;
-  field_values: Record<string, unknown>;
 };
+
+/**
+ * The five fixed fields, by name.
+ *
+ * Used to route a SERVER field error to the right owner: a key in this list is
+ * `react-hook-form`'s, anything else is a `field_key` and belongs to the
+ * interpreter store.
+ */
+const CORE_FIELD_NAMES = [
+  "requester_name",
+  "requester_email",
+  "requester_org",
+  "title",
+  "description",
+  "target_date",
+] as const;
+
+function isCoreField(key: string): key is (typeof CORE_FIELD_NAMES)[number] {
+  return (CORE_FIELD_NAMES as ReadonlyArray<string>).includes(key);
+}
+
+/**
+ * The receipts a `file` field is holding, read defensively.
+ *
+ * `Object.hasOwn` and no bare bracket look-up, for the reason values.ts states
+ * at length: `FIELD_KEY_PATTERN` allows `constructor`, and `values.constructor`
+ * on a plain object answers with a function rather than `undefined` — which
+ * would put a function into the attachment list rather than nothing.
+ */
+function attachmentsFor(values: FieldValues, fieldKey: string): AttachmentRef[] {
+  if (!Object.hasOwn(values, fieldKey)) return [];
+
+  const value = values[fieldKey];
+  return Array.isArray(value) ? (value as AttachmentRef[]) : [];
+}
 
 export function PublicFormRenderer({
   form,
@@ -90,12 +96,21 @@ export function PublicFormRenderer({
    */
   emailJs: EmailJsConfig | null;
 }) {
-  const schema = useMemo(() => buildSubmissionSchema(form), [form]);
   const [submitted, setSubmitted] = useState<{ reference_no: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
   const rules = form.attachment_rules;
   const maxBytes = rules?.max_bytes;
+  /*
+   * ⚠️ NOTHING SERVER-SIDE COUNTS THE FILES. `max_files` is a browser-side
+   * ceiling only: `uploadPendingAttachment` checks each file's bytes, its MIME
+   * type and its magic number, and `vizserve_pms_submit_request` checks that a
+   * form requiring an attachment got at least one — neither has an upper bound,
+   * so a caller posting straight at the action can still exceed this. Threading
+   * it fixes the configured form; it does not close the hole, and a comment
+   * saying so is cheaper than a reader assuming otherwise.
+   */
+  const maxFiles = rules?.max_files;
   // A filter on the file dialog, not a control. The server checks the actual
   // bytes; this only spares the client picking something that cannot work.
   const accept = rules?.allowed_mime_types.length ? rules.allowed_mime_types.join(",") : undefined;
@@ -119,6 +134,59 @@ export function PublicFormRenderer({
   const [formAttachments, setFormAttachments] = useState<AttachmentRef[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
+  /*
+   * ⚠️ THE FORM HAS TWO STATE OWNERS, AND THIS IS THE SEAM BETWEEN THEM.
+   *
+   * `react-hook-form` owns the five fixed fields. The interpreter store owns
+   * every field the form was built with — it keeps its own values AND its own
+   * errors, keyed by entity id, and there is no way to make it defer to RHF
+   * short of reimplementing it.
+   *
+   * So neither is made the master. Instead the split is made TOTAL and the two
+   * are joined at exactly three points, each named where it happens:
+   *
+   *   1. SUBMIT BLOCKS ON BOTH. `handleSubmit`'s valid path runs
+   *      `validateEntitiesValues()` before it posts anything, and its INVALID
+   *      path runs it too — otherwise a blank name would hide every dynamic
+   *      error until the name was fixed, and the client would correct the form
+   *      one half at a time.
+   *   2. THE PAYLOAD IS MERGED ONCE, in `submit`: RHF's parsed values spread
+   *      flat, the interpreter's translated back to `field_key`s under
+   *      `field_values`. That is the shape `vizserve_pms_submit_request` has
+   *      always read (`p_payload -> 'field_values' -> field_key`), so nothing
+   *      downstream changes.
+   *   3. SERVER ERRORS ARE ROUTED BY NAME. `field_errors` is keyed by
+   *      `field_key`, which is exactly what the §1 translation speaks, so
+   *      `routeFieldErrors` resolves each one against the form's own fields
+   *      first and falls back to a core name only when no field claims that key
+   *      — a per-form field may perfectly well be named `title`, and the flat
+   *      `field_errors` bag has no nesting to keep the two apart. A message that
+   *      matches neither is shown as the form-level error rather than dropped —
+   *      `attachments` is one, and it used to be set on a
+   *      `field_values.attachments` path that renders nowhere.
+   *
+   * The one thing that does NOT need reshaping is the error KEY. Both halves
+   * speak `field_key`, which is the whole point of §1.
+   */
+  const schema = useMemo(() => schemaFromPublicFields(form.fields), [form]);
+  // Computed once, for the same reason the store is: `useInterpreterStore`
+  // memoises on the schema, so `initialData` is the opening document and not a
+  // controlled value.
+  const initialValues = useMemo(() => initialEntityValues(schema), [schema]);
+  const interpreterStore = useFormInterpreterStore(schema, initialValues);
+
+  const runtime = useMemo(
+    () => ({
+      mode: "interpreter" as const,
+      formId: form.id,
+      upload: uploadPublicAttachment,
+      accept,
+      maxFiles,
+      maxBytes,
+    }),
+    [form.id, accept, maxFiles, maxBytes],
+  );
+
   const {
     register,
     control,
@@ -126,7 +194,10 @@ export function PublicFormRenderer({
     setError,
     formState: { errors, isSubmitting },
   } = useForm<SubmissionFormValues>({
-    resolver: zodResolver(schema) as unknown as Resolver<SubmissionFormValues>,
+    // The five fixed fields only. The per-form fields are validated by their own
+    // entity `validate`, which is a verbatim port of the `buildFieldSchema`
+    // branch that used to be extended onto this schema.
+    resolver: zodResolver(requestCoreSchema) as unknown as Resolver<SubmissionFormValues>,
     defaultValues: {
       requester_name: "",
       requester_email: "",
@@ -134,18 +205,30 @@ export function PublicFormRenderer({
       title: "",
       description: "",
       target_date: "",
-      field_values: Object.fromEntries(
-        form.fields.map((field) => [
-          field.field_key,
-          field.field_type === "multiselect" || field.field_type === "file" ? [] : "",
-        ]),
-      ),
     },
   });
 
-  const onSubmit = handleSubmit(async (values) => {
+  async function submit(values: SubmissionFormValues) {
     setFormError(null);
     setAttachmentError(null);
+
+    // Seam 1. Resolves either way and writes its own errors into the store, so a
+    // refusal is already sitting against the fields it belongs to.
+    const dynamic = await interpreterStore.validateEntitiesValues();
+
+    if (!dynamic.success) {
+      setFormError("Please correct the highlighted fields.");
+      return;
+    }
+
+    /*
+     * Seam 2. ONE call, and the attachment sweep below reads its output rather
+     * than translating a second time: two calls to the same translation are two
+     * places for the payload and the receipts to disagree about what was
+     * answered.
+     */
+    const payload = mergeSubmissionPayload(values, schema, dynamic.data);
+    const fieldValues = payload.field_values as FieldValues;
 
     // Files are already uploaded and live under their own field keys; the
     // submission carries the receipts. Flattened here rather than kept in
@@ -154,9 +237,7 @@ export function PublicFormRenderer({
     const attachments = [
       ...form.fields
         .filter((field) => field.field_type === "file")
-        .flatMap(
-          (field) => (values.field_values[field.field_key] as AttachmentRef[] | undefined) ?? [],
-        ),
+        .flatMap((field) => attachmentsFor(fieldValues, field.field_key)),
       ...formAttachments,
     ];
 
@@ -172,7 +253,9 @@ export function PublicFormRenderer({
 
     const result = await submitPublicRequest({
       slug: form.slug,
-      payload: values,
+      // The shape is unchanged: the fixed fields flat, the per-form answers
+      // under `field_values`.
+      payload,
       attachments,
       honeypot:
         (document.getElementById("company_website") as HTMLInputElement | null)?.value ?? "",
@@ -230,16 +313,43 @@ export function PublicFormRenderer({
     // Server-side field errors win. The database re-derives the required list,
     // so it can legitimately reject something the browser thought was fine.
     if (result.field_errors) {
-      for (const [key, message] of Object.entries(result.field_errors)) {
-        const path = key in values ? key : `field_values.${key}`;
-        setError(path as Path<SubmissionFormValues>, { type: "server", message });
+      /*
+       * Seam 3. Both halves are keyed by `field_key`, so the routing is a name
+       * look-up rather than a reshaping — but WHICH look-up runs first is a
+       * real decision, and it is made once, in `routeFieldErrors`, where it can
+       * be tested. A per-form field claims its key ahead of the core input of
+       * the same name; the core list is the fallback. See the note there.
+       */
+      const routed = routeFieldErrors(schema, result.field_errors, isCoreField);
+
+      for (const { entityId, message } of routed.entities) {
+        interpreterStore.setEntityError(entityId, message);
       }
-      setFormError("Please correct the highlighted fields.");
+
+      for (const { name, message } of routed.core) {
+        setError(name as Path<SubmissionFormValues>, { type: "server", message });
+      }
+
+      setFormError(routed.unplaced ?? "Please correct the highlighted fields.");
       return;
     }
 
     setFormError("Something went wrong. Please try again.");
-  });
+  }
+
+  const onSubmit = handleSubmit(
+    (values) => submit(values),
+    /*
+     * Seam 1's other half. `react-hook-form` refused the fixed fields and will
+     * not call the handler, so the dynamic half is validated HERE — otherwise a
+     * blank name would hide every per-form error until it was fixed, and the
+     * client would be sent round the form twice.
+     */
+    async () => {
+      await interpreterStore.validateEntitiesValues();
+      setFormError("Please correct the highlighted fields.");
+    },
+  );
 
   if (submitted) {
     return (
@@ -260,295 +370,187 @@ export function PublicFormRenderer({
     );
   }
 
-  const fieldErrors = (errors.field_values ?? {}) as Record<string, { message?: string }>;
-
   return (
-    <form onSubmit={onSubmit} className="space-y-6" noValidate>
-      {/* Honeypot (P1-15). Hidden from people, not from bots. */}
-      <div aria-hidden className="absolute left-[-9999px] h-0 w-0 overflow-hidden">
-        <label htmlFor="company_website">Company website</label>
-        <input id="company_website" name="company_website" tabIndex={-1} autoComplete="off" />
-      </div>
-
-      <fieldset className="space-y-4">
-        <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your details</legend>
-
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="requester_name">
-              Your name
-              <span className="ml-0.5 text-destructive" aria-label="required">
-                *
-              </span>
-            </Label>
-            <Input id="requester_name" {...register("requester_name")} />
-            {errors.requester_name ? (
-              <p className="text-sm text-destructive">{String(errors.requester_name.message)}</p>
-            ) : null}
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="requester_email">
-              Email
-              <span className="ml-0.5 text-destructive" aria-label="required">
-                *
-              </span>
-            </Label>
-            <Input id="requester_email" type="email" {...register("requester_email")} />
-            <p className="text-xs text-muted-foreground">
-              We send the completed work here for your approval.
-            </p>
-            {errors.requester_email ? (
-              <p className="text-sm text-destructive">{String(errors.requester_email.message)}</p>
-            ) : null}
-          </div>
-        </div>
-      </fieldset>
-
-      <fieldset className="space-y-4">
-        <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your request</legend>
-
-        <div className="space-y-2">
-          <Label htmlFor="title">
-            Title
-            <span className="ml-0.5 text-destructive" aria-label="required">
-              *
-            </span>
-          </Label>
-          <Input id="title" {...register("title")} />
-          {errors.title ? (
-            <p className="text-sm text-destructive">{String(errors.title.message)}</p>
-          ) : null}
+    <FieldRuntimeProvider runtime={runtime}>
+      <form onSubmit={onSubmit} className="space-y-6" noValidate>
+        {/* Honeypot (P1-15). Hidden from people, not from bots. */}
+        <div aria-hidden className="absolute left-[-9999px] h-0 w-0 overflow-hidden">
+          <label htmlFor="company_website">Company website</label>
+          <input id="company_website" name="company_website" tabIndex={-1} autoComplete="off" />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="description">
-            Description
-            <span className="ml-0.5 text-destructive" aria-label="required">
-              *
-            </span>
-          </Label>
-          <Textarea id="description" rows={4} {...register("description")} />
-          {errors.description ? (
-            <p className="text-sm text-destructive">{String(errors.description.message)}</p>
-          ) : null}
-        </div>
+        <fieldset className="space-y-4">
+          <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your details</legend>
 
-        <div className="space-y-2">
-          <Label htmlFor="target_date">
-            Target date
-            <span className="ml-0.5 text-destructive" aria-label="required">
-              *
-            </span>
-          </Label>
-          {/*
-            Through a Controller rather than `register`, because DatePicker is
-            controlled and has no DOM event to hook a ref onto.
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="requester_name">
+                Your name
+                <span className="ml-0.5 text-destructive" aria-label="required">
+                  *
+                </span>
+              </Label>
+              <Input id="requester_name" {...register("requester_name")} />
+              {errors.requester_name ? (
+                <p className="text-sm text-destructive">{String(errors.requester_name.message)}</p>
+              ) : null}
+            </div>
 
-            ⚠️ CLIENT-FACING (§4.6): this is one of two screens somebody outside
-            the company ever sees, and the browser's native picker was the last
-            thing here that did not carry our tokens or a dark mode. The target
-            date is also the field a client is most likely to get wrong — a real
-            calendar showing them the day of the week is worth more here than
-            anywhere else in the app.
-          */}
-          <Controller
-            control={control}
-            name="target_date"
-            render={({ field }) => (
-              <DatePicker
-                id="target_date"
-                className="w-56"
-                value={(field.value as string) ?? null}
-                onChange={(value) => field.onChange(value ?? "")}
-                invalid={Boolean(errors.target_date)}
-              />
-            )}
-          />
-          <p className="text-xs text-muted-foreground">
-            When you need this by. A team leader may propose a different date.
-          </p>
-          {errors.target_date ? (
-            <p className="text-sm text-destructive">{String(errors.target_date.message)}</p>
-          ) : null}
-        </div>
-
-        {form.fields.map((field) => {
-          const error = fieldErrors[field.field_key]?.message;
-          const name = `field_values.${field.field_key}` as const;
-
-          if (field.field_type === "textarea") {
-            return (
-              <FieldShell key={field.id} field={field} error={error}>
-                <Textarea id={field.field_key} rows={4} {...register(name as never)} />
-              </FieldShell>
-            );
-          }
-
-          if (field.field_type === "select") {
-            return (
-              <FieldShell key={field.id} field={field} error={error}>
-                <Controller
-                  control={control}
-                  name={name as never}
-                  render={({ field: controlled }) => (
-                    <Select
-                      // Value and label are the same string here — the options
-                      // ARE the words the form builder typed — so nothing is
-                      // visibly wrong today. It is still handed the map: "the
-                      // two happen to match" is not a property worth relying on
-                      // on the one page a client fills in unaided.
-                      items={Object.fromEntries(field.options.map((option) => [option, option]))}
-                      value={(controlled.value as string) || ""}
-                      onValueChange={controlled.onChange}>
-                      <SelectTrigger id={field.field_key}>
-                        <SelectValue placeholder="Choose one" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {field.options.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-              </FieldShell>
-            );
-          }
-
-          if (field.field_type === "multiselect") {
-            return (
-              <FieldShell key={field.id} field={field} error={error}>
-                <Controller
-                  control={control}
-                  name={name as never}
-                  render={({ field: controlled }) => {
-                    const selected = (controlled.value as string[]) ?? [];
-                    return (
-                      <div className="space-y-2 rounded-md border p-3">
-                        {field.options.map((option) => (
-                          <label key={option} className="flex items-center gap-2 text-sm">
-                            <Checkbox
-                              checked={selected.includes(option)}
-                              onCheckedChange={(checked) =>
-                                controlled.onChange(
-                                  checked
-                                    ? [...selected, option]
-                                    : selected.filter((value) => value !== option),
-                                )
-                              }
-                            />
-                            {option}
-                          </label>
-                        ))}
-                      </div>
-                    );
-                  }}
-                />
-              </FieldShell>
-            );
-          }
-
-          if (field.field_type === "file") {
-            return (
-              <FieldShell key={field.id} field={field} error={error}>
-                <Controller
-                  control={control}
-                  name={name as never}
-                  render={({ field: controlled }) => (
-                    <FileField
-                      id={field.field_key}
-                      formId={form.id}
-                      fieldKey={field.field_key}
-                      value={(controlled.value as AttachmentRef[] | undefined) ?? []}
-                      onChange={controlled.onChange}
-                      upload={uploadPublicAttachment}
-                      accept={accept}
-                      maxBytes={maxBytes}
-                    />
-                  )}
-                />
-              </FieldShell>
-            );
-          }
-
-          const inputType =
-            field.field_type === "date"
-              ? "date"
-              : field.field_type === "email"
-                ? "email"
-                : field.field_type === "number"
-                  ? "number"
-                  : "text";
-
-          return (
-            <FieldShell key={field.id} field={field} error={error}>
-              <Input
-                id={field.field_key}
-                type={inputType}
-                className={inputType === "date" ? "w-auto" : undefined}
-                {...register(name as never)}
-              />
-            </FieldShell>
-          );
-        })}
-
-        {needsOwnAttachment ? (
-          <div className="space-y-2">
-            <Label htmlFor="request_attachment">
-              Attachment
-              <span className="text-destructive" aria-label="required">
-                *
-              </span>
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              This request cannot be submitted without a file.
-            </p>
-            <FileField
-              id="request_attachment"
-              formId={form.id}
-              // null, not a made-up key. There is no `form_fields` row behind
-              // this slot, and `pending_attachments.field_key` is nullable for
-              // exactly that case — a synthetic key would look like a field
-              // that once existed and was deleted.
-              fieldKey={null}
-              value={formAttachments}
-              onChange={(next) => {
-                setFormAttachments(next);
-                if (next.length > 0) setAttachmentError(null);
-              }}
-              upload={uploadPublicAttachment}
-              accept={accept}
-              maxBytes={maxBytes}
-            />
-            {attachmentError ? (
-              <p className="text-sm text-destructive" role="alert">
-                {attachmentError}
+            <div className="space-y-2">
+              <Label htmlFor="requester_email">
+                Email
+                <span className="ml-0.5 text-destructive" aria-label="required">
+                  *
+                </span>
+              </Label>
+              <Input id="requester_email" type="email" {...register("requester_email")} />
+              <p className="text-xs text-muted-foreground">
+                We send the completed work here for your approval.
               </p>
+              {errors.requester_email ? (
+                <p className="text-sm text-destructive">{String(errors.requester_email.message)}</p>
+              ) : null}
+            </div>
+          </div>
+        </fieldset>
+
+        <fieldset className="space-y-4">
+          <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your request</legend>
+
+          <div className="space-y-2">
+            <Label htmlFor="title">
+              Title
+              <span className="ml-0.5 text-destructive" aria-label="required">
+                *
+              </span>
+            </Label>
+            <Input id="title" {...register("title")} />
+            {errors.title ? (
+              <p className="text-sm text-destructive">{String(errors.title.message)}</p>
             ) : null}
           </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="description">
+              Description
+              <span className="ml-0.5 text-destructive" aria-label="required">
+                *
+              </span>
+            </Label>
+            <Textarea id="description" rows={4} {...register("description")} />
+            {errors.description ? (
+              <p className="text-sm text-destructive">{String(errors.description.message)}</p>
+            ) : null}
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="target_date">
+              Target date
+              <span className="ml-0.5 text-destructive" aria-label="required">
+                *
+              </span>
+            </Label>
+            {/*
+              Through a Controller rather than `register`, because DatePicker is
+              controlled and has no DOM event to hook a ref onto.
+
+              ⚠️ CLIENT-FACING (§4.6): this is one of two screens somebody outside
+              the company ever sees, and the browser's native picker was the last
+              thing here that did not carry our tokens or a dark mode. The target
+              date is also the field a client is most likely to get wrong — a real
+              calendar showing them the day of the week is worth more here than
+              anywhere else in the app.
+            */}
+            <Controller
+              control={control}
+              name="target_date"
+              render={({ field }) => (
+                <DatePicker
+                  id="target_date"
+                  className="w-56"
+                  value={(field.value as string) ?? null}
+                  onChange={(value) => field.onChange(value ?? "")}
+                  invalid={Boolean(errors.target_date)}
+                />
+              )}
+            />
+            <p className="text-xs text-muted-foreground">
+              When you need this by. A team leader may propose a different date.
+            </p>
+            {errors.target_date ? (
+              <p className="text-sm text-destructive">{String(errors.target_date.message)}</p>
+            ) : null}
+          </div>
+
+          {/*
+            Every field this form was BUILT with, rendered from the same
+            component map the builder previews them in (lib/form-builder/
+            components.tsx). It replaces a `form.fields.map(...)` that switched
+            on `field_type` and drew each control inline — the switch that had to
+            stay in step with `buildFieldSchema` by hand.
+          */}
+          <InterpreterFields interpreterStore={interpreterStore} />
+
+          {needsOwnAttachment ? (
+            <div className="space-y-2">
+              <Label htmlFor="request_attachment">
+                Attachment
+                <span className="text-destructive" aria-label="required">
+                  *
+                </span>
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                This request cannot be submitted without a file.
+              </p>
+              <FileField
+                id="request_attachment"
+                formId={form.id}
+                // null, not a made-up key. There is no `form_fields` row behind
+                // this slot, and `pending_attachments.field_key` is nullable for
+                // exactly that case — a synthetic key would look like a field
+                // that once existed and was deleted.
+                fieldKey={null}
+                value={formAttachments}
+                onChange={(next) => {
+                  setFormAttachments(next);
+                  if (next.length > 0) setAttachmentError(null);
+                }}
+                upload={uploadPublicAttachment}
+                accept={accept}
+                // The form's own rules, same as a `file` field gets through the
+                // runtime context. Without it this slot fell back to
+                // `FileField`'s hard-coded 10 and ignored a form configured
+                // `max_files: 3`.
+                maxFiles={maxFiles}
+                maxBytes={maxBytes}
+              />
+              {attachmentError ? (
+                <p className="text-sm text-destructive" role="alert">
+                  {attachmentError}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+        </fieldset>
+
+        {formError ? (
+          <p
+            role="alert"
+            className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+            {formError}
+          </p>
         ) : null}
-      </fieldset>
 
-      {formError ? (
-        <p
-          role="alert"
-          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
-          {formError}
-        </p>
-      ) : null}
-
-      <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row-reverse sm:items-center sm:justify-between">
-        <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
-          {isSubmitting ? "Submitting…" : "Submit request"}
-        </Button>
-        {/* What happens next, next to the button that makes it happen. */}
-        <p className="text-xs text-muted-foreground">
-          A team leader reviews this and may propose a different date.
-        </p>
-      </div>
-    </form>
+        <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row-reverse sm:items-center sm:justify-between">
+          <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
+            {isSubmitting ? "Submitting…" : "Submit request"}
+          </Button>
+          {/* What happens next, next to the button that makes it happen. */}
+          <p className="text-xs text-muted-foreground">
+            A team leader reviews this and may propose a different date.
+          </p>
+        </div>
+      </form>
+    </FieldRuntimeProvider>
   );
 }

@@ -9,8 +9,11 @@ import {
   fieldsFromSchema,
   FormSchemaError,
   parseFormSchema,
+  planEntityReorder,
   planFieldReorder,
+  reconcileFormSchema,
   schemaFromFields,
+  type EntityIndexMove,
   type FieldOrderUpdate,
   type FormFieldRow,
   type ProjectedFormFieldRow,
@@ -120,7 +123,8 @@ function rowOf(row: FormFieldRow): ProjectedFormFieldRow {
  *   * all six attributes, named exactly as attributes.ts declares them
  *   * `archived` is `not is_active`, and there is no `is_active` attribute
  *   * `root` is ordered by `sort_order, created_at, id` — three columns,
- *     because live forms share `sort_order` values (see `moveField`)
+ *     because live forms share `sort_order` values (the old builder inserted
+ *     every field at the literal 999)
  */
 function backfilledBlob(rows: ReadonlyArray<FormFieldRow>): unknown {
   const ordered = [...rows].sort(
@@ -185,9 +189,9 @@ const liveForm = [noteRow, priorityRow, retiredRow];
  * A FORM WHOSE ROWS SHARE A `sort_order`, hoisted to module scope because the
  * seam below has to be checked against it and not only against `liveForm`.
  *
- * `moveField` in app/(app)/forms/actions.ts records in passing that "seeded and
- * hand-edited forms often share sort_order values", so this is live data rather
- * than a hypothetical - and it is the ONLY shape on which the two twins could
+ * Seeded and hand-edited forms share `sort_order` values — the old builder
+ * inserted every field at the literal 999 — so this is live data rather than a
+ * hypothetical - and it is the ONLY shape on which the two twins could
  * disagree, because it is the only one where `sort_order` alone does not decide
  * the order. A seam test built from distinct `sort_order` values passes whatever
  * the tiebreak is, which is why it could not catch this.
@@ -747,28 +751,21 @@ describe("the row set vizserve_pms_save_form_schema has to produce", () => {
 });
 
 /*
- * P7-66 Phase 1 — THE DUAL-WRITE'S BLOB, as jsonb rather than as an object.
+ * `schemaFromFields` AS JSONB rather than as an object.
  *
- * app/(app)/forms/form-schema-sync.ts hands `schemaFromFields(rows)` straight to
- * `.update({ schema })`, so what lands in the column is that value SERIALISED —
- * no `parseFormSchema` in between, unlike every other assertion in this file.
- * The seam test above compares the two twins after the library has normalised
- * one of them, which is the right check for the projection and the wrong one for
- * this: it would still pass if the raw object carried an extra own property, an
- * `undefined` attribute that JSON drops, or anything that does not survive
- * `JSON.stringify`.
+ * Written for Phase 1's dual-write, which Phase 2 deleted, and kept because
+ * `reconcileFormSchema` now rests on exactly the same equality: the loader calls
+ * a stored blob CURRENT when it matches `schemaFromFields(rows)`, so if the two
+ * were only usually the same the builder would report every healthy form as
+ * stale — or, worse, a genuinely stale one as current.
  *
- * So this pins the only thing the dual-write actually promises: a form edited
- * through the legacy builder ends up holding EXACTLY the blob the migration's
- * backfill would have written for the same rows. If it does not, Phase 2's first
- * `vizserve_pms_save_form_schema` projects the difference back over the rows and
- * deletes whatever the blob omits.
- *
- * The reload's column list needs no test of its own: it types the rows the
- * mapping in that file reads, so a select missing `created_at` — the tiebreak
- * both twins order by — fails `tsc` rather than silently reordering tied fields.
+ * ⚠️ SERIALISED, DELIBERATELY. The seam test above compares the two twins after
+ * the library has normalised one of them, which is the right check for the
+ * projection and the wrong one for this: it would still pass if the raw object
+ * carried an extra own property, an `undefined` attribute that JSON drops, or
+ * anything else that does not survive `JSON.stringify` on its way into jsonb.
  */
-describe("the blob the legacy actions dual-write", () => {
+describe("the blob schemaFromFields serialises to", () => {
   it.each([
     { name: "distinct sort_order values", rows: liveForm },
     { name: "rows sharing a sort_order", rows: tiedForm },
@@ -790,11 +787,14 @@ describe("the blob the legacy actions dual-write", () => {
 });
 
 /*
- * P7-66 — `moveField`'s ordering, extracted so it can be tested at all.
+ * P7-66 — THE REORDER RULE, on its own.
  *
- * `moveField` in app/(app)/forms/actions.ts is round trips wrapped around one
- * decision, and the decision was the part that was wrong. `planFieldReorder`
- * is that decision on its own: rows in, `sort_order` writes out, no database.
+ * Written for `moveField`, which was round trips wrapped around one decision —
+ * and the decision was the part that was wrong. Phase 2 deleted the action and
+ * kept the rule: `planEntityReorder` (tested at the end of this file) is the
+ * builder store's reorder and is a thin adaptation of this function, so these
+ * assertions still guard the live path. Rows in, `sort_order` writes out, no
+ * database.
  *
  * ⚠️ EVERY ASSERTION BELOW IS ABOUT THE ORDER THE USER ENDS UP LOOKING AT, not
  * about the numbers. `orderAfter` applies the plan to the rows and then reads
@@ -955,8 +955,8 @@ describe("planFieldReorder", () => {
   });
 
   it("plans nothing for a field that is not on this form", () => {
-    // `moveField` reports that as success rather than as an error, and it must
-    // not renumber a form on the strength of an id it did not find.
+    // Not an error: an id that is not on this form must simply move nothing,
+    // and above all must not renumber the form on the strength of it.
     expect(planFieldReorder(allTied, ABSENT_ID, "up")).toEqual([]);
   });
 
@@ -998,5 +998,190 @@ describe("planFieldReorder", () => {
     // The tie is what made them look interchangeable; writing 1 is what ends it.
     expect(updates).toEqual([{ id: tiedFirst.id, sort_order: 1 }]);
     expect(orderAfter(tiedForm, updates)).toEqual(["asked_second", "asked_first"]);
+  });
+});
+
+/*
+ * P7-66 Phase 2 — THE LOADER'S RECONCILE RULE.
+ *
+ * Phase 1's dual-write logged and swallowed a failed blob write, on the argument
+ * that the next save re-derives it. The save that argument does not cover is the
+ * LAST one before a form is published and left alone — and that form's stale
+ * blob, opened in the builder and saved back, would have
+ * `vizserve_pms_save_form_schema` project it over the rows and DELETE every
+ * field it omits.
+ *
+ * ⚠️ SO THE ROWS ALWAYS WIN, and every assertion below is really about one of
+ * two things: that the schema handed to the builder is the rows' whatever the
+ * blob said, and that `storedWasCurrent` tells the truth about whether the blob
+ * agreed. The second is not decoration — it is what turns a silent repair into a
+ * line in the log saying a Phase 1 write never landed.
+ *
+ * `backfilledBlob` is reused rather than re-modelled: it is already this file's
+ * longhand model of the jsonb the migration writes, so "the stored blob" and
+ * "what the database would have put there" are the same object by construction.
+ */
+describe("reconcileFormSchema", () => {
+  it("recognises the backfill's own jsonb as current", () => {
+    const { schema, storedWasCurrent } = reconcileFormSchema(backfilledBlob(liveForm), liveForm);
+
+    expect(storedWasCurrent).toBe(true);
+    expect(schema).toEqual(schemaFromFields(liveForm));
+  });
+
+  it("is indifferent to the key order jsonb hands back", () => {
+    // Postgres preserves nothing about object key order, so two byte-different
+    // blobs routinely mean the same form. A `JSON.stringify` comparison would
+    // call this stale and re-log a healthy form on every page load.
+    const blob = backfilledBlob(liveForm) as { entities: Record<string, unknown>; root: string[] };
+    const shuffled = {
+      root: blob.root,
+      entities: Object.fromEntries(Object.entries(blob.entities).reverse()),
+    };
+
+    expect(reconcileFormSchema(shuffled, liveForm).storedWasCurrent).toBe(true);
+  });
+
+  it("overrules a blob that has lost a field, and opens on the field", () => {
+    // THE FAILURE THIS EXISTS FOR: an archived field missing from the blob. Save
+    // that blob and the projection deletes a row holding historical answers —
+    // or, once the R5 trigger refuses the delete, the form can never be saved
+    // again.
+    const stale = backfilledBlob([noteRow, priorityRow]);
+    const { schema, storedWasCurrent } = reconcileFormSchema(stale, liveForm);
+
+    expect(storedWasCurrent).toBe(false);
+    expect(fieldsFromSchema(schema).map((field) => field.id)).toEqual([
+      NOTE_ID,
+      PRIORITY_ID,
+      RETIRED_ID,
+    ]);
+  });
+
+  it.each([
+    {
+      name: "a stale order",
+      stale: backfilledBlob([
+        { ...priorityRow, sort_order: 0 },
+        { ...noteRow, sort_order: 1 },
+        retiredRow,
+      ]),
+    },
+    {
+      name: "a stale label",
+      stale: backfilledBlob([{ ...noteRow, label: "Yesterday's label" }, priorityRow, retiredRow]),
+    },
+    {
+      name: "a stale option list",
+      stale: backfilledBlob([
+        noteRow,
+        { ...priorityRow, options: ["Low", "High", "Urgent"] },
+        retiredRow,
+      ]),
+    },
+    {
+      name: "a field that is archived in the rows and live in the blob",
+      stale: backfilledBlob([noteRow, priorityRow, { ...retiredRow, is_active: true }]),
+    },
+    {
+      // What the column default is, and what a form nobody has saved since the
+      // migration would hold if the backfill had not run.
+      name: "the empty default on a form that has fields",
+      stale: { entities: {}, root: [] },
+    },
+    { name: "a blob that is not an object at all", stale: null },
+  ])("overrules $name", ({ stale }) => {
+    const { schema, storedWasCurrent } = reconcileFormSchema(stale, liveForm);
+
+    expect(storedWasCurrent).toBe(false);
+    expect(schema).toEqual(schemaFromFields(liveForm));
+  });
+
+  it("calls the empty default current for a form with no fields", () => {
+    // Every live form is in exactly this state (measured 2026-09-02: four forms,
+    // zero `vizserve_pms_form_fields` rows), so a reconcile that reported them
+    // all as stale would log a warning per page load and cry wolf about the one
+    // form that really was.
+    expect(reconcileFormSchema({ entities: {}, root: [] }, []).storedWasCurrent).toBe(true);
+  });
+});
+
+/*
+ * P7-66 Phase 2 — the up/down buttons, now `setEntityIndex` calls.
+ *
+ * The RULE — the neighbour is the nearest field the user can SEE — is
+ * `planFieldReorder`'s and is tested above against rows. What is new here is the
+ * adaptation: root position as `sort_order`, and a swap expressed as an ORDERED
+ * pair of remove-then-insert calls, which is what `setEntityIndex` does.
+ *
+ * `applyMoves` is that operation modelled — `Set.delete` then splice-insert,
+ * exactly as the shipped `dist` does it — so the assertions are about the order
+ * the user ends up looking at rather than about the numbers in the plan.
+ */
+function applyMoves(root: ReadonlyArray<string>, moves: ReadonlyArray<EntityIndexMove>): string[] {
+  const next = [...root];
+
+  for (const move of moves) {
+    next.splice(next.indexOf(move.entityId), 1);
+    next.splice(move.index, 0, move.entityId);
+  }
+
+  return next;
+}
+
+describe("planEntityReorder", () => {
+  const denseSchema = schemaFromFields(alreadyDense);
+
+  it("moves one field one place, not to the front", () => {
+    const moves = planEntityReorder(denseSchema, alreadyDense[2]!.id, "up");
+
+    expect(applyMoves(denseSchema.root, moves)).toEqual([
+      alreadyDense[0]!.id,
+      alreadyDense[2]!.id,
+      alreadyDense[1]!.id,
+      alreadyDense[3]!.id,
+      alreadyDense[4]!.id,
+    ]);
+  });
+
+  it("moves down as well as up", () => {
+    const moves = planEntityReorder(denseSchema, alreadyDense[1]!.id, "down");
+
+    expect(applyMoves(denseSchema.root, moves)).toEqual([
+      alreadyDense[0]!.id,
+      alreadyDense[2]!.id,
+      alreadyDense[1]!.id,
+      alreadyDense[3]!.id,
+      alreadyDense[4]!.id,
+    ]);
+  });
+
+  it("swaps past an archived field rather than into it", () => {
+    // The builder renders active and archived as two lists and only the active
+    // one carries move buttons, so the row above `priority` on screen is `note`
+    // — swapping into the archived row would be a click that visibly does
+    // nothing. The archived field keeps its place in `root`.
+    const between = schemaFromFields([
+      { ...noteRow, sort_order: 0 },
+      { ...retiredRow, sort_order: 1 },
+      { ...priorityRow, sort_order: 2 },
+    ]);
+
+    expect(applyMoves(between.root, planEntityReorder(between, PRIORITY_ID, "up"))).toEqual([
+      PRIORITY_ID,
+      RETIRED_ID,
+      NOTE_ID,
+    ]);
+  });
+
+  it.each([
+    { name: "the first field, up", index: 0, direction: "up" as const },
+    { name: "the last field, down", index: 4, direction: "down" as const },
+  ])("plans nothing for $name", ({ index, direction }) => {
+    expect(planEntityReorder(denseSchema, alreadyDense[index]!.id, direction)).toEqual([]);
+  });
+
+  it("plans nothing for an id that is not on this form", () => {
+    expect(planEntityReorder(denseSchema, ABSENT_ID, "up")).toEqual([]);
   });
 });

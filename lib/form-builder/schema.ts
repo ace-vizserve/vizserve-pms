@@ -1,7 +1,7 @@
 import { validateSchema, type SchemaValidationErrorReason } from "@coltorapps/builder";
 
 import { formBuilder, type FormSchema, type FormSchemaEntity } from "@/lib/form-builder/builder";
-import type { FieldType } from "@/lib/schemas/forms";
+import type { FieldType, PublicFormField } from "@/lib/schemas/forms";
 
 /**
  * P7-63 Phase 0 — the stored blob, and the projection between it and rows.
@@ -70,15 +70,16 @@ declare const parsedFormSchemaBrand: unique symbol;
  * remembering to call it, and the one that forgot would turn a required field
  * into an optional one, silently.
  *
- * Only two functions mint it: `parseFormSchema`, and `schemaFromFields`, whose
- * input is already typed row data with no nullable attribute in it.
+ * Only three functions mint it: `parseFormSchema`, and the two projections
+ * `schemaFromFields` and `schemaFromPublicFields`, whose inputs are already
+ * typed database rows with no nullable attribute in them.
  */
 export type ParsedFormSchema = FormSchema & { readonly [parsedFormSchemaBrand]: true };
 
 /**
- * Applies the brand. The only two call sites are the two functions below, which
- * is the whole point — keep it that way, and a `ParsedFormSchema` is proof the
- * schema went through one of them.
+ * Applies the brand. The only call sites are the three minting functions in
+ * this file, which is the whole point — keep it that way, and a
+ * `ParsedFormSchema` is proof the schema went through one of them.
  */
 function asParsed(schema: FormSchema): ParsedFormSchema {
   return schema as ParsedFormSchema;
@@ -145,11 +146,12 @@ export type ProjectedFormFieldRow = {
  * ⚠️ `created_at` IS REQUIRED, AND THAT IS THE WHOLE POINT OF ITS BEING HERE.
  *
  * The Phase 1 backfill orders `sort_order, created_at, id` — three columns,
- * because `moveField` in app/(app)/forms/actions.ts records that "seeded and
- * hand-edited forms often share sort_order values", so ties are live data rather
- * than a hypothetical. `schemaFromFields` is that backfill's twin, so it has to
- * break a tie the same way or the two produce different `root` orders from the
- * same rows — on precisely the oldest forms, and silently.
+ * because seeded and hand-edited forms share `sort_order` values: the old
+ * builder inserted every field at the literal 999 and nothing renumbered until
+ * something moved, so ties are live data rather than a hypothetical.
+ * `schemaFromFields` is that backfill's twin, so it has to break a tie the same
+ * way or the two produce different `root` orders from the same rows — on
+ * precisely the oldest forms, and silently.
  *
  * OPTIONAL WAS CONSIDERED AND REFUSED. With `created_at?: string` the sort would
  * need a fallback for the absent case, and no fallback can be both deterministic
@@ -168,6 +170,38 @@ export type ProjectedFormFieldRow = {
  * line in each test helper. That is the entire price, and it is paid once.
  */
 export type FormFieldRow = ProjectedFormFieldRow & { created_at: string };
+
+/**
+ * The `options` column as it comes back from PostgREST — `Json`, not `string[]`.
+ *
+ * ⚠️ READS OR REFUSES. IT DOES NOT NARROW, and that is the point.
+ *
+ * The loader used to `filter((o) => typeof o === "string")`, which was written
+ * as a display-time courtesy: a row holding something odd would open with a
+ * shorter option list rather than crash the page. But the list it produces is
+ * not only displayed — it becomes the schema the builder edits, and the next
+ * save projects that schema straight back over the row through
+ * `vizserve_pms_save_form_schema`. So the courtesy WROTE: the entries it hid
+ * were permanently dropped from the stored choices, and every historical answer
+ * holding one stopped validating against its own form.
+ *
+ * `null` means "this row cannot be opened for editing", which the caller turns
+ * into a refusal to render the builder. That is the only honest third option: a
+ * schema blob carries `string[]` and has nowhere to keep a value that is not
+ * one, so there is no way to open such a row without either losing the value or
+ * inventing one.
+ *
+ * Unreachable through the app — `formFieldDraftSchema.options` and the column's
+ * own `jsonb_typeof(options) = 'array'` CHECK both stand in the way, and P7-66
+ * measured zero field rows in production — so this is the hand-edited-jsonb
+ * case, kept cheap rather than argued away.
+ */
+export function optionsFromRow(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null;
+  if (!value.every((option) => typeof option === "string")) return null;
+
+  return [...value];
+}
 
 /**
  * Code-unit comparison, not `localeCompare`.
@@ -189,8 +223,8 @@ type OrderedFormFieldRow = Pick<FormFieldRow, "id" | "sort_order" | "created_at"
  * `order by sort_order, created_at, id` — THE one ordering rule, in one place.
  *
  * It was written out inline in `schemaFromFields` and nowhere else, which is
- * how `moveField` in app/(app)/forms/actions.ts came to order by `sort_order`
- * ALONE while its blob-writing twin ordered by three columns: on a form with
+ * how the `moveField` action P7-66 has since deleted came to order by
+ * `sort_order` ALONE while its blob-writing twin ordered by three columns: on a form with
  * ties the two disagreed about which row is "the one above", so the neighbour
  * the action swapped was not the neighbour the blob went on to record. Sharing
  * the comparator makes that particular disagreement unexpressible.
@@ -351,27 +385,32 @@ export function fieldsFromSchema(schema: FormSchema): ProjectedFormFieldRow[] {
 }
 
 /**
- * A row as `moveField` reads it: the three ordering columns, plus the flag that
+ * A row as a reorder reads it: the three ordering columns, plus the flag that
  * says whether the user can see it.
  */
 export type FieldOrderRow = OrderedFormFieldRow & Pick<FormFieldRow, "is_active">;
 
-/** One `update ... set sort_order = n where id = …`. */
+/** One position in the reordered list. */
 export type FieldOrderUpdate = { id: string; sort_order: number };
 
 /**
- * ⚠️ P7-66 Phase 1 — THROWAWAY, like the action it serves. Phase 2 reorders in
- * the builder store with `setEntityIndex` and deletes `moveField` outright.
+ * ⚠️ P7-66 — THE ONE REORDER RULE, and no longer a throwaway.
+ *
+ * Phase 1 wrote this for `moveField`, which Phase 2 deleted. It survives that
+ * deletion because the rule it encodes is the part that was got wrong twice, and
+ * `planEntityReorder` at the bottom of this file — the builder store's reorder —
+ * is a thin adaptation of it rather than a second copy. The vocabulary is still
+ * rows and `sort_order`; a schema's `root` position IS a `sort_order`, which is
+ * all that adaptation says.
  *
  * Nudges one field one place, and returns the FULL DENSE RENUMBERING that move
  * implies — every row whose `sort_order` has to change, and only those.
  *
  * ⚠️ IT RENUMBERS EVERYTHING, NOT THE TWO ROWS THAT SWAPPED, and that is the
  * whole reason it exists. `moveField` used to rewrite exactly the two swapped
- * rows to `(position + 1) * 10` and leave every other row where it was. Fields
- * are inserted at `sort_order: 999` by the builder
- * (app/(app)/forms/[id]/field-builder.tsx), so on a form that had never been
- * reordered EVERY row shared 999 — and moving the third field up left the two
+ * rows to `(position + 1) * 10` and leave every other row where it was. The old
+ * builder inserted every field at the literal `sort_order: 999`, so on a form
+ * that had never been reordered EVERY row shared 999 — and moving the third field up left the two
  * rewritten rows at 20 and 30 with the rest still at 999, i.e. both of them
  * jumped in front of fields nobody had touched. `A B C D E` became `C B A D E`.
  * A renumbering that only spends values on two rows is only correct when the
@@ -427,4 +466,235 @@ export function planFieldReorder(
   });
 
   return updates;
+}
+
+/**
+ * The public renderer's fields → a schema, for `useInterpreterStore`.
+ *
+ * ⚠️ A THIRD MINT OF `ParsedFormSchema`, AND IT HAD TO BE ONE. `/request/[slug]`
+ * has no session, `anon` holds no table privileges, and the only door into the
+ * database is `vizserve_pms_get_public_form` — a SECURITY DEFINER function that
+ * returns `PublicFormField`s and neither the `schema` column nor `created_at`.
+ * So the interpreter's schema is derived from what that function returns, and
+ * `schemaFromFields` cannot do it: `FormFieldRow` requires `created_at`
+ * precisely so a loader cannot forget the tiebreak, and inventing one here would
+ * be that forgetting with a default in front of it.
+ *
+ * ⚠️ ORDER IS THE INPUT'S ORDER, NOT A SORT. It is not a shortcut: the SQL
+ * function already returns its fields `order by sort_order, created_at`, which
+ * is the first two of the three columns `schemaFromFields` sorts by and the
+ * order clients have been seeing since the form went live. Re-sorting here on
+ * the two columns that survive the trip would be a DIFFERENT rule, applied to
+ * data that has already been ordered by a better one.
+ *
+ * Archived fields never arrive — the function filters `is_active` — so every
+ * entity minted here is live. `archived: false` is a fact about the input, not a
+ * default.
+ *
+ * The brand is honest for the same reason `schemaFromFields`'s is: every
+ * attribute comes from a typed, non-nullable column, so there is no nullish
+ * default left for `parseFormSchema` to apply.
+ */
+export function schemaFromPublicFields(
+  fields: ReadonlyArray<PublicFormField>,
+): ParsedFormSchema {
+  const entities = Object.fromEntries(
+    fields.map((field): [string, FormSchemaEntity] => [
+      field.id,
+      {
+        type: field.field_type,
+        attributes: {
+          key: field.field_key,
+          label: field.label,
+          helpText: field.help_text,
+          required: field.is_required,
+          // Copied, not aliased — same rule as `schemaFromFields`.
+          options: [...field.options],
+          archived: false,
+        },
+      } as FormSchemaEntity,
+    ]),
+  );
+
+  return asParsed({ entities, root: fields.map((field) => field.id) });
+}
+
+/**
+ * Is the stored blob EXACTLY the schema these rows describe?
+ *
+ * Structural rather than `JSON.stringify`: jsonb normalises nothing about key
+ * ORDER on the way out, so two byte-different blobs routinely mean the same
+ * form. Arrays are compared elementwise because `root` and `options` are the two
+ * places where order IS the meaning.
+ *
+ * An attribute the derived schema does not have counts as a difference, not as
+ * a harmless extra: the library refuses an undeclared attribute outright
+ * (`UnknownEntityAttributeType`), so a blob carrying one is a blob that would
+ * not open.
+ */
+function sameAsStoredSchema(derived: FormSchema, stored: unknown): boolean {
+  if (typeof stored !== "object" || stored === null || Array.isArray(stored)) return false;
+
+  const blob = stored as { root?: unknown; entities?: unknown };
+
+  if (!Array.isArray(blob.root) || blob.root.length !== derived.root.length) return false;
+  if (blob.root.some((id, index) => id !== derived.root[index])) return false;
+
+  const storedEntities = blob.entities;
+  if (typeof storedEntities !== "object" || storedEntities === null) return false;
+
+  const storedIds = Object.keys(storedEntities);
+  const derivedIds = Object.keys(derived.entities);
+  if (storedIds.length !== derivedIds.length) return false;
+
+  for (const entityId of derivedIds) {
+    if (!Object.hasOwn(storedEntities, entityId)) return false;
+
+    const storedEntity = (storedEntities as Record<string, unknown>)[entityId];
+    if (typeof storedEntity !== "object" || storedEntity === null) return false;
+
+    const { type, attributes } = storedEntity as { type?: unknown; attributes?: unknown };
+    const derivedEntity = derived.entities[entityId]!;
+
+    if (type !== derivedEntity.type) return false;
+    if (typeof attributes !== "object" || attributes === null) return false;
+
+    const storedAttributes = attributes as Record<string, unknown>;
+    const derivedAttributes = derivedEntity.attributes as Record<string, unknown>;
+
+    // Both directions: a missing attribute and an extra one are both "not the
+    // same form", and comparing only one way would miss one of them.
+    if (Object.keys(storedAttributes).length !== Object.keys(derivedAttributes).length) {
+      return false;
+    }
+
+    for (const name of Object.keys(derivedAttributes)) {
+      if (!Object.hasOwn(storedAttributes, name)) return false;
+
+      const derivedValue = derivedAttributes[name];
+      const storedValue = storedAttributes[name];
+
+      if (Array.isArray(derivedValue)) {
+        if (
+          !Array.isArray(storedValue) ||
+          storedValue.length !== derivedValue.length ||
+          storedValue.some((option, index) => option !== derivedValue[index])
+        ) {
+          return false;
+        }
+        continue;
+      }
+
+      if (storedValue !== derivedValue) return false;
+    }
+  }
+
+  return true;
+}
+
+/** What the builder was opened on, and whether the stored blob already said it. */
+export type FormSchemaReconciliation = {
+  /** ⚠️ ALWAYS derived from the rows. See below. */
+  schema: ParsedFormSchema;
+  /** False means the stored blob was stale and has been overruled. */
+  storedWasCurrent: boolean;
+};
+
+/**
+ * P7-66 Phase 2 — THE LOADER RECONCILES BEFORE IT TRUSTS THE BLOB.
+ *
+ * Phase 1's dual-write (`syncFormSchemaBlob`, now deleted) logged and swallowed
+ * a failed blob write, on the argument that the next save re-derives it. That
+ * argument does not cover THE LAST SAVE BEFORE A FORM IS PUBLISHED AND LEFT
+ * ALONE — precisely the form whose blob then survives, stale, into this phase,
+ * where the first `vizserve_pms_save_form_schema` would project it back over the
+ * rows and DELETE every field it omits. Silent loss of historical answers, or a
+ * form nobody can save again once the R5 trigger refuses the delete.
+ *
+ * ⚠️ THE ROWS WIN. They were the source of truth for the whole of Phase 1, and
+ * they are what every other reader — the public form, attachments, the task
+ * column mapping — is still reading. So the builder opens on
+ * `schemaFromFields(rows)` and the stored blob is never the thing edited.
+ *
+ * Which is why `schema` is ALWAYS the derived one and the comparison decides
+ * only `storedWasCurrent`: when the two agree, "prefer the rows" and "prefer the
+ * blob" are the same value, so there is nothing to choose between. The flag
+ * exists so a caller can say out loud that a blob was overruled — a stale blob
+ * is a Phase 1 write that never landed, and it is worth a line in the log rather
+ * than a silent repair nobody sees.
+ */
+export function reconcileFormSchema(
+  storedSchema: unknown,
+  rows: ReadonlyArray<FormFieldRow>,
+): FormSchemaReconciliation {
+  const schema = schemaFromFields(rows);
+  return { schema, storedWasCurrent: sameAsStoredSchema(schema, storedSchema) };
+}
+
+/** One `builderStore.setEntityIndex(entityId, index)` call. */
+export type EntityIndexMove = { entityId: string; index: number };
+
+/**
+ * P7-66 Phase 2 — moving one field one place, expressed as `setEntityIndex`
+ * calls.
+ *
+ * The RULE is `planFieldReorder`'s, reused rather than restated: the neighbour
+ * is the nearest field THE USER CAN SEE, so an archived field sitting between
+ * two active ones is stepped over rather than swapped into, and it keeps its own
+ * place in `root`. That rule was got wrong twice in the row version (see
+ * `planFieldReorder`), which is the whole reason it stays in one tested place
+ * instead of being written out again against a different data shape.
+ *
+ * The adaptation is that ROOT POSITION IS THE `sort_order`. Positions are dense
+ * and distinct by construction, so no tie can arise and `created_at` — the
+ * tiebreak the row version needs — never decides anything. It is passed as the
+ * empty string to say exactly that, rather than as a plausible-looking date that
+ * would suggest it mattered.
+ *
+ * ⚠️ A `root` ID WITH NO ENTITY BEHIND IT IS TREATED AS ACTIVE, not filtered
+ * out. Filtering would drop it from the returned order, which is a schema this
+ * function silently edited. The builder store cannot produce one; this is the
+ * same "safe standing alone" rule `fieldsFromSchema` follows.
+ *
+ * ⚠️ `setEntityIndex` REMOVES THEN INSERTS (measured in the shipped `dist`), so
+ * a swap is TWO calls and they are order-dependent. Emitting them as a list of
+ * (entity, index) pairs applied front to back is insertion sort: after the call
+ * for index i, positions 0..i hold what they should, whatever the calls after it
+ * do. Only the span that actually changes is emitted — an empty list means the
+ * field is already first or last among the fields the user can see.
+ */
+export function planEntityReorder(
+  schema: FormSchema,
+  entityId: string,
+  direction: "up" | "down",
+): EntityIndexMove[] {
+  const rows: FieldOrderRow[] = schema.root.map((id, index) => ({
+    id,
+    sort_order: index,
+    created_at: "",
+    is_active: !(
+      Object.hasOwn(schema.entities, id) && schema.entities[id]!.attributes.archived === true
+    ),
+  }));
+
+  const updates = planFieldReorder(rows, entityId, direction);
+  if (updates.length === 0) return [];
+
+  const written = new Map(updates.map((update) => [update.id, update.sort_order]));
+  const target = [...rows]
+    .sort((a, b) => (written.get(a.id) ?? a.sort_order) - (written.get(b.id) ?? b.sort_order))
+    .map((row) => row.id);
+
+  const first = target.findIndex((id, index) => id !== schema.root[index]);
+  if (first < 0) return [];
+
+  let last = target.length - 1;
+  while (last > first && target[last] === schema.root[last]) last -= 1;
+
+  const moves: EntityIndexMove[] = [];
+  for (let index = first; index <= last; index += 1) {
+    moves.push({ entityId: target[index]!, index });
+  }
+
+  return moves;
 }

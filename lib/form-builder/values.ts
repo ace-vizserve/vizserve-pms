@@ -175,6 +175,37 @@ export function toFieldValues(
 }
 
 /**
+ * P7-66 Phases 2+3 — THE PAYLOAD MERGE, where the public form's two state
+ * owners meet.
+ *
+ * After the swap the form has two of them: `react-hook-form` holds the five
+ * fixed fields every client request carries, and the interpreter store holds the
+ * per-form answers, keyed by entity id and validated by the entity declarations.
+ * Neither can see the other's values, so exactly one function joins them, and
+ * this is it.
+ *
+ * ⚠️ THE NESTING IS THE COLLISION RULE, NOT A LAYOUT CHOICE. A form may
+ * perfectly well carry a field keyed `title` or `description` — nothing forbids
+ * it, `FIELD_KEY_PATTERN` allows it, and the fixed fields are not reserved words
+ * — and a flat merge would have that answer silently overwrite the requester's
+ * actual title. Under `field_values` the two cannot reach each other, which is
+ * also exactly where `vizserve_pms_submit_request` looks for it:
+ * `p_payload -> 'field_values' -> field_key`.
+ *
+ * ⚠️ AND `field_values` IS WRITTEN LAST, so a `field_values` key that somehow
+ * arrived in the core object cannot displace the real one.
+ *
+ * Field-keyed on the way out, per §1: the entity ids stay inside this module.
+ */
+export function mergeSubmissionPayload(
+  coreValues: Record<string, unknown>,
+  schema: ParsedFormSchema,
+  entityValues: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...coreValues, field_values: toFieldValues(schema, entityValues) };
+}
+
+/**
  * Entity-keyed errors → the `Record<string, string>` the browser expects.
  *
  * Walked in form order and never overwritten, so the duplicate key that
@@ -204,6 +235,77 @@ export function toFieldErrors(
   }
 
   return Object.fromEntries(entries);
+}
+
+/**
+ * Where each `field_errors` entry belongs on the page that has two state owners.
+ *
+ * `entities` are the interpreter store's, by entity id; `core` are the host's
+ * own fixed inputs, by name; `unplaced` is the first message nothing on the page
+ * can show, which the caller raises to the form level rather than dropping.
+ */
+export type RoutedFieldErrors = {
+  entities: Array<{ entityId: string; message: string }>;
+  core: Array<{ name: string; message: string }>;
+  unplaced: string | null;
+};
+
+/**
+ * P7-66 — the return leg of §1, and the ONE PLACE THAT DECIDES WHO OWNS A KEY.
+ *
+ * ⚠️ A PER-FORM FIELD WINS THE KEY. THE CORE LIST IS ONLY A FALLBACK, and the
+ * order is the entire content of this function.
+ *
+ * `field_errors` is FLAT — one `Record<string, string>` keyed by `field_key` —
+ * so the nesting that keeps a per-form field named `title` out of the
+ * requester's actual title on the way OUT (`mergeSubmissionPayload`) does not
+ * exist on the way BACK. Nothing forbids such a field: `FIELD_KEY_PATTERN`
+ * allows it and the five fixed names are not reserved words.
+ *
+ * Asking "is this a core name?" first therefore put the server's message on the
+ * core Title input while the blank per-form field showed nothing — and that is
+ * not a cosmetic mix-up but an UNFIXABLE LOOP on a page anyone on the internet
+ * can open: react-hook-form clears the bogus message the moment the requester
+ * edits the title it is sitting on, the field the server is actually complaining
+ * about is still blank, and the server refuses again. Round for ever, with the
+ * only usable instruction pointing at the wrong box.
+ *
+ * Resolving the entity first cannot have the mirror problem. A core name reaches
+ * the fallback only when NO field on this form claims that key, which is exactly
+ * when the core input is the thing being complained about.
+ *
+ * The core list is a predicate rather than a list, because it belongs to the
+ * host — this module knows about `field_key`s and entity ids and has no opinion
+ * about what a page collects alongside them.
+ */
+export function routeFieldErrors(
+  schema: ParsedFormSchema,
+  fieldErrors: Record<string, string>,
+  isCoreField: (key: string) => boolean,
+): RoutedFieldErrors {
+  const entityIdByKey = entityIdsByFieldKey(schema);
+  const routed: RoutedFieldErrors = { entities: [], core: [], unplaced: null };
+
+  for (const [key, message] of Object.entries(fieldErrors)) {
+    const entityId = entityIdByKey.get(key);
+
+    if (entityId !== undefined) {
+      routed.entities.push({ entityId, message });
+      continue;
+    }
+
+    if (isCoreField(key)) {
+      routed.core.push({ name: key, message });
+      continue;
+    }
+
+    // Nothing on this page collects that key — `attachments` is the live
+    // example, and it used to be set on a `field_values.attachments` path that
+    // renders nowhere, so the client was refused with no reason shown.
+    routed.unplaced ??= message;
+  }
+
+  return routed;
 }
 
 /**

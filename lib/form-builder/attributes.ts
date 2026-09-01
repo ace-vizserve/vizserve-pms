@@ -146,6 +146,32 @@ export const optionsAttribute = createAttribute({
 });
 
 /**
+ * The one-option-per-line textarea → the stored list.
+ *
+ * ⚠️ THE RULE, AND ONLY THE RULE. This does not say WHEN it runs, and that
+ * distinction is the whole bug it was extracted for: the options editor applied
+ * it to the textarea's own value on every keystroke, so pressing Enter after
+ * `Poster` re-rendered as `Poster` with the newline gone and a typed space was
+ * eaten before the next letter arrived. A second option could not be entered
+ * and a multi-word one could not be typed at all.
+ *
+ * So the editor now keeps what somebody is typing verbatim and calls this to
+ * decide what is STORED — never to decide what the textarea shows. The old
+ * hand-rolled builder had the same split by accident (`useState` held the raw
+ * string; the split/trim/filter happened in `submit`); this is that split, made
+ * deliberate and testable.
+ *
+ * `\r` falls out in the trim, so a list pasted from Windows or from Excel
+ * behaves like one typed here.
+ */
+export function normaliseOptionsText(text: string): string[] {
+  return text
+    .split("\n")
+    .map((option) => option.trim())
+    .filter((option) => option !== "");
+}
+
+/**
  * The inverse of `form_fields.is_active` (R5).
  *
  * A field with submissions behind it is soft-archived, never deleted, and it

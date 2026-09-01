@@ -1807,6 +1807,32 @@ export type Database = {
         Args: { p_slug: string };
         Returns: Json;
       };
+      /**
+       * P1-15 / P7-66. Logs a submission the SERVER ACTION refused — which
+       * `vizserve_pms_submit_request` never sees — and answers whether the
+       * sender was already over the hourly cap. `{ "throttled": boolean }`.
+       *
+       * Service role only; deliberately NOT granted to `anon`, unlike
+       * `vizserve_pms_submit_request`. It writes a row keyed by IP and email,
+       * so an anonymous caller could use it to throttle somebody else.
+       */
+      vizserve_pms_record_public_submission_rejection: {
+        Args: { p_slug: string; p_ip?: string | null; p_email?: string | null };
+        Returns: Json;
+      };
+      /**
+       * P7-66. The ONLY writer of `vizserve_pms_forms.schema`. Stores the blob
+       * and projects it into `vizserve_pms_form_fields` in one transaction, so
+       * the R5 guard still raises on a renamed `field_key` or a removed field
+       * that has answers — and rolls the blob back with it.
+       *
+       * `returns void`: success is the ABSENCE of an error, never a result to
+       * inspect.
+       */
+      vizserve_pms_save_form_schema: {
+        Args: { p_form_id: string; p_schema: Json };
+        Returns: undefined;
+      };
       vizserve_pms_next_reference_no: {
         Args: { p_form_id: string };
         Returns: string;

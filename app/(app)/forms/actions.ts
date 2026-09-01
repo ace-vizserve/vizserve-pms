@@ -4,12 +4,15 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { assertDepartmentAccess, ForbiddenError, requireRole } from "@/lib/auth/authorization";
-import { planFieldReorder } from "@/lib/form-builder/schema";
+import type { Json } from "@/lib/database.types";
+import {
+  FormSchemaError,
+  parseFormSchema,
+  type FormSchemaRejection,
+} from "@/lib/form-builder/schema";
 import { createClient } from "@/utils/supabase/server";
-import { syncFormSchemaBlob } from "./form-schema-sync";
 import {
   formCreateSchema,
-  formFieldDraftSchema,
   formSettingsSchema,
   nextCandidate,
   prefixFromName,
@@ -259,174 +262,90 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
 }
 
 /**
- * ⚠️ P7-66 Phase 1 — `saveField`, `setFieldActive` and `moveField` DUAL-WRITE,
- * and all three are THROWAWAY: Phase 2 replaces them with one `saveSchema`
- * calling `vizserve_pms_save_form_schema`, and deletes ./form-schema-sync.ts
- * with them.
+ * P7-66 Phase 2 — THE ONE WRITE THE BUILDER MAKES.
  *
- * The row write below is unchanged and stays the source of truth for the whole
- * of Phase 1. `syncFormSchemaBlob` runs AFTER it, re-derives
- * `vizserve_pms_forms.schema` from the rows and stores it, so the blob the
- * migration backfilled cannot go stale under the current builder — which is what
- * makes Phase 2 safe to trust it on its first save. It reports nothing on
- * purpose; see its own note.
- */
-export async function saveField(formId: string, input: unknown): Promise<ActionResult> {
-  const { supabase } = await assertCanEditForm(formId);
-  const parsed = formFieldDraftSchema.safeParse(input);
-
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Check the highlighted fields.",
-      fieldErrors: flattenIssues(parsed.error),
-    };
-  }
-
-  const { id, ...values } = parsed.data;
-
-  if (id) {
-    // field_key is immutable once the form has submissions — the database
-    // enforces that with a trigger (R5), so a stale client cannot slip past.
-    const { error } = await supabase
-      .from("vizserve_pms_form_fields")
-      .update(values)
-      .eq("id", id)
-      .eq("form_id", formId);
-
-    if (error) return { ok: false, error: error.message };
-  } else {
-    const { error } = await supabase
-      .from("vizserve_pms_form_fields")
-      .insert({ ...values, form_id: formId });
-
-    if (error) {
-      if (isUniqueViolation(error)) {
-        return {
-          ok: false,
-          error: "That field key is already used on this form.",
-          fieldErrors: { field_key: ["Already in use on this form."] },
-        };
-      }
-      return { ok: false, error: error.message };
-    }
-  }
-
-  await syncFormSchemaBlob(supabase, formId);
-
-  revalidatePath(`/forms/${formId}`);
-  return { ok: true, data: undefined };
-}
-
-/**
- * Archive, never delete.
+ * `saveField`, `setFieldActive` and `moveField` are gone, and so is
+ * ./form-schema-sync.ts, which existed only to keep the blob in step behind
+ * them. All four are replaced by this: the builder edits a schema in the
+ * browser and posts the whole document, and
+ * `vizserve_pms_save_form_schema` stores it AND projects it back into
+ * `vizserve_pms_form_fields` in ONE function call, therefore one transaction.
  *
- * Historical requests hold `field_values` keyed to this field, and forms are
- * designed to evolve (D20) — so removing one would silently orphan data on
- * every request that answered it. The database blocks a hard delete outright;
- * this is the supported path (R5).
+ * That transaction is the point. The three actions were three unsynchronised
+ * round trips with no transaction around them, which is why `moveField` could
+ * leave a half-applied renumbering and why the dual-write could leave a blob
+ * that never landed. Here a failure — including the R5 trigger refusing a
+ * rename or a delete — rolls the whole save back, blob included, and the form
+ * is exactly as it was.
+ *
+ * ⚠️ THE SCHEMA IS RE-VALIDATED HERE, not trusted. The builder store runs the
+ * same rules before it calls, but this is a server action: the front end will be
+ * bypassed. `parseFormSchema` IS `formBuilder.validateSchema` (lib/form-builder/
+ * schema.ts), so there is one rule set rather than a server copy free to drift.
+ *
+ * ⚠️ AND THE NORMALISED SCHEMA IS WHAT IS SENT. `parseFormSchema` returns the
+ * schema with every attribute validator's output written back — `options ?? []`,
+ * `required ?? true` — so what lands in the column is the document the next
+ * `parseFormSchema` will read back unchanged. Posting the raw one would store a
+ * blob whose round trip is only usually the identity.
+ *
+ * Authorization is `assertCanEditForm` here and RLS underneath: the function is
+ * SECURITY INVOKER precisely so `forms updatable in scope` and `form fields
+ * follow their form` are the enforcement, exactly as they were when these
+ * actions wrote the rows directly.
  */
-export async function setFieldActive(
-  formId: string,
-  fieldId: string,
-  isActive: boolean,
-): Promise<ActionResult> {
+export async function saveSchema(formId: string, input: unknown): Promise<ActionResult> {
   const { supabase } = await assertCanEditForm(formId);
 
-  const { error } = await supabase
-    .from("vizserve_pms_form_fields")
-    .update({ is_active: isActive })
-    .eq("id", fieldId)
-    .eq("form_id", formId);
+  let schema;
 
+  try {
+    schema = await parseFormSchema(input);
+  } catch (cause) {
+    if (!(cause instanceof FormSchemaError)) throw cause;
+
+    // The reason CODE, never the payload: it can carry a raw thrown value, and
+    // this is a staff screen but the same helper shape guards the public one.
+    console.error("[P7-66] refused a form schema", { formId, reason: cause.reason.code });
+    return { ok: false, error: schemaRejectionMessage(cause.reason) };
+  }
+
+  const { error } = await supabase.rpc("vizserve_pms_save_form_schema", {
+    p_form_id: formId,
+    // The brand is a phantom type; the value is plain records, strings, booleans
+    // and arrays, so it serialises to jsonb unchanged.
+    p_schema: schema as unknown as Json,
+  });
+
+  // Surfaced verbatim. The messages that matter here are Postgres's own R5
+  // refusals — `field_key "x" is immutable once the form has submissions` and
+  // `Field "x" has data on existing requests and cannot be deleted` — which say
+  // exactly what happened and what to do instead. Replacing them with a house
+  // sentence would lose the field name.
   if (error) return { ok: false, error: error.message };
 
-  // P7-66 Phase 1 dual-write. Archiving is the one edit that MUST reach the
-  // blob: the entity has to survive as `archived: true`, because dropping it
-  // would have Phase 2's projection delete a row holding historical answers.
-  await syncFormSchemaBlob(supabase, formId);
-
+  revalidatePath("/forms");
   revalidatePath(`/forms/${formId}`);
   return { ok: true, data: undefined };
 }
 
 /**
- * Nudges one field one place up or down.
+ * A library rejection → one sentence for whoever is building the form.
  *
- * ⚠️ THE ORDER IS DECIDED BY `planFieldReorder`, WHICH IS PURE AND TESTED.
- * Everything this function adds is the round trips — read the ordering columns,
- * write the rows the plan names, re-derive the blob. The three bugs it used to
- * carry were all decisions taken inline here, where nothing could reach them:
- * it renumbered only the two swapped rows (wrong on any form whose rows share a
- * `sort_order`, which is every form the builder has ever created — fields are
- * inserted at 999), it picked the neighbour by `sort_order` alone while the blob
- * and the SQL both order by three columns, and it ignored both `update` errors
- * so a half-applied swap still returned `{ ok: true }` and was then baked into
- * the schema blob. See the helper's own note for the shape of the first.
+ * `InvalidSchema` is the branch that matters: it wraps whatever
+ * `formBuilder.validateSchema` threw, and those messages were written to be read
+ * ("Two fields share the key …", "Priority needs at least one option"). Every
+ * other code is a malformed document rather than a rule somebody broke — the
+ * builder store cannot produce one — so it gets a general sentence instead of a
+ * code nobody can act on.
  */
-export async function moveField(
-  formId: string,
-  fieldId: string,
-  direction: "up" | "down",
-): Promise<ActionResult> {
-  const { supabase } = await assertCanEditForm(formId);
-
-  // `order by` matches the projection's three columns for readability and for
-  // anyone reading the query log; `planFieldReorder` re-sorts regardless, so
-  // the ordering is a property of the plan rather than of this clause.
-  const { data: fields, error: readError } = await supabase
-    .from("vizserve_pms_form_fields")
-    .select("id, sort_order, created_at, is_active")
-    .eq("form_id", formId)
-    .order("sort_order")
-    .order("created_at")
-    .order("id");
-
-  if (readError || !fields) {
-    return { ok: false, error: readError?.message ?? "Could not load fields." };
+function schemaRejectionMessage(reason: FormSchemaRejection): string {
+  if (reason.code === "InvalidSchema" && reason.payload.schemaError instanceof Error) {
+    return reason.payload.schemaError.message;
   }
 
-  const updates = planFieldReorder(fields, fieldId, direction);
-
-  // Already at the end it was asked to move towards, or not on this form.
-  if (updates.length === 0) return { ok: true, data: undefined };
-
-  /*
-   * ⚠️ SEVERAL ROUND TRIPS, NOT ONE, AND NOT A TRANSACTION. `sort_order` is the
-   * only column being written, and PostgREST can only write different values to
-   * different rows in one statement through `upsert` — which builds an INSERT,
-   * so it would have to carry `form_id`, `label`, `field_key` and the rest to
-   * clear their NOT NULLs, i.e. write back every column from a read taken
-   * moments earlier. That turns a reorder into a lost-update window against a
-   * concurrent `saveField`: a move landing after a label edit would revert the
-   * label. Narrow writes, several of them, is the lesser evil here; Phase 2
-   * gets the atomicity for free because `vizserve_pms_save_form_schema` is one
-   * function call and therefore one transaction.
-   *
-   * So a failure partway leaves a partial renumbering — but it CANNOT be
-   * reported as success, and the blob is not touched, so the rows stay the
-   * source of truth and the next successful move renumbers the lot again. A
-   * partial renumbering only ever mis-orders fields; it cannot lose one.
-   */
-  for (const update of updates) {
-    const { error } = await supabase
-      .from("vizserve_pms_form_fields")
-      .update({ sort_order: update.sort_order })
-      .eq("id", update.id)
-      .eq("form_id", formId);
-
-    if (error) {
-      // Revalidate anyway: whatever did land is what the builder must now show.
-      revalidatePath(`/forms/${formId}`);
-      return { ok: false, error: error.message };
-    }
-  }
-
-  // P7-66 Phase 1 dual-write, and only now that every row write is known to
-  // have succeeded. Reordering is the edit the blob's `root` array records, so
-  // skipping it here would leave the schema claiming the old order.
-  await syncFormSchemaBlob(supabase, formId);
-
-  revalidatePath(`/forms/${formId}`);
-  return { ok: true, data: undefined };
+  return (
+    "This form could not be saved. Check that every field has a label and a key, " +
+    "and that each choice field has at least one option."
+  );
 }

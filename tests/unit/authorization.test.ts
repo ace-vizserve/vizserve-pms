@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   ROLE_ORDER,
   canAccessDepartment,
+  departmentPickerScope,
   departmentScopeFilter,
   roleAtLeast,
   type AuthContext,
@@ -130,5 +131,38 @@ describe("departmentScopeFilter", () => {
   it("returns an empty array for a TL who leads nothing, not null", () => {
     const tl = context({ role: "team_leader", managedDepartmentIds: [] });
     expect(departmentScopeFilter(tl)).toEqual([]);
+  });
+});
+
+describe("departmentPickerScope", () => {
+  /*
+   * P7-66. The distinction `departmentScopeFilter` cannot express, and the one
+   * that broke /forms/[id]: a picker query is BUILT, not filtered by a policy,
+   * so "leads nothing" has to mean "do not run the query". Both call sites used
+   * to narrow with `.in("id", [""])` instead, which always fails with
+   * `invalid input syntax for type uuid: ""` — invisible while the error was
+   * discarded, a hard page failure the moment it was not.
+   */
+  it("is `all` for an admin", () => {
+    expect(departmentPickerScope(context({ role: "admin" }))).toEqual({ kind: "all" });
+  });
+
+  it("is `some` for a TL who leads departments", () => {
+    const tl = context({ role: "team_leader", managedDepartmentIds: [DEPT_A, DEPT_B] });
+    expect(departmentPickerScope(tl)).toEqual({ kind: "some", ids: [DEPT_A, DEPT_B] });
+  });
+
+  it("is `none` — never `some` with an empty list — for a TL who leads nothing", () => {
+    const tl = context({ role: "team_leader", managedDepartmentIds: [] });
+    const scope = departmentPickerScope(tl);
+
+    expect(scope).toEqual({ kind: "none" });
+    // The failure mode being pinned: anything that still carries ids reaches a
+    // query, and an empty `in` list has no valid rendering.
+    expect(scope.kind).not.toBe("some");
+  });
+
+  it("is `none` for a member, who routes nothing anywhere", () => {
+    expect(departmentPickerScope(context({ role: "member" }))).toEqual({ kind: "none" });
   });
 });

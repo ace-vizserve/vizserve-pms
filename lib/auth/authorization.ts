@@ -277,3 +277,47 @@ export function departmentScopeFilter(context: AuthContext): string[] | null {
   if (!roleAtLeast(context.role, "team_leader")) return [];
   return context.managedDepartmentIds;
 }
+
+/**
+ * P7-66 — the same scope, shaped for a query that is BUILT rather than filtered.
+ *
+ * ⚠️ THERE IS NO SUCH THING AS A FILTER THAT MATCHES NOTHING, and pretending
+ * otherwise is what this exists to stop. `departmentScopeFilter` hands back an
+ * empty array for "leads nothing", which a list query passes to RLS and gets
+ * zero rows from. But a picker query has no policy doing the work — it selects
+ * every active department and narrows with `.in("id", …)` — so the call sites
+ * reached for a sentinel, `.in("id", [""])`, and `""` is not a uuid:
+ *
+ *   invalid input syntax for type uuid: ""   (22P02)
+ *
+ * That is not a hypothetical. A newly created team leader with no department
+ * mapping hits it on every load of /forms/new and /forms/[id], and it was
+ * survivable only for as long as the error was being discarded — which stopped
+ * being true the moment `departmentsError` was grouped with the reads that must
+ * not open the builder. "This person leads nothing" then rendered as a failed
+ * page.
+ *
+ * So the answer is a PLAN, and `none` means DO NOT RUN THE QUERY:
+ *
+ *   all    every active department (admin)
+ *   some   exactly these ids
+ *   none   an empty list, with no round trip and therefore no error to confuse
+ *          with a real one
+ *
+ * Kept beside `departmentScopeFilter` and derived from it, so there is still one
+ * place that decides what a role reaches (CLAUDE.md) — this only re-states its
+ * answer in the terms a picker can act on.
+ */
+export type DepartmentPickerScope =
+  | { kind: "all" }
+  | { kind: "some"; ids: string[] }
+  | { kind: "none" };
+
+export function departmentPickerScope(context: AuthContext): DepartmentPickerScope {
+  const filter = departmentScopeFilter(context);
+
+  if (filter === null) return { kind: "all" };
+  if (filter.length === 0) return { kind: "none" };
+
+  return { kind: "some", ids: filter };
+}

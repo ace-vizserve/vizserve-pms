@@ -4,22 +4,28 @@ import { z } from "zod";
 
 import { FIELD_KEY_MESSAGE } from "@/lib/form-builder/attributes";
 import { emptyFormSchema, formBuilder, type FormSchema } from "@/lib/form-builder/builder";
+import { readPublicFormResponse } from "@/lib/form-builder/public-lookup";
 import {
   fieldsFromSchema,
   FormSchemaError,
+  optionsFromRow,
   parseFormSchema,
   schemaFromFields,
+  schemaFromPublicFields,
   type FormFieldRow,
   type ProjectedFormFieldRow,
 } from "@/lib/form-builder/schema";
 import {
   extractErrorMessage,
   FORM_ERROR_MESSAGE,
+  mergeSubmissionPayload,
+  routeFieldErrors,
   toEntityValues,
   toFieldErrors,
   toFieldValues,
   validateFieldValues,
 } from "@/lib/form-builder/values";
+import type { PublicFormField } from "@/lib/schemas/forms";
 
 /**
  * P7-63 Phase 0 — §1 of the plan, tested in both directions.
@@ -1229,5 +1235,295 @@ describe("a label with whitespace around it", () => {
     await expect(parseFormSchema(JSON.parse(JSON.stringify(blank)))).rejects.toBeInstanceOf(
       FormSchemaError,
     );
+  });
+});
+
+/*
+ * P7-66 Phase 3 — THE PUBLIC FORM'S MINT, AND THE ACTION BOUNDARY.
+ *
+ * `/request/[slug]` has no session and `anon` holds no table privileges, so
+ * neither the browser nor the server action can read `vizserve_pms_forms.schema`
+ * — both derive the schema from what `vizserve_pms_get_public_form` returns.
+ * That makes `schemaFromPublicFields` a THIRD mint of `ParsedFormSchema`, and
+ * the block above ("the two mints agree on one input") is exactly the reason
+ * this one has to be pinned against them rather than trusted: a mint that
+ * described the same form differently would have the renderer accept an answer
+ * the builder's own rules refuse, or the reverse.
+ */
+function asPublicField(source: FormFieldRow): PublicFormField {
+  // Field for field, `vizserve_pms_get_public_form`'s `jsonb_build_object`. It
+  // returns neither `is_active` (it filters on it) nor `created_at`.
+  return {
+    id: source.id,
+    label: source.label,
+    field_key: source.field_key,
+    field_type: source.field_type,
+    help_text: source.help_text,
+    options: source.options,
+    is_required: source.is_required,
+  };
+}
+
+describe("the public form's mint", () => {
+  const publicRows = [noteRow, priorityRow];
+
+  it("describes the same form the builder's mint does", () => {
+    expect(schemaFromPublicFields(publicRows.map(asPublicField))).toEqual(
+      schemaFromFields(publicRows),
+    );
+  });
+
+  it("keeps the order the SQL function returned, rather than re-sorting", () => {
+    /*
+     * ⚠️ NOT A SHORTCUT. `vizserve_pms_get_public_form` already orders
+     * `sort_order, created_at` — the first two of the three columns
+     * `schemaFromFields` sorts by, and the order clients have been seeing since
+     * the form went live. `PublicFormField` carries neither column, so
+     * re-sorting here could only apply a WORSE rule to data already ordered by a
+     * better one. Handing the fields over reversed must reverse the form.
+     */
+    expect(schemaFromPublicFields([...publicRows].reverse().map(asPublicField)).root).toEqual([
+      PRIORITY_ID,
+      NOTE_ID,
+    ]);
+  });
+
+  it("validates a submission field-keyed in and field-keyed out", () => {
+    // The whole §1 contract at the boundary `submitPublicRequest` sits on: an
+    // entity id never appears in what the action receives or in what it stores.
+    const publicSchema = schemaFromPublicFields(publicRows.map(asPublicField));
+
+    return expect(
+      validateFieldValues(publicSchema, { requester_note: "  Rush job  ", priority: "High" }),
+    ).resolves.toEqual({
+      ok: true,
+      // Trimmed, because `textEntity` trims — which is what the browser-side
+      // `buildSubmissionSchema` did before posting, and what the server now does
+      // instead.
+      values: { requester_note: "Rush job", priority: "High" },
+    });
+  });
+
+  it("reports a bad answer against the field key the browser renders", () => {
+    const publicSchema = schemaFromPublicFields(publicRows.map(asPublicField));
+
+    return expect(
+      validateFieldValues(publicSchema, { priority: "Urgent" }),
+    ).resolves.toEqual({
+      ok: false,
+      fieldErrors: { priority: "Choose one of the listed options." },
+    });
+  });
+});
+
+/*
+ * P7-66 Phase 3 — THE PAYLOAD MERGE, where the public form's two state owners
+ * meet.
+ *
+ * `react-hook-form` holds the five fixed fields; the interpreter store holds the
+ * per-form answers, keyed by entity id. Neither can see the other, so one
+ * function joins them — and the property worth pinning is not that it copies
+ * both halves across but that the halves CANNOT REACH EACH OTHER.
+ */
+describe("mergeSubmissionPayload", () => {
+  const core = {
+    requester_name: "Ana Cruz",
+    requester_email: "ana@example.com",
+    requester_org: "HFSE",
+    title: "New banner",
+    description: "For the open day",
+    target_date: "2026-09-30",
+  };
+
+  it("puts the fixed fields flat and the answers under field_values", () => {
+    // The shape `vizserve_pms_submit_request` has always read:
+    // `p_payload ->> 'title'` and `p_payload -> 'field_values' -> field_key`.
+    expect(mergeSubmissionPayload(core, schema, { [NOTE_ID]: "Rush job" })).toEqual({
+      ...core,
+      field_values: { requester_note: "Rush job" },
+    });
+  });
+
+  it("keeps a field named like a fixed one out of the fixed one", () => {
+    /*
+     * ⚠️ THE COLLISION THE NESTING PREVENTS. Nothing stops a form carrying a
+     * field keyed `title` — `FIELD_KEY_PATTERN` allows it and the fixed names
+     * are not reserved — and a flat merge would have that answer silently
+     * overwrite the requester's actual title, which is what the Team Leader
+     * queue displays and what the client's acknowledgement email quotes.
+     */
+    const clashing = schemaFromFields([row({ id: OLD_ID, field_key: "title", label: "Headline" })]);
+    const merged = mergeSubmissionPayload(core, clashing, { [OLD_ID]: "A headline" });
+
+    expect(merged.title).toBe("New banner");
+    expect(merged.field_values).toEqual({ title: "A headline" });
+  });
+
+  it("writes no key for an answer nobody gave", () => {
+    // `toFieldValues` drops `undefined` rather than writing it, so an untouched
+    // optional field does not land in the jsonb as a `null` that reads back as
+    // an answer. Asserted here because the merge is the last place it could
+    // creep back in.
+    expect(mergeSubmissionPayload(core, schema, {}).field_values).toEqual({});
+  });
+});
+
+/*
+ * P7-66 — THE RETURN LEG, and the collision the merge above does NOT protect.
+ *
+ * `mergeSubmissionPayload` nests the per-form answers so a field keyed `title`
+ * cannot overwrite the requester's actual title on the way OUT. `field_errors`
+ * is FLAT, so on the way BACK there is no nesting to do the same job — the
+ * ORDER the two owners are consulted in is the only thing that decides who gets
+ * the message.
+ */
+describe("routeFieldErrors", () => {
+  // Two of the five fixed names the public form registers with react-hook-form.
+  // Named here rather than imported, so this pins the ORDER of the look-ups
+  // rather than the contents of that list.
+  const isCoreField = (key: string) => key === "title" || key === "requester_name";
+
+  const clashing = schemaFromFields([row({ id: OLD_ID, field_key: "title", label: "Headline" })]);
+
+  it("gives the key to the form's own field, not to the fixed input of that name", () => {
+    /*
+     * ⚠️ THE UNFIXABLE LOOP. Asking "is this a core name?" first put the
+     * server's message on the core Title input while the blank per-form field
+     * showed nothing. react-hook-form clears that message the moment the
+     * requester edits the title it is sitting on, the field the server is
+     * actually complaining about is still blank, and the server refuses again —
+     * for ever, on a page with no session and no other way in.
+     */
+    expect(routeFieldErrors(clashing, { title: "Headline is required." }, isCoreField)).toEqual({
+      entities: [{ entityId: OLD_ID, message: "Headline is required." }],
+      core: [],
+      unplaced: null,
+    });
+  });
+
+  it("falls back to the fixed input when no field on the form claims the key", () => {
+    // The mirror case, and the reason the fallback is safe: a core name reaches
+    // it only when nothing else answers to that key.
+    expect(routeFieldErrors(schema, { title: "A short title is required." }, isCoreField)).toEqual({
+      entities: [],
+      core: [{ name: "title", message: "A short title is required." }],
+      unplaced: null,
+    });
+  });
+
+  it("routes an ordinary per-form key to its entity", () => {
+    expect(
+      routeFieldErrors(schema, { priority: "Choose one of the listed options." }, isCoreField),
+    ).toEqual({
+      entities: [{ entityId: PRIORITY_ID, message: "Choose one of the listed options." }],
+      core: [],
+      unplaced: null,
+    });
+  });
+
+  it("raises a message nothing on the page can show rather than dropping it", () => {
+    // `attachments` is the live example — it used to be set on a
+    // `field_values.attachments` path that renders nowhere, so the client was
+    // refused with no reason shown.
+    expect(
+      routeFieldErrors(schema, { attachments: "Attach at least one file." }, isCoreField),
+    ).toEqual({
+      entities: [],
+      core: [],
+      unplaced: "Attach at least one file.",
+    });
+  });
+});
+
+/*
+ * P7-66 — the `options` column as PostgREST hands it back, which is `Json` and
+ * not `string[]`.
+ */
+describe("optionsFromRow", () => {
+  it("reads the list the column is constrained to hold", () => {
+    expect(optionsFromRow(["Poster", "Banner"])).toEqual(["Poster", "Banner"]);
+  });
+
+  it("refuses a list holding anything else rather than narrowing it away", () => {
+    /*
+     * ⚠️ WHY REFUSING BEATS FILTERING. The loader's filter looked like a
+     * display-time courtesy, but the list it produced became the schema the
+     * builder edits and the next save projects that schema back over the row —
+     * so the entries it hid were dropped from the stored choices for good, and
+     * every answer holding one stopped validating against its own form.
+     */
+    expect(optionsFromRow(["Poster", 3])).toBeNull();
+    expect(optionsFromRow([null])).toBeNull();
+  });
+
+  it("refuses a value that is not an array at all", () => {
+    expect(optionsFromRow(null)).toBeNull();
+    expect(optionsFromRow({ 0: "Poster" })).toBeNull();
+  });
+
+  it("does not hand back the array it was given", () => {
+    // Same rule as `schemaFromFields`: sharing the array would let a later
+    // mutation reach into the schema this row became.
+    const stored = ["Poster"];
+    const read = optionsFromRow(stored);
+
+    stored.push("Banner");
+
+    expect(read).toEqual(["Poster"]);
+  });
+});
+
+/*
+ * P7-66 — "this form is closed" and "we could not tell" are different sentences
+ * to a client, and the submit action used to say the first for both.
+ */
+describe("reading the public form RPC", () => {
+  function response(fields: FormFieldRow[]) {
+    return {
+      id: "c1000000-0000-4000-8000-000000000001",
+      name: "Design request",
+      slug: "design-request",
+      description: "",
+      requires_attachment: false,
+      attachment_rules: null,
+      fields: fields.map(asPublicField),
+    };
+  }
+
+  it("returns the same schema the mint would have produced", () => {
+    const lookup = readPublicFormResponse({ data: response([noteRow, priorityRow]), error: null });
+
+    expect(lookup).toEqual({
+      status: "ok",
+      schema: schemaFromPublicFields([noteRow, priorityRow].map(asPublicField)),
+    });
+  });
+
+  it("calls a missing row closed — the one answer that really means closed", () => {
+    // `vizserve_pms_get_public_form`'s `where` is `slug and is_public and
+    // is_active`, character for character the lookup the submit RPC performs.
+    expect(readPublicFormResponse({ data: null, error: null })).toEqual({ status: "closed" });
+  });
+
+  it("keeps a transient fault retryable instead of retiring a live form", () => {
+    /*
+     * ⚠️ THE REGRESSION THIS PINS. A PostgREST or connection fault used to come
+     * back as `null` alongside "closed" and "did not parse", and all three
+     * became `form_not_found` → "This form is no longer accepting submissions."
+     * on four live published forms. A five-second blip told a client with a
+     * typed-out request to stop trying.
+     */
+    expect(
+      readPublicFormResponse({ data: null, error: { message: "fetch failed" } }),
+    ).toEqual({ status: "unavailable", reason: "fetch failed" });
+  });
+
+  it("is unavailable, not closed, when the payload does not parse", () => {
+    // Retrying will not help, but the form has not been retired and saying so
+    // would retire one nobody retired. It is our bug: the reason is logged, not
+    // shown.
+    const lookup = readPublicFormResponse({ data: { slug: "design-request" }, error: null });
+
+    expect(lookup.status).toBe("unavailable");
   });
 });
