@@ -425,6 +425,13 @@ export type Database = {
           /** Business days the client gets at Gate 3 before auto-completion. */
           client_approval_days: number;
           default_list_id: string | null;
+          /**
+           * P7-66 — the `{ entities, root }` builder document,
+           * 20260901150000_p7_66_form_schema.sql. Kept in step with
+           * `vizserve_pms_form_fields`; the rows stay authoritative until
+           * Phase 2.
+           */
+          schema: Json;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -458,6 +465,8 @@ export type Database = {
           sla_minutes: number;
           client_approval_days: number;
           default_list_id: string | null;
+          /** P7-66 — written by the Phase 1 dual-write, and by nothing else. */
+          schema: Json;
         }>;
         Relationships: [
           {

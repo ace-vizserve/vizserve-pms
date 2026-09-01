@@ -208,14 +208,34 @@ export function FieldBuilder({ formId, fields }: { formId: string; fields: Field
   const router = useRouter();
   const [editingId, setEditingId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
-  const [, startTransition] = useTransition();
+  /*
+   * ⚠️ P7-66 — `pending` NARROWS THE RACE, IT DOES NOT CLOSE IT.
+   *
+   * Move and archive both write a row and then re-derive
+   * `vizserve_pms_forms.schema` from the rows, and those are three
+   * unsynchronised round trips (write → re-read → blob write) with no
+   * transaction around them. Two of them interleaving can have the later blob
+   * write store a schema derived from a read taken before the earlier row
+   * write landed — a blob permanently missing a field, which is exactly what
+   * Phase 2's projection would then delete.
+   *
+   * Disabling the controls while one is in flight stops the easiest way to
+   * cause that: one impatient user double-clicking. It does nothing about two
+   * browser tabs, two team leaders, or a request that is slow rather than
+   * pending. The real fix is Phase 2's single `vizserve_pms_save_form_schema`
+   * call, which is one transaction; this is a guard rail until then.
+   */
+  const [pending, startTransition] = useTransition();
 
   const active = fields.filter((f) => f.is_active);
   const archived = fields.filter((f) => !f.is_active);
 
   function move(fieldId: string, direction: "up" | "down") {
     startTransition(async () => {
-      await moveField(formId, fieldId, direction);
+      const result = await moveField(formId, fieldId, direction);
+      // A reorder can now fail partway (see `moveField`), and a silently
+      // dropped error would leave the list looking wrong for no stated reason.
+      if (!result.ok) toast.error(result.error);
       router.refresh();
     });
   }
@@ -251,7 +271,7 @@ export function FieldBuilder({ formId, fields }: { formId: string; fields: Field
                   size="icon-xs"
                   variant="ghost"
                   aria-label={`Move ${field.label} up`}
-                  disabled={index === 0}
+                  disabled={pending || index === 0}
                   onClick={() => move(field.id, "up")}
                 >
                   <ChevronUp />
@@ -260,7 +280,7 @@ export function FieldBuilder({ formId, fields }: { formId: string; fields: Field
                   size="icon-xs"
                   variant="ghost"
                   aria-label={`Move ${field.label} down`}
-                  disabled={index === active.length - 1}
+                  disabled={pending || index === active.length - 1}
                   onClick={() => move(field.id, "down")}
                 >
                   <ChevronDown />
@@ -292,7 +312,12 @@ export function FieldBuilder({ formId, fields }: { formId: string; fields: Field
               >
                 {editingId === field.id ? "Close" : "Edit"}
               </Button>
-              <Button size="sm" variant="ghost" onClick={() => toggleActive(field.id, false)}>
+              <Button
+                size="sm"
+                variant="ghost"
+                disabled={pending}
+                onClick={() => toggleActive(field.id, false)}
+              >
                 Archive
               </Button>
             </div>
@@ -329,7 +354,12 @@ export function FieldBuilder({ formId, fields }: { formId: string; fields: Field
                 <span className="min-w-0 flex-1 truncate text-muted-foreground">
                   {field.label} · {field.field_key}
                 </span>
-                <Button size="sm" variant="ghost" onClick={() => toggleActive(field.id, true)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={pending}
+                  onClick={() => toggleActive(field.id, true)}
+                >
                   <ArchiveRestore />
                   Restore
                 </Button>

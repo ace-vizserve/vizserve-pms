@@ -119,8 +119,14 @@ export async function parseFormSchema(value: unknown): Promise<ParsedFormSchema>
   return asParsed({ entities: result.data.entities, root: [...result.data.root] });
 }
 
-/** The columns of `vizserve_pms_form_fields` the projection touches. */
-export type FormFieldRow = {
+/**
+ * The columns `vizserve_pms_save_form_schema` WRITES, and therefore everything
+ * `fieldsFromSchema` is able to produce.
+ *
+ * `created_at` is absent on purpose — see `FormFieldRow` immediately below and
+ * the note on `fieldsFromSchema`.
+ */
+export type ProjectedFormFieldRow = {
   id: string;
   field_key: string;
   label: string;
@@ -133,7 +139,84 @@ export type FormFieldRow = {
 };
 
 /**
+ * A row as it is READ out of `vizserve_pms_form_fields`: every projected column
+ * plus the one the ordering needs.
+ *
+ * ⚠️ `created_at` IS REQUIRED, AND THAT IS THE WHOLE POINT OF ITS BEING HERE.
+ *
+ * The Phase 1 backfill orders `sort_order, created_at, id` — three columns,
+ * because `moveField` in app/(app)/forms/actions.ts records that "seeded and
+ * hand-edited forms often share sort_order values", so ties are live data rather
+ * than a hypothetical. `schemaFromFields` is that backfill's twin, so it has to
+ * break a tie the same way or the two produce different `root` orders from the
+ * same rows — on precisely the oldest forms, and silently.
+ *
+ * OPTIONAL WAS CONSIDERED AND REFUSED. With `created_at?: string` the sort would
+ * need a fallback for the absent case, and no fallback can be both deterministic
+ * and faithful: the value the SQL orders by is simply not in hand. A constant
+ * fallback is deterministic (the tie falls through to `id`) but agrees with the
+ * SQL only when `created_at` order happens to coincide with `id` order, which
+ * for `gen_random_uuid()` ids is a coin toss. That is not a smaller version of
+ * the bug, it is the same bug behind a defaulted parameter.
+ *
+ * Optional would also leave every future loader — Phase 2's above all — obliged
+ * to REMEMBER to select the column, which is the "a comment telling a future
+ * caller to remember" this type change exists to replace. Required makes the
+ * compiler the reminder: a loader that omits `created_at` does not build.
+ *
+ * The cost, stated: every `FormFieldRow` literal names the column, which is a
+ * line in each test helper. That is the entire price, and it is paid once.
+ */
+export type FormFieldRow = ProjectedFormFieldRow & { created_at: string };
+
+/**
+ * Code-unit comparison, not `localeCompare`.
+ *
+ * Both operands are ISO-8601 UTC timestamps as PostgREST renders `timestamptz`,
+ * a fixed-width prefix and a common suffix, so code-unit order IS timestamp
+ * order — which is what the SQL's `order by … created_at …` sorts by. ICU
+ * collation treats punctuation as variable-weight and could order `+` and `.`
+ * by locale, so it is the wrong tool for a machine-readable string.
+ */
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** The three ordering columns, and nothing else — so anything row-shaped fits. */
+type OrderedFormFieldRow = Pick<FormFieldRow, "id" | "sort_order" | "created_at">;
+
+/**
+ * `order by sort_order, created_at, id` — THE one ordering rule, in one place.
+ *
+ * It was written out inline in `schemaFromFields` and nowhere else, which is
+ * how `moveField` in app/(app)/forms/actions.ts came to order by `sort_order`
+ * ALONE while its blob-writing twin ordered by three columns: on a form with
+ * ties the two disagreed about which row is "the one above", so the neighbour
+ * the action swapped was not the neighbour the blob went on to record. Sharing
+ * the comparator makes that particular disagreement unexpressible.
+ */
+function byProjectionOrder(a: OrderedFormFieldRow, b: OrderedFormFieldRow): number {
+  return (
+    a.sort_order - b.sort_order ||
+    byCodeUnit(a.created_at, b.created_at) ||
+    byCodeUnit(a.id, b.id)
+  );
+}
+
+/**
  * Rows → schema. The TypeScript twin of the Phase 1 backfill.
+ *
+ * ⚠️ ORDERED BY `sort_order, created_at, id`, THE BACKFILL'S THREE COLUMNS.
+ * `Array.prototype.sort` is stable, so sorting on `sort_order` alone did not
+ * order tied rows — it merely preserved whatever order the caller passed them
+ * in, which for a database read is whatever the planner felt like. Two tied rows
+ * therefore landed in `root` one way here and another way in SQL. Sorting on all
+ * three makes the twins agree BY CONSTRUCTION and makes this function's output a
+ * function of its input rather than of its input's order.
+ *
+ * The first two columns are the tiebreak `vizserve_pms_get_public_form` already
+ * renders by, so the order is the one clients have been seeing; `id` makes it
+ * total.
  *
  * Deliberately NOT routed through `parseFormSchema`, and therefore deliberately
  * the more permissive of the two mints: rows are the older, authoritative store,
@@ -145,7 +228,7 @@ export type FormFieldRow = {
  * separate mint rather than a claim.
  */
 export function schemaFromFields(fields: ReadonlyArray<FormFieldRow>): ParsedFormSchema {
-  const ordered = [...fields].sort((a, b) => a.sort_order - b.sort_order);
+  const ordered = [...fields].sort(byProjectionOrder);
 
   // Assembled through `Object.fromEntries`, which DEFINES own properties, so a
   // row id can never land on a prototype slot instead of in the record. Same
@@ -182,6 +265,24 @@ export function schemaFromFields(fields: ReadonlyArray<FormFieldRow>): ParsedFor
  * `sort_order` is re-derived from position, so reordering in the builder is
  * expressed by the `root` array and nothing has to keep a counter in step.
  *
+ * ⚠️ NO `created_at` COMES OUT, AND THE RETURN TYPE SAYS SO RATHER THAN A
+ * COMMENT ASKING THE CALLER TO NOTICE. A schema blob carries no such value and
+ * cannot invent one honestly, and the SQL twin does not write the column either:
+ * step 3 UPDATEs the eight value columns and leaves `created_at` alone, step 4's
+ * INSERT omits it so the column default fires. `created_at` is the moment a row
+ * was first inserted — an input to the ordering above, never an output of a
+ * save. Hence `ProjectedFormFieldRow`.
+ *
+ * So the round-trip identity is stated over exactly those columns:
+ * `fieldsFromSchema(schemaFromFields(rows))` equals `rows` MINUS `created_at`,
+ * which is the strongest form of it that is actually true. One further caveat,
+ * and it is a property of the SQL as much as of this function: `sort_order`
+ * comes back DENSE, so rows that shared a `sort_order` do not round-trip to the
+ * `sort_order` they went in with. The tie is resolved — by `created_at` then
+ * `id`, above — and the first save writes that resolution down. That is the
+ * intended behaviour, not a broken identity: after one save through
+ * `vizserve_pms_save_form_schema` no form has a tie left to disagree about.
+ *
  * `Object.hasOwn`, not a truthiness check on the looked-up entity: `root` holds
  * arbitrary strings, and `entities["constructor"]` on a plain object answers
  * with a function rather than `undefined` — which would have projected a row
@@ -196,8 +297,8 @@ export function schemaFromFields(fields: ReadonlyArray<FormFieldRow>): ParsedFor
  * not get to assume one went through it, and a projection that is the twin of a
  * SQL writer has to be safe on its own.
  */
-export function fieldsFromSchema(schema: FormSchema): FormFieldRow[] {
-  const rows: FormFieldRow[] = [];
+export function fieldsFromSchema(schema: FormSchema): ProjectedFormFieldRow[] {
+  const rows: ProjectedFormFieldRow[] = [];
   const seen = new Set<string>();
 
   for (const entityId of schema.root) {
@@ -247,4 +348,83 @@ export function fieldsFromSchema(schema: FormSchema): FormFieldRow[] {
   }
 
   return rows;
+}
+
+/**
+ * A row as `moveField` reads it: the three ordering columns, plus the flag that
+ * says whether the user can see it.
+ */
+export type FieldOrderRow = OrderedFormFieldRow & Pick<FormFieldRow, "is_active">;
+
+/** One `update ... set sort_order = n where id = …`. */
+export type FieldOrderUpdate = { id: string; sort_order: number };
+
+/**
+ * ⚠️ P7-66 Phase 1 — THROWAWAY, like the action it serves. Phase 2 reorders in
+ * the builder store with `setEntityIndex` and deletes `moveField` outright.
+ *
+ * Nudges one field one place, and returns the FULL DENSE RENUMBERING that move
+ * implies — every row whose `sort_order` has to change, and only those.
+ *
+ * ⚠️ IT RENUMBERS EVERYTHING, NOT THE TWO ROWS THAT SWAPPED, and that is the
+ * whole reason it exists. `moveField` used to rewrite exactly the two swapped
+ * rows to `(position + 1) * 10` and leave every other row where it was. Fields
+ * are inserted at `sort_order: 999` by the builder
+ * (app/(app)/forms/[id]/field-builder.tsx), so on a form that had never been
+ * reordered EVERY row shared 999 — and moving the third field up left the two
+ * rewritten rows at 20 and 30 with the rest still at 999, i.e. both of them
+ * jumped in front of fields nobody had touched. `A B C D E` became `C B A D E`.
+ * A renumbering that only spends values on two rows is only correct when the
+ * other rows already hold values that separate them, which on this table is
+ * precisely the case that had never happened yet.
+ *
+ * Dense and ZERO-BASED, matching `fieldsFromSchema` above and
+ * `row_number() over (order by u.pos) - 1` in
+ * supabase/migrations/20260901150000_p7_66_form_schema.sql. So a form that has
+ * been moved once already holds the `sort_order` values Phase 2's first save
+ * would write, and the ties are gone for good.
+ *
+ * ⚠️ THE NEIGHBOUR IS THE NEAREST ROW THE USER CAN SEE, not the adjacent row.
+ * The builder renders active and archived fields as two separate lists and only
+ * the active one carries move buttons, so an archived field sitting between two
+ * active ones is invisible in the list being reordered — swapping into it would
+ * be a click that visibly does nothing. The archived row keeps its position in
+ * the overall order (and therefore in the blob's `root`); the two visible rows
+ * trade places around it.
+ *
+ * Pure and total: no database, no throwing, and it re-sorts its input rather
+ * than trusting the caller's `order by`, so its output is a function of the
+ * rows and not of the order Postgres happened to return them in. An empty
+ * result means "nothing to do" — the field is not on this form, or it is
+ * already the first/last thing the user can see in that direction.
+ */
+export function planFieldReorder(
+  rows: ReadonlyArray<FieldOrderRow>,
+  fieldId: string,
+  direction: "up" | "down",
+): FieldOrderUpdate[] {
+  const ordered = [...rows].sort(byProjectionOrder);
+
+  const from = ordered.findIndex((row) => row.id === fieldId);
+  if (from < 0) return [];
+
+  const step = direction === "up" ? -1 : 1;
+  let to = from + step;
+  while (to >= 0 && to < ordered.length && ordered[to]!.is_active !== ordered[from]!.is_active) {
+    to += step;
+  }
+  if (to < 0 || to >= ordered.length) return [];
+
+  const moved = [...ordered];
+  moved[from] = ordered[to]!;
+  moved[to] = ordered[from]!;
+
+  const updates: FieldOrderUpdate[] = [];
+  moved.forEach((row, index) => {
+    // Only the rows that actually move are written. On an already-dense form
+    // that is the two that swapped; on the all-999 form above it is all of them.
+    if (row.sort_order !== index) updates.push({ id: row.id, sort_order: index });
+  });
+
+  return updates;
 }

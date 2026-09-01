@@ -10,6 +10,7 @@ import {
   parseFormSchema,
   schemaFromFields,
   type FormFieldRow,
+  type ProjectedFormFieldRow,
 } from "@/lib/form-builder/schema";
 import {
   extractErrorMessage,
@@ -42,7 +43,37 @@ function row(overrides: Partial<FormFieldRow> & { id: string; field_key: string 
     is_required: true,
     is_active: true,
     sort_order: 0,
+    // Required on `FormFieldRow`, because the backfill orders `sort_order,
+    // created_at, id` and `schemaFromFields` is its twin. Nothing in this file
+    // gives two rows the same `sort_order`, so the value never decides an order
+    // here; it is the column the compiler now stops a loader from forgetting.
+    created_at: "2026-07-29T10:00:00Z",
     ...overrides,
+  };
+}
+
+/**
+ * A row with the column no projection can produce dropped.
+ *
+ * `fieldsFromSchema` returns `ProjectedFormFieldRow` - `created_at` is an input
+ * to the ordering, never an output of a save, exactly as the SQL leaves the
+ * column alone on UPDATE and lets its default fire on INSERT. So a round trip is
+ * the identity over the nine projected columns, which is what this compares.
+ */
+function projected(source: FormFieldRow): ProjectedFormFieldRow {
+  // Longhand rather than rest-destructuring, so it doubles as the list of the
+  // nine columns a save actually writes - and so no unused binding is left
+  // behind for the column that is deliberately dropped.
+  return {
+    id: source.id,
+    field_key: source.field_key,
+    label: source.label,
+    field_type: source.field_type,
+    help_text: source.help_text,
+    options: source.options,
+    is_required: source.is_required,
+    is_active: source.is_active,
+    sort_order: source.sort_order,
   };
 }
 
@@ -184,7 +215,7 @@ describe("rows to schema and back", () => {
       row({ id: OLD_ID, field_key: "retired_question", is_active: false, sort_order: 2 }),
     ];
 
-    expect(fieldsFromSchema(schemaFromFields(rows))).toEqual(rows);
+    expect(fieldsFromSchema(schemaFromFields(rows))).toEqual(rows.map(projected));
   });
 
   it("re-derives sort_order from position, so a reorder needs no counter", () => {
@@ -1055,7 +1086,7 @@ describe("the two mints agree on one input", () => {
   });
 
   it("projects back to the rows it came from, padding included", () => {
-    expect(fieldsFromSchema(schemaFromFields(rows))).toEqual(rows);
+    expect(fieldsFromSchema(schemaFromFields(rows))).toEqual(rows.map(projected));
   });
 });
 
@@ -1176,13 +1207,14 @@ describe("a label with whitespace around it", () => {
       is_required: true,
       is_active: true,
       sort_order: 0,
+      created_at: "2026-07-29T10:00:00Z",
     },
   ];
 
   it("survives a round trip through the jsonb blob unchanged", async () => {
     const blob = JSON.parse(JSON.stringify(schemaFromFields(padded)));
 
-    expect(fieldsFromSchema(await parseFormSchema(blob))).toEqual(padded);
+    expect(fieldsFromSchema(await parseFormSchema(blob))).toEqual(padded.map(projected));
   });
 
   it("means the same form whichever mint loaded it", async () => {

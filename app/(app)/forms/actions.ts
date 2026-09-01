@@ -4,7 +4,9 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { assertDepartmentAccess, ForbiddenError, requireRole } from "@/lib/auth/authorization";
+import { planFieldReorder } from "@/lib/form-builder/schema";
 import { createClient } from "@/utils/supabase/server";
+import { syncFormSchemaBlob } from "./form-schema-sync";
 import {
   formCreateSchema,
   formFieldDraftSchema,
@@ -142,6 +144,12 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   let slug = derivedSlug ? slugStem : parsed.data.slug;
   let reference_prefix = derivedPrefix ? prefixStem : parsed.data.reference_prefix;
 
+  // P7-66 — no dual-write here, deliberately, and for one reason only: a new
+  // form has no field rows, so the blob to derive is the empty one, and the
+  // `schema` column's default `{"entities": {}, "root": []}` IS what
+  // `schemaFromFields([])` produces. There is nothing for a sync to write that
+  // the insert has not already written.
+  //
   // Bounded. An unbounded retry against a unique index is a way to hold a
   // connection open for a very long time; twenty distinct names for one form is
   // already past the point where the person should be choosing one themselves.
@@ -250,6 +258,19 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
   return { ok: true, data: undefined };
 }
 
+/**
+ * ⚠️ P7-66 Phase 1 — `saveField`, `setFieldActive` and `moveField` DUAL-WRITE,
+ * and all three are THROWAWAY: Phase 2 replaces them with one `saveSchema`
+ * calling `vizserve_pms_save_form_schema`, and deletes ./form-schema-sync.ts
+ * with them.
+ *
+ * The row write below is unchanged and stays the source of truth for the whole
+ * of Phase 1. `syncFormSchemaBlob` runs AFTER it, re-derives
+ * `vizserve_pms_forms.schema` from the rows and stores it, so the blob the
+ * migration backfilled cannot go stale under the current builder — which is what
+ * makes Phase 2 safe to trust it on its first save. It reports nothing on
+ * purpose; see its own note.
+ */
 export async function saveField(formId: string, input: unknown): Promise<ActionResult> {
   const { supabase } = await assertCanEditForm(formId);
   const parsed = formFieldDraftSchema.safeParse(input);
@@ -291,6 +312,8 @@ export async function saveField(formId: string, input: unknown): Promise<ActionR
     }
   }
 
+  await syncFormSchemaBlob(supabase, formId);
+
   revalidatePath(`/forms/${formId}`);
   return { ok: true, data: undefined };
 }
@@ -318,10 +341,29 @@ export async function setFieldActive(
 
   if (error) return { ok: false, error: error.message };
 
+  // P7-66 Phase 1 dual-write. Archiving is the one edit that MUST reach the
+  // blob: the entity has to survive as `archived: true`, because dropping it
+  // would have Phase 2's projection delete a row holding historical answers.
+  await syncFormSchemaBlob(supabase, formId);
+
   revalidatePath(`/forms/${formId}`);
   return { ok: true, data: undefined };
 }
 
+/**
+ * Nudges one field one place up or down.
+ *
+ * ⚠️ THE ORDER IS DECIDED BY `planFieldReorder`, WHICH IS PURE AND TESTED.
+ * Everything this function adds is the round trips — read the ordering columns,
+ * write the rows the plan names, re-derive the blob. The three bugs it used to
+ * carry were all decisions taken inline here, where nothing could reach them:
+ * it renumbered only the two swapped rows (wrong on any form whose rows share a
+ * `sort_order`, which is every form the builder has ever created — fields are
+ * inserted at 999), it picked the neighbour by `sort_order` alone while the blob
+ * and the SQL both order by three columns, and it ignored both `update` errors
+ * so a half-applied swap still returned `{ ok: true }` and was then baked into
+ * the schema blob. See the helper's own note for the shape of the first.
+ */
 export async function moveField(
   formId: string,
   fieldId: string,
@@ -329,31 +371,61 @@ export async function moveField(
 ): Promise<ActionResult> {
   const { supabase } = await assertCanEditForm(formId);
 
-  const { data: fields } = await supabase
+  // `order by` matches the projection's three columns for readability and for
+  // anyone reading the query log; `planFieldReorder` re-sorts regardless, so
+  // the ordering is a property of the plan rather than of this clause.
+  const { data: fields, error: readError } = await supabase
     .from("vizserve_pms_form_fields")
-    .select("id, sort_order")
+    .select("id, sort_order, created_at, is_active")
     .eq("form_id", formId)
-    .order("sort_order");
+    .order("sort_order")
+    .order("created_at")
+    .order("id");
 
-  if (!fields) return { ok: false, error: "Could not load fields." };
-
-  const index = fields.findIndex((f) => f.id === fieldId);
-  const swapWith = direction === "up" ? index - 1 : index + 1;
-  if (index < 0 || swapWith < 0 || swapWith >= fields.length) {
-    return { ok: true, data: undefined };
+  if (readError || !fields) {
+    return { ok: false, error: readError?.message ?? "Could not load fields." };
   }
 
-  // Rewrite both rows rather than swapping the stored values, because seeded
-  // and hand-edited forms often share sort_order values.
-  await supabase
-    .from("vizserve_pms_form_fields")
-    .update({ sort_order: (swapWith + 1) * 10 })
-    .eq("id", fields[index]!.id);
+  const updates = planFieldReorder(fields, fieldId, direction);
 
-  await supabase
-    .from("vizserve_pms_form_fields")
-    .update({ sort_order: (index + 1) * 10 })
-    .eq("id", fields[swapWith]!.id);
+  // Already at the end it was asked to move towards, or not on this form.
+  if (updates.length === 0) return { ok: true, data: undefined };
+
+  /*
+   * ⚠️ SEVERAL ROUND TRIPS, NOT ONE, AND NOT A TRANSACTION. `sort_order` is the
+   * only column being written, and PostgREST can only write different values to
+   * different rows in one statement through `upsert` — which builds an INSERT,
+   * so it would have to carry `form_id`, `label`, `field_key` and the rest to
+   * clear their NOT NULLs, i.e. write back every column from a read taken
+   * moments earlier. That turns a reorder into a lost-update window against a
+   * concurrent `saveField`: a move landing after a label edit would revert the
+   * label. Narrow writes, several of them, is the lesser evil here; Phase 2
+   * gets the atomicity for free because `vizserve_pms_save_form_schema` is one
+   * function call and therefore one transaction.
+   *
+   * So a failure partway leaves a partial renumbering — but it CANNOT be
+   * reported as success, and the blob is not touched, so the rows stay the
+   * source of truth and the next successful move renumbers the lot again. A
+   * partial renumbering only ever mis-orders fields; it cannot lose one.
+   */
+  for (const update of updates) {
+    const { error } = await supabase
+      .from("vizserve_pms_form_fields")
+      .update({ sort_order: update.sort_order })
+      .eq("id", update.id)
+      .eq("form_id", formId);
+
+    if (error) {
+      // Revalidate anyway: whatever did land is what the builder must now show.
+      revalidatePath(`/forms/${formId}`);
+      return { ok: false, error: error.message };
+    }
+  }
+
+  // P7-66 Phase 1 dual-write, and only now that every row write is known to
+  // have succeeded. Reordering is the edit the blob's `root` array records, so
+  // skipping it here would leave the schema claiming the old order.
+  await syncFormSchemaBlob(supabase, formId);
 
   revalidatePath(`/forms/${formId}`);
   return { ok: true, data: undefined };

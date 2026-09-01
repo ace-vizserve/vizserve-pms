@@ -53,6 +53,12 @@ function row(field_type: FieldType, is_required: boolean, options: string[]): Fo
     is_required,
     is_active: true,
     sort_order: 0,
+    // `created_at` is a required column of `FormFieldRow`: it is the second of
+    // the three the backfill orders by, and `schemaFromFields` has to break a
+    // `sort_order` tie the same way. Every row here is a form of one field, so
+    // the value never decides anything - it is here because the compiler is the
+    // reminder that a loader must select the column.
+    created_at: "2026-07-29T10:00:00Z",
   };
 }
 
