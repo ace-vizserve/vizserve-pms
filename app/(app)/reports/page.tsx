@@ -7,11 +7,10 @@ import { addDays, addMonths, isOverdue, startOfMonth, todayInAppZone } from "@/l
 import {
   INITIAL_TASK_STATUS,
   TASK_STATUSES,
-  TASK_STATUS_LABELS,
   isTerminal,
 } from "@/lib/schemas/tasks";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
-import { DataTable, type Column } from "@/components/data-table";
+import { ReportsTable, type ReportRow } from "./reports-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
@@ -154,17 +153,7 @@ export default async function ReportsPage({
    * enum lands in the right band here without anybody remembering to come back.
    * A hand-written list of "active statuses" is the copy that goes stale.
    */
-  type Row = {
-    id: string;
-    name: string;
-    byStatus: Record<VizservePmsTaskStatus, number>;
-    notStarted: number;
-    active: number;
-    done: number;
-    overdue: number;
-    minutes: number;
-    total: number;
-  };
+  type Row = ReportRow;
 
   const rows = new Map<string, Row>();
 
@@ -245,58 +234,6 @@ export default async function ReportsPage({
 
   const error = tasksResult.error ?? requestsResult.error ?? hoursResult.error;
 
-  const columns: Column<Row>[] = [
-    {
-      key: "department",
-      header: "Department",
-      className: "font-medium",
-      cell: (row) => row.name,
-    },
-    ...TASK_STATUSES.map(
-      (status): Column<Row> => ({
-        key: status,
-        // The human label, never the enum — a column headed
-        // "COMPLETED_NO_RESPONSE" is a database value on screen.
-        header: TASK_STATUS_LABELS[status],
-        className: "hidden lg:table-cell tabular-nums text-muted-foreground",
-        align: "end",
-        cell: (row) =>
-          row.byStatus[status] === 0 ? (
-            // A dash rather than a zero. Eight columns of zeroes is a table
-            // nobody can find the numbers in.
-            <span className="text-foreground-faint">—</span>
-          ) : (
-            row.byStatus[status]
-          ),
-      }),
-    ),
-    {
-      key: "overdue",
-      header: "Overdue",
-      className: "tabular-nums",
-      align: "end",
-      cell: (row) =>
-        row.overdue === 0 ? (
-          <span className="text-foreground-faint">—</span>
-        ) : (
-          // The word travels with the number, so a scanned column does not rely
-          // on the heading being in view.
-          <span className="font-medium text-destructive">{row.overdue} late</span>
-        ),
-    },
-    {
-      key: "hours",
-      header: "Logged",
-      className: "tabular-nums",
-      align: "end",
-      cell: (row) =>
-        row.minutes === 0 ? (
-          <span className="text-foreground-faint">—</span>
-        ) : (
-          formatCellDuration(row.minutes)
-        ),
-    },
-  ];
 
   return (
     <PageShell>
@@ -466,18 +403,7 @@ export default async function ReportsPage({
           */}
           <div className="space-y-2">
             <h2 className="text-sm font-semibold">Every figure, per department</h2>
-            <DataTable
-              columns={columns}
-              rows={departmentRows}
-              getRowKey={(row) => row.id}
-              empty={
-                <EmptyState
-                  icon={<BarChart3 />}
-                  title="Nothing in this period"
-                  description="No tasks were created between these two dates. Widen the range, or check that the department you expected has work in it."
-                />
-              }
-            />
+            <ReportsTable rows={departmentRows} />
           </div>
         </>
       )}

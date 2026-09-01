@@ -1,23 +1,17 @@
-import { CornerDownRight, ListChecks, ListTree } from "lucide-react";
+import { ListChecks } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { DataTable, type Column } from "@/components/data-table";
-import { TaskCategoryBadge, TaskStatusGlyph, isTaskStatus, taskCategoryEdge } from "@/components/status-badge";
+import { TaskGroupTable, type ListRow, type TaskRow } from "./tasks-table";
+import { isTaskStatus } from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
-import { formatDate, isOverdue } from "@/lib/dates";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
-  INITIAL_TASK_STATUS,
   isTerminal,
   TASK_PRIORITIES,
   TASK_STATUSES,
-  taskCategory,
   type TaskPriority,
 } from "@/lib/schemas/tasks";
-import { formatCellDuration } from "@/lib/schemas/timesheet";
 
 import { EmptyState } from "@/components/empty-state";
 import { loadPendingRequests } from "@/lib/pending-requests-server";
@@ -25,59 +19,18 @@ import { fetchJoinedTaskIds, mineFilter } from "@/lib/tasks-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
-import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
 import type { TaskComment } from "./comment-thread";
-import { LatestCommentCell } from "./latest-comment-cell";
 
-import { GroupComposer } from "./add-task";
-import { AssigneePicker } from "./assignees";
-import { TaskSelectCheckbox, TaskSelectionProvider } from "./task-selection";
+import { TaskSelectionProvider } from "./task-selection";
 import { TaskFilters } from "./filters";
-import { InlineDate, InlineEstimate, InlinePriority, SubtaskProgress, TaskRowActions } from "./inline";
 import { NewTaskButton } from "./new-task-button";
 import { TaskStatusGroup } from "./status-group";
-import { TaskStatusSelect } from "./status-select";
 import { PendingRequestList } from "./pending-requests";
 import { TaskToolbar } from "./toolbar";
 
 export const metadata: Metadata = { title: "Tasks" };
 
-type TaskRow = {
-  id: string;
-  title: string;
-  status: VizservePmsTaskStatus;
-  due_date: string | null;
-  start_date: string | null;
-  assignee_id: string | null;
-  qa_assignee_id: string | null;
-  department_id: string;
-  list_id: string | null;
-  request_id: string | null;
-  /** P7-19. Whoever filed it — a member may delete a task they created. */
-  created_by: string | null;
-  /** P7-01. With `request_id`, decides which of the three categories this is. */
-  is_personal: boolean;
-  /** P7-11. Null on most tasks — that is the ordinary state, not a gap. */
-  priority: TaskPriority | null;
-  /** P7-15. Minutes somebody expects it to take. Null = nobody estimated. */
-  estimate_minutes: number | null;
-  /** P7-09. Set on a subtask, so the row can say what it belongs to. */
-  parent_task_id: string | null;
-  /**
-   * Fetched only to answer "is the resolution gate met" for the status control.
-   * Never rendered here — it is a paragraph, and a row is not where it is read.
-   */
-  resolution: string | null;
-};
-
-/**
- * A row as the table renders it — a task plus how deep it sits.
- *
- * P7-09. Only two levels exist (`parent_task_id` is one level by trigger), so
- * this is 0 or 1 and never a tree.
- */
-type ListRow = TaskRow & { depth: 0 | 1 };
 
 /** `?sort=` — the two orders a task list is actually read in. */
 const SORTS = ["due", "priority"] as const;
@@ -356,6 +309,7 @@ export default async function TasksPage({
     : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
+  /* Plain objects from here on: a Map cannot cross the RSC boundary. */
   const listName = new Map((lists ?? []).map((list) => [list.id, list.name]));
 
   // Threads by task, oldest first — the order they were fetched in, so the cell
@@ -555,342 +509,31 @@ export default async function TasksPage({
     byDepartment.set(person.primary_department_id, list);
   }
 
-  const isAdmin = roleAtLeast(context.role, "admin");
-  /**
-   * P7-19 — whether to offer the trash on this row.
-   *
-   * Mirrors `vizserve_pms_can_delete_task`: internal work only, and only for a
-   * lead of the department, whoever created it, or the owner of a personal task.
-   * The database is still the authority — this only decides whether to ask, so
-   * nobody is offered a control that can only answer no.
-   */
-  function canDelete(task: TaskRow) {
-    if (task.request_id !== null) return false;
-    const leads =
-      context.role === "admin" || context.managedDepartmentIds.includes(task.department_id);
-    return (
-      leads ||
-      task.created_by === context.userId ||
-      (task.is_personal && task.assignee_id === context.userId)
-    );
-  }
-
-  /**
-   * Where the viewer sits on a task.
-   *
-   * `isAssignee` MIRRORS `vizserve_pms_transition_task`'s `v_is_pic`, which is
-   * `assignee_id = actor OR a row in vizserve_pms_task_assignees`. It used to be
-   * the column alone, and that was the same defect as the timesheet picker: a
-   * second assignee could be handed work, and be fully able to edit and move it
-   * as far as the database was concerned, while every control on this page was
-   * hidden from them because one comparison disagreed.
-   *
-   * It is named `isAssignee` rather than `isPic` because on an INTERNAL task
-   * there is no person in charge (P7-43) — everyone on it is an equal assignee,
-   * and a field called `isPic` would be claiming a rank the data no longer has.
-   * On a CLIENT task the accountable name still exists; it is simply not what
-   * this flag is asking about.
-   */
-  function seat(task: TaskRow) {
-    return {
-      isAssignee:
-        task.assignee_id === context.userId ||
-        (extraAssignees.get(task.id) ?? []).some((person) => person.id === context.userId),
-      isQa: task.qa_assignee_id === context.userId,
-      leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
-      isAdmin,
-    };
-  }
-
   /*
-   * The columns, in the order Amier's reference sets them: name · progress ·
-   * assignee · priority · start · due · date closed · estimate · tracked ·
-   * latest comment.
+   * P7-64 — THE MAPS, FLATTENED FOR THE WIRE.
    *
-   * THE QA COLUMN IS GONE. It was a name repeated on every client row and empty
-   * on every internal one — internal work needs no reviewer at all since P7-13a,
-   * which is most of the list. The reviewer is on the task itself, where the
-   * decision to appoint one is made.
+   * Every lookup above is a `Map`, which does not survive the RSC boundary. The
+   * table reads plain objects instead; `Object.fromEntries` is the whole
+   * translation and it happens once, here, rather than eight times at the call
+   * site.
    */
-  const columns: Column<ListRow>[] = [
-    {
-      /*
-       * P7-19 — the selection column.
-       *
-       * A checkbox ONLY where the row can actually be deleted, on the same rule
-       * as the per-row trash: `canDelete` mirrors
-       * `vizserve_pms_can_delete_task`, so client-backed work and a colleague's
-       * tasks have nothing to tick. The cell is not merely disabled — a
-       * disabled checkbox on two thirds of the rows reads as the feature being
-       * broken rather than as the row being out of scope.
-       */
-      key: "select",
-      header: "",
-      className: "w-8 pr-0",
-      cell: (task) =>
-        canDelete(task) ? <TaskSelectCheckbox taskId={task.id} title={task.title} /> : null,
-    },
-    {
-      key: "task",
-      header: "Task",
-      className: "max-w-sm whitespace-normal",
-      cell: (task) => {
-        const isChild = task.depth === 1;
+  const viewer = {
+    userId: context.userId,
+    role: context.role,
+    managedDepartmentIds: context.managedDepartmentIds,
+  };
 
-        return (
-          // `group/task` is what the hover strip keys off. Named, because the
-          // status group above is a group too and an unnamed one would make the
-          // whole panel's hover reveal every row's actions at once.
-          //
-          // P7-09. A subtask is INDENTED rather than labelled. The old row said
-          // "⊢ subtask" in the meta line underneath and sat flush with its
-          // parent, which reads as two tasks that happen to mention each other.
-          // The indent is the relationship — it is how every reference draws it,
-          // and it survives a screenshot where a word in a meta row does not.
-          <div className={cn("group/task", isChild && "pl-6")}>
-            <span className="flex min-w-0 items-center gap-2">
-              {/* The elbow. Decoration only — the row's meaning is carried by
-                  the indent and by the parent link in the meta line, so this is
-                  hidden from a screen reader rather than read out as a glyph.
-                  `--foreground-faint` is legal here for exactly that reason:
-                  it is 3.44:1 and NON-TEXT ONLY (§1.1). */}
-              {isChild ? (
-                <CornerDownRight
-                  aria-hidden
-                  className="-ml-4 size-3.5 shrink-0 text-foreground-faint"
-                />
-              ) : null}
+  const lookups = {
+    nameOf: Object.fromEntries(nameOf),
+    listName: Object.fromEntries(listName),
+    threads: Object.fromEntries(threads),
+    progress: Object.fromEntries(progress),
+    extraAssignees: Object.fromEntries(extraAssignees),
+    closedOn: Object.fromEntries(closedOn),
+    tracked: Object.fromEntries(tracked),
+    byDepartment: Object.fromEntries(byDepartment),
+  };
 
-              {/*
-                The stage, always visible and BEFORE the title — the shape the
-                reference uses. It is not the hover strip's status control: that
-                one moves the task and disappears when there is nowhere legal to
-                move to, which is exactly when a reader still needs to know where
-                the task is. See the note on `TaskStatusGlyph`.
-              */}
-              <TaskStatusGlyph status={task.status} />
-
-              <Link
-                href={`/tasks/${task.id}`}
-                className={cn(
-                  "truncate hover:underline",
-                  // A subtask is a smaller thing than its parent and should not
-                  // compete with it for the eye.
-                  isChild ? "text-sm font-normal" : "font-medium",
-                )}>
-                {task.title}
-              </Link>
-
-              {/* Renders nothing when unranked, which is most tasks. A "None"
-                  chip on every row would mark everything, and a mark carried by
-                  everything marks nothing. */}
-              <InlinePriority taskId={task.id} value={task.priority} />
-
-              <TaskRowActions
-                taskId={task.id}
-                title={task.title}
-                priority={task.priority}
-                assignable={assignable}
-                deletable={canDelete(task)}>
-                {/* The glyph, not the chip: the group heading right above this
-                    row already says the status in words. */}
-                <TaskStatusSelect
-                  taskId={task.id}
-                  status={task.status}
-                  viewer={seat(task)}
-                  task={task}
-                  resolutionMissing={!task.resolution?.trim()}
-                  variant="compact"
-                />
-              </TaskRowActions>
-            </span>
-
-            <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-2xs text-muted-foreground">
-              {task.list_id ? <span>{listName.get(task.list_id)}</span> : null}
-              {/* P7-01. THREE categories, not two. "Added by hand" used to cover
-                  both work a lead assigned you and work you made for yourself —
-                  and those finish differently: an assigned task goes through
-                  review, a personal one you close yourself.
-
-                  ⚠️ P7-27 — THIS WAS A PLAIN `<span>` in a row of plain spans,
-                  the same muted grey as the list name beside it. So the single
-                  most consequential fact about a row — whether finishing it
-                  needs a client's sign-off or just your own — read as the least
-                  consequential thing on it. It is a chip now, and client work is
-                  the only category that gets an accent. */}
-              <TaskCategoryBadge category={taskCategory(task)} className="px-1.5 py-0" />
-              {/* A subtask says so. Without it the list shows two rows that look
-                  like peers when one is part of the other. */}
-              {/*
-                P7-09. Only when the row is NOT already sitting under its parent.
-                Once it is indented, the indent says "subtask" and a word saying
-                it again is a word people stop reading. This survives for the two
-                cases where the indent cannot: a subtask whose parent is filtered
-                off screen, and a finished one that has left the nest for its own
-                terminal group.
-              */}
-              {task.parent_task_id && task.depth === 0 ? (
-                <Link href={`/tasks/${task.parent_task_id}`} className="inline-flex items-center gap-1 hover:underline">
-                  <ListTree className="size-3" aria-hidden />
-                  subtask
-                </Link>
-              ) : null}
-            </div>
-          </div>
-        );
-      },
-    },
-    {
-      /*
-       * K5 — PROGRESS, from the subtasks and nowhere else.
-       *
-       * A task with no children renders NOTHING rather than 0%: "no subtasks"
-       * and "no subtasks done" are different facts, and a permanent 0% is the
-       * same lie as a permanent zero on a dashboard tile.
-       */
-      key: "progress",
-      header: "Progress",
-      className: "hidden lg:table-cell",
-      cell: (task) => {
-        const bars = progress.get(task.id);
-        return bars ? <SubtaskProgress done={bars.done} total={bars.total} /> : null;
-      },
-    },
-    {
-      key: "assignee",
-      header: "Assignee",
-      className: "hidden md:table-cell text-muted-foreground",
-      cell: (task) => (
-        <AssigneePicker
-          taskId={task.id}
-          pic={task.assignee_id ? { id: task.assignee_id, full_name: nameOf.get(task.assignee_id) ?? "—" } : null}
-          // P7-13. The join table is the whole reason this is fetched: a row
-          // showing one name on a task three people are working on makes the
-          // second and third invisible.
-          others={(extraAssignees.get(task.id) ?? []).filter((person) => person.id !== task.assignee_id)}
-          // Scoped to the TASK'S department, not the viewer's — the join table's
-          // own function refuses anybody outside it, so offering a wider list
-          // would only produce an error after the click.
-          candidates={byDepartment.get(task.department_id) ?? []}
-          canEdit={seat(task).isAssignee || seat(task).isQa || seat(task).leadsDepartment}
-          // P7-43. A client task has a person in charge; an internal one does
-          // not, and `request_id` is the same test `taskCategory` uses.
-          showPic={task.request_id !== null}
-        />
-      ),
-    },
-    {
-      key: "priority",
-      header: "Priority",
-      className: "hidden lg:table-cell",
-      // Its own column now, and editable in place. It used to sit beside the
-      // title, which read well at one glance and badly at twenty — a column is
-      // what makes "what is urgent" answerable by scanning down.
-      cell: (task) => <InlinePriority taskId={task.id} value={task.priority} />,
-    },
-    {
-      key: "start",
-      header: "Start date",
-      className: "hidden xl:table-cell whitespace-nowrap",
-      cell: (task) => <InlineDate taskId={task.id} field="start_date" value={task.start_date} label="Start" />,
-    },
-    {
-      key: "due",
-      header: "Due date",
-      className: "hidden sm:table-cell whitespace-nowrap",
-      cell: (task) => (
-        <>
-          <InlineDate
-            taskId={task.id}
-            field="due_date"
-            value={task.due_date}
-            label="Due"
-            // Overdue only matters on work that is still live. A completed task
-            // delivered late is history, not an alarm.
-            emphasis={isOverdue(task.due_date) && !isTerminal(task.status)}
-          />
-          {/* Never colour alone. */}
-          {isOverdue(task.due_date) && !isTerminal(task.status) ? (
-            <span className="ml-1 text-2xs text-destructive">overdue</span>
-          ) : null}
-        </>
-      ),
-    },
-    {
-      /*
-       * Read from `vizserve_pms_task_status_history`, never from a column.
-       *
-       * A `completed_at` column can disagree with the trail; the trail cannot
-       * disagree with itself. It is also correctly EMPTY on a task that was
-       * closed and then reopened — which internal work can be (P7-06) — because
-       * what the column asks is "when was this closed", and a live task has no
-       * answer to that.
-       */
-      key: "closed",
-      header: "Date closed",
-      className: "hidden 2xl:table-cell whitespace-nowrap text-muted-foreground",
-      cell: (task) => {
-        const closed = isTerminal(task.status) ? closedOn.get(task.id) : null;
-        return closed ? formatDate(closed.slice(0, 10)) : <span className="text-foreground-faint">—</span>;
-      },
-    },
-    {
-      key: "estimate",
-      header: "Time estimate",
-      className: "hidden xl:table-cell whitespace-nowrap",
-      align: "end",
-      cell: (task) => <InlineEstimate taskId={task.id} minutes={task.estimate_minutes} />,
-    },
-    {
-      /*
-       * P7-15 — TIME TRACKED CANNOT BE A PLAIN SUM, and this is the trap.
-       *
-       * The entries policy is owner-or-their-lead, so summing that table
-       * client-side shows each viewer only their own hours and calls it the task
-       * total. Two people on one task would read two different figures. The
-       * rollup is `SECURITY DEFINER` for exactly that reason.
-       */
-      key: "tracked",
-      header: "Time tracked",
-      className: "hidden xl:table-cell whitespace-nowrap",
-      align: "end",
-      cell: (task) => {
-        const minutes = tracked.get(task.id) ?? 0;
-        const over = task.estimate_minutes !== null && minutes > task.estimate_minutes;
-
-        if (minutes === 0) return <span className="text-foreground-faint">—</span>;
-
-        return (
-          <span
-            className={cn("tabular-nums", over ? "font-medium text-warning" : "text-muted-foreground")}
-            title={
-              over
-                ? `Over the estimate — ${formatCellDuration(minutes)} against ${formatCellDuration(task.estimate_minutes!)}`
-                : `${formatCellDuration(minutes)} logged`
-            }>
-            {formatCellDuration(minutes)}
-            {/* Never colour alone. */}
-            {over ? <span className="ml-0.5 text-2xs">over</span> : null}
-          </span>
-        );
-      },
-    },
-    {
-      key: "comment",
-      header: "Latest comment",
-      // Last, and the widest thing in the row. It is the only cell that is a
-      // control rather than a value, so it sits where the eye finishes.
-      className: "hidden 2xl:table-cell",
-      cell: (task) => (
-        <LatestCommentCell
-          taskId={task.id}
-          taskTitle={task.title}
-          comments={threads.get(task.id) ?? []}
-          viewerId={context.userId}
-        />
-      ),
-    },
-  ];
 
   return (
     <PageShell>
@@ -999,28 +642,12 @@ export default async function TasksPage({
                   paragraph cannot hold a row. The empty sentence moves into the
                   table as its `empty` state.
                 */}
-                <DataTable
-                  bare
-                  columns={columns}
-                  rows={group}
-                  getRowKey={(task) => task.id}
-                  // P7-27. The accented left edge on client work, so a column of
-                  // rows says which ones have somebody outside waiting without
-                  // anybody reading a word. Empty string for the other two —
-                  // an accent on every row is not an accent.
-                  rowClassName={(task) => taskCategoryEdge(taskCategory(task))}
-                  empty={
-                    <p className="px-3.5 py-4 text-xs text-muted-foreground">
-                      {status === INITIAL_TASK_STATUS
-                        ? "Nothing waiting to be picked up."
-                        : "Nothing at this stage. Work reaches it from the stage before."}
-                    </p>
-                  }
-                  appendRow={
-                    status === "FOR_CLIENT_APPROVAL" ? null : (
-                      <GroupComposer status={status} assignable={assignable} columnCount={columns.length} />
-                    )
-                  }
+                <TaskGroupTable
+                  group={group}
+                  status={status}
+                  viewer={viewer}
+                  lookups={lookups}
+                  assignable={assignable}
                 />
 
                 {/*

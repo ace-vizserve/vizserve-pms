@@ -1,28 +1,14 @@
-import { FileText, Plus } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 
-import { DataTable, type Column } from "@/components/data-table";
-import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
-import { Chip } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth/authorization";
-import { formatDate } from "@/lib/dates";
 import { createClient } from "@/utils/supabase/server";
+import { FormsTable, type FormRow } from "./forms-table";
 
 export const metadata: Metadata = { title: "Forms" };
-
-type FormRow = {
-  id: string;
-  name: string;
-  slug: string;
-  is_public: boolean;
-  is_active: boolean;
-  reference_prefix: string;
-  department_id: string | null;
-  created_at: string;
-};
 
 /**
  * P1-05 — forms list.
@@ -45,65 +31,9 @@ export default async function FormsPage() {
 
   const { data: departments } = await supabase.from("vizserve_pms_departments").select("id, name");
 
-  const departmentName = new Map((departments ?? []).map((d) => [d.id, d.name]));
+  /* A Map cannot cross the RSC boundary. */
+  const departmentNames = Object.fromEntries((departments ?? []).map((d) => [d.id, d.name]));
   const rows = (forms ?? []) as FormRow[];
-
-  const columns: Column<FormRow>[] = [
-    {
-      key: "created_at",
-      header: "Created at",
-      className: "max-w-xs",
-      cell: (form) => <p className="truncate">{formatDate(form.created_at)}</p>,
-    },
-    {
-      key: "form",
-      header: "Form",
-      cell: (form) => (
-        <>
-          <Link href={`/forms/${form.id}`} className="font-medium hover:underline">
-            {form.name}
-          </Link>
-          <span className="ml-2 text-xs text-muted-foreground">{form.reference_prefix}</span>
-        </>
-      ),
-    },
-    {
-      key: "department",
-      header: "Department",
-      className: "hidden sm:table-cell text-muted-foreground",
-      cell: (form) =>
-        form.department_id ? (
-          departmentName.get(form.department_id)
-        ) : (
-          // A form with no department has nowhere to route a submission, which
-          // is a fault rather than a blank.
-          <span className="text-warning">Not routed</span>
-        ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      cell: (form) =>
-        /* Status is never colour alone — the label carries it. */
-        form.is_active ? <Chip tone="success" label="Live" /> : <Chip tone="neutral" label="Draft" />,
-    },
-    {
-      key: "url",
-      header: "Public URL",
-      className: "hidden md:table-cell",
-      cell: (form) =>
-        form.is_active && form.is_public ? (
-          <Link
-            target="_blank"
-            href={`/request/${form.slug}`}
-            className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-            /request/{form.slug}
-          </Link>
-        ) : (
-          <span className="text-xs text-muted-foreground">—</span>
-        ),
-    },
-  ];
 
   return (
     <PageShell>
@@ -114,24 +44,7 @@ export default async function FormsPage() {
         </Link>
       </div>
 
-      <DataTable
-        columns={columns}
-        rows={rows}
-        getRowKey={(form) => form.id}
-        /* This list has no filters, so there is only one way to be empty. */
-        empty={
-          <EmptyState
-            icon={<FileText />}
-            title="No forms yet"
-            description="A form defines what a client must tell you before the team will accept the work. Every required field is a question you will never have to chase."
-            action={
-              <Link href="/forms/new" className={buttonVariants({ size: "sm", variant: "outline" })}>
-                Create the first form
-              </Link>
-            }
-          />
-        }
-      />
+      <FormsTable rows={rows} departmentNames={departmentNames} />
     </PageShell>
   );
 }

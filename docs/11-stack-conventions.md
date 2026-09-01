@@ -15,11 +15,11 @@ Source: SIS `package.json` + `.claude/rules/tech-stack.md`.
 | Backend | **Supabase** (Postgres + Auth) via `@supabase/ssr` + `@supabase/supabase-js` |
 | Hosting | **Vercel**, including cron jobs |
 | Styling | Tailwind v4 via `@tailwindcss/postcss` — **no JS config**; all tokens in `app/globals.css` |
-| Components | shadcn/ui on Radix primitives, `class-variance-authority`, `clsx`, `tailwind-merge` |
+| Components | shadcn/ui on **`@base-ui/react`** primitives (`components.json` sets `"style": "base-nova"` — **not Radix**), `class-variance-authority`, `clsx`, `tailwind-merge` |
 | Icons / misc UI | `lucide-react`, `cmdk`, `react-day-picker`, `nextjs-toploader`, `@dnd-kit` |
 | Toasts | `sileo`, aliased as `sonner` via a tsconfig path shim |
-| Client data | `@tanstack/react-query` v5 — **every call goes through `lib/query/fetcher.ts::apiFetch`**. RSC-first; mutations still `router.refresh()` |
-| Tables | `@tanstack/react-table` for all filterable lists, via the shared `<DataTable>` shell; `@tanstack/react-virtual` for drill sheets |
+| Client data | **No client-data library.** `@tanstack/react-query` was removed — this app is RSC-first and mutations `router.refresh()`. There is no `lib/query/fetcher.ts` |
+| Tables | `@tanstack/react-table` v8 via the shared `<DataTable>`, which is a **client** component (P7-64). No `@tanstack/react-virtual` — row counts here do not need it |
 | Charts | `recharts` |
 | Forms | `react-hook-form` + `zod` v4 + `@hookform/resolvers`; schemas in `lib/schemas/` |
 | Spreadsheets | `xlsx` (SheetJS) |
@@ -60,7 +60,7 @@ Good news mostly — several things I listed as work are already solved in SIS.
 | **P0-12** Scope test suite | Vitest 4, matching SIS test layout |
 | **P1-03/P1-06** Form builder + public form | `react-hook-form` + `zod` for the rendered form. Zod schema generated at runtime from `form_fields` |
 | **P1-07** Submission validation | The zod schema is the **shared** contract — same schema validates client-side and server-side. This is how you get the completeness rule enforced twice without writing it twice |
-| **P1-13 / P2-10 / P3-03 / P5-04** all list views | Shared `<DataTable>` shell on `@tanstack/react-table`. Do not hand-roll tables |
+| **P1-13 / P2-10 / P3-03 / P5-04** all list views | Shared `<DataTable>` on `@tanstack/react-table`. Do not hand-roll tables. Columns live in a client `*-table.tsx`; see `urlSort` in the design skill |
 | **P3-04** Task board | `@dnd-kit` is already in the stack for drag-and-drop |
 | **P4-09** Auto-complete job | **Vercel cron.** Already available, no new infrastructure |
 | **P5-11 / P6-09** Exports | `xlsx` (SheetJS), same as the SIS masterfile export |

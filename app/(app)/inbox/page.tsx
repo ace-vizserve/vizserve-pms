@@ -6,17 +6,14 @@ import { Bell, CheckCheck, SearchX } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
-import { formatDateTime } from "@/lib/dates";
-import type { VizservePmsNotificationType } from "@/lib/database.types";
+
 import {
-  NOTIFICATION_TYPE_LABELS,
   isNotificationType,
   isReadFilter,
   type ReadFilter,
 } from "@/lib/notifications";
 import { ilikeAnyOf } from "@/lib/search";
-import { cn } from "@/lib/utils";
-import { DataTable, type Column } from "@/components/data-table";
+import { InboxTable, type Notification } from "./inbox-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
@@ -25,17 +22,6 @@ import { ListSearch } from "@/components/list-search";
 import { InboxFilters } from "./inbox-filters";
 
 export const metadata: Metadata = { title: "Inbox" };
-
-type Notification = {
-  id: string;
-  type: VizservePmsNotificationType;
-  title: string;
-  body: string | null;
-  link_path: string | null;
-  read_at: string | null;
-  created_at: string;
-  emailed_at: string | null;
-};
 
 /**
  * P0-10 — the inbox.
@@ -64,6 +50,8 @@ export default async function InboxPage({
     size?: string;
     type?: string;
     read?: string;
+    sort?: string;
+    dir?: string;
   }>;
 }) {
   await requireAuthContext();
@@ -83,6 +71,23 @@ export default async function InboxPage({
   const type = isNotificationType(params.type) ? params.type : null;
   const read: ReadFilter = isReadFilter(params.read) ? params.read : "all";
 
+  /*
+   * P7-64 — THE SORT ALLOWLIST. `?sort=` is a string somebody can type, so it
+   * is narrowed to a closed union and used to PICK a literal column name. It is
+   * never interpolated into `.order()`.
+   */
+  const SORTS = ["when", "type"] as const;
+  type Sort = (typeof SORTS)[number];
+  const sort: Sort = (SORTS as readonly string[]).includes(params.sort ?? "")
+    ? (params.sort as Sort)
+    : "when";
+  const NOTIFICATION_ORDER: Record<Sort, string> = {
+    when: "created_at",
+    type: "type",
+  };
+  // Newest first is the inbox's whole point, so "when" defaults to descending.
+  const ascending = params.dir ? params.dir !== "desc" : sort !== "when";
+
   const from = (page - 1) * pageSize;
 
   let query = supabase
@@ -90,7 +95,7 @@ export default async function InboxPage({
     .select("id, type, title, body, link_path, read_at, created_at, send_email, emailed_at", {
       count: "exact",
     })
-    .order("created_at", { ascending: false })
+    .order(NOTIFICATION_ORDER[sort], { ascending })
     .range(from, from + pageSize - 1);
 
   // Escaped in lib/search.ts — `.or()` takes a raw filter string, so a comma or
@@ -144,82 +149,16 @@ export default async function InboxPage({
     if (read !== "all") next.set("read", read);
     // Defaults stay out of the URL, so the everyday link is just /inbox.
     if (pageSize !== PAGE_SIZES[0]) next.set("size", String(pageSize));
+    /* ⚠️ WITHOUT THESE TWO, PAGE 2 SILENTLY REVERTS TO THE DEFAULT ORDER.
+       `hrefFor` rebuilds the query string from narrowed values rather than
+       copying the incoming URL, so every param it forgets is a param the
+       paginator drops. */
+    if (sort !== "when") next.set("sort", sort);
+    if (params.dir === "desc" || (sort !== "when" && params.dir === "desc")) next.set("dir", "desc");
     if (target > 1) next.set("page", String(target));
     const query = next.toString();
     return query ? `/inbox?${query}` : "/inbox";
   }
-
-  /**
-   * A TABLE now, not a hand-built list of cards.
-   *
-   * The divided-card version was a second implementation of a list — its own
-   * padding, its own hover, its own empty-state wrapper — sitting beside
-   * DataTable, which every other list route in the app uses. Two of them is two
-   * places for row rhythm and empty-state handling to drift, and this one had
-   * already drifted: it wrapped its EmptyState in a card by hand because it did
-   * not go through the shell that does that.
-   *
-   * What the list carried and the table keeps: the unread marker, the link to
-   * the exact record, the body line, the timestamp, and whether it was emailed.
-   * What it gains: the type, which was only ever filterable and never shown.
-   */
-  const columns: Column<Notification>[] = [
-    {
-      key: "notification",
-      header: "Notification",
-      className: "max-w-lg whitespace-normal",
-      cell: (item) => (
-        <div className="flex items-start gap-2.5">
-          {/* Unread is a dot AND a word — the word is `sr-only` because the
-              weight of the title carries it visually, but a coloured dot alone
-              is not an accessible status. */}
-          <span
-            aria-hidden
-            className={cn(
-              "mt-1.75 size-1.5 shrink-0 rounded-full",
-              item.read_at ? "bg-transparent" : "bg-primary",
-            )}
-          />
-          <div className="min-w-0">
-            {item.link_path ? (
-              // Every notification links to the exact record, never to a
-              // dashboard the recipient then has to search (docs/12 §3).
-              <Link
-                href={item.link_path}
-                className={cn("text-sm hover:underline", !item.read_at && "font-medium")}
-              >
-                {item.title}
-                {!item.read_at ? <span className="sr-only"> (unread)</span> : null}
-              </Link>
-            ) : (
-              <span className={cn("text-sm", !item.read_at && "font-medium")}>
-                {item.title}
-                {!item.read_at ? <span className="sr-only"> (unread)</span> : null}
-              </span>
-            )}
-            {item.body ? <p className="mt-0.5 text-xs text-muted-foreground">{item.body}</p> : null}
-          </div>
-        </div>
-      ),
-    },
-    {
-      key: "type",
-      header: "Type",
-      className: "hidden md:table-cell text-xs text-muted-foreground",
-      cell: (item) => NOTIFICATION_TYPE_LABELS[item.type] ?? item.type,
-    },
-    {
-      key: "when",
-      header: "When",
-      className: "hidden sm:table-cell text-xs text-muted-foreground",
-      cell: (item) => (
-        <>
-          {formatDateTime(item.created_at)}
-          {item.emailed_at ? <span className="text-2xs"> · emailed</span> : null}
-        </>
-      ),
-    },
-  ];
 
   return (
     // Full width, like the other list pages. The old max-w-3xl gave a reading
@@ -284,10 +223,8 @@ export default async function InboxPage({
         )}
       </p>
 
-      <DataTable
-        columns={columns}
+      <InboxTable
         rows={rows}
-        getRowKey={(item) => item.id}
         empty={
           isFiltered ? (
             <EmptyState

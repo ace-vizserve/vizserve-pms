@@ -1,3 +1,18 @@
+"use client";
+
+import { useMemo } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  flexRender,
+  getCoreRowModel,
+  getSortedRowModel,
+  useReactTable,
+  type ColumnDef,
+  type SortingState,
+  type VisibilityState,
+} from "@tanstack/react-table";
+import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
+
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -16,14 +31,8 @@ import {
  * one used `overflow-hidden` where the rest used `overflow-x-auto`, another
  * added a `min-w`. That is the drift this exists to stop.
  *
- * The ring rather than a border is the template's card boundary; `overflow-hidden`
- * is what keeps the first and last rows from spilling past the rounded corner.
- *
- * Deliberately not built on @tanstack/react-table. The template does its
- * filtering and sorting with plain state, our filters already live in the URL
- * so the server does the work, and a headless table library earns its place at
- * column virtualisation and pinning — neither of which we need. It was removed
- * from package.json for the same reason.
+ * `overflow-hidden` is what keeps the first and last rows from spilling past
+ * the rounded corner.
  */
 export function DataTableShell({
   className,
@@ -44,6 +53,29 @@ export function DataTableShell({
   );
 }
 
+/**
+ * ⚠️ THIS FILE IS `"use client"`, AND THAT IS THE COST OF THE LIBRARY.
+ *
+ * It used to be server-safe, so a page could declare its columns inline and
+ * hand over `cell` closures. `useReactTable` is a hook, so the table has to run
+ * in the browser — and a function cannot cross the RSC boundary. Every page
+ * therefore declares its columns in a client component of its own
+ * (`*-table.tsx`) and the server page passes it plain, serialisable rows.
+ *
+ * Six tables were already shaped that way before this change; the rest were
+ * moved to match.
+ *
+ * ⚠️ SORTING IS `manualSorting` WHEREVER THE PAGE DOES NOT HOLD EVERY ROW.
+ *
+ * TanStack sorts the rows it has been given. `/inbox` and `/admin/audit` hold
+ * one page of a `.range()`, `/requests` is capped at 200, `/tasks` and `/dtr`
+ * are filtered server-side — so client sorting on any of them would silently
+ * reorder the current page and call it a sort. Those pass `urlSort`, the URL
+ * stays the source of truth, and Postgres does the ordering. A table that
+ * genuinely holds all its rows may leave it off and sort in the browser, which
+ * is honest because there is nothing else to see.
+ */
+
 export type Column<T> = {
   /** Stable key — also the React key for the cell. */
   key: string;
@@ -54,15 +86,20 @@ export type Column<T> = {
   className?: string;
   /** Right-align numerics. */
   align?: "start" | "end";
+  /**
+   * Makes the header a sort control.
+   *
+   * The value is what goes in `?sort=`, and the server maps it to a LITERAL
+   * `.order()` call. Never pass it through to Postgres: an unknown column name
+   * arrives as `invalid input value for enum` and 500s the page.
+   */
+  sortKey?: string;
+  /** Offered in the columns menu. A column nobody may hide simply omits it. */
+  hideable?: boolean;
 };
 
-/**
- * A declarative table for the common case: columns in, rows out.
- *
- * `empty` renders inside the shell as a full-width row rather than replacing
- * it, so a filtered-to-nothing list keeps its header and the person can see
- * which filter to loosen.
- */
+export type SortDirection = "asc" | "desc";
+
 export function DataTable<T>({
   columns,
   rows,
@@ -74,6 +111,9 @@ export function DataTable<T>({
   bare = false,
   appendRow,
   className,
+  urlSort = false,
+  columnVisibility,
+  onColumnVisibilityChange,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -81,8 +121,6 @@ export function DataTable<T>({
   /**
    * Classes for one row, from the row itself.
    *
-   * Added for P7-27's client-work edge: a chip is readable once you are looking
-   * at a row, and an accented edge is what makes a COLUMN of rows scannable.
    * Deliberately a function of the row rather than a `variant` prop — the table
    * has no business knowing what a client task is, and the next caller that
    * wants to mark a row will want to mark it for a different reason.
@@ -93,46 +131,184 @@ export function DataTable<T>({
    * A totals row, as `<tr>` content. Inside the table rather than under it
    * because a total that sits outside the element it totals is a number a
    * screen reader reads with no relationship to the figures above it.
-   * Hidden when there are no rows — a total of nothing is noise.
    */
   footer?: React.ReactNode;
   /** When set, the whole row becomes a link target for pointer users. */
   onRowHref?: (row: T) => string | undefined;
   /**
-   * Drop the shell.
-   *
-   * For a table that is already inside a bounded surface — the status groups on
-   * the task list, where the group IS the panel. Nesting DataTableShell inside
-   * one draws a second border a hairline in from the first, which reads as a
-   * rendering fault rather than as structure.
+   * Drop the shell, for a table already inside a bounded surface — the status
+   * groups on the task list, where the group IS the panel.
    */
   bare?: boolean;
   /**
-   * A `<tr>` appended inside `<tbody>`, after the rows and regardless of how many
-   * there are.
-   *
-   * For the task list's inline composer, which has to line up under the columns
-   * — a form rendered in a div beneath the table cannot, because it has no way to
-   * know the column widths the browser just computed. `footer` is not the same
-   * thing: it lands in `<tfoot>` and is suppressed when the list is empty, which
-   * is exactly when somebody most wants to add the first row.
+   * A `<tr>` appended inside `<tbody>`, after the rows and regardless of how
+   * many there are. For the task list's inline composer, which has to line up
+   * under the columns.
    */
   appendRow?: React.ReactNode;
   className?: string;
+  /**
+   * Sorting goes through the URL and the server does the ordering.
+   *
+   * ⚠️ SET THIS ON ANY TABLE THAT DOES NOT HOLD EVERY ROW — anything paginated,
+   * ranged or capped. Left false, TanStack sorts the array it was given, which
+   * on a paginated list means reordering the current page and calling it a
+   * sort.
+   *
+   * The current values are read from `?sort=` and `?dir=` here rather than
+   * passed in: a callback cannot cross the RSC boundary, and the server page
+   * has to read the same two params anyway to build its query. One reader on
+   * each side of the wire, no prop to keep in step.
+   */
+  urlSort?: boolean;
+  columnVisibility?: VisibilityState;
+  onColumnVisibilityChange?: (next: VisibilityState) => void;
 }) {
-  const table = (
+  const router = useRouter();
+  const pathname = usePathname();
+  const params = useSearchParams();
+
+  const manual = urlSort;
+  const sort = urlSort ? (params.get("sort") ?? undefined) : undefined;
+  const dir: SortDirection = params.get("dir") === "desc" ? "desc" : "asc";
+
+  /*
+   * Our `Column<T>` mapped onto TanStack's shape rather than replaced by it.
+   * The call sites keep the API they had — `key`, `header`, `cell` — and this
+   * is the one place that knows about `ColumnDef`, so swapping the engine again
+   * would touch this function and nothing else.
+   */
+  const columnDefs = useMemo<ColumnDef<T>[]>(
+    () =>
+      columns.map((column) => ({
+        id: column.key,
+        enableSorting: Boolean(column.sortKey),
+        enableHiding: Boolean(column.hideable),
+        header: () => column.header,
+        // The row index TanStack hands back is the index within the rendered
+        // page, which is what the old signature promised.
+        cell: (context) => column.cell(context.row.original, context.row.index),
+        meta: { column },
+      })),
+    [columns],
+  );
+
+  const sorting = useMemo<SortingState>(
+    () => (sort ? [{ id: keyOf(columns, sort), desc: dir === "desc" }] : []),
+    [columns, sort, dir],
+  );
+
+  const table = useReactTable({
+    data: rows,
+    columns: columnDefs,
+    getRowId: (row, index) => getRowKey(row, index),
+    getCoreRowModel: getCoreRowModel(),
+    // Only ask for the sorted row model when the browser is allowed to do the
+    // sorting. In manual mode the rows arrive ordered and re-sorting them here
+    // would fight the server.
+    ...(manual ? {} : { getSortedRowModel: getSortedRowModel() }),
+    manualSorting: manual,
+    state: {
+      sorting,
+      ...(columnVisibility ? { columnVisibility } : {}),
+    },
+    onColumnVisibilityChange: onColumnVisibilityChange
+      ? (updater) =>
+          onColumnVisibilityChange(
+            typeof updater === "function" ? updater(columnVisibility ?? {}) : updater,
+          )
+      : undefined,
+    onSortingChange: (updater) => {
+      if (!urlSort) return;
+      const next = typeof updater === "function" ? updater(sorting) : updater;
+      const first = next[0];
+      if (!first) return;
+
+      const column = columns.find((candidate) => candidate.key === first.id);
+      if (!column?.sortKey) return;
+
+      const query = new URLSearchParams(params.toString());
+      query.set("sort", column.sortKey);
+      // Ascending is the default, so it stays out of the URL — a link that
+      // says `?dir=asc` claims a choice nobody made, the same reasoning the
+      // task filters already apply to their default sort.
+      if (first.desc) query.set("dir", "desc");
+      else query.delete("dir");
+
+      /* ⚠️ RE-SORTING RETURNS YOU TO PAGE ONE. Staying on page 4 of a new
+         order shows the fourth page of a list nobody asked for. Every filter
+         control in this app deletes `page` for the same reason. */
+      query.delete("page");
+
+      const next_query = query.toString();
+      router.push(next_query ? `${pathname}?${next_query}` : pathname);
+    },
+  });
+
+  const headers = table.getHeaderGroups()[0]?.headers ?? [];
+  const visibleCount = table.getVisibleLeafColumns().length;
+
+  const body = (
     <Table>
       <TableHeader>
         <TableRow>
-          {columns.map((column) => (
-            <TableHead
-              key={column.key}
-              scope="col"
-              className={cn(column.align === "end" && "text-right", column.className)}
-            >
-              {column.header}
-            </TableHead>
-          ))}
+          {headers.map((header) => {
+            const column = (header.column.columnDef.meta as { column: Column<T> }).column;
+            const sortable = Boolean(column.sortKey);
+            const active = sortable && sort === column.sortKey;
+
+            return (
+              <TableHead
+                key={header.id}
+                scope="col"
+                // ⚠️ The assistive-tech half of the sort indicator. Without it a
+                // screen reader is told only that this is a column heading, and
+                // the arrow beside it is decoration it never hears about.
+                aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : undefined}
+                className={cn(column.align === "end" && "text-right", column.className)}
+              >
+                {sortable ? (
+                  <button
+                    type="button"
+                    onClick={header.column.getToggleSortingHandler()}
+                    className={cn(
+                      "inline-flex cursor-pointer items-center gap-1.5 rounded-sm text-xs font-semibold",
+                      "hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2",
+                      active ? "text-foreground" : "text-muted-foreground",
+                      column.align === "end" && "flex-row-reverse",
+                    )}
+                  >
+                    {flexRender(header.column.columnDef.header, header.getContext())}
+                    {/*
+                      SHAPE, NOT JUST WEIGHT. An active column is darker AND
+                      carries a directional arrow; an inactive one carries the
+                      neutral two-way glyph, so the control reads as sortable
+                      before anyone clicks it. Greyscale loses nothing.
+                    */}
+                    {active ? (
+                      dir === "asc" ? (
+                        <ArrowUp aria-hidden className="size-3.5 shrink-0" />
+                      ) : (
+                        <ArrowDown aria-hidden className="size-3.5 shrink-0" />
+                      )
+                    ) : (
+                      <ChevronsUpDown
+                        aria-hidden
+                        className="size-3.5 shrink-0 text-foreground-faint"
+                      />
+                    )}
+                    <span className="sr-only">
+                      {active
+                        ? `Sorted ${dir === "asc" ? "ascending" : "descending"}. Click to reverse.`
+                        : "Click to sort by this column."}
+                    </span>
+                  </button>
+                ) : (
+                  flexRender(header.column.columnDef.header, header.getContext())
+                )}
+              </TableHead>
+            );
+          })}
         </TableRow>
       </TableHeader>
 
@@ -140,40 +316,42 @@ export function DataTable<T>({
         {/*
           The empty state still renders when there is an `appendRow`, and that is
           the whole point of the pair: an empty stage shows BOTH the sentence
-          saying why it is empty AND the control for adding the first task. An
-          earlier cut suppressed the sentence whenever a composer was present,
-          which silently removed "Nothing at this stage" from seven of the eight
-          groups on the task list.
+          saying why it is empty AND the control for adding the first task.
         */}
         {rows.length === 0 ? (
           <TableRow className="hover:bg-transparent">
             {/* `whitespace-normal` undoes TableCell's `whitespace-nowrap`,
-                  which is right for a time or a reference number and very wrong
-                  for a paragraph. Without it the empty state's description was
-                  laid out on a single unbreakable line, which set the table's
-                  minimum width to the length of that sentence — the header row
-                  then stretched to match, the first column scrolled out of
-                  view, and every empty list in the app grew a horizontal
-                  scrollbar. EmptyState's own `max-w-xs` could not fight it:
-                  a max-width cannot shrink content that refuses to wrap. */}
-            <TableCell colSpan={columns.length} className="p-0 whitespace-normal">
+                which is right for a time or a reference number and very wrong
+                for a paragraph. Without it the empty state's description was
+                laid out on a single unbreakable line, which set the table's
+                minimum width to the length of that sentence — the header row
+                then stretched to match and every empty list grew a horizontal
+                scrollbar. */}
+            <TableCell colSpan={visibleCount} className="p-0 whitespace-normal">
               {empty ?? <EmptyRow />}
             </TableCell>
           </TableRow>
         ) : (
-          rows.map((row, index) => (
+          table.getRowModel().rows.map((row) => (
             <TableRow
-              key={getRowKey(row, index)}
-              className={cn("align-top", onRowHref?.(row) && "cursor-pointer", rowClassName?.(row))}
+              key={row.id}
+              className={cn(
+                "align-top",
+                onRowHref?.(row.original) && "cursor-pointer",
+                rowClassName?.(row.original),
+              )}
             >
-              {columns.map((column) => (
-                <TableCell
-                  key={column.key}
-                  className={cn(column.align === "end" && "text-right", column.className)}
-                >
-                  {column.cell(row, index)}
-                </TableCell>
-              ))}
+              {row.getVisibleCells().map((cell) => {
+                const column = (cell.column.columnDef.meta as { column: Column<T> }).column;
+                return (
+                  <TableCell
+                    key={cell.id}
+                    className={cn(column.align === "end" && "text-right", column.className)}
+                  >
+                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                  </TableCell>
+                );
+              })}
             </TableRow>
           ))
         )}
@@ -185,9 +363,18 @@ export function DataTable<T>({
     </Table>
   );
 
-  if (bare) return table;
+  if (bare) return body;
 
-  return <DataTableShell className={className}>{table}</DataTableShell>;
+  return <DataTableShell className={className}>{body}</DataTableShell>;
+}
+
+/**
+ * `sortKey` is what the URL and the server speak; `key` is what TanStack's
+ * column is called. They are usually the same string and deliberately allowed
+ * to differ — a column headed "Requester" may sort on `requester_name`.
+ */
+function keyOf<T>(columns: Column<T>[], sortKey: string): string {
+  return columns.find((column) => column.sortKey === sortKey)?.key ?? sortKey;
 }
 
 function EmptyRow() {

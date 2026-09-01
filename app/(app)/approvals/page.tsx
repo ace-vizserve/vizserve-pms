@@ -1,25 +1,20 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { Inbox } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
-import type { InternalRequestRow } from "@/lib/database.types";
-import { richTextToPlainText } from "@/lib/rich-text";
-import { formatDate, todayInAppZone } from "@/lib/dates";
+import { todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { createClient } from "@/utils/supabase/server";
-import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
-import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
 import { MyLeaveRecordButton } from "./my-leave-record";
 import { NewRequestDialog } from "./new-request-dialog";
+import { Section, type Row } from "./approvals-table";
 
 /** Rows rendered. The query asks for one more so the cap is detectable. */
 const APPROVALS_PAGE_SIZE = 200;
-import { requestDetail } from "./request-summary";
 
 export const metadata: Metadata = { title: "Approvals" };
 
@@ -39,88 +34,7 @@ export const metadata: Metadata = { title: "Approvals" };
  * <h2> because "pending your approval" and "mine" are genuinely different lists
  * and nothing else on the screen distinguishes them.
  */
-type Row = InternalRequestRow & { vizserve_pms_users: { full_name: string } | null };
 
-function columnsFor(showWho: boolean): Column<Row>[] {
-  return [
-    {
-      key: "request",
-      header: "Request",
-      cell: (request) => (
-        <>
-          <Link href={`/approvals/${request.id}`} className="font-medium hover:underline">
-            {requestDetail(request)}
-          </Link>
-          <div className="mt-1 flex flex-wrap items-center gap-1.5">
-            <InternalTypeBadge type={request.request_type} />
-            {showWho ? (
-              <span className="text-2xs text-muted-foreground">
-                {request.vizserve_pms_users?.full_name ?? "—"}
-              </span>
-            ) : null}
-          </div>
-        </>
-      ),
-    },
-    {
-      key: "reason",
-      header: "Reason",
-      className: "hidden sm:table-cell max-w-xs",
-      /*
-       * P7-56. The FLATTENED reason, not the column.
-       *
-       * `truncate` is `text-overflow: ellipsis` on one line, which cannot do
-       * anything useful with a `<ul>` or an `<h3>` — the markup would either
-       * render as blocks and blow the row height open or, rendered as text,
-       * show the reader a `<p>` tag. Same helper the emails use.
-       */
-      cell: (request) => (
-        <p className="truncate text-muted-foreground">{richTextToPlainText(request.reason)}</p>
-      ),
-    },
-    {
-      key: "submitted",
-      header: "Submitted",
-      className: "hidden md:table-cell whitespace-nowrap text-muted-foreground",
-      cell: (request) => formatDate(request.created_at),
-    },
-    {
-      key: "status",
-      header: "Status",
-      cell: (request) => <InternalStatusBadge status={request.status} />,
-    },
-  ];
-}
-
-function Section({
-  title,
-  description,
-  rows,
-  showWho,
-  empty,
-}: {
-  title: string;
-  description: string;
-  rows: Row[];
-  showWho: boolean;
-  empty: React.ReactNode;
-}) {
-  return (
-    <section className="space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-      </div>
-
-      <DataTable
-        columns={columnsFor(showWho)}
-        rows={rows}
-        getRowKey={(request) => request.id}
-        empty={empty}
-      />
-    </section>
-  );
-}
 
 export default async function ApprovalsPage({
   searchParams,

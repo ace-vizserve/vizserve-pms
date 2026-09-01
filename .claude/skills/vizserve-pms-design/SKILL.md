@@ -231,7 +231,12 @@ Check this table first. Most new screens need zero new components.
 | Logo | `BrandLockup` | `components/brand-lockup.tsx` |
 | Nav data | `NAV_ITEMS` / `visibleNavItems` / `groupedNavItems` | `lib/navigation.ts` |
 
-**Explicitly not in use:** TanStack Table and TanStack Query were removed from `package.json`. Do not reintroduce them.
+**Tables run on `@tanstack/react-table`** (P7-64, reversing the earlier removal). Two rules come with it:
+
+- **`DataTable` is a client component.** `useReactTable` is a hook and a `cell` function cannot cross the RSC boundary, so a page declares its columns in a sibling `*-table.tsx` and the server page passes plain, serialisable rows. A `Map` does not cross either — hand over `Object.fromEntries(...)`.
+- **`urlSort` on anything paginated, ranged or capped.** TanStack sorts the rows it was given; on a `.range()`d list that means reordering the current page and calling it a sort. Those tables put `?sort=`/`?dir=` in the URL and let Postgres order, branching to a **literal** `.order()` from a closed allowlist — never `.order(params.sort)`.
+
+**Explicitly not in use:** TanStack **Query**. It was removed from `package.json` and stays out — this app is RSC-first and mutations `router.refresh()`.
 
 ---
 

@@ -1,30 +1,13 @@
-import { Inbox } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { DataTable, type Column } from "@/components/data-table";
-import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
-import { QueryError } from "@/components/query-error";
-import { isRequestStatus, RequestStatusBadge } from "@/components/status-badge";
+import { isRequestStatus } from "@/components/status-badge";
 import { requireRole } from "@/lib/auth/authorization";
-import { formatDate, isOverdue } from "@/lib/dates";
 import { createClient } from "@/utils/supabase/server";
 import { RequestFilters } from "./filters";
+import { RequestsTable, type RequestRow } from "./requests-table";
 
 export const metadata: Metadata = { title: "Requests" };
-
-type RequestRow = {
-  id: string;
-  reference_no: string;
-  title: string;
-  requester_name: string;
-  requester_org: string;
-  target_date: string | null;
-  status: "DRAFT" | "SUBMITTED" | "PENDING_REVIEW" | "APPROVED" | "RETURNED" | "REJECTED";
-  submitted_at: string;
-  form_id: string;
-};
 
 /**
  * P1-13 — the Team Leader's queue, and Gate 1's front door.
@@ -41,16 +24,49 @@ type RequestRow = {
 export default async function RequestsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ status?: string; form?: string; from?: string; to?: string }>;
+  searchParams: Promise<{
+    status?: string;
+    form?: string;
+    from?: string;
+    to?: string;
+    sort?: string;
+    dir?: string;
+  }>;
 }) {
   await requireRole("team_leader");
   const params = await searchParams;
   const supabase = await createClient();
 
+  /*
+   * P7-64 — THE SORT ALLOWLIST.
+   *
+   * `?sort=` is a string somebody can type. It is narrowed to this closed union
+   * and then used to pick a LITERAL `.order()` below — never interpolated into
+   * one. An unknown column name reaches Postgres as `invalid input value` and
+   * 500s the page, which is why every `.order()` in this repo names its column
+   * outright.
+   */
+  const SORTS = ["submitted", "reference", "title", "requester", "target", "status"] as const;
+  type Sort = (typeof SORTS)[number];
+  const sort: Sort = (SORTS as readonly string[]).includes(params.sort ?? "")
+    ? (params.sort as Sort)
+    : "submitted";
+  // Submitted-at leads newest-first; everything else reads naturally ascending.
+  const ascending = params.dir ? params.dir !== "desc" : sort !== "submitted";
+
+  const ORDER_COLUMN: Record<Sort, string> = {
+    submitted: "submitted_at",
+    reference: "reference_no",
+    title: "title",
+    requester: "requester_name",
+    target: "target_date",
+    status: "status",
+  };
+
   let query = supabase
     .from("vizserve_pms_requests")
     .select("id, reference_no, title, requester_name, requester_org, target_date, status, submitted_at, form_id")
-    .order("submitted_at", { ascending: false, nullsFirst: false })
+    .order(ORDER_COLUMN[sort], { ascending, nullsFirst: false })
     .limit(200);
 
   if (isRequestStatus(params.status)) query = query.eq("status", params.status);
@@ -63,96 +79,22 @@ export default async function RequestsPage({
   const { data: requests, error: requestsError } = await query;
 
   const { data: forms } = await supabase.from("vizserve_pms_forms").select("id, name").order("name");
-  const formName = new Map((forms ?? []).map((form) => [form.id, form.name]));
+  /* A Map cannot cross the RSC boundary; the table rebuilds nothing and just
+     indexes this. */
+  const formNames = Object.fromEntries((forms ?? []).map((form) => [form.id, form.name]));
 
   const rows = (requests ?? []) as RequestRow[];
   const isFiltered = Boolean(params.status || params.form || params.from || params.to);
-
-  const columns: Column<RequestRow>[] = [
-    {
-      key: "submitted_at",
-      header: "Submitted at",
-      className: "max-w-xs",
-      cell: (request) => <p className="truncate">{formatDate(request.submitted_at)}</p>,
-    },
-    {
-      key: "reference",
-      header: "Reference",
-      className: "whitespace-nowrap",
-      cell: (request) => (
-        <>
-          <Link href={`/requests/${request.id}`} className="font-medium hover:underline">
-            {request.reference_no}
-          </Link>
-          <p className="text-xs text-muted-foreground">{formName.get(request.form_id) ?? "—"}</p>
-        </>
-      ),
-    },
-    {
-      key: "title",
-      header: "Request",
-      className: "max-w-xs",
-      cell: (request) => <p className="truncate">{request.title}</p>,
-    },
-    {
-      key: "requester",
-      header: "Requester",
-      className: "hidden md:table-cell",
-      cell: (request) => (
-        <>
-          <p className="truncate">{request.requester_name}</p>
-          <p className="text-xs text-muted-foreground">{request.requester_org}</p>
-        </>
-      ),
-    },
-    {
-      key: "target",
-      header: "Target date",
-      className: "hidden sm:table-cell whitespace-nowrap",
-      cell: (request) => (
-        <>
-          {formatDate(request.target_date)}
-          {/* Overdue is said in words as well as colour — a red date alone is
-              invisible to a meaningful share of people, and to anyone reading
-              a printed or screenshotted queue. */}
-          {isOverdue(request.target_date) && request.status === "PENDING_REVIEW" ? (
-            <p className="text-xs font-medium text-destructive">Overdue</p>
-          ) : null}
-        </>
-      ),
-    },
-    {
-      key: "status",
-      header: "Status",
-      cell: (request) => <RequestStatusBadge status={request.status} />,
-    },
-  ];
 
   return (
     <PageShell>
       <RequestFilters forms={forms ?? []} />
 
-      <DataTable
-        columns={columns}
+      <RequestsTable
         rows={rows}
-        getRowKey={(request) => request.id}
-        empty={
-          requestsError ? (
-            <QueryError what="requests" message={requestsError.message} />
-          ) : isFiltered ? (
-            <EmptyState
-              icon={<Inbox />}
-              title="No requests match these filters"
-              description="Widen the date range or clear the status filter to see the rest of the queue."
-            />
-          ) : (
-            <EmptyState
-              icon={<Inbox />}
-              title="Nothing here yet"
-              description="Requests appear when a client submits one of your published forms. If you are expecting one, check the form is published and routed to your department."
-            />
-          )
-        }
+        formNames={formNames}
+        isFiltered={isFiltered}
+        errorMessage={requestsError?.message}
       />
 
       {rows.length >= 200 ? (

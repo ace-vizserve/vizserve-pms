@@ -5,44 +5,33 @@ import { Clock } from "lucide-react";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import {
   addDays,
-  formatAppTime,
   formatDate,
   formatDuration,
   todayInAppZone,
   workedMinutes,
 } from "@/lib/dates";
 import {
-  correctionTypeFor,
-  describeDeviation,
   deviation as computeDeviation,
   effectiveEnd,
   scheduleFor,
-  type Deviation,
 } from "@/lib/dtr-schedule";
 import { loadPunchState } from "@/lib/dtr-server";
 import {
-  INTERNAL_REQUEST_LABELS,
-  isTimeCorrectionType,
   TIME_CORRECTION_TYPES,
-  type TimeCorrectionType,
 } from "@/lib/schemas/internal-requests";
 import { loadAppSettings } from "@/lib/settings-server";
 import {
-  describeLeaveDay,
   expandLeaveDays,
   leaveKey,
-  LEAVE_PORTION_LABELS,
   type LeaveDay,
   type LeaveSpan,
 } from "@/lib/leave";
 import { createClient } from "@/utils/supabase/server";
-import { DataTable, type Column } from "@/components/data-table";
-import { InternalStatusBadge } from "@/components/status-badge";
+import { DtrTable, type DayRequest, type Entry, type PunchRow } from "./dtr-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
 import { QueryError } from "@/components/query-error";
-import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { DtrToolbar } from "./dtr-toolbar";
 import { PunchPanel } from "./punch-panel";
 
@@ -218,55 +207,6 @@ export default async function DtrPage({
     loadAppSettings(),
   ]);
 
-  type PunchRow = {
-    id: string;
-    work_date: string;
-    time_in: string | null;
-    time_out: string | null;
-    corrected_at: string | null;
-    user_id: string;
-    vizserve_pms_users: {
-      full_name: string;
-      /** P7-36. `HH:MM:SS` or null — normalised through `scheduleFor`. */
-      work_start: string | null;
-      work_end: string | null;
-    } | null;
-  };
-
-  /** P7-40. A correction or an approved overtime filed against a day. */
-  type DayRequest = {
-    id: string;
-    request_type: string;
-    status: "PENDING_REVIEW" | "APPROVED" | "REJECTED";
-    work_date: string | null;
-    requester_id: string;
-    correction_at: string | null;
-    overtime_minutes: number | null;
-  };
-
-  /**
-   * A row on this list is now either a punch or an approved absence.
-   *
-   * `leave` hangs off both. On a punched row it annotates — a half day worked
-   * and half taken is ONE day and one row, and splitting it would make the
-   * record show two entries for a date that only happened once. On a row with
-   * no punch it is the whole reason the row exists.
-   */
-  type Entry = PunchRow & {
-    leave: LeaveDay | null;
-    isLeaveOnly: boolean;
-    /** Every request filed against this person on this day, newest first. */
-    requests: DayRequest[];
-    /**
-     * P7-40. How far off schedule the punches landed, once grace and approved
-     * overtime are accounted for. Null in both slots is the ordinary case AND
-     * the no-schedule case — deliberately indistinguishable here, because the
-     * table has nothing to say about either.
-     */
-    deviationIn: Deviation | null;
-    deviationOut: Deviation | null;
-  };
-
   const fetched = (entriesResult.data ?? []) as unknown as PunchRow[];
   // The extra row is a signal, not data. Drop it before anything is counted.
   const truncated = fetched.length > DTR_PAGE_SIZE;
@@ -436,214 +376,7 @@ export default async function DtrPage({
    * silently raise a request about their own day. Correcting for somebody else
    * is not a thing this system does, and the honest response is to not offer it.
    */
-  const isMine = (entry: Entry) => entry.user_id === context.userId;
 
-  const columns: Column<Entry>[] = [
-    {
-      key: "date",
-      header: "Date",
-      className: "whitespace-nowrap",
-      cell: (entry) => (
-        <>
-          {formatDate(entry.work_date)}
-          {/* Provenance in words. A corrected time is a different fact from a
-              punched one, and this is the row someone points at in a payroll
-              dispute. */}
-          {entry.corrected_at ? (
-            <p className="mt-0.5 text-2xs font-medium text-info">Corrected</p>
-          ) : null}
-          {/* The absence, named. Colour alone would not do it here any more
-              than it does on a status pill, and the portion matters: half a day
-              off is a different fact from a whole one. */}
-          {entry.leave ? (
-            <p className="mt-0.5 text-2xs font-medium text-info">
-              {entry.leave.portion === "full"
-                ? "On leave"
-                : `On leave · ${LEAVE_PORTION_LABELS[entry.leave.portion]}`}
-              {entry.leave.typeNames.length > 0 ? (
-                <span className="font-normal text-muted-foreground">
-                  {" "}
-                  {entry.leave.typeNames.join(", ")}
-                </span>
-              ) : null}
-            </p>
-          ) : null}
-        </>
-      ),
-    },
-    // Only when the list spans more than one person. A column of your own name
-    // repeated forty times is a column carrying no information.
-    ...(showPerson
-      ? [
-          {
-            key: "person",
-            header: "Person",
-            cell: (entry: Entry) => entry.vizserve_pms_users?.full_name ?? "—",
-          },
-        ]
-      : []),
-    {
-      key: "in",
-      header: "Time in",
-      className: "tabular-nums whitespace-nowrap",
-      cell: (entry) => (
-        <>
-          {formatAppTime(entry.time_in)}
-          {/* F — the route to the correction, from the row showing the problem.
-              A row with no time-in is exactly the case NO_TIME_IN exists for.
-
-              EXCEPT on a day somebody was approved to be away. Offering "Time-in
-              missing?" there tells a person on holiday to file a correction for
-              a gap that is not a gap — and a correction they should never file
-              is worse than no link, because filing it puts a punch on a day they
-              did not work. */}
-          {!entry.time_in && !entry.isLeaveOnly && isMine(entry) ? (
-            <CorrectionLink type="NO_TIME_IN" date={entry.work_date} label="Time-in missing?" />
-          ) : null}
-          {/* P7-40. The deviation, in words, on the number it describes. THE
-              LABEL CARRIES THE STATE — an amber tint alone would leave a
-              colour-blind reader with a time and no idea it was flagged. */}
-          {entry.deviationIn ? (
-            <p className="mt-0.5 text-2xs font-medium text-warning">
-              {describeDeviation(entry.deviationIn)}
-            </p>
-          ) : null}
-        </>
-      ),
-    },
-    {
-      key: "out",
-      header: "Time out",
-      className: "tabular-nums whitespace-nowrap",
-      cell: (entry) => (
-        <>
-          {formatAppTime(entry.time_out)}
-          {Boolean(entry.time_in) && !entry.time_out ? (
-            <>
-              <p className="mt-0.5 text-2xs font-medium text-warning">Still open</p>
-              {/* This is the case the 18-hour stale-shift refusal already tells
-                  people to fix, and until now it told them without giving them
-                  any way to do it. */}
-              {isMine(entry) ? (
-                <CorrectionLink
-                  type="NO_TIME_OUT"
-                  date={entry.work_date}
-                  label="Never timed out?"
-                />
-              ) : null}
-            </>
-          ) : null}
-          {entry.deviationOut ? (
-            <p className="mt-0.5 text-2xs font-medium text-warning">
-              {describeDeviation(entry.deviationOut)}
-            </p>
-          ) : null}
-        </>
-      ),
-    },
-    /*
-     * P7-40 — THE PAPERWORK ON THIS DAY.
-     *
-     * Placed BEFORE `worked` on purpose. The footer renders the range total in
-     * the LAST cell and spans everything before it with
-     * `colSpan={columns.length - 1}`; a column appended after `worked` would
-     * quietly put the total under the wrong heading.
-     *
-     * What appears here is scoped by RLS, not by anything below. A member sees
-     * only rows they filed; a team leader, manager or admin sees their
-     * department's. There is no role check in this cell because there is no
-     * role check in the query — the rows that arrive are already the rows this
-     * viewer may see.
-     */
-    {
-      key: "request",
-      header: "Request",
-      className: "whitespace-nowrap",
-      cell: (entry) => {
-        // Newest first, and at most two shown: a day realistically carries a
-        // time-in correction and a time-out correction. More than that is a
-        // person iterating on a request, and the detail page is where that
-        // history belongs.
-        const shown = entry.requests.slice(0, 2);
-
-        if (shown.length > 0) {
-          return (
-            <div className="flex flex-col gap-1">
-              {shown.map((request) => (
-                <Link
-                  key={request.id}
-                  href={`/approvals/${request.id}`}
-                  className="group flex items-center gap-1.5 text-2xs underline-offset-2 hover:underline"
-                >
-                  <InternalStatusBadge status={request.status} />
-                  <span className="text-muted-foreground group-hover:text-foreground">
-                    {INTERNAL_REQUEST_LABELS[
-                      request.request_type as keyof typeof INTERNAL_REQUEST_LABELS
-                    ] ?? request.request_type}
-                    {/* What it is asking for, so a lead can compare the claim
-                        against the recorded time without opening it. */}
-                    {isTimeCorrectionType(request.request_type) && request.correction_at
-                      ? ` · ${formatAppTime(request.correction_at)}`
-                      : null}
-                    {request.request_type === "OVERTIME" && request.overtime_minutes
-                      ? ` · ${formatDuration(request.overtime_minutes)}`
-                      : null}
-                  </span>
-                </Link>
-              ))}
-              {entry.requests.length > shown.length ? (
-                <span className="text-2xs text-muted-foreground">
-                  +{entry.requests.length - shown.length} more
-                </span>
-              ) : null}
-            </div>
-          );
-        }
-
-        /*
-         * Nothing filed yet, and the row is off schedule — so offer the fix.
-         *
-         * OWN ROWS ONLY, for the reason `isMine` documents: the submit function
-         * resolves the requester from the caller, so a lead clicking this on a
-         * member's row would file a correction against their own record.
-         *
-         * The time carried in the URL is the SCHEDULED one, which is a
-         * suggestion the dialog leaves editable — not a claim. See
-         * `narrowRequestPrefill`.
-         */
-        const pending = entry.deviationIn ?? entry.deviationOut;
-
-        if (pending && isMine(entry)) {
-          return (
-            <CorrectionLink
-              type={correctionTypeFor(pending.side)}
-              date={entry.work_date}
-              time={pending.scheduled}
-              label="Request correction"
-            />
-          );
-        }
-
-        return <span className="text-muted-foreground">—</span>;
-      },
-    },
-    {
-      key: "worked",
-      header: "Worked",
-      className: "tabular-nums whitespace-nowrap",
-      // A leave-only row has no hours and never will. "—" would read as a day
-      // that recorded nothing, which is precisely the confusion this row exists
-      // to end, so it says what the day was instead.
-      cell: (entry) =>
-        entry.isLeaveOnly ? (
-          <span className="text-2xs text-muted-foreground">
-            {entry.leave ? describeLeaveDay(entry.leave) : "On leave"}
-          </span>
-        ) : (
-          formatDuration(workedMinutes(entry.time_in, entry.time_out))
-        ),
-    },
-  ];
 
   return (
     /*
@@ -806,7 +539,7 @@ export default async function DtrPage({
             page wanting denser rows does not justify a new API on the shared
             component, and the day a second page wants it, that is the moment
             to add one. */}
-        <DataTable
+        <DtrTable
           // The card fills the row and the rows scroll inside it, so five
           // hundred days of DTR never make the page itself longer.
           //
@@ -826,9 +559,9 @@ export default async function DtrPage({
           className={`[&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 lg:h-full lg:min-h-0 lg:[&>div]:h-full lg:[&>div]:overflow-y-auto lg:[&_thead_th]:sticky lg:[&_thead_th]:top-0 lg:[&_thead_th]:z-10 lg:[&_thead_th]:bg-background lg:[&_thead_th]:shadow-[inset_0_-1px_0_var(--border)] ${
             entries.length === 0 ? "lg:[&_table]:h-full" : ""
           }`}
-          columns={columns}
           rows={entries}
-          getRowKey={(entry) => entry.id}
+          viewerId={context.userId}
+          showPerson={showPerson}
           empty={
             entriesResult.error ? (
               <QueryError what="your time record" message={entriesResult.error.message} />
@@ -877,16 +610,8 @@ export default async function DtrPage({
             />
             )
           }
-          footer={
-            <TableRow className="hover:bg-transparent">
-              <TableHead scope="row" colSpan={columns.length - 1}>
-                {truncated ? `Total of the first ${DTR_PAGE_SIZE} shown` : "Total in range"}
-              </TableHead>
-              <TableCell className="font-semibold tabular-nums">
-                {formatDuration(totalMinutes)}
-              </TableCell>
-            </TableRow>
-          }
+          totalLabel={truncated ? `Total of the first ${DTR_PAGE_SIZE} shown` : "Total in range"}
+          totalMinutes={totalMinutes}
         />
       </div>
     </PageShell>
@@ -913,33 +638,3 @@ export default async function DtrPage({
  * again on arrival by `narrowRequestPrefill`, so this and a hand-typed URL are
  * treated identically.
  */
-function CorrectionLink({
-  type,
-  date,
-  time,
-  label,
-}: {
-  /**
-   * P7-39 widened this from the missing-punch pair. The four types differ in
-   * what they claim, not in what this link does with them — narrowing happens
-   * again on arrival, so an unknown value opens the plain dialog.
-   */
-  type: TimeCorrectionType;
-  date: string;
-  /** P7-40. The scheduled time, prefilled as a SUGGESTION the dialog keeps editable. */
-  time?: string;
-  label: string;
-}) {
-  return (
-    <Link
-      href={`/approvals?type=${type}&date=${date}${time ? `&time=${encodeURIComponent(time)}` : ""}`}
-      className="mt-0.5 block text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-    >
-      {label}
-      {/* The visible label is deliberately short enough to sit in a numeric
-          column; the full sentence is here for anyone who cannot see which row
-          it belongs to. */}
-      <span className="sr-only"> Raise a correction for {formatDate(date)}.</span>
-    </Link>
-  );
-}
