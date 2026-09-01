@@ -55,6 +55,13 @@ export type AllocatableLeaveType = {
   label: string;
   /** P7-45. NULL applies to everyone; a value restricts the type. */
   applies_to_gender: Gender | null;
+  /**
+   * P7-53. Not used by the allocation panel — a retired type keeps its
+   * allocation and must stay editable. It is here for the leave-audit dialog
+   * in the toolbar, which marks a retired type so somebody filtering to one
+   * knows that is what they picked.
+   */
+  is_active: boolean;
 };
 
 export type EditableUser = {
@@ -64,6 +71,8 @@ export type EditableUser = {
   /** P7-32. NULL on accounts nobody has opened since the column landed. */
   gender: Gender | null;
   role: Role;
+  /** P7-52. The HR job, orthogonal to `role` — see D33. */
+  is_hr: boolean;
   primary_department_id: string | null;
   is_active: boolean;
   /** Which HFSE applications they may enter. See the access toggle below. */
@@ -189,6 +198,7 @@ function UserForm({
   const [workStart, setWorkStart] = useState(user?.work_start?.slice(0, 5) ?? "");
   const [workEnd, setWorkEnd] = useState(user?.work_end?.slice(0, 5) ?? "");
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
+  const [isHr, setIsHr] = useState(user?.is_hr ?? false);
   const [hasAppAccess, setHasAppAccess] = useState(
     user ? user.app_access.includes(APP_ACCESS_KEY) : true,
   );
@@ -221,8 +231,14 @@ function UserForm({
    * already recorded against one stays in the database untouched — see the
    * submit path, which only sends what is on screen.
    */
-  const applicableLeaveTypes = leaveTypes.filter((type) =>
-    leaveTypeApplies(type.applies_to_gender, gender),
+  const applicableLeaveTypes = leaveTypes.filter(
+    (type) =>
+      // `is_active` is filtered HERE since P7-53, not in the page query, which
+      // now fetches retired types too for the toolbar's audit dialog. A retired
+      // type keeps any allocation already recorded against it — the submit path
+      // only sends what is on screen — so hiding the row is exactly what the
+      // old server-side filter did, and nothing about this panel changes.
+      type.is_active && leaveTypeApplies(type.applies_to_gender, gender),
   );
 
   const [allocations, setAllocations] = useState<Record<string, string>>(() =>
@@ -289,6 +305,10 @@ function UserForm({
       role,
       primary_department_id: primaryDepartmentId,
       managed_department_ids: scopeApplies ? managed : [],
+      // In the SHARED payload, not beside `is_active` below: HR is settable on
+      // create as well as on edit, unlike the active switch which only makes
+      // sense once an account exists.
+      is_hr: isHr,
       // The empty string is how a cleared time input reports itself. The schema
       // turns it into null — "no fixed schedule" — rather than a parse error.
       work_start: workStart,
@@ -713,6 +733,30 @@ function UserForm({
             ) : null}
           </div>
         ) : null}
+
+        {/*
+          P7-52 — the HR switch.
+
+          ⚠️ THIS SCREEN IS ADMIN-ONLY AND MUST STAY THAT WAY. It is the only
+          place `is_hr` can be set, which is precisely what stops the capability
+          escalating itself: an HR person can allocate leave and edit holidays,
+          and cannot appoint another HR person or make themselves one.
+
+          Rendered for a NEW user too, unlike Active below — an account can be
+          created for somebody who is joining to do the HR job, and making them
+          save twice to say so would be pointless.
+        */}
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div>
+            <Label htmlFor="is_hr">HR</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {isHr
+                ? "Can set leave balances, edit leave types and holidays, and run the leave report for everyone. Cannot manage users."
+                : "Not an HR user. Every admin already has these abilities regardless of this switch."}
+            </p>
+          </div>
+          <Switch id="is_hr" checked={isHr} onCheckedChange={setIsHr} />
+        </div>
 
         {user ? (
           <div className="flex items-start justify-between gap-4 rounded-lg border p-4">

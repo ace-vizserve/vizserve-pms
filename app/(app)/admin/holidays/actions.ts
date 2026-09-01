@@ -3,7 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { requireHr } from "@/lib/auth/authorization";
 import {
   createHolidaySchema,
   deleteHolidaySchema,
@@ -14,12 +14,18 @@ import { createAdminClient } from "@/utils/supabase/admin";
 /**
  * P7-35 — the holiday calendar.
  *
- * Admin-only, re-established on every call before anything reads a parameter,
- * exactly as `admin/users/actions.ts` does. The RLS on
- * `vizserve_pms_holidays` says the same thing — writable by
- * `vizserve_pms_is_admin()` — but these use the service-role client, which
- * bypasses policies entirely, so `requireRole("admin")` here is the belt rather
- * than the braces.
+ * ⚠️ HR-GATED SINCE P7-52, NOT ADMIN-GATED. The route is still `/admin/holidays`
+ * — an admin has it bookmarked and audit rows point at it — but the capability
+ * that opens it moved, because D31 made this table the only authority on which
+ * days the company is shut and D32 recorded that editing a past one rewrites
+ * reported leave. That consequence is entitlement, which is HR's job. Admins
+ * keep the screen, since `canDoHr` is true for them.
+ *
+ * Re-established on every call before anything reads a parameter, exactly as
+ * `admin/users/actions.ts` does. The RLS on `vizserve_pms_holidays` says the
+ * same thing — writable by `vizserve_pms_is_hr()` since P7-52 — but these use
+ * the service-role client, which bypasses policies entirely, so `requireHr()`
+ * here is the belt rather than the braces.
  *
  * WHY SERVICE ROLE AT ALL, given the policy would allow an admin's own client
  * through: the audit write. `vizserve_pms_write_audit_log` is called with an
@@ -68,7 +74,7 @@ function revalidateHolidayScreens(): void {
 // ---------------------------------------------------------------------------
 
 export async function createHoliday(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireHr();
 
   const parsed = createHolidaySchema.safeParse(input);
   if (!parsed.success) {
@@ -128,7 +134,7 @@ export async function createHoliday(input: unknown): Promise<ActionResult> {
  * a date that changed would be a lie.
  */
 export async function renameHoliday(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireHr();
 
   const parsed = updateHolidaySchema.safeParse(input);
   if (!parsed.success) {
@@ -198,7 +204,7 @@ export async function renameHoliday(input: unknown): Promise<ActionResult> {
  * what makes that recoverable — it holds the date and name needed to put it back.
  */
 export async function deleteHoliday(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireHr();
 
   const parsed = deleteHolidaySchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That is not a valid date." };

@@ -30,6 +30,10 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
     // P7-45. Not an authorization input — it narrows the leave picker — but the
     // context carries it, so the factory has to supply a default.
     gender: null,
+    // P7-52. Defaults to false so every existing case describes somebody who is
+    // NOT HR — the HR cases opt in explicitly, and the ones below that pin the
+    // role ladder keep testing only the ladder.
+    isHr: false,
     primaryDepartmentId: null,
     managedDepartmentIds: [],
     ...overrides,

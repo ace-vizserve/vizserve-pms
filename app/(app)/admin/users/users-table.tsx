@@ -4,22 +4,24 @@ import { useMemo, useState, useTransition } from "react";
 import { FileDown, KeyRound, Pencil, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 
+import { ReportBuilder } from "@/app/(app)/hr/reports/report-builder";
+
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { Chip } from "@/components/status-badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { GENDER_LABELS, ROLE_LABELS } from "@/lib/schemas/users";
 
-import { exportLeaveReportPdf, sendPasswordReset } from "./actions";
+import { sendPasswordReset } from "./actions";
 import {
   UserEditor,
   type AllocatableLeaveType,
@@ -40,6 +42,7 @@ export function UsersTable({
   departments,
   leaveTypes,
   balanceYear,
+  today,
   currentUserId,
 }: {
   users: EditableUser[];
@@ -48,6 +51,8 @@ export function UsersTable({
   leaveTypes: AllocatableLeaveType[];
   /** Which year that panel allocates for. Manila's year, from the server. */
   balanceYear: number;
+  /** Manila's date, for the audit dialog's default period. Server-supplied. */
+  today: string;
   currentUserId: string;
 }) {
   const [query, setQuery] = useState("");
@@ -55,53 +60,15 @@ export function UsersTable({
   const [editorOpen, setEditorOpen] = useState(false);
   const [resetting, startReset] = useTransition();
 
-  /*
-   * P7-34 — the leave audit year.
+  /**
+   * P7-53 — the leave audit dialog.
    *
-   * Defaults to the year the allocations panel is editing, which is the current
-   * one in Manila. THIS YEAR AND THE TWO BEFORE IT, no further: the report is
-   * run in December against the year that is ending, and occasionally against
-   * the one before while a query is settled. Offering 2020 would be offering a
-   * year whose numbers nobody has looked at since.
+   * No year state here any more: the builder owns every choice, so this screen
+   * holds only whether the dialog is open. The old three-year picker is gone
+   * with it — the builder bounds the year itself (2020–2100 via
+   * `balanceYearSchema`) rather than offering three and calling it a rule.
    */
-  const [reportYear, setReportYear] = useState(balanceYear);
-  const [exporting, startExport] = useTransition();
-
-  const reportYears = [balanceYear, balanceYear - 1, balanceYear - 2];
-  const reportYearItems = Object.fromEntries(
-    reportYears.map((year) => [String(year), String(year)]),
-  );
-
-  function downloadLeaveReport() {
-    startExport(async () => {
-      const result = await exportLeaveReportPdf({ year: reportYear });
-
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      /*
-       * Base64 back to bytes. `atob` gives one character per byte with every
-       * code point below 256, so charCodeAt is the byte — no TextEncoder, which
-       * would re-encode as UTF-8 and double everything above 0x7F.
-       */
-      const binary = atob(result.data.base64);
-      const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
-
-      // Built and revoked in the same tick, as the DTR export does — a blob URL
-      // left dangling pins the whole file in memory for the life of the page.
-      const blob = new Blob([bytes], { type: "application/pdf" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = result.data.filename;
-      anchor.click();
-      URL.revokeObjectURL(url);
-
-      toast.success(`Leave audit for ${reportYear} downloaded.`);
-    });
-  }
+  const [reportOpen, setReportOpen] = useState(false);
 
   const departmentName = useMemo(
     () => new Map(departments.map((department) => [department.id, department.name])),
@@ -266,35 +233,14 @@ export function UsersTable({
             aria-label="Search users"
           />
         </div>
-        {/* P7-34. The year sits BESIDE the button rather than inside a dialog:
-            it is one choice, it is nearly always the default, and a dialog to
-            confirm a download nobody has to configure is a click for nothing.
-            The two read as one control because the label says what the year is
-            for. */}
         <div className="flex shrink-0 items-center gap-2 sm:ml-auto">
-          <Select
-            items={reportYearItems}
-            value={String(reportYear)}
-            onValueChange={(value) => value !== null && setReportYear(Number(value))}
-          >
-            <SelectTrigger size="sm" aria-label="Leave audit year" className="w-24">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {reportYears.map((year) => (
-                <SelectItem key={year} value={String(year)}>
-                  {year}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Button
-            size="sm"
-            variant="outline"
-            loading={exporting}
-            onClick={downloadLeaveReport}
-          >
+          {/* P7-53. This WAS a year picker beside a one-click download, on the
+              argument that a dialog to confirm a download nobody configures is
+              a click for nothing. That argument died when the report gained a
+              second mode and four filters: there is now something to configure,
+              so the button opens the same builder /hr/reports uses rather than
+              a second, lesser copy of it. */}
+          <Button size="sm" variant="outline" onClick={() => setReportOpen(true)}>
             <FileDown />
             Leave audit PDF
           </Button>
@@ -322,6 +268,34 @@ export function UsersTable({
           />
         }
       />
+
+      {/*
+        The SAME builder /hr/reports renders, in a dialog. Not a cut-down copy:
+        a second implementation of the filter payload is a second chance to send
+        `[]` where the schema wants `undefined`, which renders an empty PDF that
+        reads as a broken export.
+      */}
+      <Dialog open={reportOpen} onOpenChange={setReportOpen}>
+        <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>Leave audit</DialogTitle>
+            <DialogDescription>
+              Pick a document and narrow it however you need. The PDF prints every filter it
+              applied, so a filtered copy is never mistaken for a full one.
+            </DialogDescription>
+          </DialogHeader>
+
+          {reportOpen ? (
+            <ReportBuilder
+              currentYear={balanceYear}
+              today={today}
+              people={users}
+              departments={departments}
+              leaveTypes={leaveTypes}
+            />
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <UserEditor
         departments={departments}

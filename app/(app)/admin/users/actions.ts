@@ -5,17 +5,7 @@ import { z } from "zod";
 
 import { APP_ACCESS_KEY, requireRole } from "@/lib/auth/authorization";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
-import { todayInAppZone } from "@/lib/dates";
-import {
-  balanceYearSchema,
-  currentBalanceYear,
-  setLeaveAllocationsSchema,
-} from "@/lib/schemas/leave-balances";
-import {
-  groupLeaveReport,
-  leaveReportFilename,
-  renderLeaveReport,
-} from "@/lib/reports/leave-report";
+import { setLeaveAllocations as setHrLeaveAllocations } from "@/app/(app)/hr/balances/actions";
 import {
   createUserSchema,
   normaliseManagedDepartments,
@@ -57,6 +47,7 @@ type AuditableProfile = {
   full_name: string;
   gender: string | null;
   role: string;
+  is_hr: boolean;
   primary_department_id: string | null;
   is_active: boolean;
   app_access: string[];
@@ -70,7 +61,7 @@ async function readProfileForAudit(
   const { data: profile } = await admin
     .from("vizserve_pms_users")
     .select(
-      "email, full_name, gender, role, primary_department_id, is_active, app_access, work_start, work_end",
+      "email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access, work_start, work_end",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -194,6 +185,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
       full_name: values.full_name,
       gender: values.gender,
       role: values.role,
+      is_hr: values.is_hr,
       primary_department_id: values.primary_department_id,
       is_active: true,
       app_access: [APP_ACCESS_KEY],
@@ -287,6 +279,9 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
       full_name: values.full_name,
       gender: values.gender,
       role: values.role,
+      // P7-52. Only reachable from this screen, which is admin-gated — that is
+      // what stops HR appointing HR.
+      is_hr: values.is_hr,
       primary_department_id: values.primary_department_id,
       is_active: values.is_active,
       // Revoking this closes every table at once — vizserve_pms_current_role()
@@ -331,108 +326,18 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
 /**
  * Sets what HR allocates this person, per leave type, for one year.
  *
- * ADMIN ONLY, and deliberately not `manager` or `team_leader`. A lead who could
- * set the allowance and then approve leave measured against it is on both sides
- * of the same question; the RLS write policy on `vizserve_pms_leave_balances`
- * says the same thing underneath. The service-role client below bypasses that
- * policy, so `requireRole("admin")` here is the belt rather than the braces —
- * the same posture every other action in this file takes.
+ * ⚠️ THE IMPLEMENTATION MOVED TO `app/(app)/hr/balances/actions.ts` IN P7-52.
+ * It used to live here because /admin/users was the only screen that could set
+ * an allocation; /hr/balances is now the org-wide version of the same edit, and
+ * two copies of an upsert that silently doubles an entitlement if its conflict
+ * target is wrong is not a thing to keep two of.
  *
- * UPSERT, NEVER DELETE-THEN-INSERT. `replaceManagedDepartments` above wipes and
- * rewrites because an empty managed set is meaningful and a missing row is the
- * only way to express it. Here the opposite holds: an allocation of ZERO is a
- * real statement — "you get no vacation leave this year" — and deleting the row
- * to express it would make it indistinguishable from "nobody has decided yet".
- * So every row the form sends is written, zeroes included.
- *
- * NOTHING HERE TOUCHES USAGE, because nothing stores it. Days taken are computed
- * from approved requests by `vizserve_pms_leave_balance_summary` each time it is
- * read, which is why this action has no re-credit path, no recalculation step
- * and no way to leave a stale number behind.
+ * Still exported from here, and still admin-gated, because the DIALOG on this
+ * screen calls it. The shared action gates on `requireHr()`, which admins pass.
  */
 export async function setLeaveAllocations(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
-
-  const parsed = setLeaveAllocationsSchema.safeParse(input);
-  if (!parsed.success) {
-    return {
-      ok: false,
-      error: "Check the highlighted figures.",
-      fieldErrors: flattenIssues(parsed.error),
-    };
-  }
-
-  const { user_id: userId, balance_year: year, allocations } = parsed.data;
-  const admin = createAdminClient();
-
-  const { data: subject } = await admin
-    .from("vizserve_pms_users")
-    .select("full_name")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (!subject) return { ok: false, error: "That user no longer exists." };
-
-  // Read before, so the audit row can say what the numbers were. Keyed by type
-  // rather than by row id: the ids are meaningless to anyone reading the log,
-  // and an upsert can mint new ones, which would make a before/after diff look
-  // like a wholesale replacement of untouched rows.
-  const { data: existing } = await admin
-    .from("vizserve_pms_leave_balances")
-    .select("leave_type_id, days_allocated")
-    .eq("user_id", userId)
-    .eq("balance_year", year);
-
-  const before = Object.fromEntries(
-    (existing ?? []).map((row) => [row.leave_type_id, row.days_allocated]),
-  );
-
-  if (allocations.length > 0) {
-    const { error } = await admin.from("vizserve_pms_leave_balances").upsert(
-      allocations.map((allocation) => ({
-        user_id: userId,
-        leave_type_id: allocation.leave_type_id,
-        balance_year: year,
-        days_allocated: allocation.days_allocated,
-      })),
-      // The unique constraint the migration adds for exactly this. Without a
-      // conflict target an admin saving twice would insert a second allocation
-      // and silently double somebody's entitlement.
-      { onConflict: "user_id,leave_type_id,balance_year" },
-    );
-
-    if (error) {
-      // A retired leave type still has a valid id, so a stale form could post
-      // one. The foreign key accepts it — retiring is `is_active = false`, not
-      // a delete — which is correct: the allocation stays attached to whatever
-      // was actually allocated. Anything else that fails here is worth showing.
-      return { ok: false, error: error.message };
-    }
-  }
-
-  const after = Object.fromEntries(
-    allocations.map((allocation) => [allocation.leave_type_id, allocation.days_allocated]),
-  );
-
-  // Only log a change that changed something — an audit trail full of no-op
-  // saves is one nobody reads. Same rule as `updateUser` above.
-  if (JSON.stringify(before) !== JSON.stringify(after)) {
-    await admin.rpc("vizserve_pms_write_audit_log", {
-      p_entity_type: "user",
-      p_entity_id: userId,
-      p_action: "leave_allocation_set",
-      p_actor_id: context.userId,
-      p_before: { balance_year: year, allocations: before },
-      p_after: { balance_year: year, allocations: after },
-    });
-  }
-
-  revalidatePath("/admin/users");
-  // The figure the person themselves reads while filing leave comes off the
-  // same rows, so the approvals page has to be invalidated too or an admin
-  // raising somebody's allowance would not show up until the cache expired.
-  revalidatePath("/approvals");
-  return { ok: true, data: undefined };
+  await requireRole("admin");
+  return setHrLeaveAllocations(input);
 }
 
 /**
@@ -469,80 +374,17 @@ export async function readLeaveBalances(
 // Leave audit PDF (P7-34)
 // ---------------------------------------------------------------------------
 
-/**
- * The whole staff's leave for a year, as a PDF.
- *
- * Run in December, before January, so unused days can be settled or paid with
- * the bonus. It is an audit document — printed, checked against HR's manual
- * count, signed, filed — which is why it is a file rather than a screen and why
- * the page states the rules it counted by.
- *
- * RETURNED AS BASE64, not as a string of bytes. A Uint8Array does not survive
- * the server-action boundary intact, and a "binary string" would be re-encoded
- * as UTF-8 somewhere in the middle and arrive with every byte above 0x7F turned
- * into two — a PDF that is subtly, unopenably corrupt. Base64 is ASCII the whole
- * way and the client turns it back into bytes in three lines.
- *
- * ADMIN ONLY HERE, though `vizserve_pms_leave_report` would happily scope itself
- * to a lead's own departments. This action hangs off /admin/users, which is an
- * admin screen; the day a team leader wants their own team's figures, the SQL
- * already supports it and only this line has to change.
- */
-export async function exportLeaveReportPdf(
-  input: unknown,
-): Promise<ActionResult<{ filename: string; base64: string }>> {
-  const context = await requireRole("admin");
-
-  // Defaults to this year in Manila when nothing is passed. December is exactly
-  // when this is run, so a UTC server rolling over to January early would offer
-  // the wrong year at the worst possible moment.
-  const parsed = balanceYearSchema.safeParse(
-    (input as { year?: unknown } | null)?.year ?? currentBalanceYear(todayInAppZone()),
-  );
-
-  if (!parsed.success) {
-    return { ok: false, error: "Choose a year between 2020 and 2100." };
-  }
-
-  const year = parsed.data;
-  const supabase = await createClient();
-
-  const { data, error } = await supabase.rpc("vizserve_pms_leave_report", { p_year: year });
-  if (error) return { ok: false, error: error.message };
-
-  const rows = data ?? [];
-  if (rows.length === 0) {
-    // Not an empty PDF. A blank audit page is indistinguishable from a broken
-    // export, and somebody would file it.
-    return {
-      ok: false,
-      error: `Nothing to report for ${year} — no staff or leave types were in scope.`,
-    };
-  }
-
-  const { data: profile } = await supabase
-    .from("vizserve_pms_users")
-    .select("full_name, email")
-    .eq("id", context.userId)
-    .maybeSingle();
-
-  const bytes = renderLeaveReport(groupLeaveReport(rows), {
-    year,
-    generatedOn: todayInAppZone(),
-    generatedBy: profile?.full_name || profile?.email || "an administrator",
-    // Admin-only for now, per the note above. Printed either way, so the day
-    // this becomes lead-scoped the page cannot quietly start lying about it.
-    scope: "All departments",
-  });
-
-  return {
-    ok: true,
-    data: {
-      filename: leaveReportFilename(year),
-      base64: Buffer.from(bytes).toString("base64"),
-    },
-  };
-}
+// P7-53 REMOVED `exportLeaveReportPdf` FROM HERE.
+//
+// It was the last trace of the one-click, whole-company download: a thin
+// wrapper that parsed a year and called `exportLeaveReport`. The toolbar button
+// now opens the same builder /hr/reports uses, in a dialog, and calls that
+// action directly — so this wrapper had no caller and existed only to be found
+// later and wondered about.
+//
+// The report itself lives in `app/(app)/hr/reports/actions.ts`, gated on a
+// session rather than a role, because its three callers are an admin, an HR
+// member and any employee printing their own record.
 
 // ---------------------------------------------------------------------------
 // Password reset

@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { requireHr } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { holidayYearSchema } from "@/lib/schemas/holidays";
 import { createClient } from "@/utils/supabase/server";
@@ -12,7 +12,7 @@ import { HolidaysTable } from "./holidays-table";
 export const metadata: Metadata = { title: "Holidays" };
 
 /**
- * P7-35 — the holiday calendar an admin maintains.
+ * P7-35 — the holiday calendar. Maintained by HR since P7-52; see actions.ts.
  *
  * The table has existed since P4, seeded with 2026 and editable by nothing but a
  * migration. Two things made that untenable: movable holidays are proclaimed
@@ -22,7 +22,7 @@ export const metadata: Metadata = { title: "Holidays" };
  *
  * Read through the ORDINARY RLS-scoped client, not the service role, exactly as
  * `/admin/users` does. The policy already says "readable by any active user,
- * writable by an admin", so the same query a member would run returns the same
+ * writable by HR", so the same query a member would run returns the same
  * rows — and that is worth keeping true. The service role appears only in the
  * write actions, where the audit row needs it.
  *
@@ -36,7 +36,7 @@ export default async function HolidaysPage({
 }: {
   searchParams: Promise<{ year?: string | string[] }>;
 }) {
-  await requireRole("admin");
+  await requireHr();
   const supabase = await createClient();
 
   const params = await searchParams;

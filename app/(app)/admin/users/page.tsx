@@ -31,7 +31,8 @@ export default async function UsersPage() {
   // P7-33. Manila's year, not the server's — see `currentBalanceYear`. On
   // 1 January a UTC server is still in December for eight hours, and the editor
   // would open on last year's allocations.
-  const balanceYear = currentBalanceYear(todayInAppZone());
+  const today = todayInAppZone();
+  const balanceYear = currentBalanceYear(today);
 
   const [
     { data: users },
@@ -43,7 +44,7 @@ export default async function UsersPage() {
     supabase
       .from("vizserve_pms_users")
       .select(
-        "id, email, full_name, gender, role, primary_department_id, is_active, app_access, work_start, work_end",
+        "id, email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access, work_start, work_end",
       )
       // Deactivated accounts sink to the bottom; the rest read alphabetically.
       .order("is_active", { ascending: false })
@@ -61,9 +62,13 @@ export default async function UsersPage() {
       // types the person being edited is not eligible for. Filtered in the
       // browser rather than here, because it keys off the gender SELECTED IN THE
       // FORM, which the server has not been told about yet.
+      // P7-53 dropped the `.eq("is_active", true)` that used to be here, so the
+      // leave-audit dialog in the toolbar can offer a RETIRED type as a filter
+      // — an auditor checking what was taken under a type withdrawn mid-year is
+      // precisely what that report is for. The editor's allocation panel keeps
+      // its old behaviour by filtering client-side; see `applicableLeaveTypes`.
       .from("vizserve_pms_leave_types")
-      .select("id, label, applies_to_gender")
-      .eq("is_active", true)
+      .select("id, label, applies_to_gender, is_active")
       .order("sort_order"),
 
     // ALLOCATIONS ONLY, not the used/remaining summary. That summary is one
@@ -116,6 +121,7 @@ export default async function UsersPage() {
         departments={departments ?? []}
         leaveTypes={leaveTypes ?? []}
         balanceYear={balanceYear}
+        today={today}
         currentUserId={context.userId}
       />
     </PageShell>

@@ -59,6 +59,14 @@ export type AuthContext = {
    * column on every leave screen would be waste.
    */
   gender: Gender | null;
+  /**
+   * P7-52. Whether this person holds the HR job, which is ORTHOGONAL to `role`
+   * and not a rank on it. Read `canDoHr()` rather than this field: an admin is
+   * HR without carrying the flag, and every check in the database says so.
+   *
+   * Unlike `gender` above, this one IS an authorization input.
+   */
+  isHr: boolean;
   /** The department the user *belongs to*. Not the same as what they lead. */
   primaryDepartmentId: string | null;
   /** The departments they lead or oversee. Empty for a plain member. */
@@ -110,7 +118,7 @@ export const resolveAuth = cache(
     const { data: profile } = await supabase
       .from("vizserve_pms_users")
       .select(
-        "id, email, full_name, gender, role, primary_department_id, is_active, app_access",
+        "id, email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access",
       )
       .eq("id", user.id)
       .maybeSingle();
@@ -151,6 +159,7 @@ export const resolveAuth = cache(
         fullName: profile.full_name,
         gender: profile.gender,
         role: profile.role,
+        isHr: profile.is_hr,
         primaryDepartmentId: profile.primary_department_id,
         managedDepartmentIds: (managed ?? []).map((row) => row.department_id),
       },
@@ -185,6 +194,42 @@ export async function requireRole(required: Role): Promise<AuthContext> {
   const context = await requireAuthContext();
   if (!roleAtLeast(context.role, required)) {
     throw new ForbiddenError(`This action requires the ${required} role or higher.`);
+  }
+  return context;
+}
+
+/**
+ * P7-52 — the HR capability, and the ONLY TypeScript definition of it.
+ *
+ * Mirrors `vizserve_pms_is_hr()` exactly, and the mirroring is the point: that
+ * function is what every policy and every SECURITY DEFINER check actually
+ * consults, so a second reading of "is this person HR" written inline at a call
+ * site is a disagreement waiting to happen.
+ *
+ * ⚠️ THE ADMIN BRANCH IS LOAD-BEARING, not a courtesy. Admin *is* HR today —
+ * `vizserve_pms_leave_balances` says so in a comment (p7_33:262) — so P7-52
+ * widened every one of those checks from `is_admin()` to `is_hr()`. Drop the
+ * admin branch here and the UI would start hiding screens from admins that the
+ * database still lets them use.
+ *
+ * The active/app-access gates the SQL also applies are already enforced upstream:
+ * `resolveAuth` returns no context at all for a deactivated or access-revoked
+ * user, so by the time there is an `AuthContext` to pass in, both hold.
+ */
+export function canDoHr(context: AuthContext): boolean {
+  return context.isHr || roleAtLeast(context.role, "admin");
+}
+
+/**
+ * For pages and actions the HR capability guards.
+ *
+ * Deliberately NOT `requireRole`-shaped: HR is not a floor on the role ladder,
+ * and expressing it as one is the mistake this whole change exists to avoid.
+ */
+export async function requireHr(): Promise<AuthContext> {
+  const context = await requireAuthContext();
+  if (!canDoHr(context)) {
+    throw new ForbiddenError("This area is for HR.");
   }
   return context;
 }

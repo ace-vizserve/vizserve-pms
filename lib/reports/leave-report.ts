@@ -161,6 +161,28 @@ const FIRST_PAGE_TOP = 128;
 const LATER_PAGE_TOP = 60;
 const BOTTOM_LIMIT = A4_HEIGHT - MARGIN - 24; // room for the page footer
 
+/** P7-53. Leading for one printed filter line under the counting rules. */
+const FILTER_LINE_HEIGHT = 10;
+/** Where the first filter line sits — just below the two rules lines at 98/108. */
+const FILTER_BLOCK_TOP = 122;
+
+/**
+ * P7-53 — where the column band starts once the filter lines are in.
+ *
+ * ⚠️ THE PLANNER HAS TO BE TOLD THIS, it cannot read the constant. `FIRST_PAGE_TOP`
+ * used to be a module constant that both the planner and the renderer read, so
+ * "print a taller header" was a one-line change. It is not: the planner decides
+ * how many rows fit on page one from this number, so a header that grew without
+ * telling it would overprint the first rows while the pagination still believed
+ * it had 128pt of margin. Hence the parameter on `planLeaveReport`.
+ *
+ * With no filters this returns exactly 128, which is why every existing
+ * pagination test still describes the same pages.
+ */
+function firstPageTopFor(filters: string[]): number {
+  return FIRST_PAGE_TOP + filters.length * FILTER_LINE_HEIGHT;
+}
+
 export type LeaveReportMeta = {
   year: number;
   /** ISO date in the app zone. Passed in — nothing here reads the clock. */
@@ -173,6 +195,21 @@ export type LeaveReportMeta = {
    * one, which is the single most dangerous way this document can be wrong.
    */
   scope: string;
+  /**
+   * P7-53 — the filters that were applied, already written as English.
+   *
+   * ⚠️ REQUIRED, AND EMPTY IS A VALID ANSWER MEANING "unfiltered". Not optional,
+   * because the failure this prevents is silent: a filtered PDF that does not
+   * name its filters is indistinguishable from an unfiltered one, and this
+   * document exists to be compared against HR's manual count. Two documents
+   * that disagree are useless unless each states what it counted (D30). An
+   * optional field is one a caller forgets.
+   *
+   * Formatted by the caller rather than here: turning a list of uuids into
+   * "Leave type: Sick leave, Vacation leave" needs the names, and this module
+   * deliberately knows nothing but layout.
+   */
+  filters: string[];
 };
 
 /** A drawable line. Deliberately data, so the layout can be tested directly. */
@@ -196,10 +233,10 @@ export type PlannedPage = { lines: PlannedLine[] };
  * page is split rather than dropped, because dropping them silently is worse
  * than an awkward break.
  */
-export function planLeaveReport(people: LeaveReportPerson[]): PlannedPage[] {
-  const pages: PlannedPage[] = [];
-  let lines: PlannedLine[] = [];
-  let y = FIRST_PAGE_TOP + HEADER_HEIGHT;
+function planBlocks<L>(blocks: L[][], firstPageTop: number): { lines: L[] }[] {
+  const pages: { lines: L[] }[] = [];
+  let lines: L[] = [];
+  let y = firstPageTop + HEADER_HEIGHT;
 
   const startPage = () => {
     pages.push({ lines });
@@ -207,26 +244,7 @@ export function planLeaveReport(people: LeaveReportPerson[]): PlannedPage[] {
     y = LATER_PAGE_TOP + HEADER_HEIGHT;
   };
 
-  for (const person of people) {
-    const block: PlannedLine[] = [
-      { kind: "person", person },
-      ...(person.types.length === 0
-        ? [{ kind: "empty" } as PlannedLine]
-        : person.types.map(
-            (type): PlannedLine => ({
-              kind: "type",
-              label: type.label,
-              allocated: type.allocated,
-              used: type.used,
-              remaining: type.remaining,
-            }),
-          )),
-      // No total line when there is only one type: "10 / 3 / 7" repeated
-      // immediately underneath itself is noise, and an auditor reads the
-      // repetition as a second figure to check.
-      ...(person.types.length > 1 ? [{ kind: "total", totals: person.totals } as PlannedLine] : []),
-    ];
-
+  for (const block of blocks) {
     const blockHeight = block.length * ROW_HEIGHT + 6;
     const fitsOnAPage = LATER_PAGE_TOP + HEADER_HEIGHT + blockHeight <= BOTTOM_LIMIT;
 
@@ -247,18 +265,52 @@ export function planLeaveReport(people: LeaveReportPerson[]): PlannedPage[] {
   return pages;
 }
 
+export function planLeaveReport(
+  people: LeaveReportPerson[],
+  /**
+   * P7-53. Defaulted so every existing caller and test describes the same
+   * pages; the renderer passes `firstPageTopFor(meta.filters)` when the header
+   * has grown filter lines. See the note on that function — this cannot be read
+   * from a module constant, because the header and the pagination would then
+   * disagree about how much room page one has.
+   */
+  firstPageTop: number = FIRST_PAGE_TOP,
+): PlannedPage[] {
+  const blocks = people.map((person): PlannedLine[] => [
+    { kind: "person", person },
+    ...(person.types.length === 0
+      ? [{ kind: "empty" } as PlannedLine]
+      : person.types.map(
+          (type): PlannedLine => ({
+            kind: "type",
+            label: type.label,
+            allocated: type.allocated,
+            used: type.used,
+            remaining: type.remaining,
+          }),
+        )),
+    // No total line when there is only one type: "10 / 3 / 7" repeated
+    // immediately underneath itself is noise, and an auditor reads the
+    // repetition as a second figure to check.
+    ...(person.types.length > 1 ? [{ kind: "total", totals: person.totals } as PlannedLine] : []),
+  ]);
+
+  return planBlocks(blocks, firstPageTop);
+}
+
 /** Draw the planned pages. Returns the finished PDF bytes. */
 export function renderLeaveReport(
   people: LeaveReportPerson[],
   meta: LeaveReportMeta,
 ): Uint8Array {
   const document = new PdfDocument();
-  const pages = planLeaveReport(people);
+  const firstPageTop = firstPageTopFor(meta.filters);
+  const pages = planLeaveReport(people, firstPageTop);
 
   pages.forEach((page, index) => {
     document.addPage();
 
-    let y = index === 0 ? FIRST_PAGE_TOP : LATER_PAGE_TOP;
+    let y = index === 0 ? firstPageTop : LATER_PAGE_TOP;
 
     if (index === 0) {
       document.text(MARGIN, 56, "Leave audit", { size: 20, font: "bold" });
@@ -294,6 +346,22 @@ export function renderLeaveReport(
         "year it started in. Unused = allocated less used, and may be negative where leave was allowed past the allocation.",
         { size: 7.5, gray: 0.4 },
       );
+
+      // P7-53 — the filters, named on the page.
+      //
+      // Darker and bolder than the rules above them, deliberately: the rules are
+      // the same on every copy and get skimmed after the first read, while these
+      // change per document and are the line somebody must notice before
+      // comparing this page to a count of everybody. A filtered report that
+      // looks exactly like an unfiltered one is the failure mode (D30).
+      meta.filters.forEach((filter, filterIndex) => {
+        document.text(
+          MARGIN,
+          FILTER_BLOCK_TOP + filterIndex * FILTER_LINE_HEIGHT,
+          filter,
+          { size: 8, font: "bold", gray: 0.15 },
+        );
+      });
     }
 
     // The column header band, repeated on every page — a table continuing onto
@@ -417,4 +485,345 @@ export function renderLeaveReport(
  */
 export function leaveReportFilename(year: number): string {
   return `vizserve-leave-audit-${year}.pdf`;
+}
+
+// ---------------------------------------------------------------------------
+// MODE B — leave actually taken in a window (P7-53).
+//
+// In this file rather than its own, because the two modes are one document
+// family and share every piece of geometry above. Splitting them would mean
+// exporting the column map, the page constants and the block planner out of a
+// module that deliberately keeps its layout private.
+//
+// ⚠️ THERE IS NO ALLOCATED COLUMN AND NO UNUSED COLUMN. Allocation is annual;
+// a "remaining" figure for March–June would be a number on an audit document
+// that is not true of any period, which is worse than an absent column. The
+// only figures here are days actually taken.
+// ---------------------------------------------------------------------------
+
+/** One row of `vizserve_pms_leave_taken`, as the action hands it over. */
+export type LeaveTakenRow = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  is_active: boolean;
+  department_name: string | null;
+  leave_type_id: string;
+  code: string;
+  label: string;
+  sort_order: number;
+  request_id: string;
+  start_date: string;
+  end_date: string;
+  counted_from: string;
+  counted_to: string;
+  start_half: string;
+  end_half: string;
+  is_clipped: boolean;
+  days: number;
+};
+
+export type LeaveTakenPerson = {
+  user_id: string;
+  full_name: string;
+  email: string;
+  is_active: boolean;
+  department_name: string | null;
+  requests: LeaveTakenRow[];
+  totalDays: number;
+};
+
+export type LeaveTakenMeta = {
+  /** The window, inclusive. Printed on the page — this report has no year. */
+  from: string;
+  to: string;
+  generatedOn: string;
+  generatedBy: string;
+  scope: string;
+  /** See `LeaveReportMeta.filters`. Same contract, same reason. */
+  filters: string[];
+};
+
+/**
+ * Group the flat rows by person, preserving the SQL ordering.
+ *
+ * Same shape as `groupLeaveReport` and for the same reason: the document is
+ * blocked by person, and a person's total has to be next to their rows.
+ */
+export function groupLeaveTaken(rows: LeaveTakenRow[]): LeaveTakenPerson[] {
+  const people: LeaveTakenPerson[] = [];
+  const byId = new Map<string, LeaveTakenPerson>();
+
+  for (const row of rows) {
+    let person = byId.get(row.user_id);
+
+    if (!person) {
+      person = {
+        user_id: row.user_id,
+        full_name: row.full_name,
+        email: row.email,
+        is_active: row.is_active,
+        department_name: row.department_name,
+        requests: [],
+        totalDays: 0,
+      };
+      byId.set(row.user_id, person);
+      people.push(person);
+    }
+
+    person.requests.push(row);
+    person.totalDays += row.days;
+  }
+
+  return people;
+}
+
+export type PlannedTakenLine =
+  | { kind: "person"; person: LeaveTakenPerson }
+  | { kind: "request"; row: LeaveTakenRow }
+  | { kind: "total"; person: LeaveTakenPerson };
+
+export type PlannedTakenPage = { lines: PlannedTakenLine[] };
+
+export function planLeaveTaken(
+  people: LeaveTakenPerson[],
+  firstPageTop: number = FIRST_PAGE_TOP,
+): PlannedTakenPage[] {
+  const blocks = people.map((person): PlannedTakenLine[] => [
+    { kind: "person", person },
+    ...person.requests.map((row): PlannedTakenLine => ({ kind: "request", row })),
+    // Unlike Mode A there is no single-row exception. One leave request and a
+    // total saying the same number IS redundant on the page — but this report
+    // is read by summing a column, and a person whose total is sometimes
+    // present and sometimes not makes that sum a manual special case.
+    { kind: "total", person },
+  ]);
+
+  return planBlocks(blocks, firstPageTop);
+}
+
+/**
+ * `2026-03-01` and `2026-03-31` -> `1–31 Mar 2026`, near enough.
+ *
+ * Formatted from the string parts, NOT through `Date`. Parsing `2026-03-01` as
+ * a Date gives midnight UTC, which is the previous day in Manila — the exact
+ * trap `lib/dates.ts` exists to avoid, and it would print a range off by a day
+ * at both ends on an audit document.
+ */
+const MONTHS = [
+  "Jan", "Feb", "Mar", "Apr", "May", "Jun",
+  "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
+export function formatReportDate(iso: string): string {
+  const [year, month, day] = iso.split("-");
+  const monthName = MONTHS[Number(month) - 1] ?? month;
+  return `${Number(day)} ${monthName} ${year}`;
+}
+
+const TAKEN_COLUMN = {
+  name: MARGIN,
+  type: MARGIN + 150,
+  dates: MARGIN + 330,
+  daysRight: MARGIN + CONTENT_WIDTH,
+} as const;
+
+const TAKEN_TYPE_WIDTH = 170;
+const TAKEN_DATES_WIDTH = 170;
+
+export function renderLeaveTakenReport(
+  people: LeaveTakenPerson[],
+  meta: LeaveTakenMeta,
+): Uint8Array {
+  const document = new PdfDocument();
+  const firstPageTop = firstPageTopFor(meta.filters);
+  const pages = planLeaveTaken(people, firstPageTop);
+
+  const grandTotal = people.reduce((total, person) => total + person.totalDays, 0);
+
+  pages.forEach((page, index) => {
+    document.addPage();
+
+    let y = index === 0 ? firstPageTop : LATER_PAGE_TOP;
+
+    if (index === 0) {
+      document.text(MARGIN, 56, "Leave taken", { size: 20, font: "bold" });
+      document.text(
+        MARGIN,
+        74,
+        `${formatReportDate(meta.from)} to ${formatReportDate(meta.to)}`,
+        { size: 11 },
+      );
+
+      document.text(A4_WIDTH - MARGIN, 56, `Generated ${meta.generatedOn}`, {
+        size: 8,
+        align: "right",
+        gray: 0.35,
+      });
+      document.text(A4_WIDTH - MARGIN, 68, `by ${meta.generatedBy}`, {
+        size: 8,
+        align: "right",
+        gray: 0.35,
+      });
+      document.text(A4_WIDTH - MARGIN, 80, meta.scope, {
+        size: 8,
+        align: "right",
+        gray: 0.35,
+      });
+
+      // The rules, as Mode A prints them — but the second line is different and
+      // the difference is the whole point of this mode. It says both that there
+      // is no allocation here and what a clipped row means, because a row whose
+      // day count deliberately disagrees with its printed dates looks like an
+      // arithmetic error to anyone who has not been told.
+      document.text(
+        MARGIN,
+        98,
+        "Counts APPROVED leave only, in working days (weekends and holidays excluded), for leave overlapping the period.",
+        { size: 7.5, gray: 0.4 },
+      );
+      document.text(
+        MARGIN,
+        108,
+        "No allocation is shown: allocation is annual, so it cannot be reported against a partial period. * = leave extends beyond the period; only the days inside it are counted.",
+        { size: 7.5, gray: 0.4 },
+      );
+
+      meta.filters.forEach((filter, filterIndex) => {
+        document.text(
+          MARGIN,
+          FILTER_BLOCK_TOP + filterIndex * FILTER_LINE_HEIGHT,
+          filter,
+          { size: 8, font: "bold", gray: 0.15 },
+        );
+      });
+    }
+
+    document.rect(MARGIN, y, CONTENT_WIDTH, HEADER_HEIGHT, 0.92);
+    const headerBaseline = y + 12.5;
+    document.text(TAKEN_COLUMN.name + 4, headerBaseline, "Employee", { size: 8, font: "bold" });
+    document.text(TAKEN_COLUMN.type, headerBaseline, "Leave type", { size: 8, font: "bold" });
+    document.text(TAKEN_COLUMN.dates, headerBaseline, "Dates", { size: 8, font: "bold" });
+    document.text(TAKEN_COLUMN.daysRight, headerBaseline, "Days", {
+      size: 8,
+      font: "bold",
+      align: "right",
+    });
+
+    y += HEADER_HEIGHT;
+
+    page.lines.forEach((line, lineIndex) => {
+      const baseline = y + 10.5;
+
+      if (line.kind === "person") {
+        if (lineIndex !== 0) {
+          document.line(MARGIN, y, A4_WIDTH - MARGIN, y, { gray: 0.85, width: 0.4 });
+        }
+
+        const name = truncateToWidth(line.person.full_name, NAME_WIDTH, 9, "bold");
+        document.text(TAKEN_COLUMN.name + 4, baseline, name, { size: 9, font: "bold" });
+
+        const detail = [
+          line.person.department_name ?? "No department",
+          line.person.is_active ? "" : "no longer active",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+
+        document.text(TAKEN_COLUMN.type, baseline, truncateToWidth(detail, TAKEN_TYPE_WIDTH, 7.5), {
+          size: 7.5,
+          gray: 0.45,
+        });
+      } else if (line.kind === "request") {
+        const { row } = line;
+
+        document.text(
+          TAKEN_COLUMN.type,
+          baseline,
+          truncateToWidth(row.label, TAKEN_TYPE_WIDTH, BODY_SIZE),
+          { size: BODY_SIZE },
+        );
+
+        // The REQUEST'S OWN dates, not the clipped ones, with a marker where
+        // they differ. Printing the clipped range instead would be tidier and
+        // would hide the fact that the person was away longer than this report
+        // covers — which somebody reconciling two adjacent periods needs to see.
+        const range =
+          row.start_date === row.end_date
+            ? formatReportDate(row.start_date)
+            : `${formatReportDate(row.start_date)} – ${formatReportDate(row.end_date)}`;
+
+        document.text(
+          TAKEN_COLUMN.dates,
+          baseline,
+          truncateToWidth(row.is_clipped ? `${range} *` : range, TAKEN_DATES_WIDTH, BODY_SIZE),
+          { size: BODY_SIZE },
+        );
+
+        document.text(TAKEN_COLUMN.daysRight, baseline, formatDayCount(row.days), {
+          size: BODY_SIZE,
+          align: "right",
+        });
+      } else {
+        document.line(TAKEN_COLUMN.type, y + 1, A4_WIDTH - MARGIN, y + 1, {
+          gray: 0.8,
+          width: 0.4,
+        });
+        document.text(TAKEN_COLUMN.type, baseline, "Total", { size: BODY_SIZE, font: "bold" });
+        document.text(TAKEN_COLUMN.daysRight, baseline, formatDayCount(line.person.totalDays), {
+          size: BODY_SIZE,
+          font: "bold",
+          align: "right",
+        });
+      }
+
+      y += ROW_HEIGHT;
+    });
+
+    // The grand total, on the last page only. Mode A has no equivalent because
+    // summing allocations across people answers no question anybody asks; a
+    // total number of leave days taken in a period is the first thing this
+    // report gets read for.
+    if (index === pages.length - 1) {
+      document.text(
+        A4_WIDTH - MARGIN,
+        A4_HEIGHT - MARGIN - 6,
+        `Total days taken: ${formatDayCount(grandTotal)}`,
+        { size: 9, font: "bold", align: "right" },
+      );
+    }
+
+    document.text(
+      A4_WIDTH - MARGIN,
+      A4_HEIGHT - MARGIN + 8,
+      `Page ${index + 1} of ${pages.length}`,
+      { size: 7.5, align: "right", gray: 0.45 },
+    );
+    document.text(MARGIN, A4_HEIGHT - MARGIN + 8, "VizServe PMS — leave taken", {
+      size: 7.5,
+      gray: 0.45,
+    });
+  });
+
+  return document.build();
+}
+
+/** `vizserve-leave-taken-2026-03-01-to-2026-03-31.pdf`. */
+export function leaveTakenFilename(from: string, to: string): string {
+  return `vizserve-leave-taken-${from}-to-${to}.pdf`;
+}
+
+/**
+ * The "nothing to report" case, for both modes.
+ *
+ * An empty result is a real answer to a filtered question — "nobody in
+ * VizMedia took sick leave in March" — and it must still produce a document,
+ * because the person asked for one and a silent no-op reads as a broken button.
+ * The action refuses to render only when the caller can see nothing at all,
+ * which is a different thing and gets a different message.
+ */
+export function emptyReportNote(mode: "annual" | "taken"): string {
+  return mode === "annual"
+    ? "No staff match these filters."
+    : "No approved leave was taken in this period by anyone matching these filters.";
 }

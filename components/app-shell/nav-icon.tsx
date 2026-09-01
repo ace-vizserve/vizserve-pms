@@ -1,5 +1,7 @@
 import {
   BarChart3,
+  BriefcaseBusiness,
+  CalendarCheck,
   CalendarDays,
   CalendarOff,
   CheckSquare,
@@ -11,6 +13,7 @@ import {
   LayoutDashboard,
   ListChecks,
   Settings,
+  Tags,
   Timer,
   Users,
 } from "lucide-react";
@@ -32,6 +35,12 @@ const ICONS = {
   "calendar-days": CalendarDays,
   settings: Settings,
   history: History,
+  // P7-52. `hr` is unused by NAV_ITEMS today — every HR row picks a more
+  // specific icon — but the name exists so the group has one if the sidebar
+  // ever labels sections with an icon rather than text.
+  hr: BriefcaseBusiness,
+  "leave-type": Tags,
+  attendance: CalendarCheck,
 } satisfies Record<NavIconName, React.ComponentType<{ className?: string }>>;
 
 export function NavIcon({ name, className }: { name: NavIconName; className?: string }) {

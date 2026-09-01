@@ -51,6 +51,10 @@ const META = {
   generatedOn: "2026-12-15",
   generatedBy: "Test Admin",
   scope: "All departments",
+  // P7-53. Empty is the UNFILTERED case, and it is what keeps every assertion
+  // below describing the same document it always did: `firstPageTopFor([])`
+  // returns the original 128pt, so the pagination cases still pin real pages.
+  filters: [],
 };
 
 // ---------------------------------------------------------------------------

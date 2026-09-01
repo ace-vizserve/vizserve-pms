@@ -1,4 +1,4 @@
-import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import { canDoHr, requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { groupedNavItems } from "@/lib/navigation";
 import { formatNavBadge } from "@/lib/navigation";
 import { createClient } from "@/utils/supabase/server";
@@ -28,7 +28,10 @@ function labelledBadge(
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContext();
-  const sections = groupedNavItems(context.role);
+  // P7-52. `canDoHr`, not `context.isHr` — an admin holds the capability
+  // without carrying the flag, and passing the raw column would hide the HR
+  // section from every admin while the database still let them use it.
+  const sections = groupedNavItems(context.role, { isHr: canDoHr(context) });
 
   const supabase = await createClient();
 

@@ -199,6 +199,13 @@ export type Database = {
            */
           gender: VizservePmsGender | null;
           /**
+           * P7-52. The HR job, ORTHOGONAL to `role` rather than a rank on it.
+           * Never test this directly in app code — `canDoHr()` in
+           * `lib/auth/authorization.ts` is the single reading, and it returns
+           * true for admins, who hold the capability without carrying the flag.
+           */
+          is_hr: boolean;
+          /**
            * P7-36. `HH:MM:SS` Manila wall-clock, both or neither. NULL means no
            * schedule is recorded, so nothing computes lateness for this person —
            * a supported state, not missing data. Normalise through
@@ -219,6 +226,7 @@ export type Database = {
           is_active?: boolean;
           app_access?: string[];
           gender?: VizservePmsGender | null;
+          is_hr?: boolean;
           work_start?: string | null;
           work_end?: string | null;
           created_at?: string;
@@ -233,6 +241,7 @@ export type Database = {
           is_active?: boolean;
           app_access?: string[];
           gender?: VizservePmsGender | null;
+          is_hr?: boolean;
           work_start?: string | null;
           work_end?: string | null;
           created_at?: string;
@@ -1571,6 +1580,20 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };
+      /**
+       * P7-52. True for a user carrying `is_hr`, AND for any admin — the admin
+       * branch is why widening a policy from `is_admin()` to this is a strict
+       * widening rather than a transfer.
+       *
+       * Nothing in `app/` should call this over RPC: `canDoHr()` in
+       * `lib/auth/authorization.ts` answers the same question from the context
+       * already resolved for the request. It is typed here because it is the
+       * predicate the policies use, and the types file describes the database.
+       */
+      vizserve_pms_is_hr: {
+        Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
       vizserve_pms_has_app_access: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
@@ -1668,17 +1691,29 @@ export type Database = {
         }[];
       };
       /**
-       * P7-34. One row per person per leave type for one year — the leave
-       * audit. Scoped by what the caller LEADS: an admin gets everyone, a lead
-       * gets their departments, a member gets an empty set rather than an
-       * error, because "you lead nobody" is a true answer to this question.
+       * P7-34, filterable since P7-53. MODE A of the leave audit: one row per
+       * person per leave type for one year, WITH allocation.
+       *
+       * Scoped by what the caller LEADS, plus HR and admin (who get everyone),
+       * plus THEIR OWN RECORD — that last branch is new in P7-53 and amends
+       * D30, which previously gave a member an empty set.
+       *
+       * ⚠️ EVERY FILTER IS NULL-MEANS-EVERYTHING. Passing `[]` is not "no
+       * filter", it is "match nothing", and would render a blank PDF that reads
+       * as a broken export — which is why `lib/schemas/leave-report.ts` refuses
+       * an empty array rather than passing it through.
        *
        * Includes leavers who took leave in the year, flagged by `is_active`.
        * Their absences are part of the year being audited whether or not they
        * are still on the payroll.
        */
       vizserve_pms_leave_report: {
-        Args: { p_year?: number | null };
+        Args: {
+          p_year?: number | null;
+          p_user_ids?: string[] | null;
+          p_department_ids?: string[] | null;
+          p_leave_type_ids?: string[] | null;
+        };
         Returns: {
           user_id: string;
           full_name: string;
@@ -1692,6 +1727,51 @@ export type Database = {
           days_allocated: number;
           days_used: number;
           days_remaining: number;
+        }[];
+      };
+      /**
+       * P7-53. MODE B of the leave audit: one row per approved LEAVE request
+       * overlapping an arbitrary window.
+       *
+       * ⚠️ THERE IS NO ALLOCATION COLUMN, and that is the design. Allocation is
+       * annual, so a "remaining" figure scoped to March–June would be a lie
+       * with a number beside it. Mode A is the only place allocation appears.
+       *
+       * `days` is counted for the OVERLAP, not for the request: a five-day
+       * request half outside the window contributes only its days inside it,
+       * and its half-day markers are dropped at whichever end was clipped.
+       * `is_clipped` says that happened, so the PDF can mark a row whose day
+       * count deliberately disagrees with its printed date range.
+       */
+      vizserve_pms_leave_taken: {
+        Args: {
+          p_from: string;
+          p_to: string;
+          p_user_ids?: string[] | null;
+          p_department_ids?: string[] | null;
+          p_leave_type_ids?: string[] | null;
+        };
+        Returns: {
+          user_id: string;
+          full_name: string;
+          email: string;
+          is_active: boolean;
+          department_name: string | null;
+          leave_type_id: string;
+          code: string;
+          label: string;
+          sort_order: number;
+          request_id: string;
+          /** The request's own dates, whatever the window was. */
+          start_date: string;
+          end_date: string;
+          /** The window-clipped range `days` was actually counted over. */
+          counted_from: string;
+          counted_to: string;
+          start_half: string;
+          end_half: string;
+          is_clipped: boolean;
+          days: number;
         }[];
       };
       vizserve_pms_submit_request: {
@@ -2031,6 +2111,12 @@ export type LeaveBalanceRow =
 /** One line of the P7-33 summary: a type, what was allocated, and what is left. */
 export type LeaveBalanceSummaryRow =
   Database["public"]["Functions"]["vizserve_pms_leave_balance_summary"]["Returns"][number];
+/** One line of the P7-34 annual audit (Mode A). Carries allocation. */
+export type LeaveReportRpcRow =
+  Database["public"]["Functions"]["vizserve_pms_leave_report"]["Returns"][number];
+/** One leave request inside a P7-53 window (Mode B). Carries no allocation. */
+export type LeaveTakenRpcRow =
+  Database["public"]["Functions"]["vizserve_pms_leave_taken"]["Returns"][number];
 export type TimesheetEntryRow =
   Database["public"]["Tables"]["vizserve_pms_timesheet_entries"]["Row"];
 export type TaskCommentRow =

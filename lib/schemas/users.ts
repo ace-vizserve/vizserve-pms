@@ -110,6 +110,15 @@ export const createUserSchema = withWorkHourRules(
     full_name: z.string().trim().min(1, "A full name is required."),
     gender: genderSchema,
     role: roleSchema,
+    /**
+     * P7-52. The HR job, and NOT a role — see D33. Orthogonal to `role` above,
+     * so the two are set independently and neither implies the other.
+     *
+     * Admin-only to set, enforced in the action rather than here: a schema
+     * cannot know who is submitting it, and `/admin/users` is the only screen
+     * that carries this field. That is what stops HR appointing more HR.
+     */
+    is_hr: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
     work_start: workClockSchema,
@@ -129,6 +138,15 @@ export const updateUserSchema = withWorkHourRules(
      */
     gender: genderSchema,
     role: roleSchema,
+    /**
+     * P7-52. The HR job, and NOT a role — see D33. Orthogonal to `role` above,
+     * so the two are set independently and neither implies the other.
+     *
+     * Admin-only to set, enforced in the action rather than here: a schema
+     * cannot know who is submitting it, and `/admin/users` is the only screen
+     * that carries this field. That is what stops HR appointing more HR.
+     */
+    is_hr: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
     is_active: z.boolean().default(true),

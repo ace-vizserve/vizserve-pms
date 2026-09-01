@@ -4,15 +4,16 @@ import { Inbox } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
-import { formatDate } from "@/lib/dates";
+import { formatDate, todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
-import { leaveTypeApplies } from "@/lib/schemas/leave-balances";
+import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { createClient } from "@/utils/supabase/server";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
+import { MyLeaveRecordButton } from "./my-leave-record";
 import { NewRequestDialog } from "./new-request-dialog";
 
 /** Rows rendered. The query asks for one more so the cap is detectable. */
@@ -205,7 +206,13 @@ export default async function ApprovalsPage({
           what HR allocated for the year less what you have had approved, and nothing here refuses a
           request that would overdraw it.
         </p>
-        <NewRequestDialog
+        <div className="flex flex-wrap items-center gap-2">
+          {/* P7-53. Beside the filing button because this is the other thing
+              somebody does with their own leave figures, and there is nowhere
+              else on this screen those figures appear — the balances render
+              inside the dialog, one type at a time, as you file. */}
+          <MyLeaveRecordButton year={currentBalanceYear(todayInAppZone())} />
+          <NewRequestDialog
           leaveTypes={pickableLeaveTypes}
           balances={balances ?? []}
           // Read from the resolved auth context rather than re-queried: it is
@@ -224,7 +231,8 @@ export default async function ApprovalsPage({
             // with one field mysteriously filled.
             openOnMount: Boolean(prefill.type || prefill.date),
           }}
-        />
+          />
+        </div>
       </div>
 
       {/* Approver queue first when there is one: it is the thing with somebody

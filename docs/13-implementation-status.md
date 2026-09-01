@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 25 August 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 1 September 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -17,7 +17,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **4 — Client Approval (Gate 3)** | **Code done, exit criteria green except deliverability** — see below |
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). **P7-44 rebuilt the entry editor on 25 Aug** — see below. P6-04/06/07/08/09 not begun |
-| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-six migrations live, P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
+| **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-eight migrations live, **P7-52/P7-53 applied 1 Sep** (HR as a capability + the filterable leave audit — see below), P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -604,6 +604,140 @@ have the smart-DTR run, which had already taken 36 through 40 — two migrations
 called `p7_36` met in the merge. Theirs is the work-hours migration that P7-37
 through P7-40 build on and that a dozen comments cite; this one is a single
 INSERT that nothing references, so it was the cheap side to move.
+
+## P7-52 / P7-53 — HR as a capability, and the filterable leave audit, 1 Sep
+
+**P7-52 and P7-53 applied by hand on 1 Sep 2026** —
+`20260901090000_p7_52_hr_capability.sql` and
+`20260901090100_p7_53_leave_report_filters.sql`, pasted into the Supabase SQL
+editor like every other P7 migration. **`20260901090200_p7_54_hr_read_scope.sql`
+is NOT yet applied** — see the section on it below, and apply it before letting
+a non-admin HR account near the screens.
+
+**Why it exists.** Until now **admin was HR**, and the schema said so out loud:
+`p7_33:262` reads "HR — which here means admin — owns the number." That forced a
+real HR person to hold a full admin account, with the power to create users,
+change roles, revoke app access and read the audit trail — none of which is
+their job. Meanwhile the things that *are* their job were scattered or missing:
+allocations were one-at-a-time inside a dialog, `vizserve_pms_leave_types` had
+**no screen at all**, and the audit PDF printed everybody, whole-year, all
+types, always.
+
+**HR is a BOOLEAN, not a role, and that is the whole design.** The role enum is
+a total order compared with `>=` in SQL and `indexOf` in TS, so every value must
+sit somewhere on member→admin. HR sits nowhere on it: an HR person may be a
+member, and an admin who is not HR must lose nothing. `vizserve_pms_users.is_hr`
+follows the precedent already on that table (`is_active`, `app_access`), adds no
+enum value and therefore needs no two-migration dance. See `D33`.
+
+**⚠️ P7-52 WIDENED WHAT HR WRITES AND FORGOT WHAT HR READS — see P7-54 below.**
+That is the one real defect in this pass, and it was found only by reading the
+P0 policies after the migration had already been applied.
+
+**⚠️ FIVE CHECKS WERE WIDENED, NOT FOUR.** The four RLS policies are the obvious
+ones — leave balances read and write, leave types write, holidays write. The
+fifth is `vizserve_pms_leave_balance_summary`, which is `SECURITY DEFINER` and
+**restates** its three-way authority test in plpgsql because it bypasses the
+policy entirely. Widening the table policy alone would have left HR refused
+there with `insufficient_privilege`, on the one call `/approvals` makes on every
+page load. `grep -n "vizserve_pms_is_admin()" supabase/migrations/` returns 40
+hits across 14 files; everything outside those five is unrelated to leave and
+stays admin-only.
+
+**`vizserve_pms_is_hr()` returns true for every admin**, and that branch is
+load-bearing rather than a courtesy: without it, granting HR to somebody would
+REVOKE it from every admin. It is the reason every change above is a strict
+widening. `canDoHr()` in `lib/auth/authorization.ts` is the single TypeScript
+reading of the same rule.
+
+**Only an admin can appoint HR.** The switch lives on `/admin/users`, which
+stays `requireRole("admin")` and which HR cannot reach. That is what stops the
+capability escalating itself.
+
+**`/admin/holidays` moved to the HR gate and to the HR nav group.** The URL is
+unchanged — it is bookmarked and audit rows point at it — but D31 made that
+table the only authority on which days the company is shut and D32 recorded that
+editing a past one rewrites reported leave. That consequence is entitlement,
+which is HR's job.
+
+**Three new screens.** `/hr/balances` is the org-wide allocation grid, and it is
+the read `p7_33:220-222` predicted in a comment while declining to index for it
+— P7-52 adds exactly the `(balance_year, user_id)` index that comment names.
+`/hr/leave-types` is the screen that has never existed. `/hr/attendance` is the
+monthly roll-up. Every cell in the balances grid is held as a **string** to the
+moment of submit: `Number("")` is 0, so a cleared box read naively becomes a
+deliberate "no days this year" written over somebody's entitlement.
+
+**⚠️ "ABSENT" HAD NO DEFINITION IN THIS CODEBASE BEFORE `/hr/attendance`.**
+Lateness was defined precisely (`lib/dtr-schedule.ts`); absence never had to be.
+The answer is therefore a **decision**, made in `lib/attendance-summary.ts` and
+stated on the screen: a working day is a weekday that is not a holiday; absent
+is a working day with no DTR entry and no approved leave; leave is counted
+separately and is never absence; **anybody with no fixed hours is shown but not
+counted**, because judging them against a start time nobody set would invent
+lateness. The aggregation is a pure function rather than inline in the page —
+unlike the only comparable roll-up, at `app/(app)/dtr/page.tsx:408-422` — which
+is what lets the definition be pinned by a test.
+
+**P7-54 — the read scope P7-52 did not grant.** `vizserve_pms_users` has three
+SELECT policies: yourself, departments you manage, and (through the `for all`
+write policy) admin. An admin passes the second, because
+`vizserve_pms_manages_department` returns true for admins — **so nothing looked
+wrong.** An HR MEMBER who leads no department passes only the first, and every
+HR screen would have rendered a grid, a picker and a report containing exactly
+one person: themselves. **Silently**, because a failing policy returns zero rows
+and never an error. `vizserve_pms_dtr_entries` and
+`vizserve_pms_internal_requests` have the same shape. P7-54 adds three additive
+SELECT policies — additive because permissive policies are OR-ed, so nobody's
+access can narrow and no existing policy is ever briefly absent.
+
+**REIMBURSEMENT is deliberately excluded** from HR's request read. `D33` lists
+what HR does and money is not on it; "HR can read every internal request" is
+easy to write, hard to notice, and impossible to walk back once somebody has
+read one. The predicate names the four attendance-and-leave types instead, plus
+the two P5-era correction values still sitting on old rows.
+
+**P7-53 gives the audit two modes and four filters.** Mode A is the existing
+annual document, now filterable by member, department and leave type. Mode B is
+`vizserve_pms_leave_taken`, an arbitrary period, one row per request, and
+**deliberately no allocation column** — allocation is annual, so a range-scoped
+"remaining" would be a lie with a number beside it.
+
+**⚠️ THE CLIPPING RULE IS THE SHARPEST EDGE IN THIS PAIR.** Mode B counts days
+for the OVERLAP, so the dates handed to `vizserve_pms_leave_days` are
+`greatest(start, from)` and `least(end, to)`. But the half-day markers describe
+the request's own ends, and a clipped date is no longer an end — so a request
+finishing on a MORNING half-day, clipped by a window that ends before it, must
+count that day WHOLE. Carry the marker across and the report silently loses half
+a day per clipped request, on a document that gets signed and filed.
+
+**`vizserve_pms_leave_report(integer)` was DROPPED and recreated**, not
+replaced. Adding defaulted parameters via `create or replace` produces a second
+overload and `rpc(...)` then fails as ambiguous. The drop takes the grants with
+it, so they are re-issued — the same dance `p7_42:196-197` had to do to
+`vizserve_pms_leave_calendar`.
+
+**A member can now print their own record**, from `/approvals`. This amends
+`D30`, which gave a member an empty set. One action serves all three call sites
+— the builder, the `/admin/users` toolbar button (which dropped its local copy)
+and the member's button — and **no caller passes the scope string**: it is
+derived from the caller's own context, so no call site can misstate what its
+document covers. Every PDF prints the filters it applied.
+
+**Also cleaned up on the way through:** the duplicate `ROLE_ORDER` at
+`lib/navigation.ts:230` is deleted in favour of the canonical one in
+`lib/auth/roles.ts`, which warns against exactly that copy; and the base64
+download dance is extracted to `lib/download-file.ts` now that three screens
+need it.
+
+**Tests.** `tests/unit/hr-capability.test.ts` (19), `leave-taken-clipping.test.ts`
+(12) and `attendance-summary.test.ts` (14). Unit suite is **612 across 31
+files**; typecheck clean, lint 0 errors. **⚠️ THE CLIPPING TESTS DO NOT PROVE
+THE SQL** — `tests/db/*` cannot run against the production project this repo
+points at, so that file transcribes the rule and states the intended answers by
+hand. It exists so the first PDF off the real database has something to be
+checked against. The first clipped request in a real Mode B report is worth
+checking by hand.
 
 ## P7-35 — the holiday calendar, 24 Aug
 

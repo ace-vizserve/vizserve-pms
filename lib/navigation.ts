@@ -1,4 +1,9 @@
-import type { Role } from "@/lib/auth/authorization";
+// `roles.ts`, NOT `authorization.ts`. The type import above used to be enough
+// because it is erased at build time; `roleAtLeast` is a VALUE, and importing it
+// from the authorization module would drag `server-only` into the sidebar and
+// break every client component that renders the nav. `roles.ts` exists for
+// exactly this — it is the half of the hierarchy that is safe on the client.
+import { roleAtLeast, type Role } from "@/lib/auth/roles";
 
 /**
  * The six modules behind one login (docs/01-updated-workflow.md §0).
@@ -26,6 +31,8 @@ export type NavChild = {
   href: string;
   /** Inclusive floor — `role >= minRole` (D15). Defaults to the parent's. */
   minRole?: Role;
+  /** See `NavItem.requiresHr`. Applied on top of `minRole`, never instead. */
+  requiresHr?: boolean;
 };
 
 export type NavItem = {
@@ -33,6 +40,13 @@ export type NavItem = {
   href: string;
   /** Inclusive floor — `role >= minRole` (D15). */
   minRole: Role;
+  /**
+   * P7-52. Requires the HR capability, which is ORTHOGONAL to `minRole` rather
+   * than a point on it — so the two are ANDed, never substituted. An HR row
+   * keeps `minRole: "member"`, because an HR person may be a member and the
+   * ladder has nothing to say about the job they hold.
+   */
+  requiresHr?: boolean;
   /** False until the phase that builds it lands. */
   enabled: boolean;
   /** Shown on the disabled state so the reason is obvious. */
@@ -64,7 +78,10 @@ export type NavIconName =
   | "calendar-off"
   | "calendar-days"
   | "settings"
-  | "history";
+  | "history"
+  | "hr"
+  | "leave-type"
+  | "attendance";
 
 export const NAV_ITEMS: NavItem[] = [
   {
@@ -163,9 +180,19 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Holidays",
     href: "/admin/holidays",
-    minRole: "admin",
-    // P7-35. Admin-only to EDIT — but what it produces is read by everybody, on
-    // the shared calendar on the home page. That is why there is no member-level
+    // P7-52 moved this from `minRole: "admin"` to the HR capability, and moved
+    // the row into the HR group below. The URL is unchanged — an admin has this
+    // page bookmarked and a link in the audit trail points at it — only who
+    // reaches it and where it appears in the rail.
+    //
+    // Holidays became HR's because D31 made this table the only authority on
+    // which days the company is shut, and D32 recorded that editing a past one
+    // rewrites reported leave. That consequence is entitlement, which is HR's
+    // job, not administration.
+    minRole: "member",
+    requiresHr: true,
+    // P7-35. Restricted to EDIT — what it produces is read by everybody, on the
+    // shared calendar on the home page. That is why there is no member-level
     // entry for it: there is nothing to navigate to, the result is already
     // where they are looking.
     enabled: true,
@@ -205,6 +232,58 @@ export const NAV_ITEMS: NavItem[] = [
     enabled: true,
     icon: "history",
   },
+
+  // ---------------------------------------------------------------------------
+  // P7-52 — the HR group.
+  //
+  // EVERY ROW HERE IS `minRole: "member"` AND `requiresHr: true`, and that pair
+  // is the whole point of the change: HR is a job, not a rank, so the ladder
+  // floor stays at the bottom and the capability does the gating. Writing these
+  // as `minRole: "admin"` would work today — an admin is HR — and would silently
+  // hide the entire section from the HR person this was built for.
+  // ---------------------------------------------------------------------------
+  {
+    label: "Leave balances",
+    href: "/hr/balances",
+    minRole: "member",
+    requiresHr: true,
+    // The org-wide version of the per-person panel buried in the /admin/users
+    // editor dialog. First screen that reads a whole year across everybody,
+    // which is the read p7_33:220-222 predicted and P7-52 finally indexed for.
+    enabled: true,
+    icon: "users",
+  },
+  {
+    label: "Leave types",
+    href: "/hr/leave-types",
+    minRole: "member",
+    requiresHr: true,
+    // P7-12 created this table with an admin-write policy and NO SCREEN AT ALL.
+    // label, sort_order, is_active, applies_to_gender and calendar_visibility
+    // have been SQL-editor-only since. D25 called types "policy data HR will
+    // change" — this is the first time HR can actually change them.
+    enabled: true,
+    icon: "leave-type",
+  },
+  {
+    label: "Leave reports",
+    href: "/hr/reports",
+    minRole: "member",
+    requiresHr: true,
+    // P7-53's two modes and four filters. The /admin/users toolbar button still
+    // exists and now calls the same action — this is the version with the
+    // filters exposed.
+    enabled: true,
+    icon: "reports",
+  },
+  {
+    label: "Attendance",
+    href: "/hr/attendance",
+    minRole: "member",
+    requiresHr: true,
+    enabled: true,
+    icon: "attendance",
+  },
 ];
 
 /**
@@ -227,25 +306,51 @@ export function formatNavBadge(count: number): string | null {
   return count > 99 ? "99+" : String(count);
 }
 
-const ROLE_ORDER: Role[] = ["member", "team_leader", "manager", "admin"];
-
 /**
  * Nav filtering is presentation, not authorization. Hiding a link protects
  * nobody — every route re-checks through lib/auth/authorization.ts, and RLS
  * re-checks under that.
+ *
+ * P7-52 deleted a second, module-local `ROLE_ORDER` that used to sit here and
+ * delegated to the canonical one. `lib/auth/roles.ts` warns in as many words
+ * against exactly that copy, and adding a second gating dimension below was the
+ * wrong moment to be maintaining two versions of the first.
  */
 export function roleAllows(role: Role, required: Role): boolean {
-  return ROLE_ORDER.indexOf(role) >= ROLE_ORDER.indexOf(required);
+  return roleAtLeast(role, required);
 }
 
-export function visibleNavItems(role: Role): NavItem[] {
-  return NAV_ITEMS.filter((item) => roleAllows(role, item.minRole)).map((item) => {
+/**
+ * P7-52 — who is looking, beyond their rank.
+ *
+ * A bag rather than a second positional argument, so the next orthogonal
+ * capability is a field here instead of another parameter every caller has to
+ * thread through in the right order.
+ */
+export type NavViewer = {
+  /** `canDoHr(context)`, NOT `context.isHr` — admins hold it without the flag. */
+  isHr?: boolean;
+};
+
+/** True when this row's capability requirements are met. Role is checked apart. */
+function capabilityAllows(item: { requiresHr?: boolean }, viewer: NavViewer): boolean {
+  return !item.requiresHr || viewer.isHr === true;
+}
+
+export function visibleNavItems(role: Role, viewer: NavViewer = {}): NavItem[] {
+  return NAV_ITEMS.filter(
+    (item) => roleAllows(role, item.minRole) && capabilityAllows(item, viewer),
+  ).map((item) => {
     if (!item.children) return item;
 
     // A child with no `minRole` inherits the parent's, which the filter above
     // has already cleared — so only the ones that RAISE the floor are re-checked.
+    // `requiresHr` does NOT inherit: a child under a non-HR parent that needs
+    // the capability must say so itself, because there is nothing above it to
+    // have already cleared.
     const children = item.children.filter(
-      (child) => !child.minRole || roleAllows(role, child.minRole),
+      (child) =>
+        (!child.minRole || roleAllows(role, child.minRole)) && capabilityAllows(child, viewer),
     );
 
     // One child left means the sub-menu is the parent restated. Collapse it back
@@ -279,11 +384,26 @@ export const NAV_GROUPS: NavGroup[] = [
   // them side by side in the rail in the first place.
   { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
   { label: "Manage", hrefs: ["/forms", "/reports"] },
+  // P7-52. Above Admin and below Manage: HR is a job somebody does daily, not
+  // an administration screen you open when something is wrong. Pinned only by
+  // sitting here — `pinBottom` stays Admin's, so an HR person who is not an
+  // admin sees this as their last section and nothing beneath it.
+  {
+    label: "HR",
+    hrefs: [
+      "/hr/balances",
+      "/hr/leave-types",
+      // Lives at /admin/holidays and always has. Grouped here because that is
+      // whose job it is now, not because of where the file sits.
+      "/admin/holidays",
+      "/hr/reports",
+      "/hr/attendance",
+    ],
+  },
   {
     label: "Admin",
     hrefs: [
       "/admin/users",
-      "/admin/holidays",
       "/admin/events",
       "/admin/settings",
       "/admin/audit",
@@ -296,8 +416,11 @@ export const NAV_GROUPS: NavGroup[] = [
  * The role's visible items, bucketed into groups. Empty groups are dropped, so
  * a member never sees a "Manage" heading with nothing under it.
  */
-export function groupedNavItems(role: Role): { group: NavGroup; items: NavItem[] }[] {
-  const visible = visibleNavItems(role);
+export function groupedNavItems(
+  role: Role,
+  viewer: NavViewer = {},
+): { group: NavGroup; items: NavItem[] }[] {
+  const visible = visibleNavItems(role, viewer);
 
   return NAV_GROUPS.map((group) => ({
     group,
