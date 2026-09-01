@@ -1,10 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { EyeOff, Pencil, Plus } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { useState, useTransition } from "react";
 import { toast } from "sonner";
 
+import { DataTable, type Column } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,9 +26,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { DataTable, type Column } from "@/components/data-table";
-import { GENDER_LABELS, type Gender } from "@/lib/schemas/users";
 import { CALENDAR_VISIBILITY_LABELS } from "@/lib/schemas/leave-types";
+import { GENDER_LABELS, type Gender } from "@/lib/schemas/users";
 
 import { createLeaveType, updateLeaveType } from "./actions";
 
@@ -60,6 +60,19 @@ const VISIBILITY_SHORT: Record<CalendarVisibility, string> = {
  * rather than the absence of one.
  */
 const ANY_GENDER = "__ANY__";
+
+/**
+ * ⚠️ AND THE SENTINEL IS WHAT THE TRIGGER SHOWED. Base UI renders the raw value
+ * in <SelectValue> unless the root is handed an `items` map, so this select read
+ * "__ANY__" closed and "Everyone" open, and the one beside it read "LABEL_HIDDEN"
+ * closed and "Label hidden" open — a database enum on screen, which §6 rules out
+ * outright.
+ */
+const GENDER_ITEMS: Record<string, string> = {
+  [ANY_GENDER]: "Everyone",
+  FEMALE: GENDER_LABELS.FEMALE,
+  MALE: GENDER_LABELS.MALE,
+};
 
 type Draft = {
   id: string | null;
@@ -252,21 +265,23 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="applies_to_gender">Applies to</Label>
                 <Select
+                  items={GENDER_ITEMS}
                   value={draft.applies_to_gender}
                   // Base UI hands back `string | null`; null means cleared,
                   // which this select offers no way to reach. Falling back to
                   // the sentinel rather than to "" keeps the trigger labelled.
                   onValueChange={(value) =>
                     setDraft({ ...draft, applies_to_gender: value ?? ANY_GENDER })
-                  }
-                >
+                  }>
                   <SelectTrigger id="applies_to_gender">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value={ANY_GENDER}>Everyone</SelectItem>
-                    <SelectItem value="FEMALE">{GENDER_LABELS.FEMALE}</SelectItem>
-                    <SelectItem value="MALE">{GENDER_LABELS.MALE}</SelectItem>
+                    {Object.entries(GENDER_ITEMS).map(([value, label]) => (
+                      <SelectItem key={value} value={value}>
+                        {label}
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
                 <p className="text-xs text-muted-foreground">
@@ -278,14 +293,14 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="calendar_visibility">On the shared calendar</Label>
                 <Select
+                  items={CALENDAR_VISIBILITY_LABELS}
                   value={draft.calendar_visibility}
                   onValueChange={(value) =>
                     setDraft({
                       ...draft,
                       calendar_visibility: (value ?? "FULL") as CalendarVisibility,
                     })
-                  }
-                >
+                  }>
                   <SelectTrigger id="calendar_visibility">
                     <SelectValue />
                   </SelectTrigger>

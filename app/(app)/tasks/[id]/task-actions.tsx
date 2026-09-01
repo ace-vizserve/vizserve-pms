@@ -149,7 +149,7 @@ export function TaskActions({
         </p>
       ) : null}
 
-      <TransitionCommentDialog taskId={taskId} state={move} />
+      <TransitionCommentDialog state={move} />
     </div>
   );
 }

@@ -8,6 +8,7 @@ import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
+import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
   INITIAL_TASK_STATUS,
   isTerminal,
@@ -364,7 +365,7 @@ export default async function TasksPage({
     const thread = threads.get(row.task_id) ?? [];
     thread.push({
       id: row.id,
-      body: row.body,
+      body: sanitizeRichText(row.body),
       authorId: row.author_id,
       authorName: nameOf.get(row.author_id) ?? "Someone no longer active",
       createdAt: row.created_at,

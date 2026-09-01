@@ -206,8 +206,7 @@ export function UsersTable({
             size="icon-sm"
             disabled={resetting || !user.is_active}
             onClick={() => resetPassword(user)}
-            title="Send a password reset link"
-          >
+            title="Send a password reset link">
             <KeyRound />
             <span className="sr-only">Send password reset to {user.email}</span>
           </Button>
@@ -287,6 +286,8 @@ export function UsersTable({
 
           {reportOpen ? (
             <ReportBuilder
+              // The dialog draws its own header and box — see `chrome` there.
+              chrome="bare"
               currentYear={balanceYear}
               today={today}
               people={users}

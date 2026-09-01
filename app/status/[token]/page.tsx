@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
-import { Check, CircleDashed, PackageSearch } from "lucide-react";
+import { Check, Dot, PackageSearch } from "lucide-react";
 
+import { BrandLockup } from "@/components/brand-lockup";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import type { RequestStatusResult } from "@/lib/request-status";
 import { createClient } from "@/utils/supabase/server";
@@ -28,10 +29,29 @@ export const metadata: Metadata = {
  */
 export const dynamic = "force-dynamic";
 
+/**
+ * THE SAME SHELL `/approve/[token]` USES, down to the class list.
+ *
+ * These are the two pages a client ever sees after the form, often in the same
+ * week and from the same thread of emails. They had drifted: this one drew its
+ * own "VIZSERVE" in letter-spaced caps and a `shadow-sm` card, while the
+ * approval page used `BrandLockup` and `shadow-raised-lg`. A client who
+ * approves work on Tuesday and tracks the next request on Thursday should not
+ * be looking at two different companies — and a hand-set wordmark instead of
+ * the real asset is precisely the detail that makes a page read as phishing
+ * (§4.6).
+ *
+ * `client-surface` is what grows every control to a 44px target.
+ */
 function Shell({ children }: { children: React.ReactNode }) {
   return (
-    <main className="min-h-svh bg-muted/40 px-4 py-10">
-      <div className="mx-auto w-full max-w-2xl">{children}</div>
+    <main className="client-surface min-h-svh bg-muted/40 px-4 py-10">
+      <div className="mx-auto max-w-2xl">
+        <div className="mb-5">
+          <BrandLockup align="stacked" />
+        </div>
+        {children}
+      </div>
     </main>
   );
 }
@@ -61,7 +81,7 @@ export default async function RequestStatusPage({
   if (!result?.ok) {
     return (
       <Shell>
-        <div className="rounded-lg border bg-card p-8 text-center shadow-sm">
+        <div className="rounded-lg border bg-card grade-surface p-8 text-center shadow-raised-lg">
           <PackageSearch className="mx-auto size-6 text-muted-foreground" aria-hidden />
           <h1 className="mt-3 text-lg font-semibold">This tracking link is not valid</h1>
           <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-muted-foreground">
@@ -74,10 +94,22 @@ export default async function RequestStatusPage({
   }
 
   const timeline = result.timeline ?? [];
-  // Most recent LAST, and the newest entry is the one that gets the filled
-  // marker — the same reading order LBC uses, and the one a person scanning for
-  // "where is it now" expects at the bottom.
   const latest = timeline[timeline.length - 1];
+
+  /**
+   * ⚠️ NEWEST FIRST. The trace used to run oldest-to-newest, so the answer to
+   * the only question this page exists to answer — where is my request now —
+   * was at the BOTTOM, under everything that had already happened. That is the
+   * right order for a courier's scan history, which people read to reconstruct
+   * a journey, and the wrong one here: a client opens this link from an email
+   * to check one thing, and on a phone the current step was below the fold on
+   * a request with any history at all.
+   *
+   * The source stays chronological — `vizserve_pms_get_request_status` returns
+   * it that way and `latest` is still its last row. Only the reading order is
+   * reversed, and the dates are on every entry, so nothing is ambiguous.
+   */
+  const entries = [...timeline].reverse();
 
   // The agreed date where Gate 1 set one, otherwise what was asked for. Which
   // of the two is being shown is stated in the label rather than left implied.
@@ -86,14 +118,9 @@ export default async function RequestStatusPage({
 
   return (
     <Shell>
-      <header className="mb-6 text-center">
-        <p className="text-xs font-medium tracking-wide text-muted-foreground uppercase">
-          VizServe
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Track your request</h1>
-      </header>
+      <h1 className="mb-5 text-center text-2xl font-semibold tracking-tight">Track your request</h1>
 
-      <section className="rounded-lg border bg-card shadow-sm">
+      <section className="rounded-lg border bg-card grade-surface shadow-raised-lg">
         {/* The summary band. Reference first and largest: it is the string the
             client quotes back to us and the one they came here holding. */}
         <div className="grid gap-4 border-b p-5 sm:grid-cols-3 sm:items-center">
@@ -132,44 +159,69 @@ export default async function RequestStatusPage({
           </div>
         </div>
 
-        {/* The trace. */}
+        {/*
+          THE TRACE, NEWEST FIRST — and it says so, because a reversed list that
+          does not announce itself is a list somebody reads forwards and
+          misunderstands. Every entry carries its own date and time as the
+          second carrier, so the order is never the only thing establishing
+          sequence.
+        */}
+        <div className="flex items-baseline justify-between gap-3 border-b px-5 py-3">
+          <h2 className="text-xs font-semibold tracking-wide text-muted-foreground uppercase">
+            Progress
+          </h2>
+          <p className="text-2xs text-muted-foreground">Newest first</p>
+        </div>
+
         <ol className="p-5">
-          {timeline.map((entry, index) => {
-            const isLatest = index === timeline.length - 1;
+          {entries.map((entry, index) => {
+            // Index 0 is the CURRENT step now, and the bottom of the list is
+            // where the request started.
+            const isLatest = index === 0;
+            const isOldest = index === entries.length - 1;
 
             return (
               <li key={`${entry.at}-${entry.label}`} className="flex gap-4">
                 {/* The rail: a marker and the line beneath it. The line is
-                    omitted on the last entry so the trace ends rather than
-                    trailing into nothing. */}
+                    omitted on the OLDEST entry — the bottom of the list — so
+                    the trace ends rather than trailing into nothing. */}
                 <div className="flex flex-col items-center">
                   <span
                     className={cn(
                       "flex size-6 shrink-0 items-center justify-center rounded-full",
-                      isLatest ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground",
-                    )}
-                  >
+                      isLatest
+                        ? "bg-primary text-primary-foreground"
+                        : "bg-muted text-muted-foreground",
+                    )}>
                     {isLatest ? (
-                      <CircleDashed className="size-3.5" aria-hidden />
+                      <Dot className="size-5" aria-hidden />
                     ) : (
                       <Check className="size-3.5" aria-hidden />
                     )}
                   </span>
-                  {index < timeline.length - 1 ? (
-                    <span aria-hidden className="mt-1 w-px flex-1 bg-border" />
-                  ) : null}
+                  {!isOldest ? <span aria-hidden className="mt-1 w-px flex-1 bg-border" /> : null}
                 </div>
 
-                <div className={cn("pb-6", isLatest && "pb-0")}>
+                <div className={cn("min-w-0 flex-1", isOldest ? "pb-0" : "pb-6")}>
                   <p className="text-xs tabular-nums text-muted-foreground">
                     {formatDateTime(entry.at)}
                   </p>
                   {/* The label carries the state, never the marker's colour
                       alone — this page is read on phones, printed, and
-                      forwarded, and the tint survives none of those reliably. */}
-                  <p className={cn("mt-0.5 text-sm font-semibold", isLatest && "text-primary")}>
+                      forwarded, and the tint survives none of those reliably.
+                      "Happening now" is a WORD on the current step for the same
+                      reason. */}
+                  <p
+                    className={cn(
+                      "mt-0.5 flex flex-wrap items-center gap-2 text-sm font-semibold",
+                      isLatest && "text-primary",
+                    )}>
                     {entry.label}
-                    {isLatest ? <span className="sr-only"> — most recent</span> : null}
+                    {isLatest ? (
+                      <span className="rounded-sm border border-accent-border bg-accent px-1.5 py-0.5 text-2xs font-semibold text-accent-foreground">
+                        Happening now
+                      </span>
+                    ) : null}
                   </p>
                   <p className="mt-0.5 text-sm leading-relaxed text-muted-foreground">
                     {entry.detail}

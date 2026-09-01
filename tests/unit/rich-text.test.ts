@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { isRichTextEmpty, richTextLength, richTextToPlainText } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
+import { taskCommentSchema, taskPatchSchema } from "@/lib/schemas/tasks";
 
 /**
  * P7-56 — the rich-text boundary.
@@ -179,5 +180,53 @@ describe("richTextLength — caps measured on prose, not markup", () => {
 
   it("counts an empty document as zero", () => {
     expect(richTextLength("<p></p>")).toBe(0);
+  });
+});
+
+/**
+ * P7-57 — THE RESOLUTION GATE, WHICH THE EMPTY DOCUMENT NEARLY DEFEATED.
+ *
+ * `vizserve_pms_transition_task` refuses the move to FOR_QA when
+ * `length(btrim(resolution)) = 0`. An empty TipTap editor serialises to
+ * `<p></p>` — seven characters that check reads as content — so making the
+ * resolution rich would have opened the gate to a resolution nobody wrote,
+ * with the box plainly empty on screen.
+ *
+ * Two things close it, and both are asserted here because either one alone is
+ * a silent hole: the schema normalises the empty document to `""` before the
+ * write, and the client gate asks `isRichTextEmpty` rather than trimming.
+ */
+describe("the empty document cannot open the QA gate", () => {
+  it("normalises an empty editor to the empty string on write", () => {
+    const parsed = taskPatchSchema.parse({ resolution: "<p></p>" });
+
+    // Not `<p></p>`: `actions.ts` writes `resolution || null`, and seven
+    // characters of markup would sail past that and reach the column.
+    expect(parsed.resolution).toBe("");
+  });
+
+  it("normalises the shapes an editor actually produces when emptied", () => {
+    for (const empty of ["<p></p>", "<p><br></p>", "<p>   </p>", ""]) {
+      expect(taskPatchSchema.parse({ resolution: empty }).resolution).toBe("");
+      expect(isRichTextEmpty(empty)).toBe(true);
+    }
+  });
+
+  it("leaves a real resolution untouched, markup and all", () => {
+    const written = "<p>Rebuilt the deck and <strong>reshot</strong> slide 4.</p>";
+    expect(taskPatchSchema.parse({ resolution: written }).resolution).toBe(written);
+    expect(isRichTextEmpty(written)).toBe(false);
+  });
+
+  it("measures the comment cap on prose, so markup cannot exhaust it", () => {
+    // 4000 is the cap. A document whose PROSE is 4000 characters passes even
+    // though the markup is longer; measuring the markup would refuse it.
+    const prose = "a".repeat(4000);
+    expect(() => taskCommentSchema.parse({ body: `<p><em>${prose}</em></p>` })).not.toThrow();
+    expect(() => taskCommentSchema.parse({ body: `<p>${"a".repeat(4001)}</p>` })).toThrow();
+  });
+
+  it("refuses a comment that is only an empty document", () => {
+    expect(() => taskCommentSchema.parse({ body: "<p></p>" })).toThrow();
   });
 });

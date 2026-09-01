@@ -393,9 +393,14 @@ export function PublicFormRenderer({
                   name={name as never}
                   render={({ field: controlled }) => (
                     <Select
+                      // Value and label are the same string here — the options
+                      // ARE the words the form builder typed — so nothing is
+                      // visibly wrong today. It is still handed the map: "the
+                      // two happen to match" is not a property worth relying on
+                      // on the one page a client fills in unaided.
+                      items={Object.fromEntries(field.options.map((option) => [option, option]))}
                       value={(controlled.value as string) || ""}
-                      onValueChange={controlled.onChange}
-                    >
+                      onValueChange={controlled.onChange}>
                       <SelectTrigger id={field.field_key}>
                         <SelectValue placeholder="Choose one" />
                       </SelectTrigger>
@@ -530,8 +535,7 @@ export function PublicFormRenderer({
       {formError ? (
         <p
           role="alert"
-          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive"
-        >
+          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
           {formError}
         </p>
       ) : null}

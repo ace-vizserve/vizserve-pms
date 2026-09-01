@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireAuthContextOrThrow, requireRole } from "@/lib/auth/authorization";
+import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
   removeStoredAttachments,
   signAttachmentUrl,
@@ -90,7 +91,7 @@ export async function transitionTask(
   const { data, error } = await supabase.rpc("vizserve_pms_transition_task", {
     p_task_id: taskId,
     p_to_status: parsed.data.to_status,
-    p_comment: parsed.data.comment ?? null,
+    p_comment: parsed.data.comment ? sanitizeRichText(parsed.data.comment) : null,
   });
 
   if (error) return { ok: false, error: readableError(error) };
@@ -222,8 +223,12 @@ export async function updateTaskField(taskId: string, input: unknown): Promise<A
       // column holding `''` where the rest of the app holds NULL is a
       // divergence that surfaces as "it says I wrote a resolution and QA says I
       // did not". `description` was always written raw.
-      ...(patch.description !== undefined ? { description: patch.description } : {}),
-      ...(patch.resolution !== undefined ? { resolution: patch.resolution || null } : {}),
+      ...(patch.description !== undefined
+        ? { description: sanitizeRichText(patch.description) }
+        : {}),
+      ...(patch.resolution !== undefined
+        ? { resolution: patch.resolution ? sanitizeRichText(patch.resolution) : null }
+        : {}),
       ...(patch.output_link !== undefined ? { output_link: patch.output_link || null } : {}),
       ...(patch.due_date !== undefined ? { due_date: patch.due_date || null } : {}),
       ...(patch.start_date !== undefined ? { start_date: patch.start_date || null } : {}),
@@ -279,7 +284,7 @@ export async function addTaskComment(taskId: string, input: unknown): Promise<Ac
     // the final say — this value only ever equals auth.uid(), and a mismatched
     // one is refused rather than trusted.
     author_id: context.userId,
-    body: parsed.data.body,
+    body: sanitizeRichText(parsed.data.body),
   });
 
   if (error) return { ok: false, error: readableError(error) };
@@ -302,7 +307,7 @@ export async function editTaskComment(commentId: string, input: unknown): Promis
   // would report "Saved".
   const { data, error } = await supabase
     .from("vizserve_pms_task_comments")
-    .update({ body: parsed.data.body })
+    .update({ body: sanitizeRichText(parsed.data.body) })
     .eq("id", commentId)
     .select("task_id");
 
@@ -815,7 +820,7 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
   const { data, error } = await supabase.rpc("vizserve_pms_create_task", {
     p_department_id: values.department_id,
     p_title: values.title,
-    p_description: values.description,
+    p_description: sanitizeRichText(values.description),
     p_assignee_id: values.assignee_id,
     p_qa_assignee_id: values.qa_assignee_id,
     p_due_date: values.due_date || null,
@@ -917,7 +922,7 @@ export async function createPersonalTask(
 
   const { data, error } = await supabase.rpc("vizserve_pms_create_personal_task", {
     p_title: values.title,
-    p_description: values.description,
+    p_description: sanitizeRichText(values.description),
     p_due_date: values.due_date || null,
     p_list_id: values.list_id,
     // P7-11. Present here where department and assignee are not: how urgent

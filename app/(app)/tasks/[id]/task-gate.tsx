@@ -2,6 +2,8 @@
 
 import { createContext, useCallback, useContext, useMemo, useRef, useState } from "react";
 
+import { isRichTextEmpty } from "@/lib/rich-text";
+
 /**
  * P7-57 — THE RESOLUTION GATE, SHARED BY TWO COMPONENTS.
  *
@@ -65,7 +67,7 @@ export function TaskGateProvider({
 
   const value = useMemo<TaskGate>(
     () => ({
-      resolutionMissing: saved.trim().length === 0,
+      resolutionMissing: isRichTextEmpty(saved),
       setSavedResolution: setSaved,
       registerFlush,
       flush,

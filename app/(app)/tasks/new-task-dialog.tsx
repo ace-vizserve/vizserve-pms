@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
 import type { TaskPriority } from "@/lib/schemas/tasks";
 
@@ -241,12 +241,15 @@ function TaskForm({
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="description">Description</Label>
-          <Textarea
-            id="description"
-            rows={3}
+          {/* No `htmlFor` — the editor's input is a contenteditable, which is
+              not a labelable element. It carries the same words as its
+              `aria-label`. */}
+          <Label>Description</Label>
+          <RichTextEditor
+            ariaLabel="Description"
             value={description}
-            onChange={(event) => setDescription(event.target.value)}
+            onChange={setDescription}
+            minHeight="min-h-24"
           />
         </div>
 

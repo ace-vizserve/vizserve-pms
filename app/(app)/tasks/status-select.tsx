@@ -387,7 +387,7 @@ export function TaskStatusSelect({
       </Popover>
 
       {/* THE SIBLING, not a child of the popover. */}
-      <TransitionCommentDialog taskId={taskId} state={move} />
+      <TransitionCommentDialog state={move} />
     </>
   );
 }

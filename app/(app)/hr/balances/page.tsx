@@ -60,26 +60,29 @@ export default async function LeaveBalancesPage({
   const parsedYear = balanceYearSchema.safeParse(requested ?? currentYear);
   const year = parsedYear.success ? (parsedYear.data as number) : currentYear;
 
-  const [{ data: people, error: peopleError }, { data: types, error: typesError }, { data: rows, error: rowsError }] =
-    await Promise.all([
-      supabase
-        .from("vizserve_pms_users")
-        .select("id, full_name, email, gender, is_active, primary_department_id")
-        // Deactivated accounts sink to the bottom rather than vanishing: a
-        // leaver can still hold an allocation for the year they left, and the
-        // audit report will show it.
-        .order("is_active", { ascending: false })
-        .order("full_name"),
-      supabase
-        .from("vizserve_pms_leave_types")
-        .select("id, label, is_active, sort_order, applies_to_gender")
-        .order("sort_order")
-        .order("label"),
-      supabase
-        .from("vizserve_pms_leave_balances")
-        .select("user_id, leave_type_id, days_allocated")
-        .eq("balance_year", year),
-    ]);
+  const [
+    { data: people, error: peopleError },
+    { data: types, error: typesError },
+    { data: rows, error: rowsError },
+  ] = await Promise.all([
+    supabase
+      .from("vizserve_pms_users")
+      .select("id, full_name, email, gender, is_active, primary_department_id")
+      // Deactivated accounts sink to the bottom rather than vanishing: a
+      // leaver can still hold an allocation for the year they left, and the
+      // audit report will show it.
+      .order("is_active", { ascending: false })
+      .order("full_name"),
+    supabase
+      .from("vizserve_pms_leave_types")
+      .select("id, label, is_active, sort_order, applies_to_gender")
+      .order("sort_order")
+      .order("label"),
+    supabase
+      .from("vizserve_pms_leave_balances")
+      .select("user_id, leave_type_id, days_allocated")
+      .eq("balance_year", year),
+  ]);
 
   const { data: departments } = await supabase
     .from("vizserve_pms_departments")
@@ -98,11 +101,13 @@ export default async function LeaveBalancesPage({
 
   return (
     <PageShell>
+      {/* Four lines of 12px grey trimmed to the two facts somebody typing in
+          this grid can act on. Days TAKEN are computed from approved requests
+          on every read, so they were never this screen's business and saying so
+          at length only pushed the grid further down the page. */}
       <p className="text-xs text-muted-foreground">
-        What each person is entitled to this year, per kind of leave. Nothing here counts days
-        taken — that is worked out from approved requests every time it is read, so these figures
-        never go stale and never need correcting after a request is approved, rejected or reversed.
-        An allocation of zero is a decision; a blank box is not, and saves nothing.
+        What each person is entitled to this year, per kind of leave. An allocation of zero is a
+        decision; a blank box is not, and saves nothing.
       </p>
 
       {error ? (

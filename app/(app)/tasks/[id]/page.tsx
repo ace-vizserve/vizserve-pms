@@ -17,7 +17,10 @@ import {
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
+import { RichText } from "@/components/ui/rich-text";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
+import { richTextToPlainText } from "@/lib/rich-text";
+import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
   TASK_STATUS_LABELS,
   availableTransitions,
@@ -208,6 +211,19 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   // not exist — three reasons, one answer, because the page treats them alike.
   const brief = parseTaskRequestBrief(briefRow);
 
+  /*
+   * P7-56 — COMPARE PROSE, NOT MARKUP.
+   *
+   * Both columns are rich text now, and two documents saying the same sentence
+   * can differ by a wrapping tag alone. Comparing the HTML would open the
+   * "As they wrote it" panel on tasks whose brief nobody has touched, and the
+   * panel exists precisely to say that somebody HAS.
+   */
+  const briefDiffers = Boolean(
+    brief?.description &&
+      richTextToPlainText(brief.description) !== richTextToPlainText(task.description ?? ""),
+  );
+
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
 
   /*
@@ -286,7 +302,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
         at: entry.created_at,
         from: entry.from_status ? TASK_STATUS_LABELS[entry.from_status] : null,
         to: TASK_STATUS_LABELS[entry.to_status],
-        said: entry.comment,
+        said: entry.comment ? sanitizeRichText(entry.comment) : null,
       } satisfies TaskActivityEvent;
     });
 
@@ -519,7 +535,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 task.description ? (
                   <section className="space-y-2">
                     <h3 className="text-xs font-semibold text-foreground">Brief</h3>
-                    <p className="whitespace-pre-wrap text-sm">{task.description}</p>
+                    <RichText html={task.description} />
                   </section>
                 ) : null
               }
@@ -557,7 +573,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 brief ? (
                   <Collapsible
                     defaultOpen={Boolean(
-                      brief.description && brief.description !== task.description,
+                      briefDiffers,
                     )}
                     className="rounded-md border">
                     <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left">
@@ -604,11 +620,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
                         {/* The client's own words, where the task's brief has been
                           edited away from them at Gate 1. */}
-                        {brief.description && brief.description !== task.description ? (
+                        {briefDiffers ? (
                           <div className="grid gap-0.5 border-b py-1.5 last:border-0 sm:grid-cols-[10rem_1fr] sm:gap-3">
                             <dt className="text-xs text-muted-foreground">As they wrote it</dt>
-                            <dd className="min-w-0 whitespace-pre-wrap wrap-break-word">
-                              {brief.description}
+                            <dd className="min-w-0 wrap-break-word">
+                              <RichText html={brief.description} />
                             </dd>
                           </div>
                         ) : null}
@@ -759,7 +775,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                   events={activity}
                   comments={(commentRows ?? []).map((row) => ({
                     id: row.id,
-                    body: row.body,
+                    body: sanitizeRichText(row.body),
                     authorId: row.author_id,
                     authorName: nameOf.get(row.author_id) ?? "Someone no longer active",
                     createdAt: row.created_at,

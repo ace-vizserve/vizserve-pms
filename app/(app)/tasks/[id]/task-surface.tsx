@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { formatDate } from "@/lib/dates";
 import {
   TASK_PRIORITY_LABELS,
@@ -618,15 +618,13 @@ export function TaskSurface({
           {/* ============================================================== */}
           <section className="space-y-2">
             <Heading>Resolution</Heading>
-            {/* `field-sizing-content` grows it past this floor as you type. */}
-            <Textarea
-              id="resolution"
-              aria-label="Resolution"
-              rows={3}
+            <RichTextEditor
+              ariaLabel="Resolution"
               value={resolution}
               disabled={!canEdit}
-              onChange={(event) => writeResolution(event.target.value)}
+              onChange={writeResolution}
               onBlur={() => void autosave.flush("resolution")}
+              minHeight="min-h-24"
               placeholder="What did you actually do? For collateral, a link is fine. For a fix, say what was wrong and what you changed."
             />
             {/*

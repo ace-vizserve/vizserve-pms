@@ -50,7 +50,12 @@ export function PageSizeSelect({
   }
 
   return (
-    <Select value={String(value)} onValueChange={change}>
+    <Select
+      // Same string on both sides today, mapped anyway — see
+      // scripts/check-select-items.mjs for why there is no exemption list.
+      items={Object.fromEntries(options.map((option) => [String(option), String(option)]))}
+      value={String(value)}
+      onValueChange={change}>
       {/* Labelled, because "20" on its own is meaningless to a screen reader. */}
       <SelectTrigger size="sm" className="w-20" aria-label="Rows per page">
         <SelectValue />

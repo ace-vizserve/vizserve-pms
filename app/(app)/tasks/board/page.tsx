@@ -16,6 +16,7 @@ import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
+import { isRichTextEmpty } from "@/lib/rich-text";
 import {
   INITIAL_TASK_STATUS,
   TASK_STATUSES,
@@ -560,7 +561,7 @@ export default async function TaskBoardPage({
                                 status={task.status}
                                 viewer={seat(task)}
                                 task={task}
-                                resolutionMissing={!task.resolution?.trim()}
+                                resolutionMissing={isRichTextEmpty(task.resolution)}
                                 variant="compact"
                                 align="end"
                               />
@@ -697,7 +698,7 @@ export default async function TaskBoardPage({
                                       status={child.status}
                                       viewer={seat(child)}
                                       task={child}
-                                      resolutionMissing={!child.resolution?.trim()}
+                                      resolutionMissing={isRichTextEmpty(child.resolution)}
                                       variant="compact"
                                       align="end"
                                     />

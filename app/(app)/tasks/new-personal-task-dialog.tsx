@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import type { TaskPriority } from "@/lib/schemas/tasks";
 
 import { createPersonalTask, createTask } from "./actions";
@@ -92,6 +92,12 @@ export function NewPersonalTaskDialog({
    * twice is one `FormData.get()` silently taking whichever came first.
    */
   const [listId, setListId] = useState(NO_LIST);
+  /*
+   * P7-56 — the notes are a rich-text editor now, which has no form value of
+   * its own, so it joins the controlled-state-plus-hidden-input arrangement
+   * the paragraph above describes.
+   */
+  const [description, setDescription] = useState("");
   // Optional on this dialog, so both start empty and stay clearable.
   const [startDate, setStartDate] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<string | null>(null);
@@ -115,6 +121,12 @@ export function NewPersonalTaskDialog({
     setEstimate(null);
     setAssignee(MINE);
     setErrors({});
+    /* ⚠️ Closing this dialog does NOT unmount the form — unlike
+       `new-task-dialog`, which renders `{open ? <TaskForm/> : null}`. An
+       uncontrolled textarea was cleared by the browser on submit; controlled
+       state is not, so without this the next task opens holding the last
+       one's notes. */
+    setDescription("");
   }
 
   function submit(formData: FormData) {
@@ -237,8 +249,18 @@ export function NewPersonalTaskDialog({
           ) : null}
 
           <div className="space-y-2">
-            <Label htmlFor="description">Notes</Label>
-            <Textarea id="description" name="description" rows={3} />
+            {/* No `htmlFor` — the editor's input is a contenteditable, which
+                is not a labelable element. It carries the same words as its
+                `aria-label`. */}
+            <Label>Notes</Label>
+            <input type="hidden" name="description" value={description} />
+            <RichTextEditor
+              ariaLabel="Notes"
+              value={description}
+              onChange={setDescription}
+              invalid={Boolean(errors.description?.length)}
+              minHeight="min-h-24"
+            />
             <FieldError messages={errors.description} />
           </div>
 

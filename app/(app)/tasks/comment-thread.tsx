@@ -6,7 +6,9 @@ import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { RICH_TEXT_CLASS } from "@/components/ui/rich-text";
+import { isRichTextEmpty } from "@/lib/rich-text";
 import { formatDateTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
@@ -150,7 +152,7 @@ export function CommentThread({
 
   function post() {
     const text = body.trim();
-    if (!text) return;
+    if (isRichTextEmpty(text)) return;
 
     startTransition(async () => {
       const result = await addTaskComment(taskId, { body: text });
@@ -169,7 +171,7 @@ export function CommentThread({
 
   function saveEdit(commentId: string) {
     const text = draft.trim();
-    if (!text) return;
+    if (isRichTextEmpty(text)) return;
 
     startTransition(async () => {
       const result = await editTaskComment(commentId, { body: text });
@@ -215,25 +217,30 @@ export function CommentThread({
 
   const composer = (
     <div className="space-y-1.5">
-      <Textarea
+      {/*
+        P7-56 — ENTER NO LONGER POSTS, AND IT CANNOT.
+
+        Enter belongs to the editor: it makes a paragraph and continues a list,
+        so a composer that intercepted it could never hold a second bullet —
+        which is most of the point of making these rich in the first place.
+        Cmd/Ctrl+Enter posts, and the button is always there for anyone who
+        never learns the shortcut.
+      */}
+      <RichTextEditor
+        ariaLabel="New comment"
         value={body}
-        onChange={(event) => setBody(event.target.value)}
-        rows={2}
+        onChange={setBody}
+        onSubmit={post}
+        minHeight="min-h-16"
         placeholder="Write a comment…"
-        aria-label="New comment"
-        className="text-sm"
-        // Enter posts, Shift+Enter breaks the line. The opposite would make
-        // every multi-line comment a fight, and these are notes rather than
-        // chat messages.
-        onKeyDown={(event) => {
-          if (event.key === "Enter" && !event.shiftKey) {
-            event.preventDefault();
-            post();
-          }
-        }}
       />
-      <div className="flex justify-end">
-        <Button size="sm" loading={pending} disabled={!body.trim()} onClick={post}>
+      <div className="flex items-center justify-end gap-3">
+        <span className="text-2xs text-muted-foreground">
+          {/* The shortcut has to be discoverable now that the obvious key does
+              something else. */}
+          ⌘/Ctrl + Enter to post
+        </span>
+        <Button size="sm" loading={pending} disabled={isRichTextEmpty(body)} onClick={post}>
           <Send />
           Comment
         </Button>
@@ -282,19 +289,18 @@ export function CommentThread({
 
                 {editing === row.comment!.id ? (
                   <div className="mt-1.5 space-y-1.5">
-                    <Textarea
+                    <RichTextEditor
+                      ariaLabel="Edit comment"
                       value={draft}
-                      onChange={(event) => setDraft(event.target.value)}
-                      rows={3}
-                      autoFocus
-                      aria-label="Edit comment"
-                      className="text-sm"
+                      onChange={setDraft}
+                      onSubmit={() => saveEdit(row.comment!.id)}
+                      minHeight="min-h-16"
                     />
                     <div className="flex gap-1.5">
                       <Button
                         size="sm"
                         loading={pending}
-                        disabled={!draft.trim()}
+                        disabled={isRichTextEmpty(draft)}
                         onClick={() => saveEdit(row.comment!.id)}>
                         Save
                       </Button>
@@ -305,9 +311,22 @@ export function CommentThread({
                   </div>
                 ) : (
                   <>
-                    {/* `whitespace-pre-wrap`: people write lists in these and a
-                        collapsed one reads as a run-on sentence. */}
-                    <p className="mt-1 text-sm whitespace-pre-wrap">{row.comment!.body}</p>
+                    {/*
+                      ⚠️ ALREADY SANITISED, ON THE SERVER. This file is
+                      `"use client"`, so it cannot use `<RichText>` — that
+                      component sanitises as it renders and would pull
+                      `sanitize-html` into the browser bundle. `page.tsx` runs
+                      every body through `sanitizeRichText` where the rows are
+                      read; this only paints what it was handed.
+
+                      If you ever pass a body in from somewhere else, sanitise
+                      it there. The markup arriving here is trusted because of
+                      where it came from, not because of anything done below.
+                    */}
+                    <div
+                      className={cn("mt-1", RICH_TEXT_CLASS)}
+                      dangerouslySetInnerHTML={{ __html: row.comment!.body }}
+                    />
 
                     {row.comment!.authorId === viewerId ? (
                       <div className="mt-1.5 flex gap-2">
@@ -405,7 +424,10 @@ function ActivityEntry({ event }: { event: TaskActivityEvent }) {
         <span className="text-2xs text-muted-foreground">{formatDateTime(event.at)}</span>
       </div>
 
-      {event.said ? <p className="mt-1 text-sm whitespace-pre-wrap">{event.said}</p> : null}
+      {/* Sanitised alongside the comment bodies, in `page.tsx`. */}
+      {event.said ? (
+        <div className={cn("mt-1", RICH_TEXT_CLASS)} dangerouslySetInnerHTML={{ __html: event.said }} />
+      ) : null}
 
       {/* An icon, never a typed arrow. A glyph in a text run inherits the font's
           metrics and sits off the baseline; `ArrowRight` is sized and aligned

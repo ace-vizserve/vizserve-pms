@@ -52,14 +52,11 @@ export default async function LeaveReportsPage() {
 
   return (
     <PageShell>
-      <p className="text-xs text-muted-foreground">
-        Two documents. The annual audit is the one run in December to settle unused days — it shows
-        what each person was allocated, used and has left. Leave taken covers any period you choose
-        and lists the actual absences; it shows no allocation, because allocation is annual and a
-        figure for part of a year would not be true of anything. Every PDF prints the filters it
-        applied.
-      </p>
-
+      {/* The intro paragraph that used to sit here is gone. It explained the
+          difference between the two documents in five lines of 12px grey, and
+          the builder now explains it on the two cards you choose between — in
+          the place where the choice is actually made, and in one set of words
+          instead of two. */}
       {peopleError ? (
         <QueryError what="the report options" message={peopleError.message} />
       ) : (

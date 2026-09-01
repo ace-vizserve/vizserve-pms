@@ -7,6 +7,7 @@ import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } 
 import { cn } from "@/lib/utils";
 
 import { CommentThread, type TaskComment } from "./comment-thread";
+import { richTextToPlainText } from "@/lib/rich-text";
 
 /**
  * P7-08 / K5 — the latest comment, and the way into the thread.
@@ -48,7 +49,11 @@ export function LatestCommentCell({
             {/* Two lines, then it stops. The cell is a pointer into the thread,
                 not the thread — a row that grows to fit a paragraph pushes
                 every other row down the page. */}
-            <span className="line-clamp-2">{latest.body}</span>
+            {/* ⚠️ FLATTENED, NOT RENDERED. `line-clamp` counts lines in a
+                block box; a <ul> inside this cell would lay out at full height
+                and blow the row open. `richTextToPlainText` is the same
+                flattener the emails use — bullets survive as "• ". */}
+            <span className="line-clamp-2">{richTextToPlainText(latest.body)}</span>
             {comments.length > 1 ? (
               <span className="mt-0.5 block text-2xs text-muted-foreground">{comments.length} comments</span>
             ) : null}

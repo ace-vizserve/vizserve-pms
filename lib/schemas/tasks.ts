@@ -1,6 +1,18 @@
 import { z } from "zod";
 
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
+import { richTextSchema } from "@/lib/schemas/rich-text";
+
+/**
+ * P7-56 — the ceiling on the two long-prose columns.
+ *
+ * `description` and `resolution` had no cap at all, and a rich column needs one:
+ * the markup is what gets stored, so an unbounded field is an unbounded write.
+ * 20,000 characters of PROSE — `richTextSchema` measures the flattened text —
+ * is roughly four thousand words, far past any brief anyone has written here,
+ * so it bounds the column without being a rule somebody meets in practice.
+ */
+const LONG_PROSE_MAX = 20_000;
 
 /**
  * PHASE 3 CONTRACT — the task schema and the legal-transition table (D3a, R11).
@@ -632,7 +644,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
 
 export const transitionPayloadSchema = z.object({
   to_status: taskStatusSchema,
-  comment: z.string().trim().max(2000).optional(),
+  comment: richTextSchema({ max: 2000 }).optional(),
 });
 
 export const overridePayloadSchema = z.object({
@@ -696,9 +708,18 @@ export const taskPatchSchema = z
      * screen currently offers the control — the key exists so the column has a
      * writer at all.
      */
-    description: z.string().trim(),
-    /** What the member actually produced. The QA reviewer reviews against this. */
-    resolution: z.string().trim(),
+    description: richTextSchema({ max: LONG_PROSE_MAX }),
+    /**
+     * What the member actually produced. The QA reviewer reviews against this.
+     *
+     * ⚠️ P7-56 — `richTextSchema` NORMALISES AN EMPTY DOCUMENT TO `""`, and the
+     * resolution gate depends on it. `vizserve_pms_transition_task` refuses the
+     * move to FOR_QA when `length(btrim(resolution)) = 0`; an empty editor
+     * serialises to `<p></p>`, which is seven characters that check would read
+     * as content. Without the transform, a visually empty resolution would open
+     * the gate.
+     */
+    resolution: richTextSchema({ max: LONG_PROSE_MAX }),
     output_link: outputLinkSchema,
     // "" from a cleared date input means "no date", never the epoch. Both dates
     // stay nullable rather than required, because most internal work has one or
@@ -731,7 +752,7 @@ export type TaskPatchInput = z.infer<typeof taskPatchSchema>;
 export const createTaskSchema = z.object({
   department_id: z.uuid("Choose the department this belongs to."),
   title: z.string().trim().min(1, "A task needs a title.").max(300),
-  description: z.string().trim().default(""),
+  description: richTextSchema({ max: LONG_PROSE_MAX }).default(""),
   assignee_id: z.uuid().nullable().default(null),
   qa_assignee_id: z.uuid().nullable().default(null),
   due_date: z
@@ -773,7 +794,7 @@ export type CreateTaskInput = z.infer<typeof createTaskSchema>;
  */
 export const createPersonalTaskSchema = z.object({
   title: z.string().trim().min(1, "What are you working on?").max(300),
-  description: z.string().trim().default(""),
+  description: richTextSchema({ max: LONG_PROSE_MAX }).default(""),
   due_date: z
     .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
     .default(""),
@@ -811,11 +832,12 @@ export type CreatePersonalTaskInput = z.infer<typeof createPersonalTaskSchema>;
  * name is not a request the server can be talked into.
  */
 export const taskCommentSchema = z.object({
-  body: z
-    .string()
-    .trim()
-    .min(1, "Say something.")
-    .max(4000, "Keep a comment under 4000 characters."),
+  body: richTextSchema({
+    min: 1,
+    max: 4000,
+    requiredMessage: "Say something.",
+    tooLongMessage: "Keep a comment under 4000 characters.",
+  }),
 });
 
 export type TaskCommentInput = z.infer<typeof taskCommentSchema>;

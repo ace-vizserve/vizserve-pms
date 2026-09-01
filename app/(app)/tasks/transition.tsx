@@ -15,7 +15,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { isRichTextEmpty } from "@/lib/rich-text";
 import { transitionTone, type Transition } from "@/lib/schemas/tasks";
 
 import { transitionTask } from "./actions";
@@ -139,13 +140,7 @@ export function useTaskTransition({
  * nested in a popover dies with it the moment the popover dismisses — which it
  * does as soon as focus moves into the dialog.
  */
-export function TransitionCommentDialog({
-  taskId,
-  state,
-}: {
-  taskId: string;
-  state: TaskTransitionState;
-}) {
+export function TransitionCommentDialog({ state }: { state: TaskTransitionState }) {
   const transition = state.prompt;
   if (!transition) return null;
 
@@ -154,7 +149,6 @@ export function TransitionCommentDialog({
   return (
     <CommentDialog
       key={`${transition.from}-${transition.to}`}
-      taskId={taskId}
       state={state}
       transition={transition}
     />
@@ -162,17 +156,24 @@ export function TransitionCommentDialog({
 }
 
 function CommentDialog({
-  taskId,
   state,
   transition,
 }: {
-  taskId: string;
   state: TaskTransitionState;
   transition: Transition;
 }) {
   const [comment, setComment] = useState("");
 
   const returning = transition.to === "ONGOING";
+
+  /* One string, two consumers: the visible <Label> and the editor's
+     `aria-label`. Stated once so they cannot drift apart. */
+  const label =
+    transition.to === "WAITING_FOR_INFO"
+      ? "What are you waiting for?"
+      : returning
+        ? "What needs changing?"
+        : "Add a comment";
   const tone = transitionTone(transition);
 
   return (
@@ -205,19 +206,15 @@ function CommentDialog({
         </DialogHeader>
 
         <div className="space-y-1.5">
-          <Label htmlFor={`move-comment-${taskId}`}>
-            {transition.to === "WAITING_FOR_INFO"
-              ? "What are you waiting for?"
-              : returning
-                ? "What needs changing?"
-                : "Add a comment"}
-          </Label>
-          <Textarea
-            id={`move-comment-${taskId}`}
-            autoFocus
-            rows={5}
+          {/* No `htmlFor` — the editor's input is a contenteditable, which is
+              not a labelable element. It carries the same words as its
+              `aria-label`. */}
+          <Label>{label}</Label>
+          <RichTextEditor
+            ariaLabel={label}
             value={comment}
-            onChange={(event) => setComment(event.target.value)}
+            onChange={setComment}
+            minHeight="min-h-32"
             placeholder={
               returning
                 ? "e.g. The logo is the old one — please use the 2026 mark."
@@ -241,7 +238,7 @@ function CommentDialog({
             // Never the sole explanation for why it is unavailable: the label
             // above says a note is the whole point of this dialog, so an empty
             // box already carries its own reason.
-            disabled={comment.trim().length === 0}
+            disabled={isRichTextEmpty(comment)}
             onClick={() => state.commit(transition, comment)}>
             {transition.label}
           </Button>
