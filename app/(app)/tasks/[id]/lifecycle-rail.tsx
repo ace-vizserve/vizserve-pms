@@ -1,4 +1,4 @@
-import { Circle, CircleAlert, CircleCheck, CircleDot } from "lucide-react";
+import { Check, Circle, CircleAlert, CircleDot } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
 import { formatDate } from "@/lib/dates";
@@ -69,11 +69,38 @@ type ClientDecision = {
   approverName: string | null;
 };
 
-const MARKER: Record<StepState, { icon: LucideIcon; className: string; word: string }> = {
+const MARKER: Record<
+  StepState,
+  { icon: LucideIcon; className: string; word: string; pulse?: string }
+> = {
   // Shape as well as colour, in all four: greyscale has to separate them (§5.5),
   // and a tick, a filled dot, an empty ring and an alert do.
-  done: { icon: CircleCheck, className: "text-success", word: "done" },
-  current: { icon: CircleDot, className: "text-primary", word: "now" },
+  //
+  // `pulse` is the FOURTH carrier and it is only ever on the LIVE stage — the
+  // one place on the page where something is still moving. It is decoration
+  // over three carriers that already work without it, and the utility itself
+  // sits behind `prefers-reduced-motion`, so it can vanish entirely and the
+  // track still reads. Its tint is named per state: a brand-blue halo on
+  // `attention` would report a client asking for changes in the same colour as
+  // ordinary progress.
+  // A FILLED green disc, not an outline tick. The outline read as a hairline
+  // at 16px and a passed gate has to be obvious from across the header.
+  // A RAISED green chip, not an outline tick and not a flat disc. Depth is
+  // outward (§1.5): its own fill, the `grade-chip` wash for a lit top edge and
+  // `shadow-raised` under it, so a passed gate sits ON the header rather than
+  // being painted onto it — and reads as green from across the page, which a
+  // 1px outline at 16px did not.
+  done: {
+    icon: Check,
+    className: "border border-success bg-success grade-chip text-background shadow-raised",
+    word: "done",
+  },
+  current: {
+    icon: CircleDot,
+    className: "text-primary",
+    word: "now",
+    pulse: "pulse-now",
+  },
   pending: {
     icon: Circle,
     className: "text-foreground-faint",
@@ -83,6 +110,7 @@ const MARKER: Record<StepState, { icon: LucideIcon; className: string; word: str
     icon: CircleAlert,
     className: "text-warning",
     word: "needs attention",
+    pulse: "pulse-now [--pulse-tint:var(--warning)]",
   },
 };
 
@@ -146,7 +174,17 @@ export function GateTrack(props: {
               />
             ) : null}
 
-            <Icon className={cn("mt-0.5 size-4 shrink-0", marker.className)} aria-hidden />
+            {/* The halo needs a box to ring, and an icon glyph is not one —
+                the ring inherits this span's radius and size, so it stays
+                circular against a circular marker at any type scale. */}
+            <span
+              className={cn(
+                "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full",
+                marker.className,
+                marker.pulse,
+              )}>
+              <Icon className={cn(step.state === "done" ? "size-2.5" : "size-4")} aria-hidden />
+            </span>
 
             <div className="min-w-0">
               <p

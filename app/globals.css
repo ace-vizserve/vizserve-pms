@@ -566,6 +566,64 @@
   background-image: var(--gradient-ambient);
 }
 
+/* --- the live step ---------------------------------------------------------
+   ONE MARKER ON A PROGRESS RAIL IS ALIVE; THE REST ARE HISTORY.
+
+   Both rails — the internal `GateTrack` and the client's own tracking page —
+   draw the same three-part story: stages that have passed, the one thing
+   happening right now, and stages still ahead. Colour and shape already
+   separate them (§4.1, §5.5). This adds the third carrier the other two cannot
+   give: the current step is the only thing on the page that MOVES, so the eye
+   lands on it before anything is read.
+
+   A RING THAT EXPANDS AND FADES, on a `::after` — not a `box-shadow` on the
+   marker itself. The shadow would sit in the same property as the elevation
+   tokens and fight anything raised, and §1.5 keeps hand-rolled shadows out of
+   components for exactly that reason. A pseudo-element ring composes with a
+   real `shadow-raised` underneath it and cannot be mistaken for depth.
+
+   ⚠️ NOTHING IS CONVEYED BY THE ANIMATION ALONE. It is decoration on a marker
+   that already carries a distinct fill, a distinct icon and — on both call
+   sites — a word. Turn it off and the rails read identically, which is what
+   `prefers-reduced-motion` does: the guard wraps the whole rule, so a reader
+   who asks for stillness gets a plain marker rather than a slower one.
+
+   `border-radius: inherit` keeps it honest on the two different marker sizes
+   (16px in the app, 24px on the client page) without either restating it.
+   `--pulse-tint` is the one knob: the warning tone uses it at Gate 3 where the
+   client has asked for changes, since a brand-blue halo there would report a
+   problem in the colour of normal progress. */
+@keyframes pulse-now {
+  from {
+    opacity: 0.5;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.85);
+  }
+}
+
+@layer utilities {
+  .pulse-now {
+    position: relative;
+  }
+
+  @media (prefers-reduced-motion: no-preference) {
+    .pulse-now::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: inherit;
+      border: 2px solid var(--pulse-tint, var(--primary));
+      /* Slow on purpose. A fast pulse on a page somebody is READING is a
+         distraction; this is a heartbeat, not an alert. */
+      animation: pulse-now 2.2s ease-out infinite;
+      pointer-events: none;
+    }
+  }
+}
+
 /* --- client-facing surfaces ----------------------------------------------
    `/request/[slug]`, `/approve/[token]` and `/feedback/[token]`.
 

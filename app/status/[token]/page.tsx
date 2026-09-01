@@ -182,24 +182,48 @@ export default async function RequestStatusPage({
 
             return (
               <li key={`${entry.at}-${entry.label}`} className="flex gap-4">
-                {/* The rail: a marker and the line beneath it. The line is
-                    omitted on the OLDEST entry — the bottom of the list — so
-                    the trace ends rather than trailing into nothing. */}
+                {/*
+                  The rail: a marker and the line beneath it.
+
+                  TWO STATES ONLY, because the list is reversed — index 0 is
+                  where the request is NOW, and everything below it has already
+                  happened. So the head of the trail pulses in brand blue and
+                  the entire tail behind it is green: done, and visibly so.
+
+                  Green is `--success`, the semantic token, not a second blue.
+                  A trail drawn in one colour made the finished steps read as
+                  further stops on the same queue rather than as work that is
+                  over, which is the one thing a waiting client wants to see.
+
+                  THREE CARRIERS, none of them the animation: a filled dot
+                  versus a tick (shape, so greyscale and print survive it), blue
+                  versus green (colour), and the word — "Happening now" on the
+                  head, "Done" for a screen reader on the rest.
+
+                  The line is omitted on the OLDEST entry — the bottom of the
+                  list — so the trace ends rather than trailing into nothing.
+                */}
                 <div className="flex flex-col items-center">
                   <span
                     className={cn(
-                      "flex size-6 shrink-0 items-center justify-center rounded-full",
+                      "flex size-6 shrink-0 items-center justify-center rounded-full border",
                       isLatest
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground",
+                        ? "border-primary bg-primary grade-primary text-primary-foreground shadow-raised pulse-now"
+                        : "border-success bg-success grade-chip text-background shadow-raised",
                     )}>
                     {isLatest ? (
                       <Dot className="size-5" aria-hidden />
                     ) : (
                       <Check className="size-3.5" aria-hidden />
                     )}
+                    {/* The head already says "Happening now" in the label, in
+                        words, so only the tail needs one added here. */}
+                    {!isLatest ? <span className="sr-only">Done</span> : null}
                   </span>
-                  {!isOldest ? <span aria-hidden className="mt-1 w-px flex-1 bg-border" /> : null}
+                  {/* The travelled path, in the colour of the steps it joins. */}
+                  {!isOldest ? (
+                    <span aria-hidden className="mt-1 w-px flex-1 bg-success-border" />
+                  ) : null}
                 </div>
 
                 <div className={cn("min-w-0 flex-1", isOldest ? "pb-0" : "pb-6")}>
