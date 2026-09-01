@@ -206,18 +206,38 @@ export function fieldsFromSchema(schema: FormSchema): FormFieldRow[] {
     seen.add(entityId);
 
     const entity = schema.entities[entityId];
+    const attributes = entity.attributes as Partial<typeof entity.attributes>;
+
+    /*
+     * EVERY ATTRIBUTE IS READ DEFENSIVELY, because the parameter is a bare
+     * `FormSchema` and the comment above promises this function is safe on its
+     * own. The live caller that makes that real is Phase 2's save handler,
+     * which projects the BUILDER STORE's schema — and the store hands out its
+     * raw blob, so `optionsAttribute`'s `?? []` has not fired and an unset
+     * label is simply absent. Spreading `options` there threw
+     * `TypeError: not iterable`, which is a crashed save rather than a refused
+     * one.
+     *
+     * A missing `key` is the one thing that cannot be defaulted: it is the
+     * storage identity every answer is filed under (§1), and inventing one
+     * would file answers under a key nothing reads. Such an entity is skipped,
+     * like a dangling id above.
+     */
+    if (typeof attributes.key !== "string") continue;
 
     rows.push({
       id: entityId,
-      field_key: entity.attributes.key,
-      label: entity.attributes.label,
+      field_key: attributes.key,
+      label: typeof attributes.label === "string" ? attributes.label : "",
       field_type: entity.type,
-      help_text: entity.attributes.helpText,
+      help_text: typeof attributes.helpText === "string" ? attributes.helpText : "",
       // Copied for the same reason as in `schemaFromFields`: a caller mutating
       // a projected row must not be able to edit the schema it came from.
-      options: [...entity.attributes.options],
-      is_required: entity.attributes.required,
-      is_active: !entity.attributes.archived,
+      options: Array.isArray(attributes.options) ? [...attributes.options] : [],
+      // Mirrors `requiredAttribute`'s `?? true` — a field is required unless it
+      // says otherwise, which is layer 1 of the completeness rule.
+      is_required: attributes.required !== false,
+      is_active: attributes.archived !== true,
       // ROW position, not `root` position. Now that a duplicate or a dangling id
       // can be skipped, indexing `root` would leave holes in `sort_order`;
       // counting rows keeps it a dense 0..n-1, which is what the projection

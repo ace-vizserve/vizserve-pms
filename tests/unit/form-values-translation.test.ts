@@ -1119,3 +1119,83 @@ describe("a root listing the same entity twice", () => {
     ]);
   });
 });
+
+/**
+ * Round 4 — the projection is safe on a schema the library never normalised.
+ *
+ * Phase 2's save handler projects the BUILDER STORE's schema, and the store
+ * hands out its raw blob: attribute validators have not run, so `options` may
+ * be null and `label` simply absent. `fieldsFromSchema` promises in its own
+ * doc comment to be safe standing alone, and until now it was not.
+ */
+describe("projecting a schema the attribute validators never touched", () => {
+  const raw = (attributes: Record<string, unknown>): FormSchema =>
+    ({
+      entities: { "0e6a0d1c-6d3a-4a4f-9c3e-2b1a5f7c8d90": { type: "select", attributes } },
+      root: ["0e6a0d1c-6d3a-4a4f-9c3e-2b1a5f7c8d90"],
+    }) as unknown as FormSchema;
+
+  it("does not throw when options is null", () => {
+    expect(() => fieldsFromSchema(raw({ key: "choice", options: null }))).not.toThrow();
+    expect(fieldsFromSchema(raw({ key: "choice", options: null }))[0].options).toEqual([]);
+  });
+
+  it("fills absent display text rather than writing undefined into a row", () => {
+    const [row] = fieldsFromSchema(raw({ key: "choice", options: ["A"] }));
+
+    expect(row.label).toBe("");
+    expect(row.help_text).toBe("");
+  });
+
+  it("defaults a missing `required` to true, as the completeness rule does", () => {
+    expect(fieldsFromSchema(raw({ key: "choice", options: ["A"] }))[0].is_required).toBe(true);
+  });
+
+  it("skips an entity with no key rather than filing answers under one it invented", () => {
+    expect(fieldsFromSchema(raw({ options: ["A"] }))).toEqual([]);
+  });
+});
+
+/**
+ * Round 4 — display text is validated trim-aware but stored verbatim.
+ *
+ * A read-side trim on `label`/`helpText` made `fieldsFromSchema(parseFormSchema(blob))`
+ * silently EDIT the stored row, and made the two mints disagree about the same
+ * form. It is also what `buildFieldSchema` does: it interpolates `field.label`
+ * untrimmed into every message.
+ */
+describe("a label with whitespace around it", () => {
+  const padded: FormFieldRow[] = [
+    {
+      id: "3f2b1a09-7c4d-4e5f-8a9b-0c1d2e3f4a5b",
+      field_key: "note",
+      label: "  Note  ",
+      field_type: "text",
+      help_text: "  help  ",
+      options: [],
+      is_required: true,
+      is_active: true,
+      sort_order: 0,
+    },
+  ];
+
+  it("survives a round trip through the jsonb blob unchanged", async () => {
+    const blob = JSON.parse(JSON.stringify(schemaFromFields(padded)));
+
+    expect(fieldsFromSchema(await parseFormSchema(blob))).toEqual(padded);
+  });
+
+  it("means the same form whichever mint loaded it", async () => {
+    const blob = JSON.parse(JSON.stringify(schemaFromFields(padded)));
+
+    expect(await parseFormSchema(blob)).toEqual(schemaFromFields(padded));
+  });
+
+  it("still rejects a label that is only whitespace", async () => {
+    const blank = schemaFromFields([{ ...padded[0], label: "   " }]);
+
+    await expect(parseFormSchema(JSON.parse(JSON.stringify(blank)))).rejects.toBeInstanceOf(
+      FormSchemaError,
+    );
+  });
+});

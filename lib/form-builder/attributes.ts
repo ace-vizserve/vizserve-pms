@@ -56,15 +56,34 @@ export const keyAttribute = createAttribute({
 });
 
 /**
- * `label` and `helpText` DO still trim, and that is the deliberate other half of
- * the rule above: they are display text. Nothing is filed under them, no
- * submitted answer is compared against them, and trimming one changes only how
- * a sentence looks. Only `key` (storage identity) and `options` (a stored value
- * set) carry meaning that a rewrite would break.
+ * `label` and `helpText` VALIDATE trim-aware but STORE VERBATIM.
+ *
+ * The earlier version trimmed, on the reasoning that display text carries no
+ * meaning a rewrite could break. That was wrong for the same reason it was
+ * wrong for `key`: `fieldsFromSchema(parseFormSchema(blob))` is a projection
+ * back into `vizserve_pms_form_fields`, so a read-side trim does not change how
+ * a sentence looks — it silently EDITS THE STORED ROW. Round-tripping a form
+ * must never be a write.
+ *
+ * It also aligns the two mints. `schemaFromFields` copies these columns
+ * verbatim, so trimming here alone meant one form meant two things depending on
+ * which way it was loaded.
+ *
+ * And it is closer to the code being replaced: `buildFieldSchema` interpolates
+ * `field.label` untrimmed into every message (`${field.label} is required.`),
+ * so preserving padding is what parity actually requires.
+ *
+ * `refine` rather than `.trim().min(1)` because the point is to reject a label
+ * that is only whitespace WITHOUT rewriting one that merely has some — plain
+ * `.min(1)` on an untrimmed string would accept `"   "`.
  */
 export const labelAttribute = createAttribute({
   name: "label",
-  validate: (value) => z.string().trim().min(1, "Give the field a label.").parse(value),
+  validate: (value) =>
+    z
+      .string()
+      .refine((text) => text.trim().length > 0, "Give the field a label.")
+      .parse(value),
 });
 
 export const helpTextAttribute = createAttribute({
@@ -72,7 +91,6 @@ export const helpTextAttribute = createAttribute({
   validate: (value) =>
     z
       .string()
-      .trim()
       .nullish()
       .transform((text) => text ?? "")
       .parse(value),
