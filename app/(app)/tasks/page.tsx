@@ -32,8 +32,21 @@ import { TaskToolbar } from "./toolbar";
 export const metadata: Metadata = { title: "Tasks" };
 
 
-/** `?sort=` — the two orders a task list is actually read in. */
-const SORTS = ["due", "priority"] as const;
+/*
+ * P7-65 — WIDENED FOR THE SORTABLE HEADERS.
+ *
+ * `due` and `priority` are the two the toolbar Select has always offered; the
+ * rest are the columns whose header is now a control. They share one `?sort=`
+ * param, so the Select and the headers cannot disagree about what the list is
+ * ordered by.
+ *
+ * ⚠️ SORTING THE QUERY IS WHAT MAKES THIS WORK ON A GROUPED LIST. The rows are
+ * ordered before they are split into stages, so all eight tables reorder
+ * together. A browser-side sort would have reordered each group independently
+ * and meant nothing across them, which is why the headers were left inert when
+ * the tables first moved onto TanStack.
+ */
+const SORTS = ["due", "priority", "title", "start", "estimate"] as const;
 type Sort = (typeof SORTS)[number];
 
 function isSort(value: string | undefined): value is Sort {
@@ -87,6 +100,7 @@ export default async function TasksPage({
     kind?: string;
     priority?: string;
     sort?: string;
+    dir?: string;
   }>;
 }) {
   const context = await requireAuthContext();
@@ -156,15 +170,35 @@ export default async function TasksPage({
    * Due date stays the default. A queue is read by deadline most days; priority
    * is the question you ask when there is more work than time.
    */
-  query =
-    sort === "priority"
-      ? query
-          .order("priority", { ascending: false, nullsFirst: false })
-          .order("due_date", { ascending: true, nullsFirst: false })
-      : query
-          // Nearest deadline first; undated work sinks rather than leading.
-          .order("due_date", { ascending: true, nullsFirst: false })
-          .order("created_at", { ascending: false });
+  /*
+   * P7-65 — `?dir=`, and the default that belongs to each column.
+   *
+   * Priority reads highest-first and everything else reads ascending, so the
+   * default is per-column rather than one global direction. An explicit `?dir=`
+   * from a header click overrides it.
+   */
+  const ascending = params.dir ? params.dir !== "desc" : sort !== "priority";
+
+  /*
+   * ⚠️ A LITERAL COLUMN PER KEY, NEVER `.order(params.sort)`. `?sort=` is a
+   * string somebody can type, and an unknown column name reaches Postgres as
+   * `invalid input value` and 500s the page.
+   */
+  const ORDER_COLUMN: Record<Sort, string> = {
+    due: "due_date",
+    priority: "priority",
+    title: "title",
+    start: "start_date",
+    estimate: "estimate_minutes",
+  };
+
+  query = query
+    // `nullsFirst: false` is what puts the unranked, undated majority at the
+    // bottom instead of on top of the work that has a deadline.
+    .order(ORDER_COLUMN[sort], { ascending, nullsFirst: false })
+    // A stable tie-break, so two tasks due the same day do not swap places
+    // between renders.
+    .order("created_at", { ascending: false });
 
   if (isTaskStatus(params.status)) query = query.eq("status", params.status);
   if (params.list) query = query.eq("list_id", params.list);
@@ -437,10 +471,25 @@ export default async function TasksPage({
     const bucket = grouped.get(task.status);
     if (!bucket) continue;
 
-    bucket.push({ ...task, depth: 0 });
-    for (const child of childrenByParent.get(task.id) ?? []) {
-      bucket.push({ ...child, depth: 1 });
-    }
+    /*
+     * P7-65 — NESTED, NOT FLATTENED.
+     *
+     * These used to be pushed as two sibling rows carrying a `depth` marker,
+     * and the indent was the only thing that said one belonged to the other.
+     * TanStack's expanded row model wants the real shape, so a parent now
+     * carries its children and the table flattens them itself — which is what
+     * lets a parent collapse.
+     *
+     * `subRows` is left UNDEFINED rather than `[]` on a childless task:
+     * `getCanExpand()` is true for an empty array, and a chevron that opens
+     * onto nothing is worse than no chevron.
+     */
+    const children = childrenByParent.get(task.id);
+    bucket.push({
+      ...task,
+      depth: 0,
+      subRows: children?.map((child) => ({ ...child, depth: 1 as const })),
+    });
   }
 
   /**

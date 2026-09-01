@@ -1,13 +1,15 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   flexRender,
   getCoreRowModel,
+  getExpandedRowModel,
   getSortedRowModel,
   useReactTable,
   type ColumnDef,
+  type ExpandedState,
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table";
@@ -80,8 +82,13 @@ export type Column<T> = {
   /** Stable key — also the React key for the cell. */
   key: string;
   header: React.ReactNode;
-  /** Cell renderer. Gets the row and its index. */
-  cell: (row: T, index: number) => React.ReactNode;
+  /**
+   * Cell renderer. Gets the row, its index, and the row's own controls.
+   *
+   * `controls` is how a cell draws an expand chevron without the call site
+   * needing a TanStack row object — see `RowControls`.
+   */
+  cell: (row: T, index: number, controls: RowControls) => React.ReactNode;
   /** Applied to both the `th` and every `td`, e.g. `hidden sm:table-cell`. */
   className?: string;
   /** Right-align numerics. */
@@ -96,9 +103,30 @@ export type Column<T> = {
   sortKey?: string;
   /** Offered in the columns menu. A column nobody may hide simply omits it. */
   hideable?: boolean;
+  /**
+   * Freeze this column against the left edge while the rest scrolls sideways.
+   *
+   * ⚠️ ONE COLUMN ONLY, AND IT MUST BE THE FIRST. TanStack can offset a stack of
+   * pinned columns, but only from column SIZES — and every width in this app
+   * comes from a Tailwind class on `className` (`max-w-xs`, `hidden
+   * lg:table-cell`), so there are no sizes to add up. A second pinned column
+   * would be positioned at `left: 0` on top of the first. The table honours the
+   * first `pin: "left"` it finds and ignores the rest.
+   */
+  pin?: "left";
 };
 
 export type SortDirection = "asc" | "desc";
+
+/** What a cell can know about its own row beyond the data in it. */
+export type RowControls = {
+  /** How deep in the sub-row tree. 0 is a top-level row. */
+  depth: number;
+  /** This row has children, so a chevron is worth drawing. */
+  canExpand: boolean;
+  isExpanded: boolean;
+  toggleExpanded: () => void;
+};
 
 export function DataTable<T>({
   columns,
@@ -112,6 +140,7 @@ export function DataTable<T>({
   appendRow,
   className,
   urlSort = false,
+  getSubRows,
   columnVisibility,
   onColumnVisibilityChange,
 }: {
@@ -161,12 +190,26 @@ export function DataTable<T>({
    * each side of the wire, no prop to keep in step.
    */
   urlSort?: boolean;
+  /**
+   * The children of a row, if it has any. Supplying it turns on expand/collapse.
+   *
+   * Expansion state is held HERE rather than in the URL, unlike sorting. Sorting
+   * changes which rows exist and has to reach the server; opening a parent
+   * changes only what this person is looking at, and putting it in the query
+   * string would make every collapse a navigation and every shared link carry
+   * somebody else's reading position.
+   */
+  getSubRows?: (row: T) => T[] | undefined;
   columnVisibility?: VisibilityState;
   onColumnVisibilityChange?: (next: VisibilityState) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
+
+  /* Every parent open on first paint: a subtask hidden by default is a subtask
+     nobody discovers, and these lists are short. */
+  const [expanded, setExpanded] = useState<ExpandedState>(true);
 
   const manual = urlSort;
   const sort = urlSort ? (params.get("sort") ?? undefined) : undefined;
@@ -187,7 +230,13 @@ export function DataTable<T>({
         header: () => column.header,
         // The row index TanStack hands back is the index within the rendered
         // page, which is what the old signature promised.
-        cell: (context) => column.cell(context.row.original, context.row.index),
+        cell: (context) =>
+          column.cell(context.row.original, context.row.index, {
+            depth: context.row.depth,
+            canExpand: context.row.getCanExpand(),
+            isExpanded: context.row.getIsExpanded(),
+            toggleExpanded: () => context.row.toggleExpanded(),
+          }),
         meta: { column },
       })),
     [columns],
@@ -203,19 +252,26 @@ export function DataTable<T>({
     columns: columnDefs,
     getRowId: (row, index) => getRowKey(row, index),
     getCoreRowModel: getCoreRowModel(),
+    ...(getSubRows
+      ? { getSubRows, getExpandedRowModel: getExpandedRowModel() }
+      : {}),
     // Only ask for the sorted row model when the browser is allowed to do the
     // sorting. In manual mode the rows arrive ordered and re-sorting them here
     // would fight the server.
     ...(manual ? {} : { getSortedRowModel: getSortedRowModel() }),
     manualSorting: manual,
+    onExpandedChange: setExpanded,
     state: {
       sorting,
+      ...(getSubRows ? { expanded } : {}),
       ...(columnVisibility ? { columnVisibility } : {}),
     },
     onColumnVisibilityChange: onColumnVisibilityChange
       ? (updater) =>
           onColumnVisibilityChange(
-            typeof updater === "function" ? updater(columnVisibility ?? {}) : updater,
+            typeof updater === "function"
+              ? updater(columnVisibility ?? {})
+              : updater,
           )
       : undefined,
     onSortingChange: (updater) => {
@@ -245,6 +301,23 @@ export function DataTable<T>({
     },
   });
 
+  /*
+   * The frozen column, if any. `find` rather than `filter` — see the note on
+   * `Column.pin`: a second one would stack at the same offset.
+   *
+   * `bg-card` rather than `bg-inherit`: a row here has no background of its own
+   * (the shell carries it), so an inherited one would be transparent and the
+   * scrolled columns would show straight through the frozen cell. The cost is
+   * that the pinned column does not take the row's hover tint, which is a
+   * fair trade for it being readable at all.
+   */
+  const pinnedKey = columns.find((column) => column.pin === "left")?.key;
+  const pinnedCell = "sticky left-0 z-20 bg-card";
+  // The pinned HEADER outranks both the pinned body cells and the other
+  // headers, because /dtr also sticks its header row to the top and the two
+  // sticky axes meet in this one cell.
+  const pinnedHead = "sticky left-0 z-30 bg-background";
+
   const headers = table.getHeaderGroups()[0]?.headers ?? [];
   const visibleCount = table.getVisibleLeafColumns().length;
 
@@ -253,7 +326,9 @@ export function DataTable<T>({
       <TableHeader>
         <TableRow>
           {headers.map((header) => {
-            const column = (header.column.columnDef.meta as { column: Column<T> }).column;
+            const column = (
+              header.column.columnDef.meta as { column: Column<T> }
+            ).column;
             const sortable = Boolean(column.sortKey);
             const active = sortable && sort === column.sortKey;
 
@@ -264,8 +339,18 @@ export function DataTable<T>({
                 // ⚠️ The assistive-tech half of the sort indicator. Without it a
                 // screen reader is told only that this is a column heading, and
                 // the arrow beside it is decoration it never hears about.
-                aria-sort={active ? (dir === "asc" ? "ascending" : "descending") : undefined}
-                className={cn(column.align === "end" && "text-right", column.className)}
+                aria-sort={
+                  active
+                    ? dir === "asc"
+                      ? "ascending"
+                      : "descending"
+                    : undefined
+                }
+                className={cn(
+                  column.align === "end" && "text-right",
+                  column.key === pinnedKey && pinnedHead,
+                  column.className,
+                )}
               >
                 {sortable ? (
                   <button
@@ -278,7 +363,10 @@ export function DataTable<T>({
                       column.align === "end" && "flex-row-reverse",
                     )}
                   >
-                    {flexRender(header.column.columnDef.header, header.getContext())}
+                    {flexRender(
+                      header.column.columnDef.header,
+                      header.getContext(),
+                    )}
                     {/*
                       SHAPE, NOT JUST WEIGHT. An active column is darker AND
                       carries a directional arrow; an inactive one carries the
@@ -304,7 +392,10 @@ export function DataTable<T>({
                     </span>
                   </button>
                 ) : (
-                  flexRender(header.column.columnDef.header, header.getContext())
+                  flexRender(
+                    header.column.columnDef.header,
+                    header.getContext(),
+                  )
                 )}
               </TableHead>
             );
@@ -342,11 +433,17 @@ export function DataTable<T>({
               )}
             >
               {row.getVisibleCells().map((cell) => {
-                const column = (cell.column.columnDef.meta as { column: Column<T> }).column;
+                const column = (
+                  cell.column.columnDef.meta as { column: Column<T> }
+                ).column;
                 return (
                   <TableCell
                     key={cell.id}
-                    className={cn(column.align === "end" && "text-right", column.className)}
+                    className={cn(
+                      column.align === "end" && "text-right",
+                      column.key === pinnedKey && pinnedCell,
+                      column.className,
+                    )}
                   >
                     {flexRender(cell.column.columnDef.cell, cell.getContext())}
                   </TableCell>
@@ -378,5 +475,9 @@ function keyOf<T>(columns: Column<T>[], sortKey: string): string {
 }
 
 function EmptyRow() {
-  return <p className="py-9 text-center text-xs text-muted-foreground">Nothing to show.</p>;
+  return (
+    <p className="py-9 text-center text-xs text-muted-foreground">
+      Nothing to show.
+    </p>
+  );
 }

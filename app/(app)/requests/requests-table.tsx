@@ -4,6 +4,10 @@ import { Inbox } from "lucide-react";
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
+import {
+  DataTableColumns,
+  useColumnVisibility,
+} from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { QueryError } from "@/components/query-error";
 import { RequestStatusBadge } from "@/components/status-badge";
@@ -28,7 +32,13 @@ export type RequestRow = {
   requester_name: string;
   requester_org: string;
   target_date: string | null;
-  status: "DRAFT" | "SUBMITTED" | "PENDING_REVIEW" | "APPROVED" | "RETURNED" | "REJECTED";
+  status:
+    | "DRAFT"
+    | "SUBMITTED"
+    | "PENDING_REVIEW"
+    | "APPROVED"
+    | "RETURNED"
+    | "REJECTED";
   submitted_at: string;
   form_id: string;
 };
@@ -44,13 +54,17 @@ export function RequestsTable({
   isFiltered: boolean;
   errorMessage?: string;
 }) {
+  const { visibility, onVisibilityChange } = useColumnVisibility("requests");
+
   const columns: Column<RequestRow>[] = [
     {
       key: "submitted_at",
       header: "Submitted at",
       className: "max-w-xs",
       sortKey: "submitted",
-      cell: (request) => <p className="truncate">{formatDate(request.submitted_at)}</p>,
+      cell: (request) => (
+        <p className="truncate">{formatDate(request.submitted_at)}</p>
+      ),
     },
     {
       key: "reference",
@@ -59,10 +73,15 @@ export function RequestsTable({
       sortKey: "reference",
       cell: (request) => (
         <>
-          <Link href={`/requests/${request.id}`} className="font-medium hover:underline">
+          <Link
+            href={`/requests/${request.id}`}
+            className="font-medium hover:underline"
+          >
             {request.reference_no}
           </Link>
-          <p className="text-xs text-muted-foreground">{formNames[request.form_id] ?? "—"}</p>
+          <p className="text-xs text-muted-foreground">
+            {formNames[request.form_id] ?? "—"}
+          </p>
         </>
       ),
     },
@@ -83,7 +102,9 @@ export function RequestsTable({
       cell: (request) => (
         <>
           <p className="truncate">{request.requester_name}</p>
-          <p className="text-xs text-muted-foreground">{request.requester_org}</p>
+          <p className="text-xs text-muted-foreground">
+            {request.requester_org}
+          </p>
         </>
       ),
     },
@@ -98,7 +119,8 @@ export function RequestsTable({
           {/* Overdue is said in words as well as colour — a red date alone is
               invisible to a meaningful share of people, and to anyone reading
               a printed or screenshotted queue. */}
-          {isOverdue(request.target_date) && request.status === "PENDING_REVIEW" ? (
+          {isOverdue(request.target_date) &&
+          request.status === "PENDING_REVIEW" ? (
             <p className="text-xs font-medium text-destructive">Overdue</p>
           ) : null}
         </>
@@ -113,30 +135,42 @@ export function RequestsTable({
   ];
 
   return (
-    <DataTable
-      columns={columns}
-      rows={rows}
-      getRowKey={(request) => request.id}
-      /* Capped at 200 rows on the server, so the browser must not pretend to
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        getRowKey={(request) => request.id}
+        /* Capped at 200 rows on the server, so the browser must not pretend to
          sort the whole queue. */
-      urlSort
-      empty={
-        errorMessage ? (
-          <QueryError what="requests" message={errorMessage} />
-        ) : isFiltered ? (
-          <EmptyState
-            icon={<Inbox />}
-            title="No requests match these filters"
-            description="Widen the date range or clear the status filter to see the rest of the queue."
-          />
-        ) : (
-          <EmptyState
-            icon={<Inbox />}
-            title="Nothing here yet"
-            description="Requests appear when a client submits one of your published forms. If you are expecting one, check the form is published and routed to your department."
-          />
-        )
-      }
-    />
+        urlSort
+        empty={
+          errorMessage ? (
+            <QueryError what="requests" message={errorMessage} />
+          ) : isFiltered ? (
+            <EmptyState
+              icon={<Inbox />}
+              title="No requests match these filters"
+              description="Widen the date range or clear the status filter to see the rest of the queue."
+            />
+          ) : (
+            <EmptyState
+              icon={<Inbox />}
+              title="Nothing here yet"
+              description="Requests appear when a client submits one of your published forms. If you are expecting one, check the form is published and routed to your department."
+            />
+          )
+        }
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
+      />
+    </div>
   );
 }

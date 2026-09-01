@@ -3,6 +3,7 @@
 import { BarChart3 } from "lucide-react";
 
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { TASK_STATUSES, TASK_STATUS_LABELS } from "@/lib/schemas/tasks";
@@ -34,6 +35,8 @@ export type ReportRow = {
 };
 
 export function ReportsTable({ rows }: { rows: ReportRow[] }) {
+  const { visibility, onVisibilityChange } = useColumnVisibility("reports");
+
   const columns: Column<ReportRow>[] = [
     {
       key: "department",
@@ -62,6 +65,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
     ),
     {
       key: "overdue",
+      hideable: true,
       header: "Overdue",
       sortKey: "overdue",
       className: "tabular-nums",
@@ -77,6 +81,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
     },
     {
       key: "hours",
+      hideable: true,
       header: "Logged",
       sortKey: "hours",
       className: "tabular-nums",
@@ -91,7 +96,18 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   ];
 
   return (
-    <DataTable
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
+      <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
       rows={rows}
       getRowKey={(row) => row.id}
@@ -102,6 +118,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
           description="No tasks were created between these two dates. Widen the range, or check that the department you expected has work in it."
         />
       }
-    />
+      />
+    </div>
   );
 }

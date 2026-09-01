@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import type { VizservePmsNotificationType } from "@/lib/database.types";
 import { formatDateTime } from "@/lib/dates";
 import { NOTIFICATION_TYPE_LABELS } from "@/lib/notifications";
@@ -31,6 +32,8 @@ export type Notification = {
 };
 
 export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React.ReactNode }) {
+  const { visibility, onVisibilityChange } = useColumnVisibility("inbox");
+
   const columns: Column<Notification>[] = [
     {
       key: "notification",
@@ -72,6 +75,7 @@ export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React
     },
     {
       key: "type",
+      hideable: true,
       header: "Type",
       sortKey: "type",
       className: "hidden md:table-cell text-xs text-muted-foreground",
@@ -79,6 +83,7 @@ export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React
     },
     {
       key: "when",
+      hideable: true,
       header: "When",
       sortKey: "when",
       className: "hidden sm:table-cell text-xs text-muted-foreground",
@@ -93,12 +98,24 @@ export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React
 
 
   return (
-    <DataTable
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
+      <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
       rows={rows}
       getRowKey={(item) => item.id}
       urlSort
       empty={empty}
-    />
+      />
+    </div>
   );
 }

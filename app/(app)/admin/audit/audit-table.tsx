@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { Chip } from "@/components/status-badge";
 import { auditActionTone, auditEntityHref, auditEntityLabel } from "@/lib/audit";
 import { AuditDetails, type AuditEntry } from "./audit-details";
@@ -19,6 +20,8 @@ import { AuditDetails, type AuditEntry } from "./audit-details";
  * accountability.
  */
 export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.ReactNode }) {
+  const { visibility, onVisibilityChange } = useColumnVisibility("audit");
+
   const columns: Column<AuditEntry>[] = [
     {
       key: "when",
@@ -29,6 +32,7 @@ export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.R
     },
     {
       key: "who",
+      hideable: true,
       header: "Who",
       className: "whitespace-nowrap",
       cell: (entry) =>
@@ -49,6 +53,7 @@ export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.R
     },
     {
       key: "record",
+      hideable: true,
       header: "Record",
       className: "whitespace-nowrap",
       cell: (entry) => {
@@ -69,6 +74,7 @@ export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.R
     },
     {
       key: "changes",
+      hideable: true,
       header: "Changed",
       className: "hidden lg:table-cell max-w-xs whitespace-normal text-xs text-muted-foreground",
       cell: (entry) => {
@@ -96,12 +102,24 @@ export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.R
   ];
 
   return (
-    <DataTable
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
+      <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
       rows={rows}
       getRowKey={(entry) => entry.id}
       urlSort
       empty={empty}
-    />
+      />
+    </div>
   );
 }

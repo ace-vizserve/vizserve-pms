@@ -1,6 +1,13 @@
 "use client";
 
-import { createContext, useContext, useMemo, useState, useTransition, type ReactNode } from "react";
+import {
+  createContext,
+  useContext,
+  useMemo,
+  useState,
+  useTransition,
+  type ReactNode,
+} from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, X } from "lucide-react";
 import { toast } from "sonner";
@@ -38,6 +45,16 @@ type SelectionState = {
   selected: Set<string>;
   toggle: (taskId: string, title: string) => void;
   isSelected: (taskId: string) => boolean;
+  /**
+   * P7-65 — tick or clear a whole group at once.
+   *
+   * ⚠️ IT TAKES THE ROWS, NOT A STATUS. The provider spans every group and has
+   * no idea which tasks are in which; the caller is the group's own table, and
+   * it already knows which of its rows are deletable. Passing the list keeps
+   * the "only deletable rows are selectable" rule in the one place that
+   * mirrors `vizserve_pms_can_delete_task`.
+   */
+  setMany: (rows: { id: string; title: string }[], selected: boolean) => void;
 };
 
 const SelectionContext = createContext<SelectionState | null>(null);
@@ -58,6 +75,15 @@ export function TaskSelectionProvider({ children }: { children: ReactNode }) {
           else next.set(taskId, title);
           return next;
         }),
+      setMany: (rows, selected) =>
+        setPicked((current) => {
+          const next = new Map(current);
+          for (const row of rows) {
+            if (selected) next.set(row.id, row.title);
+            else next.delete(row.id);
+          }
+          return next;
+        }),
     }),
     [picked],
   );
@@ -70,7 +96,49 @@ export function TaskSelectionProvider({ children }: { children: ReactNode }) {
   );
 }
 
-export function TaskSelectCheckbox({ taskId, title }: { taskId: string; title: string }) {
+/**
+ * P7-65 — the header checkbox: every deletable row in THIS group.
+ *
+ * Scoped to the group rather than the page because that is the unit somebody is
+ * looking at — eight stages tick-all-at-once would be a control whose blast
+ * radius is off screen. Selection itself stays cross-group, which is the whole
+ * reason this context exists and the reason the tables did not move onto
+ * TanStack's own row selection: there are eight table instances on this page,
+ * so its selection would have been eight independent ones.
+ */
+export function TaskSelectAll({
+  rows,
+}: {
+  rows: { id: string; title: string }[];
+}) {
+  const selection = useContext(SelectionContext);
+  if (!selection || rows.length === 0) return null;
+
+  const picked = rows.filter((row) => selection.isSelected(row.id)).length;
+  const all = picked === rows.length;
+  const some = picked > 0 && !all;
+
+  return (
+    <Checkbox
+      checked={all}
+      indeterminate={some}
+      onCheckedChange={() => selection.setMany(rows, !all)}
+      aria-label={
+        all
+          ? "Clear this stage's selection"
+          : "Select every deletable task at this stage"
+      }
+    />
+  );
+}
+
+export function TaskSelectCheckbox({
+  taskId,
+  title,
+}: {
+  taskId: string;
+  title: string;
+}) {
   const selection = useContext(SelectionContext);
   if (!selection) return null;
 
@@ -155,7 +223,10 @@ function SelectionBar({
 
           {/* Separates what is true from what you can do about it, without
               spending the height a border on the bar itself would. */}
-          <span aria-hidden className="mx-0.5 h-5 w-px bg-primary-foreground/25" />
+          <span
+            aria-hidden
+            className="mx-0.5 h-5 w-px bg-primary-foreground/25"
+          />
 
           {/*
             ⚠️ NOT `variant="destructive"`. In this codebase that variant is the
@@ -200,7 +271,8 @@ function SelectionBar({
               Delete {count} {count === 1 ? "task" : "tasks"}?
             </DialogTitle>
             <DialogDescription>
-              Subtasks, logged time, comments and files on them go too. This cannot be undone.
+              Subtasks, logged time, comments and files on them go too. This
+              cannot be undone.
             </DialogDescription>
           </DialogHeader>
 
@@ -211,7 +283,10 @@ function SelectionBar({
           */}
           <ul className="max-h-48 space-y-1 overflow-y-auto rounded-sm border p-2 text-xs">
             {[...picked.values()].slice(0, 12).map((title, index) => (
-              <li key={`${title}-${index}`} className="truncate text-muted-foreground">
+              <li
+                key={`${title}-${index}`}
+                className="truncate text-muted-foreground"
+              >
                 {title}
               </li>
             ))}
@@ -221,7 +296,11 @@ function SelectionBar({
           </ul>
 
           <DialogFooter>
-            <Button variant="ghost" onClick={() => setConfirming(false)} disabled={pending}>
+            <Button
+              variant="ghost"
+              onClick={() => setConfirming(false)}
+              disabled={pending}
+            >
               Cancel
             </Button>
             <Button variant="destructive" onClick={remove} loading={pending}>

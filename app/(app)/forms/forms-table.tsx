@@ -4,6 +4,7 @@ import { FileText } from "lucide-react";
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { Chip } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -39,9 +40,12 @@ export function FormsTable({
   rows: FormRow[];
   departmentNames: Record<string, string>;
 }) {
+  const { visibility, onVisibilityChange } = useColumnVisibility("forms");
+
   const columns: Column<FormRow>[] = [
     {
       key: "created_at",
+      hideable: true,
       header: "Created at",
       className: "max-w-xs",
       cell: (form) => <p className="truncate">{formatDate(form.created_at)}</p>,
@@ -60,6 +64,7 @@ export function FormsTable({
     },
     {
       key: "department",
+      hideable: true,
       header: "Department",
       className: "hidden sm:table-cell text-muted-foreground",
       cell: (form) =>
@@ -80,6 +85,7 @@ export function FormsTable({
     },
     {
       key: "url",
+      hideable: true,
       header: "Public URL",
       className: "hidden md:table-cell",
       cell: (form) =>
@@ -98,7 +104,18 @@ export function FormsTable({
 
 
   return (
-    <DataTable
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
+      <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
       rows={rows}
       getRowKey={(form) => form.id}
@@ -115,6 +132,7 @@ export function FormsTable({
           }
         />
       }
-    />
+      />
+    </div>
   );
 }

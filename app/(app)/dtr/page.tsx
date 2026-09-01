@@ -58,11 +58,33 @@ const DTR_PAGE_SIZE = 500;
 export default async function DtrPage({
   searchParams,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; user?: string }>;
+  searchParams: Promise<{ from?: string; to?: string; user?: string; sort?: string; dir?: string }>;
 }) {
   const context = await requireAuthContext();
   const params = await searchParams;
   const supabase = await createClient();
+
+  /*
+   * P7-65 — THE SORT ALLOWLIST.
+   *
+   * `?sort=` is user input, so it picks a LITERAL column here rather than being
+   * interpolated into `.order()`. The range is capped at `DTR_PAGE_SIZE + 1`,
+   * which is exactly why the table sets `urlSort` and lets Postgres order:
+   * sorting the truncated page in the browser would claim an ordering of days
+   * it never received.
+   */
+  const DTR_SORTS = ["date", "in", "out"] as const;
+  type DtrSort = (typeof DTR_SORTS)[number];
+  const dtrSort: DtrSort = (DTR_SORTS as readonly string[]).includes(params.sort ?? "")
+    ? (params.sort as DtrSort)
+    : "date";
+  const DTR_ORDER: Record<DtrSort, string> = {
+    date: "work_date",
+    in: "time_in",
+    out: "time_out",
+  };
+  // A record reads newest-day-first; a punch time reads earliest-first.
+  const dtrAscending = params.dir ? params.dir !== "desc" : dtrSort !== "date";
 
   const today = todayInAppZone();
   // Default to the last 30 days rather than the calendar month: on the 1st, a
@@ -116,6 +138,9 @@ export default async function DtrPage({
         )
         .gte("work_date", from)
         .lte("work_date", to)
+        .order(DTR_ORDER[dtrSort], { ascending: dtrAscending, nullsFirst: false })
+        // A stable tie-break: two people punching on the same day must not
+        // swap places between renders.
         .order("work_date", { ascending: false })
         .limit(DTR_PAGE_SIZE + 1);
 

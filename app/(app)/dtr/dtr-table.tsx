@@ -3,16 +3,33 @@
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
+import {
+  DataTableColumns,
+  useColumnVisibility,
+} from "@/components/data-table-columns";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
 import { InternalStatusBadge } from "@/components/status-badge";
-import { formatAppTime, formatDate, formatDuration, workedMinutes } from "@/lib/dates";
-import { correctionTypeFor, describeDeviation, type Deviation } from "@/lib/dtr-schedule";
+import {
+  formatAppTime,
+  formatDate,
+  formatDuration,
+  workedMinutes,
+} from "@/lib/dates";
+import {
+  correctionTypeFor,
+  describeDeviation,
+  type Deviation,
+} from "@/lib/dtr-schedule";
 import {
   INTERNAL_REQUEST_LABELS,
   isTimeCorrectionType,
   type TimeCorrectionType,
 } from "@/lib/schemas/internal-requests";
-import { describeLeaveDay, LEAVE_PORTION_LABELS, type LeaveDay } from "@/lib/leave";
+import {
+  describeLeaveDay,
+  LEAVE_PORTION_LABELS,
+  type LeaveDay,
+} from "@/lib/leave";
 
 /**
  * P7-64 — the columns, in a client component, because the table is one now.
@@ -24,10 +41,11 @@ import { describeLeaveDay, LEAVE_PORTION_LABELS, type LeaveDay } from "@/lib/lea
  * together — `viewerId` arrives as a plain string, which is all `isMine` ever
  * needed.
  *
- * ⚠️ NO `urlSort`. A DTR is a chronological record and the server already
- * orders it by `work_date` desc within an explicit range; offering to reorder
- * the visible page of a truncated range would be offering a different question
- * than the one the range asked.
+ * ⚠️ P7-65 — `urlSort` IS SET. The range is capped at `DTR_PAGE_SIZE + 1`, so
+ * the page does not hold every day it is describing and the ordering has to
+ * happen in Postgres. Date, time-in and time-out are sortable; the derived
+ * columns (worked minutes, the request chips) are not, because neither exists
+ * as a column to order by.
  */
 
 export type PunchRow = {
@@ -79,7 +97,6 @@ export type Entry = PunchRow & {
   deviationOut: Deviation | null;
 };
 
-
 export function DtrTable({
   rows,
   viewerId,
@@ -100,6 +117,8 @@ export function DtrTable({
   totalMinutes: number;
   className?: string;
 }) {
+  const { visibility, onVisibilityChange } = useColumnVisibility("dtr");
+
   /*
    * OWN ROWS ONLY. The correction dialog submits as the signed-in person, so
    * offering the link on somebody else's row would open a form that can only
@@ -110,6 +129,8 @@ export function DtrTable({
   const columns: Column<Entry>[] = [
     {
       key: "date",
+      pin: "left",
+      sortKey: "date",
       header: "Date",
       className: "whitespace-nowrap",
       cell: (entry) => (
@@ -153,6 +174,7 @@ export function DtrTable({
       : []),
     {
       key: "in",
+      sortKey: "in",
       header: "Time in",
       className: "tabular-nums whitespace-nowrap",
       cell: (entry) => (
@@ -167,7 +189,11 @@ export function DtrTable({
               is worse than no link, because filing it puts a punch on a day they
               did not work. */}
           {!entry.time_in && !entry.isLeaveOnly && isMine(entry) ? (
-            <CorrectionLink type="NO_TIME_IN" date={entry.work_date} label="Time-in missing?" />
+            <CorrectionLink
+              type="NO_TIME_IN"
+              date={entry.work_date}
+              label="Time-in missing?"
+            />
           ) : null}
           {/* P7-40. The deviation, in words, on the number it describes. THE
               LABEL CARRIES THE STATE — an amber tint alone would leave a
@@ -182,6 +208,7 @@ export function DtrTable({
     },
     {
       key: "out",
+      sortKey: "out",
       header: "Time out",
       className: "tabular-nums whitespace-nowrap",
       cell: (entry) => (
@@ -189,7 +216,9 @@ export function DtrTable({
           {formatAppTime(entry.time_out)}
           {Boolean(entry.time_in) && !entry.time_out ? (
             <>
-              <p className="mt-0.5 text-2xs font-medium text-warning">Still open</p>
+              <p className="mt-0.5 text-2xs font-medium text-warning">
+                Still open
+              </p>
               {/* This is the case the 18-hour stale-shift refusal already tells
                   people to fix, and until now it told them without giving them
                   any way to do it. */}
@@ -226,6 +255,7 @@ export function DtrTable({
      */
     {
       key: "request",
+      hideable: true,
       header: "Request",
       className: "whitespace-nowrap",
       cell: (entry) => {
@@ -251,10 +281,12 @@ export function DtrTable({
                     ] ?? request.request_type}
                     {/* What it is asking for, so a lead can compare the claim
                         against the recorded time without opening it. */}
-                    {isTimeCorrectionType(request.request_type) && request.correction_at
+                    {isTimeCorrectionType(request.request_type) &&
+                    request.correction_at
                       ? ` · ${formatAppTime(request.correction_at)}`
                       : null}
-                    {request.request_type === "OVERTIME" && request.overtime_minutes
+                    {request.request_type === "OVERTIME" &&
+                    request.overtime_minutes
                       ? ` · ${formatDuration(request.overtime_minutes)}`
                       : null}
                   </span>
@@ -298,6 +330,7 @@ export function DtrTable({
     },
     {
       key: "worked",
+      hideable: true,
       header: "Worked",
       className: "tabular-nums whitespace-nowrap",
       // A leave-only row has no hours and never will. "—" would read as a day
@@ -315,26 +348,41 @@ export function DtrTable({
   ];
 
   return (
-    <DataTable
-      className={className}
-      columns={columns}
-      rows={rows}
-      getRowKey={(entry) => entry.id}
-      empty={empty}
-      footer={
-        <TableRow className="hover:bg-transparent">
-          {/* `columns.length - 1` is why the footer lives in here: the page has
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
+      <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
+        className={className}
+        columns={columns}
+        rows={rows}
+        getRowKey={(entry) => entry.id}
+        /* The range is capped at DTR_PAGE_SIZE, so the browser must not pretend
+         to order days it never received. */
+        urlSort
+        empty={empty}
+        footer={
+          <TableRow className="hover:bg-transparent">
+            {/* `columns.length - 1` is why the footer lives in here: the page has
               no way to know how many columns were drawn once `showPerson`
               started adding one conditionally. */}
-          <TableHead scope="row" colSpan={columns.length - 1}>
-            {totalLabel}
-          </TableHead>
-          <TableCell className="font-semibold tabular-nums">
-            {formatDuration(totalMinutes)}
-          </TableCell>
-        </TableRow>
-      }
-    />
+            <TableHead scope="row" colSpan={columns.length - 1}>
+              {totalLabel}
+            </TableHead>
+            <TableCell className="font-semibold tabular-nums">
+              {formatDuration(totalMinutes)}
+            </TableCell>
+          </TableRow>
+        }
+      />
+    </div>
   );
 }
 
@@ -364,8 +412,10 @@ function CorrectionLink({
       {/* The visible label is deliberately short enough to sit in a numeric
           column; the full sentence is here for anyone who cannot see which row
           it belongs to. */}
-      <span className="sr-only"> Raise a correction for {formatDate(date)}.</span>
+      <span className="sr-only">
+        {" "}
+        Raise a correction for {formatDate(date)}.
+      </span>
     </Link>
   );
 }
-
