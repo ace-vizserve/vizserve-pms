@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { richTextSchema } from "@/lib/schemas/rich-text";
+
 /**
  * PHASE 5 CONTRACT — the four internal request types (D3a, R11).
  *
@@ -116,11 +118,12 @@ export function isTimeCorrectionType(value: string): value is TimeCorrectionType
  * enough context. The floor exists to block "." and an empty submit, not to
  * demand an essay from someone with flu.
  */
-export const internalReasonSchema = z
-  .string()
-  .trim()
-  .min(5, "Say why, even briefly.")
-  .max(2000, "Keep it under 2000 characters.");
+export const internalReasonSchema = richTextSchema({
+  min: 5,
+  max: 2000,
+  requiredMessage: "Say why, even briefly.",
+  tooLongMessage: "Keep it under 2000 characters.",
+});
 
 const dateOnly = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a date.");
 
@@ -282,14 +285,18 @@ export function isTimeCorrectionRequest(
  * still supports returning; this consumer simply never asks for it.
  */
 export const internalDecisionSchema = z.discriminatedUnion("decision", [
-  z.object({ decision: z.literal("approved"), reason: z.string().trim().max(2000).optional() }),
+  z.object({
+    decision: z.literal("approved"),
+    reason: richTextSchema({ max: 2000 }).optional(),
+  }),
   z.object({
     decision: z.literal("rejected"),
-    reason: z
-      .string()
-      .trim()
-      .min(5, "Tell them why — a rejection with no reason is unactionable.")
-      .max(2000, "Keep it under 2000 characters."),
+    reason: richTextSchema({
+      min: 5,
+      max: 2000,
+      requiredMessage: "Tell them why — a rejection with no reason is unactionable.",
+      tooLongMessage: "Keep it under 2000 characters.",
+    }),
   }),
 ]);
 

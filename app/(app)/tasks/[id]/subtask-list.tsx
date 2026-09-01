@@ -1,13 +1,11 @@
 import Link from "next/link";
 
 import { TaskPriorityBadge, TaskStatusGlyph } from "@/components/status-badge";
-import { Card, CardAction, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatDate, isOverdue } from "@/lib/dates";
 import { isTerminal, type TaskPriority, type TaskStatus } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 
-import { AddSubtask, SubtaskProgress } from "../inline";
-import type { Assignable } from "../task-composer";
+import { SubtaskProgress } from "../inline";
 
 /**
  * P7-28 — the children, on the page you work on.
@@ -31,35 +29,41 @@ export type Subtask = {
   priority: TaskPriority | null;
 };
 
+/**
+ * P7-56 — A SECTION, NOT A CARD.
+ *
+ * It was a panel of its own with its own header and a bare `+` glyph in the
+ * slot where the card below it put a labelled "Upload" button. The task detail
+ * is one surface now (`task-surface.tsx`), so this is a heading and a list on
+ * it, and ADDING one moved to that surface's action list at the foot of the
+ * page — where every other "do a thing to this task" now lives, in one
+ * treatment instead of three.
+ */
 export function SubtaskList({
-  parentId,
   subtasks,
   nameOf,
-  assignable,
   canAdd,
 }: {
-  parentId: string;
   subtasks: Subtask[];
   nameOf: Map<string, string>;
-  assignable: Assignable[];
-  /** A finished task takes no new children, and neither does somebody else's. */
+  /**
+   * Only decides the EMPTY-STATE COPY now — whether to explain what a subtask
+   * is for, or simply say there are none. The control itself is the surface's.
+   */
   canAdd: boolean;
 }) {
   const done = subtasks.filter((subtask) => isTerminal(subtask.status)).length;
 
   return (
-    <Card size="sm">
-      <CardHeader>
-        <CardTitle>Subtasks</CardTitle>
-        <CardAction className="flex items-center gap-2">
-          {/* Renders nothing at zero, by its own rule — a permanent 0/0 is the
-              same lie as a permanent zero on a dashboard tile. */}
-          <SubtaskProgress done={done} total={subtasks.length} />
-          {canAdd ? <AddSubtask parentId={parentId} assignable={assignable} /> : null}
-        </CardAction>
-      </CardHeader>
+    <section className="space-y-2">
+      <div className="flex items-center gap-2">
+        <h3 className="text-xs font-semibold text-foreground">Subtasks</h3>
+        {/* Renders nothing at zero, by its own rule — a permanent 0/0 is the
+            same lie as a permanent zero on a dashboard tile. */}
+        <SubtaskProgress done={done} total={subtasks.length} />
+      </div>
 
-      <CardContent>
+      <div>
         {subtasks.length === 0 ? (
           <p className="text-xs text-muted-foreground">
             {canAdd
@@ -112,7 +116,7 @@ export function SubtaskList({
             })}
           </ul>
         )}
-      </CardContent>
-    </Card>
+      </div>
+    </section>
   );
 }

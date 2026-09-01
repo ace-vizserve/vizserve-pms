@@ -10,6 +10,7 @@ import {
   internalRequestSchema,
   isTimeCorrectionRequest,
 } from "@/lib/schemas/internal-requests";
+import { sanitizeRichText } from "@/lib/rich-text-server";
 import { createClient } from "@/utils/supabase/server";
 
 /**
@@ -71,7 +72,10 @@ export async function submitInternalRequest(input: unknown): Promise<ActionResul
   // `value`, so the nulls below are structural rather than defensive.
   const { data, error } = await supabase.rpc("vizserve_pms_submit_internal_request", {
     p_request_type: value.request_type,
-    p_reason: value.reason,
+    // P7-56. Sanitised on write so the column stays tidy. This is NOT the
+    // guard — `<RichText>` sanitises again on render, because this column is
+    // also reachable from a SQL console and from rows written before P7-56.
+    p_reason: sanitizeRichText(value.reason),
     p_start_date: value.request_type === "LEAVE" ? value.start_date : null,
     p_end_date: value.request_type === "LEAVE" ? value.end_date : null,
     // OVERTIME carries a work_date too, so this branch is not the correction
@@ -137,7 +141,7 @@ export async function decideInternalRequest(
   const { data, error } = await supabase.rpc("vizserve_pms_decide_internal_request", {
     p_id: requestId,
     p_decision: parsed.data.decision,
-    p_reason: parsed.data.reason ?? null,
+    p_reason: parsed.data.reason ? sanitizeRichText(parsed.data.reason) : null,
   });
 
   if (error) return { ok: false, error: readableError(error) };

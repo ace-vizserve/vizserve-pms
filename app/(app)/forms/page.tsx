@@ -4,10 +4,11 @@ import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
-import { Chip } from "@/components/status-badge";
 import { PageShell } from "@/components/page-shell";
+import { Chip } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { requireRole } from "@/lib/auth/authorization";
+import { formatDate } from "@/lib/dates";
 import { createClient } from "@/utils/supabase/server";
 
 export const metadata: Metadata = { title: "Forms" };
@@ -20,6 +21,7 @@ type FormRow = {
   is_active: boolean;
   reference_prefix: string;
   department_id: string | null;
+  created_at: string;
 };
 
 /**
@@ -38,8 +40,8 @@ export default async function FormsPage() {
 
   const { data: forms } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, name, slug, is_public, is_active, reference_prefix, department_id, updated_at")
-    .order("updated_at", { ascending: false });
+    .select("id, name, slug, is_public, is_active, reference_prefix, department_id, created_at")
+    .order("created_at", { ascending: false });
 
   const { data: departments } = await supabase.from("vizserve_pms_departments").select("id, name");
 
@@ -47,6 +49,12 @@ export default async function FormsPage() {
   const rows = (forms ?? []) as FormRow[];
 
   const columns: Column<FormRow>[] = [
+    {
+      key: "created_at",
+      header: "Created at",
+      className: "max-w-xs",
+      cell: (form) => <p className="truncate">{formatDate(form.created_at)}</p>,
+    },
     {
       key: "form",
       header: "Form",

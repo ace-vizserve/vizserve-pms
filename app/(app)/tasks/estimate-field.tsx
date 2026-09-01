@@ -5,6 +5,7 @@ import { useState } from "react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
+import { cn } from "@/lib/utils";
 
 /**
  * P7-15 / K5 — how long somebody expects this to take.
@@ -28,12 +29,24 @@ export function EstimateField({
   disabled,
   id = "estimate",
   label = "Estimate",
+  hint,
+  className,
 }: {
   value: number | null;
   onChange: (minutes: number | null) => void;
   disabled?: boolean;
   id?: string;
   label?: string;
+  /**
+   * P7-55. Replaces the default hint when there is something more useful to
+   * say about THIS estimate — the task detail page passes the time actually
+   * logged against it, which used to be a free-standing paragraph below the
+   * grid. An error always wins over both: a field that is refusing must say so
+   * before it says anything else.
+   */
+  hint?: React.ReactNode;
+  /** Lets a caller size the field to its column. */
+  className?: string;
 }) {
   /**
    * The text is local; the minutes are the caller's.
@@ -74,7 +87,7 @@ export function EstimateField({
   }
 
   return (
-    <div className="space-y-2">
+    <div className={cn("space-y-2", className)}>
       <Label htmlFor={id}>{label}</Label>
       <Input
         id={id}
@@ -96,7 +109,7 @@ export function EstimateField({
         }}
       />
       <p id={`${id}-hint`} className="text-2xs text-muted-foreground">
-        {error ?? "Hours and minutes, as in a timesheet cell. A plain number is hours."}
+        {error ?? hint ?? "Hours and minutes, as in a timesheet cell. A plain number is hours."}
       </p>
     </div>
   );

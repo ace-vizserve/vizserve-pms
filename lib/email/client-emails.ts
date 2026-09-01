@@ -1,5 +1,7 @@
 import "server-only";
 
+import { richTextToPlainText } from "@/lib/rich-text";
+
 import { sendEmail, type SendOutcome } from "./send";
 
 /**
@@ -261,7 +263,16 @@ export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<Send
         { label: "Please respond by", value: input.deadline },
         ...(outputs.length > 0 ? [{ label: "Output", value: outputs.join(" · ") }] : []),
       ],
-      quote: input.resolution ? { label: "What was done", text: input.resolution } : undefined,
+      /*
+       * ⚠️ FLATTENED. `layout.ts` runs every interpolation through `escapeHtml`,
+       * so a resolution written with a bullet list would arrive in the client's
+       * inbox as visible `<ul>` and `<li>` tags. The quote block sets
+       * `white-space: pre-wrap`, which renders the newlines the flattener
+       * produces — so a three-point resolution still reads as three points.
+       */
+      quote: input.resolution
+        ? { label: "What was done", text: richTextToPlainText(input.resolution) }
+        : undefined,
       button: { label: "Review and approve", path: `/approve/${input.token}` },
       // Stated a second time, in the sentence right under the button, because
       // this is the line a dispute turns on.

@@ -4,6 +4,7 @@ import { Inbox } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { InternalRequestRow } from "@/lib/database.types";
+import { richTextToPlainText } from "@/lib/rich-text";
 import { formatDate, todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
@@ -65,7 +66,17 @@ function columnsFor(showWho: boolean): Column<Row>[] {
       key: "reason",
       header: "Reason",
       className: "hidden sm:table-cell max-w-xs",
-      cell: (request) => <p className="truncate text-muted-foreground">{request.reason}</p>,
+      /*
+       * P7-56. The FLATTENED reason, not the column.
+       *
+       * `truncate` is `text-overflow: ellipsis` on one line, which cannot do
+       * anything useful with a `<ul>` or an `<h3>` — the markup would either
+       * render as blocks and blow the row height open or, rendered as text,
+       * show the reader a `<p>` tag. Same helper the emails use.
+       */
+      cell: (request) => (
+        <p className="truncate text-muted-foreground">{richTextToPlainText(request.reason)}</p>
+      ),
     },
     {
       key: "submitted",

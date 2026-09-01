@@ -12,6 +12,7 @@ import { createClient } from "@/utils/supabase/server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
+import { RichText } from "@/components/ui/rich-text";
 import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DecisionPanel } from "../decision-panel";
@@ -172,7 +173,9 @@ export default async function InternalRequestPage({ params }: { params: Promise<
 
           <div className="mt-5 border-t pt-4">
             <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Reason</dt>
-            <dd className="mt-1 text-sm whitespace-pre-wrap">{request.reason}</dd>
+            <dd className="mt-1">
+              <RichText html={request.reason} />
+            </dd>
           </div>
 
           {request.status !== "PENDING_REVIEW" ? (
@@ -180,9 +183,11 @@ export default async function InternalRequestPage({ params }: { params: Promise<
               <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
                 Decision {request.reviewed_at ? `· ${formatDateTime(request.reviewed_at)}` : ""}
               </dt>
-              <dd className="mt-1 text-sm whitespace-pre-wrap">
-                {request.decision_reason || (
-                  <span className="text-muted-foreground">No reason given.</span>
+              <dd className="mt-1">
+                {request.decision_reason ? (
+                  <RichText html={request.decision_reason} />
+                ) : (
+                  <span className="text-sm text-muted-foreground">No reason given.</span>
                 )}
               </dd>
             </div>

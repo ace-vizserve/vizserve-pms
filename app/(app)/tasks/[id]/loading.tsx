@@ -1,32 +1,44 @@
 import { PageShell } from "@/components/page-shell";
+
+import { TASK_DETAIL_GRID } from "./grid";
 import { CardSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Loading() {
   return (
-    // Mirrors the two-column grid the loaded page uses. A skeleton laid out
-    // differently from what replaces it is worse than none — the content
-    // visibly jumps into a different shape the moment it arrives.
+    // Mirrors the loaded page. A skeleton laid out differently from what
+    // replaces it is worse than none — the content visibly jumps into a
+    // different shape the moment it arrives.
     <PageShell className="gap-3">
       <Skeleton className="h-3 w-20" aria-hidden />
-      <div className="flex flex-wrap items-start justify-between gap-3" aria-hidden>
+
+      {/* P7-57 — the title row: the name and its chip line on the left, the one
+          promoted move on the right. The properties are no longer up here; they
+          are the first card in the left column. */}
+      <div className="flex flex-wrap items-start justify-between gap-4" aria-hidden>
         <div className="space-y-2">
           <Skeleton className="h-6 w-64" />
-          <Skeleton className="h-3 w-44" />
+          <Skeleton className="h-4 w-72" />
         </div>
-        <div className="space-y-2">
-          <Skeleton className="h-3 w-28" />
-          <Skeleton className="h-3 w-36" />
-        </div>
+        <Skeleton className="h-10 w-32" />
       </div>
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,4fr)] lg:items-start">
+
+      {/* The gate track, full width above both columns. Five stops on client
+          work, and it is one short card rather than a stack. */}
+      <Skeleton className="h-16 w-full rounded-lg" aria-hidden />
+
+      <div className={TASK_DETAIL_GRID}>
+        {/* Details — ten property rows, two pairs wide from `sm` — then The work:
+            the brief, the request panel COLLAPSED so one line, the resolution,
+            the output link and its files, and the subtasks. */}
         <div className="flex min-w-0 flex-col gap-3">
-          <CardSkeleton lines={3} />
           <CardSkeleton lines={5} />
-          <CardSkeleton lines={2} />
+          <CardSkeleton lines={8} />
         </div>
-        {/* History, on its own — one card, and the tallest thing here. */}
-        <div className="min-w-0">
+
+        {/* The rail: Activity — the composer, then the feed — and the trail. */}
+        <div className="flex min-w-0 flex-col gap-3">
+          <CardSkeleton lines={5} />
           <CardSkeleton lines={6} />
         </div>
       </div>

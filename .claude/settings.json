@@ -19,7 +19,8 @@
       "Bash(mv \"app/\\(app\\)/dashboard/page.tsx\" \"app/\\(app\\)/page.tsx\")",
       "Bash(sed -n '1,20p' \"C:/Users/Ace/.claude/plans/shiny-beaming-crab.md\")",
       "Bash(npx vitest *)",
-      "Bash(node --env-file=.env -e ' *)"
+      "Bash(node --env-file=.env -e ' *)",
+      "Bash(xargs grep -ln \"status_token\\\\|approval_token\\\\|feedback_token\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\Ace\\.claude\\plans"

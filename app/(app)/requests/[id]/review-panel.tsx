@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import type { CapacityRow } from "@/lib/schemas/approvals";
 
@@ -507,12 +507,14 @@ export function ReviewPanel({
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="edit_description">Description</Label>
-                <Textarea
-                  id="edit_description"
-                  rows={4}
+                {/* No `htmlFor` — the editor's input is a contenteditable,
+                    which is not a labelable element. */}
+                <Label>Description</Label>
+                <RichTextEditor
                   value={description}
-                  onChange={(event) => setDescription(event.target.value)}
+                  onChange={setDescription}
+                  ariaLabel="Description"
+                  minHeight="min-h-24"
                 />
               </div>
               {/* Every edit is written to the audit log with before and after. */}
@@ -543,16 +545,20 @@ export function ReviewPanel({
           ) : (
             <div className="space-y-3 border-t pt-4">
               <div className="space-y-2">
-                <Label htmlFor="reason">
+                <Label>
                   {mode === "returned"
                     ? "What do you need from them?"
                     : "Why can this not be taken on?"}
                 </Label>
-                <Textarea
-                  id="reason"
-                  rows={4}
+                <RichTextEditor
                   value={reason}
-                  onChange={(event) => setReason(event.target.value)}
+                  onChange={setReason}
+                  ariaLabel={
+                    mode === "returned"
+                      ? "What do you need from them?"
+                      : "Why can this not be taken on?"
+                  }
+                  minHeight="min-h-24"
                   placeholder={
                     mode === "returned"
                       ? "e.g. The brief mentions three sizes but only lists two. Which is the third?"
@@ -560,7 +566,13 @@ export function ReviewPanel({
                   }
                 />
                 <p className="text-xs text-muted-foreground">
-                  This is emailed to the requester word for word. They have no other channel.
+                  {/* ⚠️ Still true, and the reason this field flattens rather
+                      than sending markup: the email escapes every value it
+                      interpolates, so a `<strong>` would arrive as five visible
+                      characters. Formatting is for the staff reading it here;
+                      the requester gets clean text. */}
+                  This is emailed to the requester word for word, without the formatting. They have
+                  no other channel.
                 </p>
               </div>
 

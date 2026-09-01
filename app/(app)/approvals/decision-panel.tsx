@@ -7,7 +7,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { decideInternalRequest } from "./actions";
 
 /**
@@ -61,17 +61,19 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
 
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="decision-reason">
+          {/* No `htmlFor`: the editor's input is a contenteditable `div`, which
+              is not a labelable element, so `htmlFor` would resolve to nothing.
+              The editor carries the same words as its `aria-label` instead. */}
+          <Label>
             Reason <span className="text-muted-foreground">(required to reject)</span>
           </Label>
-          <Textarea
-            id="decision-reason"
-            rows={3}
+          <RichTextEditor
             value={reason}
-            onChange={(event) => setReason(event.target.value)}
+            onChange={setReason}
+            ariaLabel="Reason"
+            invalid={Boolean(error)}
             placeholder="Why you are approving or rejecting."
-            aria-invalid={Boolean(error)}
-            aria-describedby={error ? "decision-error" : undefined}
+            minHeight="min-h-20"
           />
           {error ? (
             <p id="decision-error" role="alert" className="text-xs text-destructive">

@@ -12,16 +12,16 @@ import {
 import { cn } from "@/lib/utils";
 
 /**
- * P7-28 — the three gates, as a rail.
+ * P7-28 / P7-57 — the three gates, as a track across the top of the page.
  *
  * The History card underneath is the EVIDENCE: every move, who made it, when,
  * and what they said. It is complete and it is unreadable at a glance — a task
  * that has been round QA twice runs a dozen entries, and none of them says
  * which of the three gates the work is currently sitting behind.
  *
- * This is the summary. One line per stage, each either passed, current or still
- * ahead. The trail stays exactly where it was, underneath and quieter, because
- * the two answer different questions: "where is this" and "what happened to it".
+ * This is the summary. One stop per stage, each either passed, current or still
+ * ahead. The trail stays in the right-hand rail, quieter, because the two answer
+ * different questions: "where is this" and "what happened to it".
  *
  * ⚠️ IT MUST NOT INVENT A GATE A CATEGORY DOES NOT HAVE.
  *
@@ -50,7 +50,15 @@ type Step = {
 
 type RequestGate = {
   submittedAt: string | null;
-  requesterName: string;
+  /**
+   * P7-59 — NULL FOR EVERYONE BUT A DEPARTMENT LEAD, and `line()` drops it.
+   *
+   * The client's name lives on the request row, which RLS scopes to leads
+   * because the client is never told who at VizServe holds their task and the
+   * anonymity is meant to run both ways. The stage still draws, and still dates
+   * itself from the brief — "Requested · 1 Sept" is the useful half anyway.
+   */
+  requesterName: string | null;
   reviewedAt: string | null;
   reviewedByName: string | null;
 };
@@ -66,11 +74,19 @@ const MARKER: Record<StepState, { icon: LucideIcon; className: string; word: str
   // and a tick, a filled dot, an empty ring and an alert do.
   done: { icon: CircleCheck, className: "text-success", word: "done" },
   current: { icon: CircleDot, className: "text-primary", word: "now" },
-  pending: { icon: Circle, className: "text-foreground-faint", word: "still to come" },
-  attention: { icon: CircleAlert, className: "text-warning", word: "needs attention" },
+  pending: {
+    icon: Circle,
+    className: "text-foreground-faint",
+    word: "still to come",
+  },
+  attention: {
+    icon: CircleAlert,
+    className: "text-warning",
+    word: "needs attention",
+  },
 };
 
-export function LifecycleRail(props: {
+export function GateTrack(props: {
   status: TaskStatus;
   category: TaskCategory;
   createdAt: string;
@@ -85,29 +101,58 @@ export function LifecycleRail(props: {
   const steps = buildSteps(props);
 
   return (
-    <ol className="mb-3 space-y-0 border-b pb-3">
+    /*
+      HORIZONTAL, ACROSS THE TOP, AND ABOVE BOTH COLUMNS.
+
+      It used to be a vertical rail stacked on top of the history trail inside
+      one card, and the two are different questions drawn as one object: this is
+      a ROUTE with fixed stops, ordered by the pipeline, and the trail under it
+      is a LOG ordered by time, newest first. A pipeline sitting directly above a
+      reverse-chronological list made the first look like the beginning of the
+      second.
+
+      It is up here because "how far along is this" is a header fact — it belongs
+      beside the status chip and the button that moves it, not three cards down
+      the right-hand rail.
+
+      Vertical again below `sm`: five stops with two lines of meta each cannot be
+      laid side by side in 390px without either truncating the labels or scrolling
+      the page sideways, and §9 forbids the second.
+    */
+    <ol className="flex flex-col gap-2.5 p-3 sm:flex-row sm:flex-wrap sm:items-start sm:gap-y-3">
       {steps.map((step, index) => {
         const marker = MARKER[step.state];
         const Icon = marker.icon;
-        const last = index === steps.length - 1;
 
         return (
-          <li key={step.label} className={cn("relative flex gap-2.5", last ? "pb-0" : "pb-2.5")}>
-            {/* The rail itself. Absolutely positioned so it runs from under one
-                marker to the next without either row having to know the other's
-                height — and absent on the last, which has nothing to join. */}
-            {!last ? (
-              <span aria-hidden className="absolute top-5 bottom-0 left-[7.5px] w-px bg-border" />
+          <li
+            key={step.label}
+            className={cn(
+              "flex min-w-0 items-start gap-2.5",
+              // Only the connectors stretch, so the free width falls BETWEEN
+              // stops rather than being shared out inside their labels.
+              index === 0 ? "sm:flex-none" : "sm:flex-1",
+            )}>
+            {index > 0 ? (
+              <span
+                aria-hidden
+                className={cn(
+                  "mt-[9px] hidden h-0.5 min-w-4 flex-1 rounded-full sm:block",
+                  // Filled only where the work has actually passed.
+                  step.state === "done" || steps[index - 1].state === "done"
+                    ? "bg-success"
+                    : "bg-border",
+                )}
+              />
             ) : null}
 
             <Icon className={cn("mt-0.5 size-4 shrink-0", marker.className)} aria-hidden />
 
-            <div className="min-w-0 flex-1">
+            <div className="min-w-0">
               <p
                 className={cn(
-                  "text-sm",
-                  step.state === "current" ? "font-medium" : null,
-                  step.state === "pending" ? "text-muted-foreground" : null,
+                  "text-xs leading-tight font-semibold",
+                  step.state === "pending" ? "font-medium text-muted-foreground" : null,
                 )}>
                 {step.label}
                 {/* The marker is a colour and a shape; this is the word. */}
@@ -186,7 +231,14 @@ function buildSteps({
         meta: line(request?.reviewedAt, request?.reviewedByName),
       },
       stage("Work in progress", 2, reached, finished, now, who("PIC", picName, "No PIC yet")),
-      stage("Gate 2 · internal QA", 3, reached, finished, now, who("QA", qaName, "No reviewer yet")),
+      stage(
+        "Gate 2 · internal QA",
+        3,
+        reached,
+        finished,
+        now,
+        who("QA", qaName, "No reviewer yet"),
+      ),
       clientGate(4, reached, finished, status, decision),
     ];
   }
@@ -195,7 +247,11 @@ function buildSteps({
     const reached = finished ? 2 : 1;
 
     return [
-      { label: "Made it for yourself", state: "done", meta: line(createdAt, createdByName) },
+      {
+        label: "Made it for yourself",
+        state: "done",
+        meta: line(createdAt, createdByName),
+      },
       stage("Work in progress", 1, reached, finished, now, null),
       // P7-02 — no QA stage and no client stage. You made it, you close it.
       stage("Done", 2, reached, finished, now, null),
@@ -229,7 +285,11 @@ function stage(
 
   // The current stage names the ACTUAL status, so a parked task reads
   // "Work in progress · Waiting for info" rather than claiming progress.
-  return { label, state: "current", meta: [now, seat].filter(Boolean).join(" · ") };
+  return {
+    label,
+    state: "current",
+    meta: [now, seat].filter(Boolean).join(" · "),
+  };
 }
 
 /** Gate 3, where the client's own answer decides the state rather than the status. */
@@ -245,7 +305,11 @@ function clientGate(
   // "The clock ran out" is not "the client approved". The two statuses are
   // deliberately distinct and Phase 6 reports the split, so the rail says which.
   if (status === "COMPLETED_NO_RESPONSE") {
-    return { label, state: "done", meta: line(decision?.createdAt, null, "Closed with no response") };
+    return {
+      label,
+      state: "done",
+      meta: line(decision?.createdAt, null, "Closed with no response"),
+    };
   }
 
   if (decision?.decision === "REVISION_REQUESTED") {

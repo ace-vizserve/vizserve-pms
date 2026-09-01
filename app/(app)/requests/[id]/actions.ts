@@ -17,6 +17,8 @@ import {
   decideResultSchema,
   decisionPayloadSchema,
 } from "@/lib/schemas/approvals";
+import { richTextToPlainText } from "@/lib/rich-text";
+import { sanitizeRichText } from "@/lib/rich-text-server";
 import { createClient } from "@/utils/supabase/server";
 
 /**
@@ -94,7 +96,9 @@ export async function decideOnRequest(
       p_qa_assignee_id: payload.qa_assignee_id,
       p_approved_target_date: payload.approved_target_date,
       p_title: payload.title,
-      p_description: payload.description,
+      // P7-56. Sanitised on write; `<RichText>` sanitises again on render,
+      // which is the pass that actually guards.
+      p_description: sanitizeRichText(payload.description),
       p_list_id: payload.list_id,
     });
 
@@ -168,7 +172,7 @@ export async function decideOnRequest(
   const { data, error } = await supabase.rpc("vizserve_pms_decide_request", {
     p_request_id: requestId,
     p_decision: payload.decision,
-    p_reason: payload.reason,
+    p_reason: sanitizeRichText(payload.reason),
   });
 
   if (error) return { ok: false, error: readableError(error) };
@@ -193,7 +197,11 @@ export async function decideOnRequest(
           requesterName: decided.requester_name,
           referenceNo: decided.reference_no,
           title: decided.title,
-          reason: payload.reason,
+          // ⚠️ FLATTENED, NOT THE MARKUP. `lib/email/layout.ts` escapes every
+          // value it interpolates, so sending HTML here would put visible
+          // `<strong>` tags in a client's inbox. The copy on the review panel
+          // says so: "emailed word for word, without the formatting."
+          reason: richTextToPlainText(payload.reason),
           formPath,
         })
       : sendRequestRejectedEmail({
@@ -201,7 +209,7 @@ export async function decideOnRequest(
           requesterName: decided.requester_name,
           referenceNo: decided.reference_no,
           title: decided.title,
-          reason: payload.reason,
+          reason: richTextToPlainText(payload.reason),
         });
 
   const outcome = await send;

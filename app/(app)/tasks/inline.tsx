@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { toDateString } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -495,6 +495,83 @@ export function InlineEstimate({
 }
 
 /**
+ * The list a task is filed under, edited where it is read.
+ *
+ * P7-56 — the last of the task's properties that still needed a boxed `Select`
+ * to change it, which is why the detail page's property block could not be a
+ * row of plain values until now. Same shape as `InlinePriority`: the value IS
+ * the trigger, and "No list" is offered as an option rather than as a separate
+ * Clear, because a task with no list is the ordinary case and not a cleared one.
+ */
+export function InlineList({
+  taskId,
+  value,
+  lists,
+}: {
+  taskId: string;
+  value: string | null;
+  lists: { id: string; name: string }[];
+}) {
+  const { patch, pending } = usePatch(taskId);
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(value);
+
+  const nameOf = (id: string | null) => lists.find((list) => list.id === id)?.name ?? null;
+
+  function choose(next: string | null) {
+    const previous = shown;
+    setShown(next);
+    setOpen(false);
+    patch(
+      { list_id: next },
+      {
+        success: next ? `Filed under ${nameOf(next)}` : "Removed from its list",
+        onRefused: () => setShown(previous),
+      },
+    );
+  }
+
+  const label = nameOf(shown);
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger
+        aria-label={label ? `List: ${label}. Change it.` : "File this under a list"}
+        disabled={pending}
+        className={VALUE_BUTTON}
+      >
+        {label ?? <span className="text-muted-foreground">No list</span>}
+      </PopoverTrigger>
+
+      <PopoverContent align="start" className="w-56 p-1">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => choose(null)}
+          className={cn(MENU_ROW, "text-muted-foreground")}
+        >
+          No list
+          {shown === null ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
+        </button>
+
+        {lists.map((list) => (
+          <button
+            key={list.id}
+            type="button"
+            disabled={pending}
+            onClick={() => choose(list.id)}
+            className={cn(MENU_ROW, shown === list.id && "font-semibold")}
+          >
+            <span className="min-w-0 flex-1 truncate">{list.name}</span>
+            {shown === list.id ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
+          </button>
+        ))}
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
  * `+` — a subtask, one level deep.
  *
  * A SUBTASK IS JUST ANOTHER TASK, NESTED, so this opens the SAME composer the
@@ -515,17 +592,43 @@ export function InlineEstimate({
 export function AddSubtask({
   parentId,
   assignable = [],
+  label,
+  className,
 }: {
   parentId: string;
   /** Empty is fine — the composer falls back to "Myself", which is most subtasks. */
   assignable?: Assignable[];
+  /**
+   * P7-56 — a LABELLED button instead of the bare glyph, for a card header.
+   *
+   * The icon-only form is right in `TaskRowActions`, where it is one of four
+   * marks in a hover strip on a dense row and a word per control would be a
+   * paragraph per task. It was wrong in the Subtasks card header, because the
+   * card directly below it puts "Upload" in the identical slot with a word on
+   * it — the same affordance, in the same place, labelled in one case and not
+   * the other, which left the `+` reading as decoration.
+   */
+  label?: string;
+  /**
+   * P7-56 — overrides the trigger's styling entirely. The task detail surface
+   * passes its `ACTION_LINK`, so adding a subtask reads as one entry in that
+   * page's list of actions rather than as a button competing with the status
+   * controls above it.
+   */
+  className?: string;
 }) {
   const [open, setOpen] = useState(false);
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger aria-label="Add a subtask" title="Add a subtask" className={ICON_BUTTON}>
-        <Plus className="size-3.5" aria-hidden />
+      <PopoverTrigger
+        aria-label="Add a subtask"
+        title="Add a subtask"
+        className={cn(
+          className ?? (label ? buttonVariants({ variant: "outline", size: "sm" }) : ICON_BUTTON),
+        )}>
+        <Plus className={label && !className ? undefined : "size-3.5"} aria-hidden />
+        {label}
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-80 p-2">
@@ -584,6 +687,24 @@ export function SubtaskProgress({ done, total }: { done: number; total: number }
     </span>
   );
 }
+
+/**
+ * A PROPERTY VALUE THAT IS ALSO ITS OWN EDITOR.
+ *
+ * P7-56 — the shape the task detail's property block is built from, and the
+ * reason that block can be compact at all. A boxed `Select` or `Input` per
+ * property costs 40px of control plus a label above it; a value that opens a
+ * popover when you click it costs one line, and reads as a fact rather than as
+ * a form somebody left half-filled. It is what the team is already used to.
+ *
+ * The affordance is the hover fill and the focus ring — not a border, which
+ * would make it a box again.
+ */
+const VALUE_BUTTON = cn(
+  "-mx-1 min-w-0 truncate rounded-sm px-1 py-0.5 text-left",
+  "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+  "disabled:cursor-not-allowed disabled:opacity-60",
+);
 
 const ICON_BUTTON = cn(
   "inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground",

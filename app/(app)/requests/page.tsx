@@ -1,15 +1,15 @@
+import { Inbox } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { Inbox } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/authorization";
-import { createClient } from "@/utils/supabase/server";
-import { formatDate, isOverdue } from "@/lib/dates";
-import { isRequestStatus, RequestStatusBadge } from "@/components/status-badge";
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
+import { isRequestStatus, RequestStatusBadge } from "@/components/status-badge";
+import { requireRole } from "@/lib/auth/authorization";
+import { formatDate, isOverdue } from "@/lib/dates";
+import { createClient } from "@/utils/supabase/server";
 import { RequestFilters } from "./filters";
 
 export const metadata: Metadata = { title: "Requests" };
@@ -49,10 +49,8 @@ export default async function RequestsPage({
 
   let query = supabase
     .from("vizserve_pms_requests")
-    .select(
-      "id, reference_no, title, requester_name, requester_org, target_date, status, submitted_at, form_id",
-    )
-    .order("target_date", { ascending: true, nullsFirst: false })
+    .select("id, reference_no, title, requester_name, requester_org, target_date, status, submitted_at, form_id")
+    .order("submitted_at", { ascending: false, nullsFirst: false })
     .limit(200);
 
   if (isRequestStatus(params.status)) query = query.eq("status", params.status);
@@ -72,6 +70,12 @@ export default async function RequestsPage({
 
   const columns: Column<RequestRow>[] = [
     {
+      key: "submitted_at",
+      header: "Submitted at",
+      className: "max-w-xs",
+      cell: (request) => <p className="truncate">{formatDate(request.submitted_at)}</p>,
+    },
+    {
       key: "reference",
       header: "Reference",
       className: "whitespace-nowrap",
@@ -80,9 +84,7 @@ export default async function RequestsPage({
           <Link href={`/requests/${request.id}`} className="font-medium hover:underline">
             {request.reference_no}
           </Link>
-          <p className="text-xs text-muted-foreground">
-            {formName.get(request.form_id) ?? "—"}
-          </p>
+          <p className="text-xs text-muted-foreground">{formName.get(request.form_id) ?? "—"}</p>
         </>
       ),
     },
@@ -137,8 +139,7 @@ export default async function RequestsPage({
         empty={
           requestsError ? (
             <QueryError what="requests" message={requestsError.message} />
-          ) : 
-          isFiltered ? (
+          ) : isFiltered ? (
             <EmptyState
               icon={<Inbox />}
               title="No requests match these filters"
@@ -155,9 +156,7 @@ export default async function RequestsPage({
       />
 
       {rows.length >= 200 ? (
-        <p className="text-xs text-muted-foreground">
-          Showing the first 200. Narrow the filters to see more.
-        </p>
+        <p className="text-xs text-muted-foreground">Showing the first 200. Narrow the filters to see more.</p>
       ) : null}
     </PageShell>
   );

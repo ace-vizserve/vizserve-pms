@@ -30,13 +30,25 @@ export type ClientFile = {
   size_bytes: number;
 };
 
-export function RequestAttachmentList({ attachments }: { attachments: ClientFile[] }) {
+export function RequestAttachmentList({
+  attachments,
+  taskId,
+}: {
+  attachments: ClientFile[];
+  /**
+   * P7-59. The attachments table is policied to the department's leads, so
+   * without this a member PIC gets a list of the client's reference images and
+   * "that file is not available" on every one of them. The action falls back to
+   * a seat test on this task — see `getRequestAttachmentUrl`.
+   */
+  taskId: string;
+}) {
   const [opening, setOpening] = useState<string | null>(null);
 
   async function open(file: ClientFile) {
     setOpening(file.id);
     try {
-      const result = await getRequestAttachmentUrl(file.id);
+      const result = await getRequestAttachmentUrl(file.id, taskId);
 
       if (!result.ok) {
         toast.error(result.error);
@@ -57,8 +69,7 @@ export function RequestAttachmentList({ attachments }: { attachments: ClientFile
             type="button"
             onClick={() => open(file)}
             disabled={opening !== null}
-            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-muted/60 disabled:opacity-60"
-          >
+            className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm hover:bg-muted/60 disabled:opacity-60">
             {opening === file.id ? (
               <Loader2 className="size-3.5 shrink-0 animate-spin text-muted-foreground" />
             ) : (

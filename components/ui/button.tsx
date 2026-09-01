@@ -39,6 +39,26 @@ const buttonVariants = cva(
           "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
         destructive:
           "border-destructive-border bg-destructive-subtle grade-raised text-destructive shadow-raised hover:bg-destructive/10 active:shadow-none focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40",
+        // P7-61 — THE OTHER THREE SEMANTIC TONES, in the shape `destructive`
+        // already proved: a `-subtle` fill, its own `-border` hairline, and the
+        // solid for the text. Each pair is one of the measured ones in the
+        // design system (§1.2, "every solid holds 4.5:1 on its own subtle"), so
+        // no new colour is introduced here — only the fourth, fifth and sixth
+        // members of a set that had shipped exactly one member.
+        //
+        // They exist because a control can now MEAN something. Client work draws
+        // its moves as buttons rather than as a dropdown, and "Pass QA" and
+        // "Send back to PIC" must not be two identical grey rectangles. Without
+        // these a call site would hand-roll the fill in `className`, which is
+        // the anti-pattern (§7) and, worse, would have to re-hand-roll the
+        // `grade-raised` beside it — a `grade-*` utility is deliberately outside
+        // the `bg-` namespace, so tailwind-merge CANNOT dedupe two of them and
+        // an override silently stacks both gradients.
+        success:
+          "border-success-border bg-success-subtle grade-raised text-success shadow-raised hover:bg-success/10 active:shadow-none focus-visible:border-success/40 focus-visible:ring-success/20 dark:focus-visible:ring-success/40",
+        info: "border-info-border bg-info-subtle grade-raised text-info shadow-raised hover:bg-info/10 active:shadow-none focus-visible:border-info/40 focus-visible:ring-info/20 dark:focus-visible:ring-info/40",
+        warning:
+          "border-warning-border bg-warning-subtle grade-raised text-warning shadow-raised hover:bg-warning/10 active:shadow-none focus-visible:border-warning/40 focus-visible:ring-warning/20 dark:focus-visible:ring-warning/40",
         link: "text-primary underline-offset-4 hover:underline",
       },
       size: {

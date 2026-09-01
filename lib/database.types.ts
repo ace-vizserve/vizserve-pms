@@ -2028,6 +2028,21 @@ export type Database = {
         Args: { p_task_ids: string[] };
         Returns: { task_id: string; minutes: number }[];
       };
+      /**
+       * P7-59 — the request's BRIEF for anyone holding a seat on the task, with
+       * the client's identity left out. `Returns` is `unknown` on purpose: it is
+       * a `jsonb` payload and the shape lives in `taskRequestBriefSchema`, which
+       * parses it. A hand-written type here would be a second copy to drift.
+       */
+      vizserve_pms_task_request_brief: {
+        Args: { p_task_id: string };
+        Returns: unknown;
+      };
+      /** P7-59 — the storage path of one of that request's attachments. */
+      vizserve_pms_task_request_attachment_path: {
+        Args: { p_task_id: string; p_attachment_id: string };
+        Returns: string | null;
+      };
       vizserve_pms_task_waiting_duration: {
         Args: { p_task_id: string };
         Returns: string;

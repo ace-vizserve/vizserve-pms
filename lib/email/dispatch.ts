@@ -1,5 +1,7 @@
 import "server-only";
 
+import { richTextToPlainText } from "@/lib/rich-text";
+
 import type { VizservePmsNotificationType } from "@/lib/database.types";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -143,7 +145,20 @@ export async function dispatchPendingEmails(limit = 50): Promise<DispatchSummary
     const body: EmailBody = {
       preheader: notification.body || notification.title,
       heading: notification.title,
-      paragraphs: [`Hi ${firstName},`, notification.body || "There is an update waiting for you."],
+      paragraphs: [
+        `Hi ${firstName},`,
+        /*
+         * ⚠️ FLATTENED. A `commented` notification carries the comment itself,
+         * and comments are rich text since P7-56. `layout.ts` escapes every
+         * value it interpolates, so markup would arrive as visible tags.
+         *
+         * A no-op for every other notification type, whose bodies are written
+         * as plain sentences by SQL triggers — which is exactly why it goes
+         * here, once, rather than at each of the eleven call sites that could
+         * produce one.
+         */
+        richTextToPlainText(notification.body) || "There is an update waiting for you.",
+      ],
       button: notification.link_path
         ? { label: presentation.action, path: notification.link_path }
         : undefined,

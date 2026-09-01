@@ -18,7 +18,6 @@ import {
   taskGroupSchema,
   overridePayloadSchema,
   taskCommentSchema,
-  taskDetailsSchema,
   taskParentSchema,
   taskPatchSchema,
   taskPrioritySchema,
@@ -164,64 +163,34 @@ export async function overrideTaskStatus(
 // Editing the task itself
 // ---------------------------------------------------------------------------
 
-/**
- * Saves the fields a task carries, including the resolution.
+/*
+ * P7-55 REMOVED `updateTaskDetails` FROM HERE.
  *
- * An ordinary UPDATE, not an RPC — and safe as one precisely because `status` is
- * not in the column grant. The resolution is freely editable while the work is
- * in progress; the gate is not "you may not write this" but "you may not reach
- * FOR_QA without it", and that lives in the transition function.
+ * It wrote the whole form in one statement, behind the Save button on
+ * `/tasks/[id]`. That page now autosaves per field, so the button went — and
+ * with it the last caller. It is not merely redundant: it took `title` and
+ * `description` from props the card never displayed, so pressing Save after a
+ * rename in another tab wrote the old title back over the new one.
+ *
+ * `updateTaskField` below is now the ONLY writer of any task column, which is
+ * what `editable-title.tsx` has argued for since it landed: a second path to
+ * the same column is a second set of rules to keep in step.
  */
-export async function updateTaskDetails(taskId: string, input: unknown): Promise<ActionResult> {
-  await requireAuthContextOrThrow();
-
-  const parsed = taskDetailsSchema.safeParse(input);
-  if (!parsed.success) {
-    return { ok: false, error: "Check the highlighted fields.", fieldErrors: flattenIssues(parsed.error) };
-  }
-
-  const values = parsed.data;
-  const supabase = await createClient();
-
-  // `.select()` because a policy-refused UPDATE is not an error — it is success
-  // with zero rows (trap 9). Without it, somebody editing a task they are no
-  // longer on is told "Saved".
-  const { data, error } = await supabase
-    .from("vizserve_pms_tasks")
-    .update({
-      title: values.title,
-      description: values.description,
-      resolution: values.resolution || null,
-      output_link: values.output_link || null,
-      // "" from a cleared date input means "no date", not the epoch.
-      due_date: values.due_date || null,
-      start_date: values.start_date || null,
-      list_id: values.list_id,
-      // P7-11 / P7-15. Both were in `taskDetailsSchema` from the day their
-      // migrations landed and neither was ever written here, so the detail form
-      // parsed a priority and an estimate and then dropped them.
-      priority: values.priority,
-      estimate_minutes: values.estimate_minutes,
-    })
-    .eq("id", taskId)
-    .select("id");
-
-  if (error) return { ok: false, error: readableError(error) };
-  if (!data || data.length === 0) return { ok: false, error: "That task is not yours to edit." };
-
-  refresh(taskId);
-  return { ok: true, data: undefined };
-}
 
 /**
  * K3 — one field, edited in place on a list row or a board card.
  *
  * Every column this can write is already inside the column-level UPDATE grant
  * (`p7_11a` restated the list) and already scoped by the UPDATE policy, so there
- * is no backend behind this — which is exactly why it is worth having. What it
- * adds over `updateTaskDetails` is that it does not need the whole form: a row
- * that only knows the new due date cannot send a title and a description it
- * never displayed.
+ * is no backend behind this — which is exactly why it is worth having. It does
+ * not need the whole form: a row that only knows the new due date cannot send a
+ * title and a description it never displayed.
+ *
+ * ⚠️ SINCE P7-55 THIS IS THE ONLY WRITER OF ANY TASK COLUMN. The task detail
+ * page autosaves through it field by field, so a patch that arrives here is the
+ * whole of what somebody changed — never a form echoing back values it was
+ * handed. Adding a second whole-form action would reintroduce exactly the
+ * clobber that one was deleted for.
  *
  * `status` is deliberately unreachable here. See `taskPatchSchema`.
  */
@@ -247,6 +216,15 @@ export async function updateTaskField(taskId: string, input: unknown): Promise<A
       // `?? null` for each keeps "not sent" and "cleared" distinct — a row that
       // never showed the estimate must not be able to erase it.
       ...(patch.title !== undefined ? { title: patch.title } : {}),
+      // P7-55. `|| null` on the two text columns, not on `description`, and the
+      // asymmetry is deliberate: `updateTaskDetails` stored `""` as NULL for
+      // these two, and the DB resolution gate TRIMS before it checks, so a
+      // column holding `''` where the rest of the app holds NULL is a
+      // divergence that surfaces as "it says I wrote a resolution and QA says I
+      // did not". `description` was always written raw.
+      ...(patch.description !== undefined ? { description: patch.description } : {}),
+      ...(patch.resolution !== undefined ? { resolution: patch.resolution || null } : {}),
+      ...(patch.output_link !== undefined ? { output_link: patch.output_link || null } : {}),
       ...(patch.due_date !== undefined ? { due_date: patch.due_date || null } : {}),
       ...(patch.start_date !== undefined ? { start_date: patch.start_date || null } : {}),
       ...(patch.list_id !== undefined ? { list_id: patch.list_id } : {}),
@@ -1061,6 +1039,19 @@ export async function getTaskAttachmentUrl(
  */
 export async function getRequestAttachmentUrl(
   attachmentId: string,
+  /**
+   * P7-59 — the task the file is being opened FROM, where there is one.
+   *
+   * `vizserve_pms_request_attachments` is policied to the department's leads, so
+   * the direct read below returns nothing for a member PIC — and the task page
+   * would list a client's reference image and then refuse to open it. With the
+   * task id the fallback authorizes on a SEAT instead: you are on this task, and
+   * this file belongs to that task's request.
+   *
+   * ⚠️ IT IS THE FUNCTION THAT DECIDES, NOT THIS ARGUMENT. Passing a task id you
+   * are not on returns null from the RPC and the download still fails.
+   */
+  taskId?: string,
 ): Promise<ActionResult<{ url: string }>> {
   await requireAuthContextOrThrow();
   const supabase = await createClient();
@@ -1071,12 +1062,23 @@ export async function getRequestAttachmentUrl(
     .eq("id", attachmentId)
     .maybeSingle();
 
-  if (!attachment) return { ok: false, error: "That file is not available." };
+  // The lead's path first, because it is one query and it is most callers.
+  let path = attachment?.storage_path ?? null;
+
+  if (!path && taskId) {
+    const { data } = await supabase.rpc("vizserve_pms_task_request_attachment_path", {
+      p_task_id: taskId,
+      p_attachment_id: attachmentId,
+    });
+    path = (data as string | null) ?? null;
+  }
+
+  if (!path) return { ok: false, error: "That file is not available." };
 
   // Sixty seconds, matching every other signed URL in the app: long enough to
   // click, short enough that a URL pasted into a chat is dead before anyone
   // opens it.
-  const url = await signAttachmentUrl(attachment.storage_path, 60);
+  const url = await signAttachmentUrl(path, 60);
   if (!url) return { ok: false, error: "That file could not be opened." };
 
   return { ok: true, data: { url } };

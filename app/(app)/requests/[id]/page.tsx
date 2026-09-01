@@ -5,8 +5,9 @@ import { notFound } from "next/navigation";
 
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
-import { RequestStatusBadge } from "@/components/status-badge";
+import { RequestStatusBadge, TaskStatusBadge } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RichText } from "@/components/ui/rich-text";
 import { requireRole } from "@/lib/auth/authorization";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { emailJsConfig } from "@/lib/emailjs";
@@ -133,6 +134,55 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     .eq("request_id", id)
     .order("created_at");
 
+  /*
+   * P7-59 — THE TASK THIS REQUEST BECAME.
+   *
+   * Approving at Gate 1 creates a task and then says nothing more about it. The
+   * request page carried the submission, a green "Approved" pill and a two-line
+   * Decision card, and no route onward at all — so the answer to "what happened
+   * to this?" was to go to /tasks and search for the title by eye.
+   *
+   * ⚠️ ONE QUERY, AND ONLY ONCE THE DECISION IS MADE. A pending request has no
+   * task by definition, and this page already refuses to pay for the capacity
+   * scan on a request decided last week — the same reasoning applies in reverse.
+   *
+   * NO DEPARTMENT FILTER. The task policy is WIDER than the request policy — a
+   * lead who can open this request necessarily manages the department the task
+   * was created in — so RLS returning a row IS the permission check, and
+   * restating it here would imply the policy were optional.
+   */
+  const { data: linkedTask } = awaitingDecision
+    ? { data: null }
+    : await supabase
+        .from("vizserve_pms_tasks")
+        .select("id, title, status, assignee_id, qa_assignee_id")
+        .eq("request_id", id)
+        .maybeSingle();
+
+  /*
+   * Names for the three people this card can mention: whoever approved it, and
+   * the two the task was handed to.
+   *
+   * One `in` query rather than three joins — `approver_id` was already being
+   * SELECTED by the decisions query above and then never rendered, which is how
+   * "Approved · 2 Sep" ended up not saying by whom.
+   */
+  const peopleIds = [
+    decisions?.data?.[0]?.approver_id,
+    linkedTask?.assignee_id,
+    linkedTask?.qa_assignee_id,
+  ].filter((value): value is string => Boolean(value));
+
+  const { data: people } =
+    peopleIds.length > 0
+      ? await supabase
+          .from("vizserve_pms_users")
+          .select("id, full_name")
+          .in("id", [...new Set(peopleIds)])
+      : { data: null };
+
+  const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
+
   const values = (request.field_values ?? {}) as Record<string, unknown>;
 
   function renderValue(raw: unknown): string {
@@ -167,7 +217,9 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
       {request.decision_reason ? (
         <div className="rounded-lg border border-info/30 bg-info-subtle p-4">
           <p className="text-xs font-medium text-info">Decision reason</p>
-          <p className="mt-1 text-sm text-info">{request.decision_reason}</p>
+          {/* P7-56. `text-info` has to come through on the wrapper — `RichText`
+              sets no colour of its own, so the banner's tone is inherited. */}
+          <RichText html={request.decision_reason} className="mt-1 text-info" />
         </div>
       ) : null}
 
@@ -199,7 +251,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           <dl>
             <Row label="Form">{form?.name ?? "—"}</Row>
             <Row label="Description">
-              <p className="whitespace-pre-wrap">{request.description}</p>
+              <RichText html={request.description} />
             </Row>
             <Row label="Target date">
               {formatDate(request.target_date)}
@@ -292,13 +344,70 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                   <span className="text-muted-foreground">
                     {" · "}
                     {formatDateTime(decision.created_at)}
+                    {/* P7-59. `approver_id` was already being selected here and
+                        never shown, so the card said what happened and not who
+                        did it — the one fact somebody chasing a request needs. */}
+                    {nameOf.get(decision.approver_id ?? "")
+                      ? ` · ${nameOf.get(decision.approver_id ?? "")}`
+                      : null}
                   </span>
                 </p>
                 {decision.reason ? (
-                  <p className="whitespace-pre-wrap rounded-sm bg-muted/50 px-3 py-2 text-sm">{decision.reason}</p>
+                  // The CLIENT's words on the approval page, not staff markup —
+                  // that surface has no editor. Rendered through `RichText`
+                  // anyway, because it is the same column shape and the
+                  // sanitiser is what makes any of these safe.
+                  <RichText
+                    html={decision.reason}
+                    className="rounded-sm bg-muted/50 px-3 py-2"
+                  />
                 ) : null}
               </div>
             ))}
+
+            {/*
+              P7-59 — WHERE IT WENT.
+              
+              The end of the Gate 1 story: what was agreed, who is doing it, and
+              a way through to the work. Inside the Decision card rather than a
+              card of its own, because it is the rest of one sentence — this
+              request was approved, on these terms, and became that.
+            */}
+            {linkedTask ? (
+              <dl className="mt-4 border-t pt-1">
+                <Row label="Agreed delivery">
+                  {formatDate(request.approved_target_date ?? request.target_date)}
+                  {/* Same word the Request card above uses for the same fact, so
+                      a renegotiated date reads identically in both places. */}
+                  {negotiated ? (
+                    <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
+                  ) : null}
+                </Row>
+
+                <Row label="Assigned to">
+                  {nameOf.get(linkedTask.assignee_id ?? "") ?? (
+                    <span className="text-muted-foreground">Unassigned</span>
+                  )}
+                  {nameOf.get(linkedTask.qa_assignee_id ?? "") ? (
+                    <span className="text-muted-foreground">
+                      {" · QA "}
+                      {nameOf.get(linkedTask.qa_assignee_id ?? "")}
+                    </span>
+                  ) : null}
+                </Row>
+
+                <Row label="Task">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <Link
+                      href={`/tasks/${linkedTask.id}`}
+                      className="min-w-0 truncate underline-offset-2 hover:underline">
+                      {linkedTask.title}
+                    </Link>
+                    <TaskStatusBadge status={linkedTask.status} />
+                  </span>
+                </Row>
+              </dl>
+            ) : null}
           </CardContent>
         </Card>
       ) : null}

@@ -360,6 +360,70 @@ export function transitionsFrom(status: TaskStatus): Transition[] {
 }
 
 /**
+ * P7-61 — WHAT A MOVE DOES, as opposed to where it lands.
+ *
+ * Client work offers one or two moves at a time and they are drawn as BUTTONS
+ * rather than a dropdown (see `task-actions.tsx`), which means each one needs a
+ * colour. The obvious source — the tone of the status it lands on — is the
+ * wrong one, and wrong in the direction that matters:
+ *
+ *   "Pass QA"          → FOR_CLIENT_APPROVAL, which is `warning`
+ *   "Send back to PIC" → ONGOING,             which is `brand`
+ *
+ * So the approving move would read cautionary and the rejecting one would read
+ * like progress. A status tone answers "how should I feel about work SITTING
+ * here"; a button has to answer "what happens if I press this". They are
+ * different questions and only coincidentally have the same answer.
+ *
+ * Three answers, derived from the pair rather than listed beside every row —
+ * a fourth column on `TASK_TRANSITIONS` is a fourth thing to keep in step:
+ *
+ *   advance   the work moves on to whoever has it next
+ *   return    it goes BACK to somebody who already had it
+ *   hold      it stops where it is and waits on someone outside the flow
+ *
+ * ⚠️ `WAITING_FOR_INFO` → `ONGOING` IS AN ADVANCE, NOT A RETURN. Resuming
+ * parked work hands it to nobody; it picks up where it stopped.
+ */
+export type TransitionIntent = "advance" | "return" | "hold";
+
+export function transitionIntent(transition: Pick<Transition, "from" | "to">): TransitionIntent {
+  if (transition.to === "WAITING_FOR_INFO") return "hold";
+  // Back to the start, from anywhere that is not already the start.
+  if (transition.to === "OPEN") return "return";
+  // Back to the PIC — from QA, from the client, or from a reopened close. The
+  // two excluded origins are the ones where ONGOING is forward: OPEN is
+  // starting, WAITING_FOR_INFO is resuming.
+  if (
+    transition.to === "ONGOING" &&
+    transition.from !== "OPEN" &&
+    transition.from !== "WAITING_FOR_INFO"
+  ) {
+    return "return";
+  }
+  return "advance";
+}
+
+/**
+ * The tone a move is drawn in, from `docs/12`'s semantic set (§1.2) — one
+ * mapping, so a button and the chip vocabulary around it cannot disagree.
+ *
+ * `advance` splits on whether it ENDS the task, because "send this on" and
+ * "this is finished" are not the same promise: the first is the page's primary
+ * action in brand, the second is the green every completed thing in this app
+ * already wears. `return` takes `info`, which is the tone a returned request
+ * carries everywhere else. `hold` takes `warning`, the waiting tone.
+ */
+export function transitionTone(
+  transition: Pick<Transition, "from" | "to">,
+): "brand" | "success" | "info" | "warning" {
+  const intent = transitionIntent(transition);
+  if (intent === "return") return "info";
+  if (intent === "hold") return "warning";
+  return isTerminal(transition.to) ? "success" : "brand";
+}
+
+/**
  * The moves THIS person can make right now.
  *
  * Presentation only — hiding a button protects nobody, and the same rules are
@@ -470,8 +534,7 @@ export function nextStep(
 
   const category = taskCategory(task);
   const moves = availableTransitions(status, viewer, task).filter(
-    (move) =>
-      move.actor !== "client" && move.actor !== "system" && move.requires !== "comment",
+    (move) => move.actor !== "client" && move.actor !== "system" && move.requires !== "comment",
   );
   if (moves.length === 0) return null;
 
@@ -582,40 +645,23 @@ export const overridePayloadSchema = z.object({
     .min(10, "Say why this had to be forced — the history is read by people who were not here."),
 });
 
-export const taskDetailsSchema = z.object({
-  title: z.string().trim().min(1, "A task needs a title.").max(300),
-  description: z.string().trim().default(""),
-  /** What the member actually produced. The QA reviewer reviews against this. */
-  resolution: z.string().trim().default(""),
-  output_link: z.union([z.literal(""), z.url("Enter a full URL, including https://")]).default(""),
-  due_date: z
-    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-    .default(""),
-  start_date: z
-    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-    .default(""),
-  list_id: z.uuid().nullable().default(null),
-  /**
-   * P7-11. Editable after the fact, unlike `status` — re-prioritising is
-   * ordinary work rather than a state transition, which is why `priority` sits
-   * INSIDE the column-level UPDATE grant and `status` does not.
-   */
-  priority: taskPrioritySchema.default(null),
-  /**
-   * P7-15. Minutes, like every other duration here — parse the field with
-   * `parseCellDuration` so `2h` means the same thing as it does in a timesheet
-   * cell. Null is "nobody estimated", which is most tasks.
-   */
-  estimate_minutes: z
-    .number()
-    .int("Give it in whole minutes.")
-    .positive("An estimate of nothing is not an estimate.")
-    .max(100_000, "That is more than ten working weeks — is it one task?")
-    .nullable()
-    .default(null),
-});
-
-export type TaskDetailsInput = z.infer<typeof taskDetailsSchema>;
+/**
+ * P7-55. The link rule, extracted so the CLIENT can hold the same predicate.
+ *
+ * `/tasks/[id]` autosaves this field on a timer, which means it has to decide
+ * for itself whether a half-typed value is worth sending — `https:` is invalid
+ * on the way to being valid, and a save attempt per keystroke pause is both
+ * pointless traffic and a flashing error. The field calls
+ * `outputLinkSchema.safeParse(draft)` and simply does not write until it
+ * passes. One predicate and one message, shared, rather than a second copy of
+ * the rule drifting from this one.
+ *
+ * `""` is deliberately valid and means "clear the link".
+ */
+export const outputLinkSchema = z.union([
+  z.literal(""),
+  z.url("Enter a full URL, including https://"),
+]);
 
 /**
  * K3 — ONE FIELD AT A TIME, for editing in place on a list row or a board card.
@@ -632,10 +678,28 @@ export type TaskDetailsInput = z.infer<typeof taskDetailsSchema>;
  * `vizserve_pms_transition_task` and nowhere else. A patch that accepted it
  * would compile, pass zod, and be dropped by Postgres privileges — which reads
  * as "the edit did not save" with no reason given.
+ *
+ * ⚠️ P7-55 ADDED `description`, `resolution` AND `output_link`, and gave them no
+ * default for exactly the reason the paragraph above gives. This is now the ONLY
+ * writer of every task column — `updateTaskDetails` and `taskDetailsSchema` were
+ * deleted with the Save button on `/tasks/[id]`, because a second path to the
+ * same column is a second set of rules to keep in step. If you are about to add
+ * `.default("")` to one of these three to make a form tidier, that is the bug:
+ * it would turn "I did not touch the resolution" into "clear the resolution" on
+ * every patch that omits it.
  */
 export const taskPatchSchema = z
   .object({
     title: z.string().trim().min(1, "A task needs a title.").max(300),
+    /**
+     * The Gate 1 brief. Editable through this patch since P7-55, though no
+     * screen currently offers the control — the key exists so the column has a
+     * writer at all.
+     */
+    description: z.string().trim(),
+    /** What the member actually produced. The QA reviewer reviews against this. */
+    resolution: z.string().trim(),
+    output_link: outputLinkSchema,
     // "" from a cleared date input means "no date", never the epoch. Both dates
     // stay nullable rather than required, because most internal work has one or
     // neither.
@@ -805,3 +869,64 @@ export const taskGroupSchema = z.object({
 });
 
 export type TaskGroupInput = z.infer<typeof taskGroupSchema>;
+
+// ---------------------------------------------------------------------------
+// P7-59 — the brief a client task came from, WITHOUT the client's identity.
+// ---------------------------------------------------------------------------
+
+/**
+ * What `vizserve_pms_task_request_brief` hands back.
+ *
+ * ⚠️ IT IS THE CONTRACT FOR A SECURITY DEFINER FUNCTION, so the shape here is
+ * the shape the migration builds — not a convenience type over the requests
+ * table. Adding a field to this without adding it to
+ * `20260901140000_p7_59_task_request_brief.sql` produces `undefined` at runtime
+ * and no type error, which is why the parse below is not optional.
+ *
+ * ⚠️ AND IT HAS NO IDENTITY IN IT, BY DESIGN. `requester_name`, `requester_org`
+ * and `requester_email` are absent because the client is never told who at
+ * VizServe holds their task, and the anonymity is meant to run both ways. A
+ * department lead reads those from the request row itself, through RLS.
+ */
+export const taskRequestBriefSchema = z.object({
+  reference_no: z.string(),
+  /** The client's own wording. The task's brief may have been rewritten at Gate 1. */
+  description: z.string().nullable(),
+  /** What the CLIENT asked for — not the team's due date, and not the agreed date. */
+  target_date: z.string().nullable(),
+  submitted_at: z.string().nullable(),
+  field_values: z.record(z.string(), z.unknown()).default({}),
+  /** Archived fields included — a historical answer keeps its label (D20/R5). */
+  fields: z
+    .array(
+      z.object({
+        field_key: z.string(),
+        label: z.string(),
+        is_active: z.boolean(),
+      }),
+    )
+    .default([]),
+  attachments: z
+    .array(
+      z.object({
+        id: z.string(),
+        filename: z.string(),
+        mime_type: z.string(),
+        size_bytes: z.number(),
+      }),
+    )
+    .default([]),
+});
+
+export type TaskRequestBrief = z.infer<typeof taskRequestBriefSchema>;
+
+/**
+ * The function returns SQL NULL for internal work, for a task that does not
+ * exist, and for a caller with no seat on it — three different reasons, one
+ * answer, because the page does the same thing with all of them.
+ */
+export function parseTaskRequestBrief(value: unknown): TaskRequestBrief | null {
+  if (value === null || value === undefined) return null;
+  const parsed = taskRequestBriefSchema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}

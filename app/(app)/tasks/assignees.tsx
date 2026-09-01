@@ -334,7 +334,7 @@ const GROUP = "px-3 py-1 text-2xs font-semibold tracking-wide text-muted-foregro
 const ROW = "flex w-full items-center gap-2 px-3 py-1.5 text-xs";
 
 /** `Amier Bautista` → `AB`. Two letters, because three is a monogram. */
-function initials(name: string): string {
+export function initials(name: string): string {
   return (
     name
       .split(/[\s@.]+/)

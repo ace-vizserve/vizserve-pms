@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 
+import { richTextToPlainText } from "@/lib/rich-text";
 import { formatDate } from "@/lib/dates";
 import { approvalPageResultSchema, type ApprovalPage } from "@/lib/schemas/client-approval";
 import { createClient } from "@/utils/supabase/server";
@@ -138,7 +139,18 @@ export default async function ClientApprovalPage({
               <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 What was done
               </h2>
-              <p className="mt-2 whitespace-pre-wrap text-sm">{page.resolution}</p>
+              {/*
+                ⚠️ FLATTENED, NOT RENDERED AS MARKUP — decision 3 of P7-56.
+                This is an unauthenticated client-facing page, and the QA
+                resolution it shows is the one rich-text column a person outside
+                the company ever reads. Flattening keeps the client's view of it
+                identical to the email they were sent, and keeps this page's
+                blast radius at zero: there is no `dangerouslySetInnerHTML` on
+                any surface a stranger can reach.
+              */}
+              <p className="mt-2 whitespace-pre-wrap text-sm">
+                {richTextToPlainText(page.resolution)}
+              </p>
             </section>
           ) : null}
 

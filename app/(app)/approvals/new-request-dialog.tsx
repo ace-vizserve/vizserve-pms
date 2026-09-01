@@ -25,7 +25,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { TimePicker } from "@/components/ui/time-picker";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { todayInAppZone } from "@/lib/dates";
@@ -147,6 +147,12 @@ export function NewRequestDialog({
    * re-render its own selection. Each still writes a hidden input, so the native
    * `<form action={submit}>` reads exactly the same FormData keys it always did.
    */
+  /*
+   * P7-56. The reason is a rich-text editor now, which has no form value of its
+   * own — so it joins the Selects and the DatePickers above in the
+   * controlled-state-plus-hidden-input arrangement this form already uses.
+   */
+  const [reason, setReason] = useState("");
   const [startDate, setStartDate] = useState<string | null>(null);
   const [endDate, setEndDate] = useState<string | null>(null);
   const [correctionDate, setCorrectionDate] = useState<string | null>(null);
@@ -632,11 +638,17 @@ export function NewRequestDialog({
           ) : null}
 
           <div className="space-y-2">
-            <Label htmlFor="reason">Reason</Label>
-            <Textarea
-              id="reason"
-              name="reason"
-              rows={3}
+            {/* No `htmlFor` — the editor's input is a contenteditable, which is
+                not a labelable element. It carries the same words as its
+                `aria-label`. */}
+            <Label>Reason</Label>
+            <input type="hidden" name="reason" value={reason} />
+            <RichTextEditor
+              value={reason}
+              onChange={setReason}
+              ariaLabel="Reason"
+              invalid={Boolean(errors.reason?.length)}
+              minHeight="min-h-20"
               placeholder={
                 type === "LEAVE"
                   ? "Family matters, medical appointment…"

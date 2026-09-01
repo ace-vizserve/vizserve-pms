@@ -30,7 +30,7 @@ const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7
 const SIDEBAR_WIDTH = "19rem"
 const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
-const SIDEBAR_KEYBOARD_SHORTCUT = "b"
+// No SIDEBAR_KEYBOARD_SHORTCUT — see the note above the toggle helper below.
 
 type SidebarContextProps = {
   state: "expanded" | "collapsed"
@@ -93,21 +93,26 @@ function SidebarProvider({
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen, setOpenMobile])
 
-  // Adds a keyboard shortcut to toggle the sidebar.
-  React.useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (
-        event.key === SIDEBAR_KEYBOARD_SHORTCUT &&
-        (event.metaKey || event.ctrlKey)
-      ) {
-        event.preventDefault()
-        toggleSidebar()
-      }
-    }
-
-    window.addEventListener("keydown", handleKeyDown)
-    return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [toggleSidebar])
+  /*
+   * ⚠️ NO Cmd/Ctrl+B SHORTCUT. P7-56 removed it, and it must not come back.
+   *
+   * shadcn ships this component with a WINDOW-LEVEL `keydown` listener bound to
+   * Cmd/Ctrl+B that calls `preventDefault()` unconditionally. Since the rich
+   * text editor landed, that is also the universal shortcut for BOLD — so
+   * bolding a word in a resolution or a rejection reason collapsed the whole
+   * sidebar at the same time, and the `preventDefault` meant the editor
+   * sometimes never saw the key at all.
+   *
+   * Fixing it by ignoring the event when focus is inside an editor was the
+   * obvious alternative and is the wrong trade: it makes a global shortcut
+   * conditional on where the caret happens to be, which is the kind of rule
+   * nobody can predict and everybody reports as a bug twice. The sidebar has a
+   * visible, labelled toggle in the top bar (`SidebarTrigger`) that works
+   * everywhere and needs no explaining; bold does not have a second way in.
+   *
+   * `toggleSidebar` is still exported on the context and still used by that
+   * trigger — only the global key binding is gone.
+   */
 
   // We add a state so that we can do data-state="expanded" or "collapsed".
   // This makes it easier to style the sidebar with Tailwind classes.

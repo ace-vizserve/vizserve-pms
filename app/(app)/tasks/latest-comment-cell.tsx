@@ -74,10 +74,13 @@ export function LatestCommentCell({
         </PopoverHeader>
 
         {/* Capped and scrollable: a task with forty comments must not produce a
-            popover taller than the window. */}
-        <div className="max-h-96 overflow-y-auto">
-          <CommentThread taskId={taskId} comments={comments} viewerId={viewerId} />
-        </div>
+            popover taller than the window.
+
+            P7-55 moved the cap from a wrapper onto the thread's own list. The
+            wrapper version put the COMPOSER inside the scroll region, so
+            replying to a long thread meant scrolling back down to find the box
+            you type into. */}
+        <CommentThread taskId={taskId} comments={comments} viewerId={viewerId} scrollList />
       </PopoverContent>
     </Popover>
   );

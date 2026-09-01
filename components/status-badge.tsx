@@ -66,6 +66,35 @@ type Tone = keyof typeof TONE;
 export type ChipTone = Tone;
 
 /**
+ * P7-61 — THE SAME TONE, AS A CONTROL RATHER THAN AS A LABEL.
+ *
+ * A chip says where something IS; a button says what pressing it DOES. Client
+ * work now draws its one or two legal moves as buttons (`task-actions.tsx`),
+ * and each needs to be the colour of what it means — otherwise "Pass QA" and
+ * "Send back to PIC" are two identical rectangles side by side, which is the
+ * confusion the dropdown had and the buttons were meant to end.
+ *
+ * ⚠️ THIS FILE STAYS THE ONE PLACE A TONE BECOMES A COLOUR (§4.1). The map is
+ * tone → the button variant that wears it, not tone → a class string: the
+ * colours themselves live in `buttonVariants`, next to the six other variants,
+ * so a call site never writes a fill. `brand` is the exception and deliberately
+ * so — a forward move is the page's PRIMARY action, and primary is a solid
+ * brand fill rather than a brand tint.
+ */
+const TONE_BUTTON = {
+  neutral: "outline",
+  brand: "default",
+  info: "info",
+  success: "success",
+  warning: "warning",
+  danger: "destructive",
+} as const;
+
+export function toneButtonVariant(tone: Tone): (typeof TONE_BUTTON)[Tone] {
+  return TONE_BUTTON[tone];
+}
+
+/**
  * The chip shape, for a labelled state that is NOT one of the canonical enums —
  * the landing page's module build status ("Live" / "Phase 5") and its approval
  * gate markers.
@@ -319,8 +348,7 @@ export function TaskStatusGlyph({
         // colour "For QA" is.
         TONE[tone],
         className,
-      )}
-    >
+      )}>
       <Icon className="size-3" aria-hidden />
       <span className="sr-only">{label}</span>
     </span>
@@ -409,7 +437,11 @@ export function TaskPriorityBadge({
   if (!priority) return null;
 
   return (
-    <Pill tone={TASK_PRIORITY_TONES[priority]} label={TASK_PRIORITY_LABELS[priority]} className={className} />
+    <Pill
+      tone={TASK_PRIORITY_TONES[priority]}
+      label={TASK_PRIORITY_LABELS[priority]}
+      className={className}
+    />
   );
 }
 

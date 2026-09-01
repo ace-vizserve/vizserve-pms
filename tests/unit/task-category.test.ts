@@ -5,6 +5,8 @@ import {
   TASK_TRANSITIONS,
   availableTransitions,
   nextStep,
+  transitionIntent,
+  transitionTone,
   scopeAllows,
   taskCategory,
 } from "@/lib/schemas/tasks";
@@ -263,5 +265,64 @@ describe("nextStep — off the category's own path", () => {
     // movement is the way back and this is the button for it.
     const lead = { isAssignee: true, isQa: false, leadsDepartment: true, isAdmin: false };
     expect(nextStep("FOR_CLIENT_APPROVAL", lead, INTERNAL)).toMatchObject({ to: "COMPLETED" });
+  });
+});
+
+/**
+ * P7-61 — the colour a MOVE is drawn in.
+ *
+ * Client work draws its one or two legal moves as buttons, and the tone comes
+ * from what the move DOES rather than from the status it lands on. These cases
+ * pin the two pairs where those two answers disagree, because taking the easy
+ * source would paint approval as caution and rejection as progress.
+ */
+describe("transitionIntent / transitionTone", () => {
+  it("reads a move to ONGOING from a REVIEW stage as a return, not progress", () => {
+    expect(transitionIntent({ from: "QA_IN_PROGRESS", to: "ONGOING" })).toBe("return");
+    expect(transitionIntent({ from: "FOR_CLIENT_APPROVAL", to: "ONGOING" })).toBe("return");
+    expect(transitionIntent({ from: "FOR_QA", to: "ONGOING" })).toBe("return");
+    expect(transitionIntent({ from: "COMPLETED", to: "ONGOING" })).toBe("return");
+  });
+
+  it("reads STARTING and RESUMING as advances, because they hand the work to nobody", () => {
+    expect(transitionIntent({ from: "OPEN", to: "ONGOING" })).toBe("advance");
+    expect(transitionIntent({ from: "WAITING_FOR_INFO", to: "ONGOING" })).toBe("advance");
+  });
+
+  it("reads parking as a hold and any move back to OPEN as a return", () => {
+    expect(transitionIntent({ from: "ONGOING", to: "WAITING_FOR_INFO" })).toBe("hold");
+    expect(transitionIntent({ from: "OPEN", to: "WAITING_FOR_INFO" })).toBe("hold");
+    expect(transitionIntent({ from: "ONGOING", to: "OPEN" })).toBe("return");
+    expect(transitionIntent({ from: "WAITING_FOR_INFO", to: "OPEN" })).toBe("return");
+  });
+
+  it("does not borrow the DESTINATION status' tone, which inverts the two QA moves", () => {
+    // FOR_CLIENT_APPROVAL is a `warning` chip and ONGOING is a `brand` one, so
+    // the status tones would draw approval as caution and rejection as progress.
+    expect(transitionTone({ from: "QA_IN_PROGRESS", to: "FOR_CLIENT_APPROVAL" })).toBe("brand");
+    expect(transitionTone({ from: "QA_IN_PROGRESS", to: "ONGOING" })).toBe("info");
+  });
+
+  it("gives a move that ENDS the task the success tone, not the primary one", () => {
+    expect(transitionTone({ from: "QA_IN_PROGRESS", to: "COMPLETED" })).toBe("success");
+    expect(transitionTone({ from: "ONGOING", to: "COMPLETED" })).toBe("success");
+    expect(transitionTone({ from: "ONGOING", to: "FOR_QA" })).toBe("brand");
+  });
+
+  it("never offers a client task two forward moves at once — one primary button", () => {
+    const lead = { isAssignee: true, isQa: true, leadsDepartment: true, isAdmin: false };
+
+    for (const status of TASK_STATUSES) {
+      const advances = availableTransitions(status, lead, CLIENT).filter(
+        (transition) => transitionIntent(transition) === "advance",
+      );
+      expect(advances.length, `${status} offers ${advances.length} forward moves`).toBeLessThan(2);
+    }
+  });
+
+  it("gives every legal transition a tone", () => {
+    for (const transition of TASK_TRANSITIONS) {
+      expect(["brand", "success", "info", "warning"]).toContain(transitionTone(transition));
+    }
   });
 });
