@@ -18,6 +18,27 @@ export const APPROVAL_DECISIONS = ["approved", "returned", "rejected"] as const;
 export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
 
 /**
+ * P7-63 — what a person reads, as opposed to what Postgres stores.
+ *
+ * The request detail page rendered the enum itself with `capitalize` on it,
+ * which is the same class of bug as showing a status code: "returned" is a
+ * column value, and "Returned for changes" is the thing that happened. Stated
+ * here, beside the union, so a screen never restates it — the same arrangement
+ * `TASK_STATUS_LABELS` has in `tasks.ts`.
+ *
+ * Exhaustive by construction: a `Record` keyed on the union stops compiling the
+ * moment a fourth decision is added without a label to go with it.
+ */
+export const APPROVAL_DECISION_LABELS: Record<ApprovalDecision, string> = {
+  approved: "Approved",
+  // Not "Returned". The request went back to the requester with something to
+  // act on, and the word people use for that is not the past tense of a verb
+  // about direction.
+  returned: "Returned for changes",
+  rejected: "Rejected",
+};
+
+/**
  * A reason people can act on.
  *
  * The floor is 10 characters, not 1. A required field that accepts "." is a

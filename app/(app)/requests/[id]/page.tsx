@@ -1,11 +1,15 @@
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ChevronRight, ClipboardCheck } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
-import { RequestStatusBadge, TaskStatusBadge } from "@/components/status-badge";
+import {
+  ApprovalDecisionBadge,
+  RequestStatusBadge,
+  TaskStatusBadge,
+} from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RichText } from "@/components/ui/rich-text";
 import { requireRole } from "@/lib/auth/authorization";
@@ -335,14 +339,24 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           <CardHeader>
             <CardTitle>Decision</CardTitle>
           </CardHeader>
-          <CardContent>
+
+          {/*
+            P7-63 — THE OUTCOME, READ AS AN OUTCOME.
+
+            Three beats, in the order the story happened: what was decided, on
+            what terms, and where the work went. It used to be a decision
+            sentence with a <dl> bolted under it, which put the route through to
+            the task in a table cell — the one thing somebody opening a closed
+            request actually wants to click.
+          */}
+          <CardContent className="space-y-5">
             {decisions.data.map((decision) => (
-              <div key={decision.created_at} className="space-y-1">
-                <p className="text-sm">
-                  {/* Never colour alone — the word carries the state. */}
-                  <span className="font-medium capitalize">{decision.decision}</span>
-                  <span className="text-muted-foreground">
-                    {" · "}
+              <div key={decision.created_at} className="space-y-2">
+                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                  {/* The chip carries a glyph as well as a label, so the
+                      decision survives greyscale and a printed queue. */}
+                  <ApprovalDecisionBadge decision={decision.decision} />
+                  <span className="text-sm text-muted-foreground">
                     {formatDateTime(decision.created_at)}
                     {/* P7-59. `approver_id` was already being selected here and
                         never shown, so the card said what happened and not who
@@ -351,62 +365,85 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                       ? ` · ${nameOf.get(decision.approver_id ?? "")}`
                       : null}
                   </span>
-                </p>
+                </div>
+
                 {decision.reason ? (
                   // The CLIENT's words on the approval page, not staff markup —
                   // that surface has no editor. Rendered through `RichText`
                   // anyway, because it is the same column shape and the
                   // sanitiser is what makes any of these safe.
-                  <RichText
-                    html={decision.reason}
-                    className="rounded-sm bg-muted/50 px-3 py-2"
-                  />
+                  <RichText html={decision.reason} className="rounded-sm bg-muted/50 px-3 py-2" />
                 ) : null}
               </div>
             ))}
 
             {/*
-              P7-59 — WHERE IT WENT.
-              
-              The end of the Gate 1 story: what was agreed, who is doing it, and
-              a way through to the work. Inside the Decision card rather than a
-              card of its own, because it is the rest of one sentence — this
-              request was approved, on these terms, and became that.
+              P7-59 / P7-63 — WHERE IT WENT.
+
+              Only ever drawn for an approval: a returned or rejected request has
+              no task and no agreed date, and stops at the reason above. The
+              guard is `linkedTask` rather than the decision word, because the
+              task is the thing being described.
             */}
             {linkedTask ? (
-              <dl className="mt-4 border-t pt-1">
-                <Row label="Agreed delivery">
-                  {formatDate(request.approved_target_date ?? request.target_date)}
-                  {/* Same word the Request card above uses for the same fact, so
-                      a renegotiated date reads identically in both places. */}
-                  {negotiated ? (
-                    <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
-                  ) : null}
-                </Row>
-
-                <Row label="Assigned to">
-                  {nameOf.get(linkedTask.assignee_id ?? "") ?? (
-                    <span className="text-muted-foreground">Unassigned</span>
-                  )}
-                  {nameOf.get(linkedTask.qa_assignee_id ?? "") ? (
-                    <span className="text-muted-foreground">
-                      {" · QA "}
-                      {nameOf.get(linkedTask.qa_assignee_id ?? "")}
-                    </span>
-                  ) : null}
-                </Row>
-
-                <Row label="Task">
-                  <span className="flex flex-wrap items-center gap-2">
-                    <Link
-                      href={`/tasks/${linkedTask.id}`}
-                      className="min-w-0 truncate underline-offset-2 hover:underline">
-                      {linkedTask.title}
-                    </Link>
-                    <TaskStatusBadge status={linkedTask.status} />
+              <>
+                <div>
+                  <span className="text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    Agreed delivery
                   </span>
-                </Row>
-              </dl>
+                  <p className="mt-0.5 text-sm">
+                    {formatDate(request.approved_target_date ?? request.target_date)}
+                    {/* Same word the Request card above uses for the same fact, so
+                        a renegotiated date reads identically in both places. */}
+                    {negotiated ? (
+                      <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
+                    ) : null}
+                  </p>
+                </div>
+
+                <div>
+                  <span className="text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
+                    The work
+                  </span>
+
+                  {/*
+                    ONE LINK, ONE TAB STOP. A plain <Link> rather than a button
+                    wearing link clothes — it navigates, so it is a link (§2.1).
+                    The title, the stage and the two people are all inside it, so
+                    there is no second focusable thing to tab past.
+
+                    Raised, never inset: `grade-surface` sits BESIDE `bg-card`
+                    rather than replacing it, because tailwind-merge keeps only
+                    the last `bg-*` and would eat the colour token.
+                  */}
+                  <Link
+                    href={`/tasks/${linkedTask.id}`}
+                    className="mt-1.5 flex items-center gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised transition-[box-shadow,border-color] hover:border-accent-border hover:shadow-raised-lg">
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-accent-border bg-accent grade-chip text-accent-foreground">
+                      <ClipboardCheck aria-hidden className="size-4" />
+                    </span>
+
+                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="min-w-0 truncate text-sm font-medium">
+                          {linkedTask.title}
+                        </span>
+                        <TaskStatusBadge status={linkedTask.status} />
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {nameOf.get(linkedTask.assignee_id ?? "") ?? "Unassigned"}
+                        {nameOf.get(linkedTask.qa_assignee_id ?? "")
+                          ? ` · QA ${nameOf.get(linkedTask.qa_assignee_id ?? "")}`
+                          : null}
+                      </span>
+                    </span>
+
+                    {/* Decoration only. `--foreground-faint` is 3.44:1 and may
+                        never carry a word. */}
+                    <ChevronRight aria-hidden className="size-4 shrink-0 text-foreground-faint" />
+                  </Link>
+                </div>
+              </>
             ) : null}
           </CardContent>
         </Card>

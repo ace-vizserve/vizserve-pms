@@ -1,13 +1,16 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  CircleCheck,
   CircleDashed,
   CirclePause,
   CirclePlay,
   CircleCheckBig,
   CircleSlash,
+  CircleX,
   ClipboardCheck,
   ScanSearch,
   SendHorizontal,
+  Undo2,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -17,6 +20,7 @@ import type {
   VizservePmsRequestStatus,
   VizservePmsTaskStatus,
 } from "@/lib/database.types";
+import { APPROVAL_DECISION_LABELS, type ApprovalDecision } from "@/lib/schemas/approvals";
 import { internalRequestLabel } from "@/lib/schemas/internal-requests";
 import {
   TASK_CATEGORY_LABELS,
@@ -180,6 +184,52 @@ export function RequestStatusBadge({
 export const REQUEST_STATUS_OPTIONS = (
   Object.keys(REQUEST_STATUS) as VizservePmsRequestStatus[]
 ).map((value) => ({ value, label: REQUEST_STATUS[value].label }));
+
+/**
+ * P7-63 — the Gate 1 outcome, as a chip rather than a capitalised enum.
+ *
+ * `app/(app)/requests/[id]/page.tsx` printed `{decision.decision}` in a
+ * `font-medium capitalize` span, which meant an approval and a rejection were
+ * the same sentence in the same colour — the one fact the card exists to report
+ * was the one thing it did not say. It is a real Postgres enum
+ * (`vizserve_pms_approval_decision`), so it belongs here with the other typed
+ * badges rather than being toned at the call site (§4.1). `Chip` is for labels
+ * with no enum behind them; this has one.
+ *
+ * EACH DECISION CARRIES ITS OWN GLYPH, not the shared dot. Three chips that
+ * differ only by fill are three chips a greyscale screenshot cannot tell apart,
+ * and this is the chip somebody scans a closed request for.
+ */
+const APPROVAL_DECISION_TONES: Record<ApprovalDecision, Tone> = {
+  approved: "success",
+  // Warning, not danger: a return is a negotiation with something to do next,
+  // and the request is still alive. Rejection is the one that ends it.
+  returned: "warning",
+  rejected: "danger",
+};
+
+const APPROVAL_DECISION_ICONS: Record<ApprovalDecision, LucideIcon> = {
+  approved: CircleCheck,
+  returned: Undo2,
+  rejected: CircleX,
+};
+
+export function ApprovalDecisionBadge({
+  decision,
+  className,
+}: {
+  decision: ApprovalDecision;
+  className?: string;
+}) {
+  return (
+    <Pill
+      tone={APPROVAL_DECISION_TONES[decision] ?? "neutral"}
+      label={APPROVAL_DECISION_LABELS[decision] ?? decision}
+      icon={APPROVAL_DECISION_ICONS[decision]}
+      className={className}
+    />
+  );
+}
 
 /**
  * Narrows a URL parameter to a real status.
