@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { formatWeekRange, formatWeekday, startOfWeek, weekDates } from "@/lib/dates";
 import {
   addMinutesToTime,
+  breakAdjustedPunches,
   cellCommit,
   clockAt,
   dayState,
@@ -19,6 +20,7 @@ import {
   withStart,
   draftToEntry,
   isWeekLocked,
+  punchComparison,
   timesheetEntrySchema,
   timesheetEntryUpdateSchema,
   timesheetWeekDecisionSchema,
@@ -678,5 +680,177 @@ describe("cellCommit — what a typed cell means", () => {
     // delete, and that is worth pinning down rather than leaving to be
     // discovered: a flush treats it the same way blur always has.
     expect(cellCommit("   ", { total: 60, entryCount: 1 })).toEqual({ kind: "delete" });
+  });
+});
+
+describe("punchComparison — P8-07, two records side by side", () => {
+  const days = [
+    "2026-08-31",
+    "2026-09-01",
+    "2026-09-02",
+    "2026-09-03",
+    "2026-09-04",
+    "2026-09-05",
+    "2026-09-06",
+  ];
+
+  it("puts punched beside logged and names the gap", () => {
+    // The case the whole feature exists for: nine hours on the clock, four on
+    // the timesheet. Both figures survive; the difference is stated and neither
+    // is corrected against the other.
+    const result = punchComparison({
+      days,
+      punched: { "2026-08-31": 540 },
+      logged: { "2026-08-31": 240 },
+    });
+
+    expect(result.punchedMinutes).toBe(540);
+    expect(result.loggedMinutes).toBe(240);
+    expect(result.gapMinutes).toBe(300);
+    expect(result.complete).toBe(true);
+  });
+
+  it("treats a day with no DTR row as unknown, never as zero", () => {
+    // A missing row means NOBODY PUNCHED, which is a different statement from
+    // punching and working nothing. Summing it as 0 would put a fabricated
+    // eight-hour gap next to somebody's week.
+    const result = punchComparison({
+      days,
+      punched: {},
+      logged: { "2026-08-31": 480 },
+    });
+
+    expect(result.punchedMinutes).toBeNull();
+    expect(result.gapMinutes).toBeNull();
+    expect(result.unpunchedDays).toBe(1);
+    expect(result.complete).toBe(false);
+  });
+
+  it("does not count an ordinary weekend as a missing punch", () => {
+    // Nobody punched on Saturday and nobody logged on Saturday. That is a
+    // Saturday, not a discrepancy — counting it would put "5 days with no
+    // punch" on every clean week and train leads to ignore the line.
+    const result = punchComparison({
+      days,
+      punched: { "2026-08-31": 480 },
+      logged: { "2026-08-31": 480 },
+    });
+
+    expect(result.unpunchedDays).toBe(0);
+    expect(result.gapMinutes).toBe(0);
+    expect(result.complete).toBe(true);
+  });
+
+  it("counts a shift never punched out rather than guessing its length", () => {
+    // `workedMinutes` returns null for an open shift and this keeps that null.
+    // The punched total is then a floor, and `complete` is how the screen knows
+    // to say so instead of presenting it as the week.
+    const result = punchComparison({
+      days,
+      punched: { "2026-08-31": 480, "2026-09-01": null },
+      logged: { "2026-08-31": 480, "2026-09-01": 480 },
+    });
+
+    expect(result.punchedMinutes).toBe(480);
+    expect(result.openDays).toBe(1);
+    expect(result.complete).toBe(false);
+    // The logged side still counts the open day in full — the timesheet knows
+    // its own hours whatever the DTR is missing.
+    expect(result.loggedMinutes).toBe(960);
+  });
+
+  it("reads a gap in either direction", () => {
+    const result = punchComparison({
+      days,
+      punched: { "2026-08-31": 240 },
+      logged: { "2026-08-31": 480 },
+    });
+
+    expect(result.gapMinutes).toBe(-240);
+  });
+
+  it("ignores days outside the week it was asked about", () => {
+    // Both maps are policy-scoped reads over a date range, and a stray day would
+    // otherwise inflate a week total that a reviewer is comparing against a grid
+    // showing seven columns.
+    const result = punchComparison({
+      days,
+      punched: { "2026-08-24": 480, "2026-08-31": 480 },
+      logged: { "2026-08-24": 480, "2026-08-31": 480 },
+    });
+
+    expect(result.punchedMinutes).toBe(480);
+    expect(result.loggedMinutes).toBe(480);
+  });
+});
+
+
+describe("breakAdjustedPunches — P8-07, comparing like with like", () => {
+  it("takes the unpaid break off a complete punch pair", () => {
+    // THE BUG THIS FIXES. 08:00-17:00 is a nine-hour span describing an
+    // eight-hour day, so an ordinary week logging its full 8h a day read as "5h
+    // more on the clock than on the timesheet" — for every person, every week,
+    // burying the 9h-punched-4h-logged case the comparison exists to surface.
+    expect(breakAdjustedPunches({ punched: { "2026-08-31": 540 }, breakMinutes: 60 })).toEqual({
+      "2026-08-31": 480,
+    });
+  });
+
+  it("keeps a person's explicit zero break rather than inheriting an hour", () => {
+    // `null` means inherit and `0` means no break; collapsing them is what the
+    // migration refuses to do, and `||` in a caller is how it would happen.
+    expect(breakAdjustedPunches({ punched: { "2026-08-31": 540 }, breakMinutes: 0 })).toEqual({
+      "2026-08-31": 540,
+    });
+  });
+
+  it("leaves a shift never punched out as null instead of deducting from it", () => {
+    // There is no span to take a break off. Deducting from an unknown would
+    // manufacture a figure, which is the one thing this whole feature must not
+    // do beside somebody's hours.
+    expect(
+      breakAdjustedPunches({ punched: { "2026-08-31": 540, "2026-09-01": null }, breakMinutes: 60 }),
+    ).toEqual({ "2026-08-31": 480, "2026-09-01": null });
+  });
+
+  it("clamps at zero when the break is longer than the span", () => {
+    // Somebody who punched a thirty-minute day did not work minus half an hour,
+    // and a negative punched total flows straight into a sentence about their
+    // week.
+    expect(breakAdjustedPunches({ punched: { "2026-08-31": 30 }, breakMinutes: 60 })).toEqual({
+      "2026-08-31": 0,
+    });
+  });
+
+  it("returns null for the whole person when no break could be read", () => {
+    // `loadAppSettings` degrades to 60 rather than throwing, so a failed read
+    // arrives looking like a number. Asserting a gap derived from one nobody
+    // read is the failure P8-05 fixed on the member's own page; here the claim
+    // is withheld and the screen says why.
+    expect(breakAdjustedPunches({ punched: { "2026-08-31": 540 }, breakMinutes: null })).toBeNull();
+  });
+
+  it("keeps an absent day absent", () => {
+    // A day nobody punched must not become a key, because `punchComparison`
+    // reads the presence of the key as "somebody punched" and a 0 there is an
+    // accusation.
+    const adjusted = breakAdjustedPunches({ punched: {}, breakMinutes: 60 });
+
+    expect(adjusted).toEqual({});
+    expect(adjusted && "2026-08-31" in adjusted).toBe(false);
+  });
+
+  it("feeds punchComparison a gap that is about work, not about lunch", () => {
+    // End to end: five ordinary 9h days, 8h logged against each. The raw spans
+    // would report a five-hour gap; the adjusted ones report none.
+    const days = ["2026-08-31", "2026-09-01", "2026-09-02", "2026-09-03", "2026-09-04"];
+    const punched = Object.fromEntries(days.map((day) => [day, 540]));
+    const logged = Object.fromEntries(days.map((day) => [day, 480]));
+
+    const adjusted = breakAdjustedPunches({ punched, breakMinutes: 60 })!;
+    const result = punchComparison({ days, punched: adjusted, logged });
+
+    expect(result.gapMinutes).toBe(0);
+    expect(result.complete).toBe(true);
   });
 });

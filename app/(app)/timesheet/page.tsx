@@ -490,7 +490,16 @@ export default async function TimesheetPage({
       ? "Approved leave"
       : profileResult.error
         ? "Your working hours"
-        : settings.fellBack
+        : /* ⚠️ ONLY WHEN THIS PERSON ACTUALLY INHERITS IT. `dayMinutes` above
+             reads `break_minutes ?? settings.breakMinutes`, and the SQL says the
+             same thing with `coalesce(u.break_minutes, s.break_minutes)` — so
+             somebody carrying their own break never touched the company figure
+             and a failed settings read tells us nothing about their week.
+             Withholding it from them anyway would leave the database computing a
+             minimum and refusing the week in silence, which is the exact surprise
+             this whole block exists to prevent. `== null` catches undefined too,
+             and a deliberate 0 is a real break that keeps its own branch. */
+          profileResult.data?.break_minutes == null && settings.fellBack
           ? "The company break setting"
           : null;
 
@@ -592,9 +601,13 @@ export default async function TimesheetPage({
         week={week}
         weekTotalMinutes={weekTotalMinutes}
         scheduledWeek={scheduledWeek}
-        /* Strictly before this week: the minimum covers all five working days,
-           so a week still being worked is short by construction and would warn
-           every day of every week. A FUTURE week cannot be submitted at all
+        /* Strictly before this week. It chooses which sentence the bar says, not
+           whether it says one: a finished week gets the shortfall warning, a
+           week still being worked gets a neutral progress line with the same
+           target in it. Both matter, because `vizserve_pms_submit_timesheet_week`
+           applies the full minimum to the CURRENT week and refuses only a future
+           one — so a Thursday submission can be refused, and the target must be
+           on screen before it is. A FUTURE week cannot be submitted at all
            (`v_week > v_this_week` refuses it), so "not current" and "finished"
            are the same set here. */
         weekHasEnded={thisWeek ? monday < thisWeek : false}

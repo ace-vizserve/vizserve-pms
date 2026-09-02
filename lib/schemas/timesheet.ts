@@ -748,3 +748,147 @@ export function daySummary(totalMinutes: number, approvedOvertimeMinutes = 0): D
     percentOfCapacity: totalMinutes > 0 ? Math.round((totalMinutes / capacityMinutes) * 100) : 0,
   };
 }
+
+/**
+ * P8-07 — what somebody punched, beside what they logged, for one week.
+ *
+ * ⚠️ TWO INDEPENDENT RECORDS, AND THIS FUNCTION TAKES NO VIEW ON WHICH IS RIGHT.
+ * The DTR owns "when somebody was at work"; the timesheet owns "where the day
+ * went". `20260804150000_p5_01_dtr.sql` and `p7_21` both argue the point
+ * explicitly, and neither table is derived from the other — there is no foreign
+ * key between them and there must not be one, because two tables claiming the
+ * same fact eventually disagree and then a reviewer cannot trust either. This
+ * puts both figures side by side and names the difference. It reconciles
+ * nothing, and a gap is not an error.
+ *
+ * ⚠️ A MISSING DAY IS NOT A ZERO. No DTR row means nobody punched, which is a
+ * different statement from punching and working nothing — so an absent day is
+ * counted, never summed as 0. A day punched in and never out has an unknown
+ * length for the same reason: `workedMinutes` returns null for it rather than
+ * guessing, and guessing is what would put a fake figure next to somebody's
+ * hours.
+ */
+export type PunchComparison = {
+  /** Minutes between the punches, over the days that have both. Null when no day does. */
+  punchedMinutes: number | null;
+  /** Days punched in and never out. Their length is unknown, not zero. */
+  openDays: number;
+  /** Days with logged hours and no punch at all. */
+  unpunchedDays: number;
+  loggedMinutes: number;
+  /** `punched − logged`, or null when there is no punched figure to compare against. */
+  gapMinutes: number | null;
+  /** False when `openDays` or `unpunchedDays` makes `punchedMinutes` a floor rather than a total. */
+  complete: boolean;
+};
+
+export function punchComparison({
+  days,
+  punched,
+  logged,
+}: {
+  days: string[];
+  /**
+   * `YYYY-MM-DD` → minutes, or null for a day punched in and never out. A key
+   * that is ABSENT is a day nobody punched — the distinction is the whole point.
+   */
+  punched: Record<string, number | null>;
+  /** `YYYY-MM-DD` → minutes logged on the timesheet. */
+  logged: Record<string, number>;
+}): PunchComparison {
+  let punchedMinutes: number | null = null;
+  let openDays = 0;
+  let unpunchedDays = 0;
+  let loggedMinutes = 0;
+
+  for (const day of days) {
+    const loggedToday = logged[day] ?? 0;
+    loggedMinutes += loggedToday;
+
+    if (!(day in punched)) {
+      // Only worth counting on a day somebody logged against. A Sunday nobody
+      // punched and nobody logged is not a discrepancy, it is a Sunday — and
+      // counting it would put "5 days with no punch" on every ordinary week.
+      if (loggedToday > 0) unpunchedDays += 1;
+      continue;
+    }
+
+    const minutes = punched[day] ?? null;
+
+    if (minutes === null) {
+      openDays += 1;
+      continue;
+    }
+
+    punchedMinutes = (punchedMinutes ?? 0) + minutes;
+  }
+
+  return {
+    punchedMinutes,
+    openDays,
+    unpunchedDays,
+    loggedMinutes,
+    gapMinutes: punchedMinutes === null ? null : punchedMinutes - loggedMinutes,
+    complete: openDays === 0 && unpunchedDays === 0,
+  };
+}
+
+/**
+ * P8-07 — THE SPAN BETWEEN TWO PUNCHES IS NOT A WORKING DAY.
+ *
+ * ⚠️ THIS IS THE SAME TRAP `scheduledDayMinutes` WARNS ABOUT, one table over.
+ * `workedMinutes(time_in, time_out)` is the RAW span, and a timesheet minute is
+ * working time — the unpaid break is in one figure and not the other. Comparing
+ * them directly makes an ordinary 08:00-17:00 week that logs its full eight
+ * hours a day read as "5h more on the clock than on the timesheet", for every
+ * person, every week. The 9h-punched-4h-logged case the comparison exists to
+ * surface then sits inside constant false noise, which is worse than not
+ * comparing at all. Deduct first; compare like with like.
+ *
+ * NULL — THE WHOLE RESULT — MEANS "SAY NOTHING ABOUT THIS PERSON", and there is
+ * exactly one way to reach it: `breakMinutes` is null, meaning neither their own
+ * figure nor the company's could be read. `loadAppSettings` degrades to
+ * `DEFAULT_BREAK_MINUTES` rather than throwing and reports it through `fellBack`
+ * — so a caller that asserts a figure derived from it would be stating a number
+ * nobody read. That is the failure P8-05 fixed on the member's own page, and the
+ * answer is the same here: withhold the claim, and say why on screen.
+ *
+ * TWO RULES INSIDE, AND BOTH ARE ABOUT NOT INVENTING A FIGURE:
+ *
+ *   - A DAY WITH NO CLOSED PAIR KEEPS ITS NULL. `workedMinutes` refuses to guess
+ *     the length of a shift punched in and never out, and there is no span there
+ *     to take a break off. Deducting from an unknown would manufacture one.
+ *   - THE RESULT NEVER GOES BELOW ZERO. Somebody who punched a thirty-minute day
+ *     did not work minus half an hour, and a negative punched total would flow
+ *     straight into a gap sentence about their week.
+ *
+ * An ABSENT key stays absent, exactly as `punchComparison` requires: a day
+ * nobody punched is not a day they punched and worked nothing.
+ *
+ * `breakMinutes` is the RESOLVED figure — `coalesce(user.break_minutes,
+ * settings.break_minutes)`, the same inheritance rule the SQL uses. Resolving it
+ * is the caller's job because only the caller can see both rows, and because
+ * `null` (inherit) and `0` (no break) must give different answers.
+ */
+export function breakAdjustedPunches({
+  punched,
+  breakMinutes,
+}: {
+  /** `YYYY-MM-DD` → the RAW span between punches, or null for a shift never closed. */
+  punched: Record<string, number | null>;
+  /** The resolved daily unpaid break, or null when it could not be read. */
+  breakMinutes: number | null;
+}): Record<string, number | null> | null {
+  if (breakMinutes === null || !Number.isFinite(breakMinutes)) return null;
+
+  // A negative break is a broken row, not a bonus. Clamped rather than trusted,
+  // the same way `scheduledDayMinutes` clamps it.
+  const rest = Math.max(0, breakMinutes);
+  const adjusted: Record<string, number | null> = {};
+
+  for (const [day, span] of Object.entries(punched)) {
+    adjusted[day] = span === null || !Number.isFinite(span) ? null : Math.max(0, span - rest);
+  }
+
+  return adjusted;
+}
