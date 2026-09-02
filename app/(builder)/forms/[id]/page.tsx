@@ -370,15 +370,15 @@ export default async function EditFormPage({
      * FULL-BLEED, AND NO `PageShell`.
      *
      * The page used to be capped at `max-w-5xl` inside the 304px sidebar. The
-     * Elementor rework puts a palette on the left of the canvas and an edit
-     * panel on its right, and a sidebar beside those is a third rail competing
-     * for the same screen — which is why this route moved out of the shell
-     * entirely (`app/(builder)/layout.tsx`). What is left is the builder and
-     * nothing else, so it gets the whole window.
+     * builder puts a sort rail beside the form, and an app sidebar beside THAT
+     * is a second rail competing for the same edge of the screen — which is why
+     * this route moved out of the shell entirely
+     * (`app/(builder)/layout.tsx`). What is left is the builder and nothing
+     * else, so it gets the whole window.
      *
-     * Full-bleed is not unbounded: `FieldBuilder` caps its own CANVAS column, so
-     * a question card never stretches across an ultrawide monitor while the
-     * palette and the panel stay pinned to the edges where the eye expects them.
+     * Full-bleed is not unbounded: `FieldBuilder` caps the FORM column, so a
+     * question never stretches across an ultrawide monitor while the rail stays
+     * pinned to the edge where the eye expects a tool rail.
      */
     <>
       <BuilderHeader name={form.name}>
@@ -426,31 +426,33 @@ export default async function EditFormPage({
 
       <div className="flex flex-1 flex-col gap-4 p-5">
         {/*
-          ⚠️ TWO DIFFERENT SENTENCES, BECAUSE THE GUARANTEE IS DIFFERENT.
+          ONE SENTENCE NOW, BECAUSE THE GUARANTEE IS THE SAME ON BOTH.
 
-          `vizserve_pms_form_field_protect` refuses a key rename or a field
-          delete once the form has submissions — but it counts
-          `vizserve_pms_requests` and nothing else, so on an ENGAGEMENT form it
-          does not fire. Saying "field keys are locked" there would be the
-          screen promising a guarantee Postgres is not making, which is worse
-          than saying nothing: somebody renames a key, the save succeeds, and
-          every answer already given is orphaned under the old one.
+          This used to say two different things. `vizserve_pms_form_field_protect`
+          refuses a key rename or a field delete once the form has submissions,
+          but it counted `vizserve_pms_requests` and nothing else — and an
+          engagement form never produces one. So on a staff survey the lock did
+          not fire, and the honest sentence there was a WARNING that renaming a
+          question orphans its answers, not a promise that it cannot happen.
 
-          Closing that gap means moving the guard onto the jsonb so it sees
-          `vizserve_pms_form_responses` as well — roadmap item 5, a migration of
-          its own. Until then the honest sentence is a warning, not a lock.
+          20260902110000_p7_66_form_responses.sql closes that: the guard now
+          asks both tables, so a key with an answer under it is immutable
+          whichever kind of form it belongs to. The screen can make the promise
+          again, in one sentence, because Postgres is now making it.
+
+          Only the NOUN still differs — an engagement form collects answers and
+          a client form collects submissions, and calling a colleague's survey
+          answer a "submission" is the kind of small wrongness that makes a
+          screen feel like it was built for something else.
         */}
         {submissionCount > 0 ? (
           <p className="text-xs text-muted-foreground">
             {submissionCount} {isEngagement ? "answer" : "submission"}
-            {submissionCount === 1 ? "" : "s"} —{" "}
-            {isEngagement
-              ? "renaming or removing a question orphans the answers already filed under it."
-              : "field keys are locked."}
+            {submissionCount === 1 ? "" : "s"} — field keys are locked.
           </p>
         ) : null}
 
-        <FieldBuilder formId={form.id} initialSchema={initialSchema} />
+        <FieldBuilder formId={form.id} purpose={form.purpose} initialSchema={initialSchema} />
 
         {/* COLLAPSED BY DEFAULT. The questions are the work on this screen; the
             slug, the SLA and the routing are set once and then left alone, and

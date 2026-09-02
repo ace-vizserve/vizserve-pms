@@ -36,7 +36,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   number: "Number",
 };
 
-/** One line of "what would I use this for", for the palette. */
+/** One line of "what would I use this for", for the Add question dialog. */
 export const FIELD_TYPE_HINTS: Record<FieldType, string> = {
   text: "A name, a URL, one line",
   textarea: "A brief, several sentences",
@@ -48,8 +48,16 @@ export const FIELD_TYPE_HINTS: Record<FieldType, string> = {
   number: "A quantity or a budget",
 };
 
-/** The palette, in the order it is offered. */
-export const PALETTE_FIELD_TYPES: ReadonlyArray<FieldType> = FIELD_TYPES;
+/**
+ * The types the Add question dialog offers, in the order it offers them.
+ *
+ * Was `PALETTE_FIELD_TYPES`, when the builder had a palette rail. There is no
+ * palette any more — a question's type is chosen once, in a dialog, because it
+ * is FIXED after the first save (the entity id is the
+ * `vizserve_pms_form_fields` row id, so a change of type is a delete and an
+ * insert, which the R5 trigger refuses once the field has answers).
+ */
+export const ADDABLE_FIELD_TYPES: ReadonlyArray<FieldType> = FIELD_TYPES;
 
 /** One field on the canvas: the entity, and the id it is filed under. */
 export type CanvasField = { id: string; entity: FormSchemaEntity };
@@ -108,14 +116,17 @@ export function applyEntityMoves(
 }
 
 /**
- * Where a palette drop inserts, expressed as a `root` index for
- * `addFieldEntity`.
+ * Where a NEW question lands, expressed as a `root` index for `addFieldEntity`.
  *
  * A SLOT is a gap in the visible list, numbered 0…n: slot 0 is above the first
- * card, slot n is past the last. Dropping a palette type onto the card at
- * visible index i inserts AT i and pushes that card down, which is dnd-kit's own
- * convention for `over` and therefore what the sortable preview has already
- * shown the person before they let go.
+ * card, slot n is past the last. Inserting at slot i puts the new question AT i
+ * and pushes the card that was there down.
+ *
+ * Its caller is Add question, which inserts DIRECTLY BELOW the question being
+ * edited (the selected card's slot + 1), and at the end when nothing is
+ * selected — so a form is built by working down it rather than by adding at the
+ * bottom and pressing the up arrow six times. It was written for a palette
+ * drop; the arithmetic is the same one, which is why it outlived the palette.
  *
  * ⚠️ A VISIBLE SLOT IS NOT A `root` INDEX. Archived fields keep their place in
  * `root` and render in their own list, so "third on the form" and "third in the
@@ -242,61 +253,4 @@ function sameAttributes(
     left.options.length === right.options.length &&
     left.options.every((option, index) => option === right.options[index])
   );
-}
-
-// ---------------------------------------------------------------------------
-// P7-66 — the two decisions the DOM was making on its own, brought in here
-// ---------------------------------------------------------------------------
-
-/**
- * ⚠️ ADDING A FIELD MUST WORK WITHOUT A MOUSE, AND THIS IS THE KEY TEST.
- *
- * A palette entry is a real `<button>`, so Enter and Space are what a keyboard
- * user presses on it — Enter fires a click on keydown, Space on keyup, and
- * every screen reader announces the element as one that responds to both.
- *
- * They did NOT, before this. dnd-kit's `KeyboardSensor` contributes an
- * `onKeyDown` activator to `useDraggable`'s `listeners`, and spreading those
- * onto the button installed it: it `preventDefault()`s exactly these two codes
- * and starts a keyboard drag instead. Its own escape hatch — "ignore the key
- * unless the event target IS the registered activator node" — is skipped when
- * `setActivatorNodeRef` was never called, which it was not. And the drag it
- * started could never move, because `sortableKeyboardCoordinates` returns
- * `undefined` for an `active.id` that is not a droppable container, and a
- * palette entry is `useDraggable` only. So Enter did nothing at all and Escape
- * was the only way out.
- *
- * The palette therefore does NOT get a keyboard drag. It does not need one:
- * pressing the entry adds the field at the end, and the card's up/down buttons
- * — `planEntityReorder`, the same rule as every other path — move it from
- * there. That is WCAG 2.2 AA 2.1.1 satisfied with the tested code, rather than
- * with a second ordering mechanism.
- */
-export function addsFieldOnKey(key: string): boolean {
-  return key === "Enter" || key === " ";
-}
-
-/**
- * Does the card at `cardId` show the "a new field lands HERE" rule?
- *
- * ⚠️ THE PREVIEW HAS TO AGREE WITH `rootIndexForSlot`, WHICH INSERTS ABOVE THE
- * HOVERED CARD. dnd-kit will not draw that gap itself: `SortableContext` sets
- * `disableTransforms` whenever something is dragged over the list that is not
- * IN the list (`overIndex !== -1 && activeIndex === -1`), and a palette entry is
- * never in `itemIds`. So a palette drag moved nothing on the canvas and the
- * person let go with no idea where the field would land — while a REORDER drag,
- * whose active item is in the list, previews correctly through
- * `verticalListSortingStrategy` and is left alone.
- *
- * A rule in the gap above the hovered card is the honest answer, and it is the
- * same answer `rootIndexForSlot(schema, overIndex)` gives: insert AT that
- * visible slot, pushing the hovered card down. Dropping past the last card is
- * the end zone's own hover state instead, which is already drawn.
- */
-export function showsInsertGuide(
-  drag: { kind: "new" | "move" } | null,
-  overId: string | null,
-  cardId: string,
-): boolean {
-  return drag !== null && drag.kind === "new" && overId === cardId;
 }

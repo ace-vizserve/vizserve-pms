@@ -2,12 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import type { FormSchema } from "@/lib/form-builder/builder";
 import {
-  addsFieldOnKey,
   applyEntityMoves,
   planEntityDrop,
   rootIndexForSlot,
   sameFormSchema,
-  showsInsertGuide,
   splitCanvasFields,
 } from "@/lib/form-builder/canvas";
 import { planEntityReorder, schemaFromFields, type FormFieldRow } from "@/lib/form-builder/schema";
@@ -119,8 +117,16 @@ describe("splitCanvasFields", () => {
   });
 });
 
-describe("rootIndexForSlot — where a palette drop inserts", () => {
-  it("inserts before the card it was dropped on", () => {
+/**
+ * ⚠️ STILL THE ARITHMETIC A NEW QUESTION LANDS BY, though what calls it
+ * changed. It was written for a palette drop; the palette is gone and Add
+ * question now inserts DIRECTLY BELOW the question being edited. Both ask the
+ * same thing — turn a position in the list somebody is LOOKING at into an
+ * index in `root` — and the archived-field case below is the reason that is not
+ * the same number.
+ */
+describe("rootIndexForSlot — where a new question lands", () => {
+  it("inserts at the slot, pushing the card there down", () => {
     expect(rootIndexForSlot(FLAT, 0)).toBe(0);
     expect(rootIndexForSlot(FLAT, 2)).toBe(2);
   });
@@ -131,12 +137,13 @@ describe("rootIndexForSlot — where a palette drop inserts", () => {
 
   it("translates a VISIBLE slot into a root index across an archived field", () => {
     /*
-     * ⚠️ THE BUG THIS FUNCTION EXISTS TO PREVENT. `budget` is the THIRD card on
-     * the canvas and the FOURTH id in `root`, because the retired field sits
-     * between them. Dropping a new field onto `budget` has to insert at root
-     * index 3 — passing the visible slot straight to `addEntity` would insert it
-     * at 2, in front of the retired field and BEHIND `brief` on screen: one
-     * position off, and only ever on forms that have archived something.
+     * ⚠️ THE BUG THIS FUNCTION EXISTS TO PREVENT. `budget` is the THIRD
+     * question on the form and the FOURTH id in `root`, because the retired
+     * field sits between them. Adding a question at `budget`'s slot has to
+     * insert at root index 3 — passing the visible slot straight to `addEntity`
+     * would insert it at 2, in front of the retired field and BEHIND `brief` on
+     * screen: one position off, and only ever on forms that have archived
+     * something.
      */
     expect(rootIndexForSlot(WITH_ARCHIVED, 2)).toBe(3);
     expect(rootIndexForSlot(WITH_ARCHIVED, 3)).toBe(4);
@@ -316,79 +323,6 @@ describe("sameFormSchema — the reason the list locks", () => {
   });
 });
 
-/**
- * ⚠️ ADDING A FIELD WITHOUT A MOUSE. The palette was unusable by keyboard: both
- * keys a `<button>` responds to were being taken by dnd-kit's `KeyboardSensor`
- * activator, which `preventDefault()`s them to begin a keyboard drag — a drag
- * that could then never move, because `sortableKeyboardCoordinates` returns
- * `undefined` for an `active.id` that is not a droppable container and a
- * palette entry is `useDraggable` only. Enter did nothing; Escape was the exit.
- *
- * `PaletteDragButton` now answers both keys itself. This is the decision it
- * asks, and BOTH KEYS ARE ASSERTED HERE because "Enter works" was true of the
- * intent and false of the code.
- */
-describe("addsFieldOnKey — the palette's keyboard path", () => {
-  it("adds on Enter AND on Space", () => {
-    // `event.key` for the space bar is a single space, not "Space" — writing
-    // the wrong one is how this fix would silently only half-land.
-    expect(addsFieldOnKey("Enter")).toBe(true);
-    expect(addsFieldOnKey(" ")).toBe(true);
-  });
-
-  it("leaves every other key alone", () => {
-    for (const key of ["Escape", "Tab", "ArrowDown", "ArrowUp", "a", "Space", "Spacebar", ""]) {
-      expect(addsFieldOnKey(key)).toBe(false);
-    }
-  });
-});
-
-/**
- * ⚠️ THE PREVIEW HAS TO MEAN WHAT THE DROP DOES.
- *
- * dnd-kit draws no preview at all for a palette drag: `SortableContext` sets
- * `disableTransforms` whenever `overIndex !== -1 && activeIndex === -1`, which
- * is every drag whose active item is not in `itemIds` — and a palette entry
- * never is. So the person hovered a card and nothing moved.
- *
- * The rule is drawn ABOVE the hovered card. These tests hold that against
- * `rootIndexForSlot` rather than against a restatement of it, so the two cannot
- * drift into disagreeing about which side the field lands on.
- */
-describe("showsInsertGuide — where a palette drop says it will land", () => {
-  it("marks the hovered card, and only the hovered card", () => {
-    const drag = { kind: "new" } as const;
-
-    expect(showsInsertGuide(drag, BUDGET_ID, BUDGET_ID)).toBe(true);
-    expect(showsInsertGuide(drag, BUDGET_ID, BRIEF_ID)).toBe(false);
-    expect(showsInsertGuide(drag, BUDGET_ID, DEADLINE_ID)).toBe(false);
-  });
-
-  it("draws nothing for a reorder drag — dnd-kit already previews that one", () => {
-    expect(showsInsertGuide({ kind: "move" }, BUDGET_ID, BUDGET_ID)).toBe(false);
-  });
-
-  it("draws nothing when there is no drag, and nothing over the end zone", () => {
-    expect(showsInsertGuide(null, BUDGET_ID, BUDGET_ID)).toBe(false);
-    // Past the last card the end zone lights up instead, which is its own hover
-    // state and not a card's business.
-    expect(showsInsertGuide({ kind: "new" }, null, BUDGET_ID)).toBe(false);
-  });
-
-  it("marks the card the field is inserted ABOVE, at every visible slot", () => {
-    // The agreement that matters. For each visible card, the guide is on it and
-    // `rootIndexForSlot` returns THAT card's own root index — i.e. the new
-    // field takes its place and pushes it down. A guide below the hovered card
-    // would be the opposite of what the drop does.
-    const { active } = splitCanvasFields(WITH_ARCHIVED);
-
-    active.forEach((field, slot) => {
-      expect(showsInsertGuide({ kind: "new" }, field.id, field.id)).toBe(true);
-      expect(rootIndexForSlot(WITH_ARCHIVED, slot)).toBe(WITH_ARCHIVED.root.indexOf(field.id));
-    });
-  });
-});
-
 const KEYS: Record<string, string> = {
   [NAME_ID]: "name",
   [BRIEF_ID]: "brief",
@@ -403,37 +337,47 @@ function rowFor(id: string): FormFieldRow {
 
 /*
  * ⚠️ WHAT ONLY A BROWSER CAN CONFIRM. None of it is covered above, and saying so
- * is more useful than a test that pretends to.
+ * is more useful than a test that pretends to. Rewritten for the Google-Forms
+ * layout: the palette, its keyboard path and the canvas end zone are gone, and
+ * the live form in the main column is new.
  *
  *   1. That a drag STARTS at all — dnd-kit's pointer sensor has an 8px
  *      activation distance, so a grip that is too small or a `touch-action` that
  *      is wrong produces a scroll instead of a drag.
- *   2. That `over.id` is the card the person believes they are on. Collision
+ *   2. That `over.id` is the row the person believes they are on. Collision
  *      detection is geometry; jsdom gives every element a zero-sized rect.
- *   3. That clicking a card still SELECTS it rather than beginning a drag, and
- *      that the three buttons on a card still fire.
+ *   3. That clicking a row in the LEFT RAIL selects the question in the main
+ *      column rather than beginning a drag, and that the four buttons on a row
+ *      (grip, up, down, archive) still fire.
  *   4. That the sortable transform previews the new order, and that the overlay
- *      follows the cursor without a second copy of the card moving with it.
- *   5. The drop zone past the last card lighting up, and the empty-canvas
- *      version of it accepting the first field.
- *   6. dnd-kit's keyboard sensor off the grip, and that it does not fight the
+ *      follows the cursor without a second copy of the row moving with it.
+ *   5. THE OVERLAY BUTTON ON THE FORM. Every question in the main column is a
+ *      real field under a `pointer-events-none` wrapper with a transparent
+ *      `<button>` over it. Confirm that clicking anywhere on a question opens
+ *      it, that Tab reaches exactly ONE stop per question (the disabled
+ *      controls beneath must stay out of the tab order), and that the overlay
+ *      is announced with the question's own label rather than as a bare
+ *      "button".
+ *   6. THAT EDITING IN PLACE LEAVES THE REST OF THE FORM LIVE. Open a question
+ *      in the middle of a form and confirm the questions above and below still
+ *      render their real controls, and that typing a label changes the preview
+ *      inside the open card as you type.
+ *   7. dnd-kit's keyboard sensor off the grip, and that it does not fight the
  *      up/down buttons.
- *   6a. That Enter and Space on a PALETTE entry add a field — the pure decision
- *      is `addsFieldOnKey` above, but that the key actually reaches it, that
- *      `preventDefault` stops dnd-kit's activator, and that Space does not also
- *      synthesise a second click, are all real-DOM facts. Tab to a palette
- *      entry, press Enter, then Space; expect exactly one new field each time
- *      and the panel opening on it.
- *   6b. That the grip is skipped by Tab while the list is locked — it now
- *      carries the real `disabled` attribute rather than only `aria-disabled`.
- *   6c. That clicking a card mid-save does nothing at all: start a reorder
- *      save, click another card before the toast, and confirm the canvas order
- *      is the saved one and the next save writes it.
- *   6d. That the insertion rule appears ABOVE the hovered card during a palette
- *      drag, in the 8px gap, in both themes.
- *   7. The three-column layout at 1280px and 390px, in both themes, and the
- *      panel's sticky offset under the 56px header.
- *   8. That `toast` still appears — this route left the `(app)` shell, and the
+ *   7a. That the grip is skipped by Tab while the list is locked — it carries
+ *      the real `disabled` attribute rather than only `aria-disabled`.
+ *   7b. That clicking a row mid-save does nothing at all: start a reorder save,
+ *      click another row before the toast, and confirm the order is the saved
+ *      one and the next save writes it.
+ *   8. THE ADD QUESTION DIALOG: that it opens on click and on Enter, that
+ *      Escape closes it, that choosing a type closes it and opens the new
+ *      question, and — the part with real arithmetic behind it — that the new
+ *      question appears DIRECTLY BELOW the one that was being edited, on a form
+ *      that has an archived question in the middle of it.
+ *   9. The two-column layout at 1280px and 390px in both themes, the rail's
+ *      sticky offset under the 56px header, and the EMPTY form rendering as one
+ *      centred column with no rail at all.
+ *  10. That `toast` still appears — this route left the `(app)` shell, and the
  *      `Toaster` it depends on is mounted in the ROOT layout rather than the one
  *      it left. That reasoning is in `app/(builder)/layout.tsx`; only the
  *      browser proves it.
