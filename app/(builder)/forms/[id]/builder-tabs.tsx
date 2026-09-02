@@ -16,14 +16,19 @@ import type { BuilderTab } from "./tabs";
  * precisely because it made the form itself look like the smaller half of its
  * own page.
  *
- * ⚠️ ALL THREE PANELS ARE RENDERED AND KEPT MOUNTED. `keepMounted` is not a
- * performance choice, it is the only way the canvas survives a tab change: the
- * builder store lives in `FieldBuilder`'s own state, so unmounting it to look at
- * the answers and coming back would discard the open question, the selection and
- * anything typed into it. Base UI unmounts a hidden panel by default.
+ * ⚠️ RESPONSES IS OPTIONAL, AND A CLIENT FORM DOES NOT PASS ONE. Two tabs, not
+ * three, and not a third tab holding an explanation of why it is empty. The
+ * reasoning is in `builderTabsFor`: a client form's submissions are requests,
+ * and /requests is the one place requests are read.
+ *
+ * ⚠️ EVERY PANEL RENDERED IS KEPT MOUNTED. `keepMounted` is not a performance
+ * choice, it is the only way the canvas survives a tab change: the builder store
+ * lives in `FieldBuilder`'s own state, so unmounting it to look at the answers
+ * and coming back would discard the open question, the selection and anything
+ * typed into it. Base UI unmounts a hidden panel by default.
  *
  * The panels are SERVER-RENDERED and passed in as children. That is what lets a
- * client tab strip sit over an `async` Responses table without this component
+ * client tab strip sit over an `async` Responses summary without this component
  * knowing anything about it — and it means switching tabs costs no round trip,
  * which a `?tab=` link would.
  *
@@ -35,7 +40,6 @@ import type { BuilderTab } from "./tabs";
 
 export function BuilderTabs({
   initialTab,
-  responsesLabel,
   responsesCount,
   questions,
   responses,
@@ -43,24 +47,22 @@ export function BuilderTabs({
 }: {
   initialTab: BuilderTab;
   /**
-   * ⚠️ THE WORD DIFFERS BY WHAT THE FORM IS FOR, and it is not decoration. A
-   * client form's submissions are requests — with a reference number, a status
-   * and an SLA clock — and calling them "responses" invites somebody to look
-   * here for a queue that lives at /requests. An engagement form collects
-   * answers. Two products, one builder.
-   */
-  responsesLabel: string;
-  /**
-   * How many submissions the form has, which is what the badge shows.
+   * How many answers the form has, which is what the badge shows.
    *
    * Always a real number by the time this renders: the page refuses to open the
    * builder at all on a count that failed, because the same number decides
-   * whether the purpose and the reference prefix render locked. See
+   * whether the reference prefix and the anonymity switch render locked. See
    * `countFormSubmissions` and `readFailure`.
    */
   responsesCount: number;
   questions: React.ReactNode;
-  responses: React.ReactNode;
+  /**
+   * ⚠️ UNDEFINED ON A CLIENT FORM, WHICH REMOVES THE TAB RATHER THAN EMPTYING
+   * IT. `builderTabsFor` decides; this prop is the same decision expressed as a
+   * child, so the strip and the panel cannot disagree about whether the tab
+   * exists.
+   */
+  responses?: React.ReactNode;
   settings: React.ReactNode;
 }) {
   const [tab, setTab] = useState<BuilderTab>(initialTab);
@@ -85,36 +87,41 @@ export function BuilderTabs({
         <TabsTrigger value="questions" className="h-auto flex-none px-4.5 py-3">
           Questions
         </TabsTrigger>
-        <TabsTrigger value="responses" className="h-auto flex-none gap-1.5 px-4.5 py-3">
-          {responsesLabel}
-          {/*
-            ⚠️ NO BADGE ON AN EMPTY FORM. A pill reading 0 beside the word
-            "Answers" is a count of nothing dressed as a count — and on the tab
-            somebody visits precisely to find out whether anybody has answered
-            yet, the empty state inside says it better than a zero on the way in.
-          */}
-          {responsesCount > 0 ? (
-            <span className="inline-grid h-[19px] min-w-[19px] place-items-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular-nums">
-              {responsesCount}
-            </span>
-          ) : null}
-        </TabsTrigger>
+        {responses === undefined ? null : (
+          <TabsTrigger value="responses" className="h-auto flex-none gap-1.5 px-4.5 py-3">
+            Responses
+            {/*
+              ⚠️ NO BADGE ON AN EMPTY FORM. A pill reading 0 beside the word
+              "Responses" is a count of nothing dressed as a count — and on the
+              tab somebody visits precisely to find out whether anybody has
+              answered yet, the empty state inside says it better than a zero on
+              the way in.
+            */}
+            {responsesCount > 0 ? (
+              <span className="inline-grid h-[19px] min-w-[19px] place-items-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular-nums">
+                {responsesCount}
+              </span>
+            ) : null}
+          </TabsTrigger>
+        )}
         <TabsTrigger value="settings" className="h-auto flex-none px-4.5 py-3">
           Settings
         </TabsTrigger>
       </TabsList>
 
       {/*
-        `keepMounted` on all three. See the note at the top: the Questions panel
-        holds the builder store, and the other two are cheap server output that
-        is already on the page by the time this renders.
+        `keepMounted` on every panel. See the note at the top: the Questions
+        panel holds the builder store, and the others are cheap server output
+        that is already on the page by the time this renders.
       */}
       <TabsContent value="questions" keepMounted className="min-h-0">
         {questions}
       </TabsContent>
-      <TabsContent value="responses" keepMounted className="min-h-0">
-        {responses}
-      </TabsContent>
+      {responses === undefined ? null : (
+        <TabsContent value="responses" keepMounted className="min-h-0">
+          {responses}
+        </TabsContent>
+      )}
       <TabsContent value="settings" keepMounted className="min-h-0">
         {settings}
       </TabsContent>

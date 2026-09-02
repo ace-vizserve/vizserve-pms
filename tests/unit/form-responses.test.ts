@@ -5,17 +5,20 @@ import {
   answerFor,
   answeredKeysOf,
   formatResponseAnswer,
-  rawAnswerFor,
   responseColumns,
-  summariseResponses,
 } from "@/lib/form-builder/responses";
 
 /**
- * P7-66 Phase 4b — THE RESPONSES TABLE'S COLUMNS.
+ * P7-66 — THE COLUMNS AND CELLS OF A FORM'S ANSWERS.
  *
  * The rule worth a test is "a column that vanishes takes its history with it".
- * Both ways it can vanish are silent: the table simply looks complete, and the
- * answers people gave are gone from the screen with nothing to notice.
+ * Both ways it can vanish are silent: the FILE simply looks complete, and the
+ * answers people gave are gone from it with nothing to notice.
+ *
+ * ⚠️ THE ONE CONSUMER IS NOW `lib/form-builder/csv.ts`, which is why these
+ * matter MORE than they did rather than less. A missing column on a screen is a
+ * thing somebody spots; a missing column in a spreadsheet somebody analyses next
+ * month is not.
  */
 
 function entity(
@@ -195,257 +198,30 @@ describe("formatResponseAnswer — one stored answer, one line", () => {
 });
 
 /*
- * ⚠️ THE NAMESPACED-COLUMN BLOCK IS GONE WITH THE TABLE IT GUARDED.
+ * ⚠️ THE SUMMARY BLOCK IS GONE WITH THE SCREEN IT FED — P7-66 Phase 4.
  *
- * It pinned `answerColumnId`, which prefixed every answer column's DataTable id
- * so a question keyed `submitted_by` could not collide with the flat table's
- * pinned identity column — duplicate TanStack ids, duplicate React keys, and an
- * answer cell painted `sticky left-0` over the frozen one.
+ * Roughly 250 lines here pinned `summariseResponses` and `rawAnswerFor`:
+ * per-question tallies with their denominator, retired choices still counted,
+ * date spans, and what counts as an answer. All of it fed the Responses tab's
+ * Summary · Question · Individual views.
  *
- * The flat table was replaced by Summary · Question · Individual
- * (`response-views.tsx`), none of which renders a per-question COLUMN at all:
- * the summary keys its sections by `field_key` directly, and there are no fixed
- * identity columns left for one to collide with. So the helper, its prefix and
- * their tests were deleted rather than kept green against nothing.
+ * Ace, on reading that tab: "no need to capture all questions its hard to read
+ * it." The tab is now a count and, on a named form, who answered; the answers
+ * themselves are in the CSV export, which never went through `summariseResponses`
+ * at all. So the functions were deleted rather than kept green against nothing —
+ * a test suite guarding code no screen calls is how dead code survives a
+ * clear-out.
  *
- * The rule that DID survive the screen is the anonymity one, and it moved with
- * it: `responseViewsFor` is tested in `tests/unit/form-anonymity.test.ts`.
+ * The rules that OUTLIVED the screen are still pinned, and above: `responseColumns`
+ * (archived and orphaned questions keep their column), `answeredKeysOf` and
+ * `formatResponseAnswer`/`answerFor` (what one stored value looks like in a
+ * cell). Those are the export's rules, and the export is what people actually
+ * read the answers with.
+ *
+ * `responseViewsFor` went the same way, out of `tests/unit/form-anonymity.test.ts`.
+ * What it decided — that an anonymous form has no Individual view — is no longer
+ * a decision: there are no views. The rule that survives it is the one the
+ * Responses tab still obeys and the test file still pins, that anonymity is read
+ * off `vizserve_pms_forms.is_anonymous` and NEVER off whether a row's
+ * `submitted_by` happens to be null.
  */
-
-
-// ---------------------------------------------------------------------------
-// P7-66 — THE SUMMARY, WHICH IS WHERE THE NUMBERS COME FROM.
-//
-// The flat table this replaced needed no tests like these because it made no
-// claims: it showed what was stored. A summary asserts things — "7 of 12 chose
-// Home", "4 skipped" — and every one of those is a decision that can be wrong in
-// a way nobody spots, because a confident number looks the same whether or not
-// it is true.
-// ---------------------------------------------------------------------------
-
-/** A choice question, with its offered options. */
-function choice(
-  key: string,
-  label: string,
-  options: string[],
-  type: "select" | "multiselect" = "select",
-): FormSchema["entities"][string] {
-  return {
-    type,
-    attributes: { key, label, helpText: "", required: false, options, archived: false },
-  } as unknown as FormSchema["entities"][string];
-}
-
-const answers = (...values: Record<string, unknown>[]) =>
-  values.map((field_values) => ({ field_values }));
-
-describe("summariseResponses — choice questions", () => {
-  const schema = schemaOf([["a", choice("pages", "Which pages?", ["Home", "Pricing", "Contact"])]]);
-
-  it("counts each option, and keeps the ones nobody picked", () => {
-    // "Nobody picked Contact" is a finding. A missing row is an absence somebody
-    // has to notice.
-    const [summary] = summariseResponses(
-      schema,
-      answers({ pages: "Home" }, { pages: "Home" }, { pages: "Pricing" }),
-    );
-
-    expect(summary!.kind).toBe("choice");
-    if (summary!.kind !== "choice") return;
-
-    expect(summary!.tallies).toEqual([
-      { option: "Home", count: 2, offered: true },
-      { option: "Pricing", count: 1, offered: true },
-      { option: "Contact", count: 0, offered: true },
-    ]);
-  });
-
-  it("keeps the form's own option order, not the order answers arrived in", () => {
-    const [summary] = summariseResponses(schema, answers({ pages: "Contact" }));
-
-    if (summary!.kind !== "choice") throw new Error("expected a choice summary");
-    expect(summary!.tallies.map((tally) => tally.option)).toEqual([
-      "Home",
-      "Pricing",
-      "Contact",
-    ]);
-  });
-
-  it("⚠️ still counts an answer given under a choice since removed", () => {
-    /*
-     * Options are editable. An answer given under an option that has since been
-     * deleted is still a real answer — dropping it would make the tallies
-     * disagree with the number of people who answered, which is the one
-     * arithmetic error on this page nobody would catch.
-     */
-    const [summary] = summariseResponses(
-      schema,
-      answers({ pages: "Home" }, { pages: "Careers" }),
-    );
-
-    if (summary!.kind !== "choice") throw new Error("expected a choice summary");
-
-    expect(summary!.tallies.at(-1)).toEqual({ option: "Careers", count: 1, offered: false });
-    // And it counts toward the total, so `answered` and the tallies agree.
-    expect(summary!.answered).toBe(2);
-  });
-
-  it("counts a multiselect answer once per option chosen", () => {
-    const multi = schemaOf([
-      ["a", choice("pages", "Which pages?", ["Home", "Pricing"], "multiselect")],
-    ]);
-
-    const [summary] = summariseResponses(
-      multi,
-      answers({ pages: ["Home", "Pricing"] }, { pages: ["Home"] }),
-    );
-
-    if (summary!.kind !== "choice") throw new Error("expected a choice summary");
-
-    expect(summary!.tallies).toEqual([
-      { option: "Home", count: 2, offered: true },
-      { option: "Pricing", count: 1, offered: true },
-    ]);
-    // ⚠️ THE TALLIES SUM TO MORE THAN `answered`, AND THAT IS THE POINT. It is
-    // why the screen's percentage is against `answered` rather than the sum:
-    // "60% of the people who answered chose Home" is the useful claim.
-    expect(summary!.answered).toBe(2);
-  });
-});
-
-describe("summariseResponses — what counts as an answer", () => {
-  const schema = schemaOf([["a", entity("text", "note", "Notes")]]);
-
-  it("counts blanks separately, so an optional question's skipping is visible", () => {
-    const [summary] = summariseResponses(
-      schema,
-      answers({ note: "Yes" }, {}, { note: "" }, { note: "   " }),
-    );
-
-    expect(summary!.answered).toBe(1);
-    expect(summary!.blank).toBe(3);
-  });
-
-  it("⚠️ treats the empty string an optional field stores as NOT answered", () => {
-    /*
-     * An optional email, date, select or number genuinely stores `""` — a ported
-     * quirk documented in entities.ts. A rule that counted those would inflate
-     * every optional question on every form, and the inflation would look
-     * exactly like engagement.
-     */
-    const [summary] = summariseResponses(schema, answers({ note: "" }));
-
-    expect(summary!.answered).toBe(0);
-    expect(summary!.blank).toBe(1);
-  });
-
-  it("answered + blank is always the response count", () => {
-    const summaries = summariseResponses(
-      schemaOf([
-        ["a", entity("text", "note", "Notes")],
-        ["b", choice("pages", "Pages", ["Home"])],
-      ]),
-      answers({ note: "Yes" }, { pages: "Home" }, {}),
-    );
-
-    for (const summary of summaries) {
-      expect(summary.answered + summary.blank).toBe(3);
-    }
-  });
-});
-
-describe("summariseResponses — free text", () => {
-  const schema = schemaOf([["a", entity("text", "note", "Notes")]]);
-
-  it("⚠️ returns an INDEX rather than a name, so the aggregation never sees one", () => {
-    /*
-     * The pure summary must not touch attribution: on an anonymous form there is
-     * none, and on a named one the decision about whether to show it belongs to
-     * the screen. An index is enough for the screen to attach an author and a
-     * timestamp, and carries neither itself.
-     */
-    const [summary] = summariseResponses(schema, answers({}, { note: "Second" }));
-
-    if (summary!.kind !== "text") throw new Error("expected a text summary");
-    expect(summary!.answers).toEqual([{ responseIndex: 1, text: "Second" }]);
-  });
-
-  it("summarises an ORPHANED key as text, because nothing is left to say otherwise", () => {
-    // The field was deleted; the answers under its key were not. There is no
-    // option list to tally against, and inventing one from the values that
-    // happen to be there would be a guess presented as a fact.
-    const [summary] = summariseResponses(schemaOf([]), answers({ gone: "still here" }));
-
-    expect(summary!.column.origin).toBe("orphan");
-    expect(summary!.fieldType).toBeNull();
-    expect(summary!.kind).toBe("text");
-  });
-
-  it("summarises an ARCHIVED question rather than dropping it", () => {
-    // Its answers are still stored and still real. A summary that quietly
-    // stopped counting them would report fewer answers than the form received.
-    const schemaWithArchived = schemaOf([["a", entity("text", "note", "Notes", true)]]);
-
-    const [summary] = summariseResponses(schemaWithArchived, answers({ note: "Kept" }));
-
-    expect(summary!.column.origin).toBe("archived");
-    expect(summary!.answered).toBe(1);
-  });
-});
-
-describe("summariseResponses — dates", () => {
-  const schema = schemaOf([["a", entity("date", "when", "When?")]]);
-
-  it("reports the span, compared as strings because YYYY-MM-DD sorts that way", () => {
-    const [summary] = summariseResponses(
-      schema,
-      answers({ when: "2026-09-30" }, { when: "2026-09-12" }, { when: "2026-12-01" }),
-    );
-
-    if (summary!.kind !== "date") throw new Error("expected a date summary");
-    expect(summary!.earliest).toBe("2026-09-12");
-    expect(summary!.latest).toBe("2026-12-01");
-  });
-
-  it("⚠️ ignores anything that is not that shape rather than guessing", () => {
-    /*
-     * `31/12/2026` would sort as the latest date on any form it appeared on, and
-     * this never parses — which is the point. `lib/dates.ts` exists because
-     * parsing a bare date wrong lands it on the previous day in any negative
-     * offset; a comparison that never parses cannot make that mistake.
-     */
-    const [summary] = summariseResponses(
-      schema,
-      answers({ when: "2026-09-12" }, { when: "31/12/2026" }),
-    );
-
-    if (summary!.kind !== "date") throw new Error("expected a date summary");
-    expect(summary!.latest).toBe("2026-09-12");
-  });
-
-  it("reports nulls when nobody gave a date", () => {
-    const [summary] = summariseResponses(schema, answers({}, {}));
-
-    if (summary!.kind !== "date") throw new Error("expected a date summary");
-    expect(summary!.earliest).toBeNull();
-    expect(summary!.latest).toBeNull();
-  });
-});
-
-describe("rawAnswerFor", () => {
-  it("hands back the stored value, unformatted", () => {
-    // The tally needs the ARRAY, not "Home, Pricing" — formatting a multiselect
-    // first would count the whole joined string as one option.
-    expect(rawAnswerFor({ pages: ["Home", "Pricing"] }, "pages")).toEqual(["Home", "Pricing"]);
-  });
-
-  it("is undefined for a key nothing holds", () => {
-    expect(rawAnswerFor({}, "pages")).toBeUndefined();
-  });
-
-  it("does not answer for an inherited property", () => {
-    // `"constructor" in {}` is true on every object there has ever been, and
-    // FIELD_KEY_PATTERN permits a field keyed `constructor`.
-    expect(rawAnswerFor({}, "constructor")).toBeUndefined();
-  });
-});

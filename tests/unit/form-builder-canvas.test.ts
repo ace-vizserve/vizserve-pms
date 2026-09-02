@@ -647,9 +647,9 @@ describe("nextOptionLabel", () => {
  *      that clearing a row blocks the save with the row number named.
  *
  *  --- the chrome ---
- *  20. The tab strip: that switching to Responses and back keeps the open
- *      question, the selection and the scroll position (`keepMounted`), and that
- *      a `?tab=responses&page=2` link opens on the Responses tab.
+ *  20. The tab strip on a STAFF form: three tabs, that switching to Responses
+ *      and back keeps the open question, the selection and the scroll position
+ *      (`keepMounted`), and that a `?tab=responses` link opens on it.
  *  21. The in-place title: that Enter commits, that Escape abandons WITHOUT
  *      saving, that clearing it and clicking away restores the name rather than
  *      leaving a blank, and that a rename reaches the Settings tab's Name field.
@@ -657,4 +657,30 @@ describe("nextOptionLabel", () => {
  *      `Toaster` it depends on is mounted in the ROOT layout rather than the one
  *      it left. That reasoning is in `app/(builder)/layout.tsx`; only the
  *      browser proves it.
+ *
+ *  --- P7-66 Phase 4: the two kinds of form, separated ---
+ *  23. THE TAB STRIP ON A CLIENT FORM HAS TWO TABS. Questions and Settings, with
+ *      no Responses tab and no empty panel where one was — and `?tab=responses`
+ *      on that form opens on QUESTIONS rather than rendering a tab strip over a
+ *      blank page. (`builderTabsFor` decides; only the browser proves Base UI
+ *      agrees.)
+ *  24. THE RESPONSES TAB IS A COUNT AND A LIST OF PEOPLE. On a NAMED staff form
+ *      with answers: the total, "N people" beside it, and one row per person
+ *      with their latest timestamp — somebody who answered twice appearing ONCE
+ *      with "2 answers". No question is printed anywhere on the page.
+ *  25. THE ANONYMOUS FORM SHOWS THE COUNT AND NOTHING ELSE. No "Who answered"
+ *      section at all, the blue anonymity notice, and Export CSV still enabled.
+ *      ⚠️ THIS IS ALSO THE FIRST BROWSER TEST OF ANONYMITY END TO END — answer
+ *      an anonymous form at /respond/<slug> and confirm it SAVES (the live
+ *      INSERT policy refused every one of them until 20260902130000).
+ *  26. THE TWO SETTINGS CARDS. A client form shows slug, reference prefix, SLA,
+ *      routing department, default list, approval window, attachment and
+ *      Published — and NO anonymity switch. A staff form shows name,
+ *      description, owning department, anonymity and Published, and nothing
+ *      else. Neither shows a Purpose picker any more.
+ *  27. ⚠️ THAT A STAFF FORM'S SETTINGS STILL SAVE. The five controls that card no
+ *      longer draws are still sent from what the page loaded, and
+ *      `formSettingsSchema` defaults nothing — so a save that silently fails, or
+ *      one that blanks the slug, is exactly what this is looking for. Save,
+ *      reload, and confirm the slug and prefix are unchanged.
  */

@@ -10,7 +10,7 @@ import {
   FORM_PURPOSE_LABELS,
   type FormPurpose,
 } from "@/lib/schemas/forms";
-import { FormSettings } from "../form-settings";
+import { ClientFormSettings } from "../form-settings";
 import { loadRoutableDepartments, type RoutableDepartment } from "../routable-departments";
 import { EngagementCreate } from "./engagement-create";
 
@@ -211,11 +211,10 @@ export default async function NewFormPage({
       </div>
 
       <div className="rounded-lg border bg-card grade-surface p-6 shadow-raised-lg">
-        <FormSettings
-          departments={departments}
-          lists={lists ?? []}
-          initial={{ purpose: "CLIENT_REQUEST" }}
-        />
+        {/* P7-66 Phase 4 — no `initial`, and no purpose to state. This branch is
+            already the client-request one (`?purpose=`), and the card is now
+            client-only: it hard-codes the purpose it sends. */}
+        <ClientFormSettings departments={departments} lists={lists ?? []} />
       </div>
     </PageShell>
   );

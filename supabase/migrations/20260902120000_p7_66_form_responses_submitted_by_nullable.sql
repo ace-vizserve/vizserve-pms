@@ -41,8 +41,11 @@
 -- does not loosen anything: the policy is stricter than `not null` ever was,
 -- because it also refuses a null on a NAMED form.
 --
--- ⚠️ APPLY BY HAND, in the Supabase SQL editor, like every P7 migration. It
--- will not be recorded in `supabase_migrations.schema_migrations`.
+-- ⚠️⚠️ APPLIED TO LIVE PRODUCTION ON 2 SEP 2026, BY HAND, and therefore not to
+-- be edited: this file is now the record of what was run. Anything further needs
+-- a NEW file. Like every P7 migration it is not recorded in
+-- `supabase_migrations.schema_migrations`, so the CLI still believes it is
+-- pending.
 --
 -- Re-runnable: `drop not null` is idempotent.
 --

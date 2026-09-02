@@ -10,7 +10,8 @@ import { QueryError } from "@/components/query-error";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { FormSettings } from "@/app/(app)/forms/form-settings";
+import { ClientFormSettings } from "@/app/(app)/forms/form-settings";
+import { EngagementSettings } from "@/app/(app)/forms/engagement-settings";
 import {
   optionsFromRow,
   reconcileFormSchema,
@@ -23,9 +24,8 @@ import { BuilderTabs } from "./builder-tabs";
 // ⚠️ NOT from "./builder-tabs" — that module is `"use client"`, and calling a
 // pure export of a client module from a server component is a runtime crash
 // typecheck cannot see. See the note in ./tabs.ts.
-import { resolveBuilderTab } from "./tabs";
+import { builderTabsFor, resolveBuilderTab } from "./tabs";
 import { BuilderTitle } from "./builder-title";
-import { ClientRequestsPanel } from "./client-requests-panel";
 import { SaveStatusLine, SaveStatusProvider } from "./save-status";
 import { administersForm } from "@/app/(app)/forms/administers";
 import { countFormSubmissions } from "@/app/(app)/forms/submission-count";
@@ -138,12 +138,11 @@ export default async function EditFormPage({
 }: {
   params: Promise<{ id: string }>;
   /*
-   * ⚠️ ONLY `?tab=` NOW. The Responses panel used to be PAGED and carried
-   * `?page=`/`?size=`; a summary cannot be paged — "7 of 12 chose Home" is a
-   * statement about every response — so the read is capped and unpaged instead.
-   * See `FormResponses`.
-   *
-   * `?tab=` survives because a link to the answers has to open on the answers.
+   * ⚠️ ONLY `?tab=`. The Responses panel used to be PAGED and carried
+   * `?page=`/`?size=`; it is now a count and a list of who answered, which has
+   * nothing to page. `?tab=` survives because a link to the answers has to open
+   * on the answers — and it is narrowed against the tabs THIS form offers, since
+   * a client form no longer has a Responses tab at all.
    */
   searchParams: Promise<{ tab?: string }>;
 }) {
@@ -459,10 +458,7 @@ export default async function EditFormPage({
       </BuilderHeader>
 
       <BuilderTabs
-        initialTab={resolveBuilderTab(rawTab)}
-        /* An engagement form collects ANSWERS; a client form mints REQUESTS.
-           See the prop's note — the two are different products. */
-        responsesLabel={isEngagement ? "Responses" : "Requests"}
+        initialTab={resolveBuilderTab(rawTab, builderTabsFor(form.purpose))}
         responsesCount={submissionCount}
         questions={
           <div className="flex flex-col gap-4 p-5">
@@ -506,58 +502,90 @@ export default async function EditFormPage({
         }
         responses={
           /*
-            ⚠️ TWO DIFFERENT PANELS, NOT ONE WITH A BRANCH INSIDE IT. A client
-            form's submissions are `vizserve_pms_requests` and are already read
-            at /requests — with a reference number, a status, a Gate 1 decision
-            and an SLA clock, none of which a flat answers table has anywhere to
-            put. The engagement table has no column for any of it and no query
-            that would fill one, so pretending they are one screen would mean a
-            component that is really two.
+            ⚠️ P7-66 Phase 4 — NO PANEL AT ALL ON A CLIENT FORM, WHICH REMOVES
+            THE TAB RATHER THAN EMPTYING IT.
+
+            This used to render a second panel here, listing the requests the
+            form had minted. It was a second door onto /requests that showed
+            less: no filters, no SLA clock, no Gate 1 decision, eight rows and a
+            link. /requests is the ONE place requests are read, and a more
+            convenient screen that tells you less is how a queue stops being the
+            queue.
+
+            An engagement form is the opposite case — its answers have no other
+            screen — so the tab on the form IS where they are read.
           */
           isEngagement ? (
             <FormResponses
               formId={form.id}
               departmentId={form.department_id}
               isAnonymous={form.is_anonymous}
-              schema={initialSchema}
             />
-          ) : (
-            <ClientRequestsPanel
-              formId={form.id}
-              formName={form.name}
-              departmentId={form.department_id}
-              submissionCount={submissionCount}
-            />
-          )
+          ) : undefined
         }
         settings={
+          /*
+            ⚠️ P7-66 Phase 4 — TWO CARDS, NOT ONE CARD BRANCHING ON ITSELF.
+
+            This was `FormSettings` with `isClientRequest` deciding which of
+            eleven controls to draw. A client form and an engagement form are
+            different products, and a screen that renders one as the other with
+            six fields missing is exactly what blurred them: the ROUTING
+            department and the OWNING department are the same column meaning two
+            different things, and one card cannot say both.
+
+            Splitting also removes the purpose picker, which is the point rather
+            than a side effect. `purpose` is now a CONSTANT inside each card —
+            the field whose stray default once put a published staff form on the
+            public internet cannot be sent wrongly by a screen that only knows
+            one value.
+          */
           <div className="mx-auto w-full max-w-3xl p-5">
-            <FormSettings
-              departments={departments}
-              lists={lists ?? []}
-              formId={form.id}
-              hasSubmissions={submissionCount > 0}
-              initial={{
-                name: form.name,
-                slug: form.slug,
-                description: form.description,
-                department_id: form.department_id,
-                reference_prefix: form.reference_prefix,
-                // P7-66 — `purpose` is settable here and `is_public` is not.
-                // `updateFormSettings` derives the boolean from it, and the
-                // schema no longer carries it, so it cannot be sent at all.
-                purpose: form.purpose,
-                // P7-66 — the card only OFFERS this on an engagement form; it is
-                // loaded on both so a client form's save resends the false it
-                // already holds rather than a value the schema never received.
-                is_anonymous: form.is_anonymous,
-                is_active: form.is_active,
-                requires_attachment: form.requires_attachment,
-                sla_minutes: form.sla_minutes,
-                default_list_id: form.default_list_id,
-                client_approval_days: form.client_approval_days,
-              }}
-            />
+            {isEngagement ? (
+              <EngagementSettings
+                departments={departments}
+                formId={form.id}
+                hasSubmissions={submissionCount > 0}
+                initial={{
+                  name: form.name,
+                  description: form.description,
+                  department_id: form.department_id,
+                  is_anonymous: form.is_anonymous,
+                  is_active: form.is_active,
+                  /*
+                    The five the card never draws, loaded so its save resends
+                    what is stored rather than a value `formSettingsSchema` —
+                    which defaults nothing, deliberately — would reject or
+                    overwrite. See the note there.
+                  */
+                  slug: form.slug,
+                  reference_prefix: form.reference_prefix,
+                  requires_attachment: form.requires_attachment,
+                  sla_minutes: form.sla_minutes,
+                  default_list_id: form.default_list_id,
+                  client_approval_days: form.client_approval_days,
+                }}
+              />
+            ) : (
+              <ClientFormSettings
+                departments={departments}
+                lists={lists ?? []}
+                formId={form.id}
+                hasSubmissions={submissionCount > 0}
+                initial={{
+                  name: form.name,
+                  slug: form.slug,
+                  description: form.description,
+                  department_id: form.department_id,
+                  reference_prefix: form.reference_prefix,
+                  is_active: form.is_active,
+                  requires_attachment: form.requires_attachment,
+                  sla_minutes: form.sla_minutes,
+                  default_list_id: form.default_list_id,
+                  client_approval_days: form.client_approval_days,
+                }}
+              />
+            )}
           </div>
         }
       />

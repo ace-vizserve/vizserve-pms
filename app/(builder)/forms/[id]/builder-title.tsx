@@ -74,7 +74,7 @@ export function BuilderTitle({ formId, name }: { formId: string; name: string })
    * MOUNTED so the question canvas survives a tab change — so a rename saved
    * there leaves this input holding the name the page loaded with, and the next
    * edit up here writes the stale one back over it. That is the mirror image of
-   * the effect on `FormSettings`, and it has to exist on both sides or one of
+   * the effect on both settings cards, and it has to exist on both sides or one of
    * the two always loses.
    *
    * ⚠️ IT DOES NOT FIGHT SOMEBODY TYPING HERE. The dependency is the SERVER's

@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { schemaFromFields } from "@/lib/form-builder/schema";
-import { RESPONSE_VIEWS, responseViewsFor } from "@/lib/form-builder/responses";
 import {
   DEFAULT_SLA_MINUTES,
   formCreateSchema,
@@ -654,42 +653,25 @@ describe("submitFormResponse — the promise the screen made must still hold", (
 
 // ---------------------------------------------------------------------------
 // 4. THE READ
+//
+// ⚠️ NOTHING TO TEST HERE ANY MORE, AND THAT IS THE POINT — P7-66 Phase 4.
+//
+// This section pinned `responseViewsFor`: that an anonymous form offered
+// Summary and Question but no INDIVIDUAL view, because `submitted_by` is null
+// on every row and the view could only have paged through submissions labelled
+// "somebody" while presenting them as separable people.
+//
+// There are no views left to choose between. The Responses tab is a count and,
+// on a named form, who answered — so anonymity does not remove a view, it
+// removes the list of people, which is a branch in the component rather than a
+// pure function worth its own suite.
+//
+// ⚠️ THE RULE THE FUNCTION EXISTED TO ENFORCE IS STILL LIVE, AND IT IS THE ONE
+// WORTH REPEATING: anonymity is read off `vizserve_pms_forms.is_anonymous` and
+// never off `rows.every((r) => r.submitted_by === null)`. An empty page
+// satisfies that shortcut, and so does a page whose only author sits outside the
+// reader's department — either would declare a NAMED form anonymous and drop the
+// attribution off answers that carry it. `FormResponses` takes the flag as a
+// prop and reads no rows to decide; sections 1–3 above are what stop the flag
+// itself being wrong.
 // ---------------------------------------------------------------------------
-
-describe("responseViewsFor — which readings an anonymous form offers", () => {
-  it("offers all three on a named form", () => {
-    expect(responseViewsFor(false)).toEqual([...RESPONSE_VIEWS]);
-  });
-
-  it("⚠️ has no Individual view on an anonymous form", () => {
-    /*
-     * Not hidden for tidiness — THERE IS NO INDIVIDUAL. `submitted_by` is NULL
-     * on every row because the INSERT policy refused to let a name be written,
-     * so the view could only page through submissions labelled "somebody" while
-     * presenting them as separable people. A form with one long free-text answer
-     * each is re-identifiable by writing style; the count is what an anonymous
-     * form promises and the count is what it gives.
-     */
-    expect(responseViewsFor(true)).not.toContain("individual");
-  });
-
-  it("still offers a way to read the answers either way", () => {
-    // Anonymity removes attribution, not the answers. A form with no readings at
-    // all would be a page that collected data nobody can look at.
-    for (const isAnonymous of [true, false]) {
-      expect(responseViewsFor(isAnonymous).length).toBeGreaterThan(0);
-      expect(responseViewsFor(isAnonymous)).toContain("summary");
-    }
-  });
-
-  it("is a function of the FORM's flag alone", () => {
-    /*
-     * ⚠️ THE SHORTCUT THIS EXISTS TO FORBID is `rows.every(r => r.submitted_by
-     * === null)`. An empty page satisfies it, and so does a page whose only
-     * author is outside the reader's department — either would declare a NAMED
-     * form anonymous and drop the attribution off answers that carry it. The
-     * signature takes a boolean and no rows, which is the guarantee in the type.
-     */
-    expect(responseViewsFor.length).toBe(1);
-  });
-});

@@ -20,13 +20,10 @@ import {
 } from "@/components/ui/select";
 import {
   DEFAULT_SLA_MINUTES,
-  FORM_PURPOSES,
-  FORM_PURPOSE_LABELS,
   formCreateSchema,
   formSettingsSchema,
   prefixFromName,
   slugFromName,
-  type FormPurpose,
   type FormSettingsInput,
   type FormSettingsValues,
 } from "@/lib/schemas/forms";
@@ -38,7 +35,43 @@ type List = { id: string; name: string; department_id: string; form_id?: string 
 
 const NO_LIST = "__none__";
 
-export function FormSettings({
+/**
+ * P7-66 Phase 4 — SETTINGS FOR A CLIENT REQUEST FORM.
+ *
+ * ⚠️ CLIENT FORMS ONLY. This card used to serve both purposes and hide half of
+ * itself behind `isClientRequest`, which is how the two kinds of form got
+ * blurred: one screen that looked like one product with some fields absent, when
+ * they are two products that happen to share a builder. `EngagementSettings` is
+ * the other half, and it is a different five questions rather than a subset of
+ * these.
+ *
+ * What is here is everything a form the OUTSIDE fills in needs: a public URL, a
+ * reference the client quotes back, a turnaround standard, a queue to route to,
+ * a list to file into and a Gate 3 window. None of it means anything on a form a
+ * colleague answers while signed in.
+ *
+ * ⚠️ `purpose` IS HARD-CODED RATHER THAN ASKED FOR OR PASSED THROUGH.
+ *
+ * The picker is gone. Converting a live form from one product into the other is
+ * not a setting; it was only ever legal on a form with no submissions, which is
+ * a form it costs nothing to build again. The choice is made once, at
+ * /forms/new, where it is the only question asked.
+ *
+ * What the constant buys is stronger than tidiness. `purpose` is the field whose
+ * stray `.default("CLIENT_REQUEST")` once flipped a published STAFF form and let
+ * the CHECK `is_public = (purpose = 'CLIENT_REQUEST')` put it on the open
+ * internet. A payload from this card can now only ever mean CLIENT_REQUEST, and
+ * one from `EngagementSettings` can only ever mean EMPLOYEE_ENGAGEMENT, because
+ * the page picks the component by the form's own purpose.
+ *
+ * ⚠️ SO IS `is_anonymous`, AT FALSE. `vizserve_pms_forms_anonymous_is_internal`
+ * refuses the pair, and the reason is not arbitrary: /request/<slug> has no
+ * session at all, so a client TYPES their own name and email and those are
+ * ordinary answers on the request. There is no identity the platform captured
+ * and therefore nothing to withhold. The switch is not hidden here — there is
+ * nothing for it to mean.
+ */
+export function ClientFormSettings({
   departments,
   lists = [],
   formId,
@@ -48,6 +81,7 @@ export function FormSettings({
   departments: Department[];
   /** P2-06 — where approved requests from this form land. */
   lists?: List[];
+  /** Absent while creating. */
   formId?: string;
   initial?: Partial<FormSettingsInput>;
   hasSubmissions?: boolean;
@@ -79,17 +113,14 @@ export function FormSettings({
       formId ? formSettingsSchema : formCreateSchema,
     ) as unknown as Resolver<FormSettingsValues>,
     defaultValues: {
-      // P7-66. First in the object as it is first on screen: everything under
-      // it means something different depending on this one value.
-      purpose: initial?.purpose ?? "CLIENT_REQUEST",
+      // See the note above: a constant, not a control and not a pass-through.
+      purpose: "CLIENT_REQUEST",
+      is_anonymous: false,
       name: initial?.name ?? "",
       slug: initial?.slug ?? "",
       description: initial?.description ?? "",
       department_id: initial?.department_id ?? null,
       reference_prefix: initial?.reference_prefix ?? "",
-      // P7-66 — false is the safe default and the column's own: a form is
-      // ATTRIBUTED unless somebody deliberately says otherwise.
-      is_anonymous: initial?.is_anonymous ?? false,
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
       sla_minutes: formatSlaDuration(initial?.sla_minutes ?? DEFAULT_SLA_MINUTES),
@@ -102,11 +133,11 @@ export function FormSettings({
   const departmentId = watch("department_id");
 
   /*
-   * ⚠️ P7-66 — THE NAME IS NOW EDITED IN TWO PLACES, AND THIS CARD IS THE ONE
-   * THAT CAN OVERWRITE THE OTHER.
+   * ⚠️ P7-66 — THE NAME IS EDITED IN TWO PLACES, AND THIS CARD IS THE ONE THAT
+   * CAN OVERWRITE THE OTHER.
    *
    * The builder's top bar renames the form in place (`BuilderTitle`), and the
-   * builder keeps all three tabs MOUNTED so the question canvas survives a tab
+   * builder keeps every tab MOUNTED so the question canvas survives a tab
    * change. `defaultValues` is read ONCE, at mount — so after a rename this card
    * is still holding the name the page loaded with, and the next Save posts it
    * back over the new one. A settings save that silently undoes a rename made
@@ -127,44 +158,6 @@ export function FormSettings({
   useEffect(() => {
     if (initial?.name !== undefined) setValue("name", initial.name);
   }, [initial?.name, setValue]);
-
-  /*
-   * P7-66 — the four controls an engagement form has no use for.
-   *
-   * A reference prefix mints `COL-2026-0142` for a client to quote, an SLA is a
-   * turnaround standard on client work, a default list is where an APPROVED
-   * request files, and the client approval window is Gate 3. None of the four
-   * exists on a form staff fill in, so none of them is shown.
-   *
-   * HIDDEN, NOT UNREGISTERED. react-hook-form keeps a field's value when its
-   * input unmounts (`shouldUnregister` defaults to false), which is what this
-   * relies on: `formSettingsSchema` still demands a legal prefix and a legal
-   * SLA on every UPDATE, and they are supplied by the values the form loaded
-   * with. Switching to `shouldUnregister: true` would make this card
-   * unsaveable on an engagement form, with the error landing on a field nobody
-   * can see.
-   */
-  const purpose = watch("purpose") ?? "CLIENT_REQUEST";
-  const isClientRequest = purpose === "CLIENT_REQUEST";
-  const isAnonymous = watch("is_anonymous") ?? false;
-
-  /*
-   * ⚠️ P7-66 — CHANGING THE PURPOSE TO CLIENT MUST CLEAR THIS, and that is
-   * exactly because of the "HIDDEN, NOT UNREGISTERED" note above.
-   *
-   * react-hook-form keeps a field's value when its input unmounts, which is what
-   * makes the four hidden client-only settings saveable. The same behaviour on
-   * `is_anonymous` is a bug: mark a draft anonymous, then switch it to a client
-   * form, and the card sends `{ purpose: CLIENT_REQUEST, is_anonymous: true }`
-   * — refused by `vizserve_pms_forms_anonymous_is_internal`, on a control that
-   * is no longer on screen to explain itself. So the value is cleared with the
-   * switch that set it, and `updateFormSettings` still refuses the pair for
-   * anybody who bypasses this card.
-   */
-  const setPurpose = (value: FormPurpose) => {
-    setValue("purpose", value, { shouldValidate: true });
-    if (value === "CLIENT_REQUEST") setValue("is_anonymous", false);
-  };
 
   /*
    * P7-29 — what the server will fill in if these are left blank.
@@ -229,9 +222,6 @@ export function FormSettings({
   // Select.Value falls back to rendering the raw value, and these two are the
   // worst case of that: a bare UUID and the literal string "__none__".
   const departmentItems = Object.fromEntries(departments.map((d) => [d.id, d.name]));
-  const purposeItems = Object.fromEntries(
-    FORM_PURPOSES.map((value) => [value, FORM_PURPOSE_LABELS[value].label]),
-  );
   const listItems = {
     [NO_LIST]: "No list",
     ...Object.fromEntries(departmentLists.map((list) => [list.id, ownListLabel(list)])),
@@ -267,44 +257,6 @@ export function FormSettings({
 
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
-      {/* P7-66 — FIRST, above the name, because it changes what every control
-          below it means. `items` is not optional here: without it Base UI's
-          Select.Value renders the raw enum, and "EMPLOYEE_ENGAGEMENT" on a
-          screen is the exact thing check:select-items exists to fail. */}
-      <div className="space-y-2">
-        <Label htmlFor="purpose">Purpose</Label>
-        <Select
-          items={purposeItems}
-          value={purpose}
-          onValueChange={(value) => setPurpose(value as FormPurpose)}
-          disabled={hasSubmissions}
-        >
-          <SelectTrigger id="purpose" className="w-full sm:w-1/2" aria-invalid={Boolean(errors.purpose)}>
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {/* The label goes in BOTH the items map and the children — Base UI
-                reads the map for the trigger and the children for the popup. */}
-            {FORM_PURPOSES.map((value) => (
-              <SelectItem key={value} value={value}>
-                {FORM_PURPOSE_LABELS[value].label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">
-          {hasSubmissions
-            ? // Not just disabled — `updateFormSettings` refuses the change too.
-              // Flipping this on a live form would either strand its requests
-              // off the Gate 1 route or put a staff form on the open internet.
-              `Locked — ${FORM_PURPOSE_LABELS[purpose].label.toLowerCase()}, with submissions already through it.`
-            : FORM_PURPOSE_LABELS[purpose].hint}
-        </p>
-        {errors.purpose ? (
-          <p className="text-xs text-destructive">{errors.purpose.message}</p>
-        ) : null}
-      </div>
-
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="name">Name</Label>
@@ -321,14 +273,7 @@ export function FormSettings({
             {...register("slug")}
           />
           <p className="text-xs text-muted-foreground">
-            {/* An engagement form is not at /request/… — that route is the
-                public one and refuses anything `is_public` is false on. It gets
-                a slug all the same, because it is the form's address wherever
-                staff open it from; promising a URL this phase has not built
-                would be worse than naming none. */}
-            {isClientRequest
-              ? `Public at /request/${shownSlug || "…"}. `
-              : `Its address is /${shownSlug || "…"}. Staff open it signed in, not from a public link. `}
+            Public at /request/{shownSlug || "…"}.{" "}
             {willDeriveSlug ? "Derived from the name — type your own to change it." : null}
           </p>
           {errors.slug ? <p className="text-xs text-destructive">{errors.slug.message}</p> : null}
@@ -341,9 +286,9 @@ export function FormSettings({
         <p className="text-xs text-muted-foreground">Shown to the client above the fields.</p>
       </div>
 
-      <div className={isClientRequest ? "grid gap-4 sm:grid-cols-3" : "grid gap-4 sm:grid-cols-2"}>
+      <div className="grid gap-4 sm:grid-cols-3">
         <div className="space-y-2">
-          <Label htmlFor="department">Owning department</Label>
+          <Label htmlFor="department">Routing department</Label>
           {/* `items` is what makes the trigger show "VizBytes" instead of the
               department's UUID. Base UI's Select.Value renders the raw value
               unless the Root is handed a value→label map. */}
@@ -363,23 +308,21 @@ export function FormSettings({
               ))}
             </SelectContent>
           </Select>
-          {/* On a client form this decides which Team Leader the request lands
-              on. On an engagement form nothing is routed anywhere — but the
-              department is still what RLS scopes the form by, and publishing is
-              refused without one (vizserve_pms_forms_active_requires_
-              department), so the field is asked for either way. */}
+          {/*
+            ⚠️ ROUTING, NOT OWNERSHIP. The same column means something different
+            on an engagement form, where nothing is routed and it decides who
+            READS the answers. Here it decides whose Gate 1 queue a submission
+            lands in, which is the first thing that happens to a client request
+            and the one nobody can undo from the outside.
+          */}
           <p className="text-xs text-muted-foreground">
-            {isClientRequest
-              ? "Routes submissions to this department's TL."
-              : "Who owns the form. Required before it can be published."}
+            Routes submissions to this department&rsquo;s TL.
           </p>
           {errors.department_id ? (
             <p className="text-xs text-destructive">{errors.department_id.message}</p>
           ) : null}
         </div>
 
-        {isClientRequest ? (
-          <>
         <div className="space-y-2">
           <Label htmlFor="reference_prefix">Reference prefix</Label>
           <Input
@@ -421,13 +364,9 @@ export function FormSettings({
           {errors.sla_minutes ? (
             <p className="text-xs text-destructive">{errors.sla_minutes.message}</p>
           ) : null}
-
         </div>
-          </>
-        ) : null}
       </div>
 
-      {isClientRequest ? (
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="default_list">Default list</Label>
@@ -499,67 +438,8 @@ export function FormSettings({
           ) : null}
         </div>
       </div>
-      ) : null}
 
       <div className="space-y-3 rounded-lg border p-4">
-        {/*
-          ⚠️ P7-66 — ENGAGEMENT FORMS ONLY, AND NOT MERELY BECAUSE IT WOULD BE
-          USELESS ON A CLIENT FORM.
-
-          /request/<slug> has no session at all: a client TYPES their own name
-          and email into the form, and those are ordinary answers on the
-          request. There is no identity the platform captured and therefore
-          nothing to withhold — an "anonymous" client form would promise
-          something it does not deliver, with the name sitting in
-          `requester_name` the whole time. `vizserve_pms_forms_anonymous_is_
-          internal` refuses that row; this is why the control is not there to
-          try it.
-
-          ⚠️ FIRST IN THIS BOX, ABOVE PUBLISHED. It is the setting that has to be
-          right BEFORE the form goes live — publishing is what makes it
-          unchangeable, and a switch found underneath the one that locked it is
-          a switch found too late.
-        */}
-        {isClientRequest ? null : (
-          <div className="flex items-start justify-between gap-4 border-b pb-3">
-            <div>
-              <Label htmlFor="is_anonymous">Anonymous answers</Label>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {/* "Not recorded" rather than "not shown", in both branches. The
-                    difference is the entire feature: an anonymous form writes no
-                    name, so there is none to surface later through an export, a
-                    new screen or an admin with SQL access. */}
-                {isAnonymous
-                  ? "Nobody's name is recorded — not hidden, never written. You see the answers and when they came in."
-                  : "Each answer is recorded against the name of whoever wrote it."}
-              </p>
-              {hasSubmissions ? (
-                // Not just disabled — `updateFormSettings` refuses the change
-                // and `vizserve_pms_forms_anonymity_lock` refuses it under that.
-                // The reason is not "it would be awkward": named→anonymous would
-                // label answers that still carry names as anonymous.
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Locked — answers already came in under this promise. Build a new form to change
-                  it.
-                </p>
-              ) : (
-                <p className="mt-1 text-xs text-warning">
-                  Settles when the first answer arrives, and cannot change afterwards.
-                </p>
-              )}
-              {errors.is_anonymous ? (
-                <p className="mt-1 text-xs text-destructive">{errors.is_anonymous.message}</p>
-              ) : null}
-            </div>
-            <Switch
-              id="is_anonymous"
-              checked={isAnonymous}
-              disabled={hasSubmissions}
-              onCheckedChange={(checked) => setValue("is_anonymous", checked)}
-            />
-          </div>
-        )}
-
         <div className="flex items-start justify-between gap-4">
           <div>
             <Label htmlFor="requires_attachment">Require an attachment</Label>
@@ -577,24 +457,14 @@ export function FormSettings({
         <div className="flex items-start justify-between gap-4 border-t pt-3">
           <div>
             <Label htmlFor="is_active">Published</Label>
-            {/* P7-66 — "anyone with the URL, no login" is TRUE of a client form
-                and would be a lie about an engagement one. The whole point of
-                the purpose column is that these are two different promises, so
-                the sentence that describes publishing has to be two sentences. */}
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {isClientRequest
-                ? isActive
-                  ? "Live — anyone with the URL can submit, no login."
-                  : "Draft — the public URL returns not found."
-                : isActive
-                  ? "Live — signed-in staff can fill it in. There is no public link."
-                  : "Draft — nobody can fill it in yet."}
+              {isActive
+                ? "Live — anyone with the URL can submit, no login."
+                : "Draft — the public URL returns not found."}
             </p>
             {isActive && !departmentId ? (
               <p className="mt-1 text-xs text-warning">
-                {isClientRequest
-                  ? "Choose a department first, or submissions have nowhere to go."
-                  : "Choose a department first — a form with none cannot be published."}
+                Choose a department first, or submissions have nowhere to go.
               </p>
             ) : null}
           </div>
