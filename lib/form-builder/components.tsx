@@ -1,6 +1,7 @@
 "use client";
 
-import { createContext, useContext, useState } from "react";
+import { createContext, useContext } from "react";
+import { Plus, X } from "lucide-react";
 import type { BuilderStore, EntitiesValues, InterpreterStore } from "@coltorapps/builder";
 import {
   BuilderEntity,
@@ -16,6 +17,7 @@ import {
 } from "@coltorapps/builder-react";
 
 import { FileField, type UploadFn } from "@/components/file-field";
+import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
@@ -31,13 +33,12 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import {
   helpTextAttribute,
-  keyAttribute,
   labelAttribute,
-  normaliseOptionsText,
   optionsAttribute,
   requiredAttribute,
-  FIELD_KEY_MESSAGE,
 } from "@/lib/form-builder/attributes";
+import { cn } from "@/lib/utils";
+import { nextOptionLabel } from "@/lib/form-builder/canvas";
 import { formBuilder, type FormBuilder, type FormSchema } from "@/lib/form-builder/builder";
 import {
   dateEntity,
@@ -607,11 +608,15 @@ const LabelAttribute = createAttributeComponent(
     const error = attributeErrorText(attribute.error);
 
     return (
-      <div className="space-y-2">
-        <Label htmlFor={controlId}>Label</Label>
+      <div className="min-w-0 space-y-1.5">
+        {/* "Question", not "Label". The person using this is writing a form, and
+            the thing they are typing is the question. "Label" is what the
+            attribute is called in the schema, which is nobody's business here. */}
+        <Label htmlFor={controlId}>Question</Label>
         <Input
           id={controlId}
           value={attribute.value}
+          placeholder="What are you asking?"
           aria-invalid={error ? true : undefined}
           onChange={(event) => setValue(event.target.value)}
           onBlur={() => void validateValue()}
@@ -627,47 +632,23 @@ const LabelAttribute = createAttributeComponent(
 );
 
 /**
- * ⚠️ THE KEY IS THE STORAGE IDENTITY (§1), AND IT LOCKS ONCE THE FIELD EXISTS.
+ * ⚠️ THERE IS NO KEY INPUT ANY MORE, AND ITS ABSENCE IS THE FEATURE.
  *
- * Every answer in `vizserve_pms_requests.field_values` is filed under it, and
- * renaming one that has data is refused by `vizserve_pms_form_field_protect` in
- * Postgres — the front end will be bypassed, so this input being disabled is a
- * courtesy, not the rule. A field being ADDED has no row and no answers yet, so
- * its key is still open.
+ * `field_key` is the storage identity every stored answer is filed under (§1).
+ * It was a text box, on every question, asking whoever was writing a survey to
+ * invent a unique lower-case identifier they would never see again — and one
+ * they could not change afterwards, because `vizserve_pms_form_field_protect`
+ * refuses to rename a key with data behind it.
+ *
+ * `deriveFieldKeys` now mints it from the label and de-duplicates it against
+ * every key on the form, ARCHIVED ONES INCLUDED, immediately before each save.
+ * The editor states what it will be, in a sentence, so the fact is not hidden —
+ * only the box is gone.
+ *
+ * `keyAttribute` still validates, and is still what refuses a malformed key
+ * arriving from a hand-edited blob. Nothing about the rule changed; what changed
+ * is who answers it.
  */
-const KeyAttribute = createAttributeComponent(
-  keyAttribute,
-  ({ attribute, entity, setValue, validateValue }) => {
-    const { lockedEntityIds } = useFieldRuntime();
-    const controlId = `attr-key-${entity.id}`;
-    const locked = lockedEntityIds?.has(entity.id) ?? false;
-    const error = attributeErrorText(attribute.error);
-
-    return (
-      <div className="space-y-2">
-        <Label htmlFor={controlId}>Field key</Label>
-        <Input
-          id={controlId}
-          value={attribute.value}
-          disabled={locked}
-          aria-invalid={error ? true : undefined}
-          onChange={(event) => setValue(event.target.value)}
-          onBlur={() => void validateValue()}
-        />
-        <p className="text-xs text-muted-foreground">
-          {locked
-            ? "Fixed — existing requests store their answers under this key."
-            : `Used to store answers, and fixed once saved. Leave it blank to derive one from the label. ${FIELD_KEY_MESSAGE}`}
-        </p>
-        {error ? (
-          <p className="text-xs text-destructive" role="alert">
-            {error}
-          </p>
-        ) : null}
-      </div>
-    );
-  },
-);
 
 const HelpTextAttribute = createAttributeComponent(
   helpTextAttribute,
@@ -675,11 +656,12 @@ const HelpTextAttribute = createAttributeComponent(
     const controlId = `attr-help-${entity.id}`;
 
     return (
-      <div className="space-y-2">
-        <Label htmlFor={controlId}>Helper text</Label>
+      <div className="space-y-1.5">
+        <Label htmlFor={controlId}>Help text (optional)</Label>
         <Input
           id={controlId}
           value={attribute.value}
+          placeholder="Shown under the question"
           onChange={(event) => setValue(event.target.value)}
         />
       </div>
@@ -687,96 +669,126 @@ const HelpTextAttribute = createAttributeComponent(
   },
 );
 
+/**
+ * A switch beside the question, not a bordered card under it.
+ *
+ * The paragraph that used to be here ("Required is the default. Every optional
+ * field is a question the team will end up chasing.") was three lines of advice
+ * on a control that is toggled once and understood immediately. It made the
+ * required flag the largest thing in the editor.
+ */
 const RequiredAttribute = createAttributeComponent(
   requiredAttribute,
   ({ attribute, entity, setValue }) => {
     const controlId = `attr-required-${entity.id}`;
 
     return (
-      <div className="flex items-center justify-between gap-4 rounded-sm border bg-background p-3">
-        <div>
-          <Label htmlFor={controlId}>Required</Label>
-          <p className="mt-0.5 text-xs text-muted-foreground">
-            Required is the default. Every optional field is a question the team will end up
-            chasing.
-          </p>
+      <div className="shrink-0 space-y-1.5">
+        <Label htmlFor={controlId}>Required</Label>
+        {/* `h-9` matches the Input beside it, so the switch sits on the control
+            line rather than floating above it. */}
+        <div className="flex h-9 items-center">
+          <Switch id={controlId} checked={attribute.value} onCheckedChange={setValue} />
         </div>
-        <Switch id={controlId} checked={attribute.value} onCheckedChange={setValue} />
       </div>
     );
   },
 );
 
 /**
- * One option per line, exactly as the old builder took them.
+ * P7-66 — ONE ROW PER CHOICE, INLINE, UNDER THE ANSWER TYPE.
  *
- * ⚠️ TRIMMED AND EMPTIES DROPPED ON THE WAY IN, never on the way out. An option
- * is a stored VALUE — `selectEntity` builds `z.enum(options)` from this list and
- * accepts an answer only if it matches one exactly — so rewriting one that is
- * already stored moves the accepted set away from the stored set and a
- * historical answer stops validating. `optionsAttribute` therefore preserves
- * whatever it is given; the cleaning belongs here, at the moment somebody types
- * a new list, which is what `formFieldDraftSchema.options` did before.
+ * ⚠️ IT WAS A ONE-PER-LINE TEXTAREA AND THAT IS WHAT IT STOPPED BEING. The
+ * textarea worked, after two bugs were fixed in it, and it still asked somebody
+ * to hold "one option per line" in their head while typing something that
+ * renders as a list of radio buttons six inches to the right. Rows are what the
+ * thing IS: one control per choice, a remove button on each, and an add button
+ * under them.
  *
- * ⚠️ TYPING AND NORMALISING ARE TWO DIFFERENT MOMENTS, AND THIS IS WHY THERE IS
- * A SECOND PIECE OF STATE.
+ * ⚠️ NO DRAFT STATE, AND IT DOES NOT NEED ONE. The textarea kept a raw draft
+ * separate from the normalised store because it normalised the WHOLE list on
+ * every keystroke — which ate a typed space and made a second option
+ * unreachable. Here each row is its own input bound to its own element, so a
+ * keystroke replaces one entry and touches nothing else. There is no
+ * normalisation to fight.
  *
- * The textarea used to be driven straight off `attribute.value.join("\n")` while
- * `onChange` normalised every keystroke into the store. That is a controlled
- * input that rewrites what you type as you type it: Enter after `Poster`
- * produced `["Poster"]`, which re-rendered as `Poster` with the newline gone, so
- * a SECOND OPTION COULD NEVER BE ENTERED — and the space in `Social media` was
- * eaten the instant it was pressed, so a multi-word option was impossible too.
- * The editor was unusable on arrival, and it is the only way to configure a
- * `select`.
+ * ⚠️ AN EMPTY ROW IS KEPT, NOT DROPPED. `optionsAttribute` refuses `""`, so a
+ * document holding one cannot be saved — and `unsavableReason` says exactly
+ * that, naming the row. Dropping it instead would delete, mid-keystroke and with
+ * no way back, a choice somebody had just cleared in order to retype it.
  *
- * So `draft` is what somebody is typing, verbatim, and it is the only thing the
- * textarea shows. `normaliseOptionsText` decides what is STORED, and it still
- * runs on every keystroke — the store therefore never holds a half-typed line,
- * and a save that lands without an intervening blur is as correct as one that
- * follows one. The blur tidies the visible text to match.
- *
- * The reconciliation below is the standard "adjust state when a prop changes"
- * pattern, and it exists for `resetBuilderStore`: a refused save puts the store
- * back on the last saved schema WITHOUT unmounting this editor, and a draft left
- * showing the rejected list would be a lie about what the form now holds. It
- * compares NORMALISED to stored, so it cannot fire on the trailing newline or
- * the mid-word space that are the whole point of keeping a draft.
+ * ⚠️ THE LAST ROW CANNOT BE REMOVED. A choice field with no choices is a
+ * question that cannot be answered, and `validateSchema` refuses it. Changing
+ * the answer type is the way to stop having choices, which is a decision rather
+ * than an accident.
  */
 const OptionsAttribute = createAttributeComponent(
   optionsAttribute,
   ({ attribute, entity, setValue, validateValue }) => {
-    const controlId = `attr-options-${entity.id}`;
     const error = attributeErrorText(attribute.error);
-    const stored = attribute.value.join("\n");
+    const options = attribute.value;
 
-    const [draft, setDraft] = useState(stored);
-    const [lastStored, setLastStored] = useState(stored);
+    // Round for "choose one", square for "choose many" — the same shape the
+    // respondent will see, so the editor looks like what it configures.
+    const round = entity.type === "select";
 
-    if (stored !== lastStored) {
-      setLastStored(stored);
-      if (stored !== normaliseOptionsText(draft).join("\n")) setDraft(stored);
+    function replace(index: number, value: string) {
+      setValue(options.map((option, at) => (at === index ? value : option)));
     }
 
     return (
-      <div className="space-y-2">
-        <Label htmlFor={controlId}>Options</Label>
-        <Textarea
-          id={controlId}
-          rows={4}
-          aria-invalid={error ? true : undefined}
-          value={draft}
-          placeholder={"Poster\nBanner\nSocial media set"}
-          onChange={(event) => {
-            setDraft(event.target.value);
-            setValue(normaliseOptionsText(event.target.value));
-          }}
-          onBlur={() => {
-            setDraft(normaliseOptionsText(draft).join("\n"));
-            void validateValue();
-          }}
-        />
-        <p className="text-xs text-muted-foreground">One per line.</p>
+      <div className="space-y-1.5">
+        <Label>Choices</Label>
+
+        <ul className="space-y-1.5">
+          {options.map((option, index) => (
+            // The index IS the identity here: choices have no id of their own,
+            // and keying by value makes two rows with the same text collide and
+            // makes every row remount as it is typed into.
+            <li key={index} className="flex items-center gap-2.5">
+              <span
+                aria-hidden
+                className={cn(
+                  "size-4 shrink-0 border-1.5 border-border-strong",
+                  round ? "rounded-full" : "rounded-xs",
+                )}
+              />
+              <Input
+                value={option}
+                aria-label={`Choice ${index + 1}`}
+                aria-invalid={error ? true : undefined}
+                className="h-9 border-0 border-b border-transparent bg-transparent px-0.5 shadow-none hover:border-border focus-visible:border-primary focus-visible:ring-0"
+                onChange={(event) => replace(index, event.target.value)}
+                onBlur={() => void validateValue()}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="size-7 shrink-0"
+                // The only choice left is the one that makes the question
+                // answerable. See the note above.
+                disabled={options.length <= 1}
+                aria-label={`Remove choice ${index + 1}`}
+                onClick={() => setValue(options.filter((_, at) => at !== index))}
+              >
+                <X />
+              </Button>
+            </li>
+          ))}
+        </ul>
+
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          className="ml-6.5"
+          onClick={() => setValue([...options, nextOptionLabel(options)])}
+        >
+          <Plus />
+          Add choice
+        </Button>
+
         {error ? (
           <p className="text-xs text-destructive" role="alert">
             {error}
@@ -787,46 +799,78 @@ const OptionsAttribute = createAttributeComponent(
   },
 );
 
-function TextAttributes() {
+/**
+ * P7-66 — THE ATTRIBUTES COME IN TWO PANELS, BECAUSE THE ANSWER TYPE SITS
+ * BETWEEN THEM.
+ *
+ * The editor reads: the question and whether it is required, then the answer
+ * type, then the choices that type may have, then the help text. The type is not
+ * an attribute — the library has no `setEntityType` at all (see
+ * `replaceFieldType`) — so it cannot be one more entry in a single ordered map.
+ *
+ * Two maps, therefore, rendered either side of a control the app owns. That is
+ * the only way to get the mockup's order without moving the type control to the
+ * top or the bottom, and both of those were tried on paper: at the top it reads
+ * as the most important decision on the screen, which it is not; at the bottom
+ * the choices it governs appear above it.
+ *
+ * Everything else about the library's plumbing is unchanged — each panel is a
+ * real `BuilderEntityAttributes` render, so per-attribute validation and the
+ * error under each input work exactly as they did.
+ */
+function HeadAttributes() {
   return (
-    <div className="space-y-4">
-      <LabelAttribute />
-      <KeyAttribute />
-      <HelpTextAttribute />
+    <div className="flex items-start gap-4">
+      <div className="min-w-0 flex-1">
+        <LabelAttribute />
+      </div>
       <RequiredAttribute />
     </div>
   );
 }
 
-function ChoiceAttributes() {
+function TextBodyAttributes() {
+  return <HelpTextAttribute />;
+}
+
+function ChoiceBodyAttributes() {
   return (
-    <div className="space-y-4">
-      <LabelAttribute />
-      <KeyAttribute />
-      <HelpTextAttribute />
+    <div className="space-y-3.5">
       <OptionsAttribute />
-      <RequiredAttribute />
+      <HelpTextAttribute />
     </div>
   );
 }
+
+/** The question and its required flag. Same panel for every type. */
+export const fieldHeadAttributeComponents: EntitiesAttributesComponents<FormBuilder> = {
+  text: HeadAttributes,
+  textarea: HeadAttributes,
+  date: HeadAttributes,
+  select: HeadAttributes,
+  multiselect: HeadAttributes,
+  file: HeadAttributes,
+  email: HeadAttributes,
+  number: HeadAttributes,
+};
 
 /**
- * Which panel each field type gets.
+ * What follows the answer type.
  *
- * Only `select` and `multiselect` carry an options editor — showing an empty
- * "Options" box on a text field was the one thing the old builder got right by
- * hiding it, and `formBuilder.validateSchema` refuses to save an option-less
- * choice field, so the box has to be there for exactly those two.
+ * Only `select` and `multiselect` carry a choices editor — an empty "Choices"
+ * box on a text field was the one thing the old builder got right by hiding it,
+ * and `formBuilder.validateSchema` refuses to save an option-less choice field,
+ * so the rows have to be there for exactly those two.
  */
-export const fieldAttributeComponents: EntitiesAttributesComponents<FormBuilder> = {
-  text: TextAttributes,
-  textarea: TextAttributes,
-  date: TextAttributes,
-  select: ChoiceAttributes,
-  multiselect: ChoiceAttributes,
-  file: TextAttributes,
-  email: TextAttributes,
-  number: TextAttributes,
+export const fieldBodyAttributeComponents: EntitiesAttributesComponents<FormBuilder> = {
+  text: TextBodyAttributes,
+  textarea: TextBodyAttributes,
+  date: TextBodyAttributes,
+  select: ChoiceBodyAttributes,
+  multiselect: ChoiceBodyAttributes,
+  file: TextBodyAttributes,
+  email: TextBodyAttributes,
+  number: TextBodyAttributes,
 };
 
 // ---------------------------------------------------------------------------
@@ -882,8 +926,8 @@ export function FieldPreview({
   );
 }
 
-/** One field's attribute editors. */
-export function FieldAttributesEditor({
+/** The question and its required flag — everything ABOVE the answer type. */
+export function FieldHeadAttributes({
   builderStore,
   entityId,
 }: {
@@ -894,7 +938,24 @@ export function FieldAttributesEditor({
     <BuilderEntityAttributes
       builderStore={builderStore}
       entityId={entityId}
-      components={fieldAttributeComponents}
+      components={fieldHeadAttributeComponents}
+    />
+  );
+}
+
+/** The choices and the help text — everything BELOW the answer type. */
+export function FieldBodyAttributes({
+  builderStore,
+  entityId,
+}: {
+  builderStore: FormBuilderStore;
+  entityId: string;
+}) {
+  return (
+    <BuilderEntityAttributes
+      builderStore={builderStore}
+      entityId={entityId}
+      components={fieldBodyAttributeComponents}
     />
   );
 }
@@ -926,6 +987,111 @@ export function addFieldEntity(
   });
 
   return entity.id;
+}
+
+/**
+ * P7-66 — CHANGING A QUESTION'S ANSWER TYPE, WHICH THE LIBRARY CANNOT DO.
+ *
+ * ⚠️ THERE IS NO `setEntityType`. Verified in `@coltorapps/builder`'s own
+ * `.d.ts`: the store exposes `addEntity`, `deleteEntity`, `setEntityIndex`,
+ * `setEntityAttribute`, `cloneEntity` and nothing that mutates `type`. An
+ * entity's type is fixed at creation, so a change is a DELETE and an ADD — which
+ * is exactly what it is in the database too, since the entity id IS the
+ * `vizserve_pms_form_fields` row id.
+ *
+ * That equivalence is the reason this is safe to offer at all and the reason it
+ * has to be refused once answers exist: `vizserve_pms_form_field_protect`
+ * refuses to drop a field that has data, so a type change on an answered
+ * question is a save that Postgres rejects. The editor disables the control
+ * there; this function is what the control drives when it is allowed.
+ *
+ * ⚠️ IT LANDS AT THE SAME INDEX. Without that, changing question 2 from Short
+ * text to Long text moves it to the bottom of the form — the delete removes it
+ * and the add appends. The index is read BEFORE the delete, because after it
+ * every position past this one has shifted.
+ *
+ * ⚠️ THE ATTRIBUTES COME ACROSS, INCLUDING `key`. The label, the help text, the
+ * required flag and the archived flag all describe the QUESTION rather than its
+ * control, and losing them would make a type change feel like starting over. The
+ * key travels for a different reason: it is only ever editable on a field that
+ * has never been saved, so this either carries a derived key that is about to be
+ * re-derived anyway, or one the caller has already decided is free.
+ *
+ * `options` are kept when the new type can use them and dropped when it cannot,
+ * so Choose one → Choose many keeps the list somebody typed, and Choose one →
+ * Short text does not leave three orphan choices in the document for
+ * `optionsAttribute` to carry around.
+ *
+ * Returns the NEW entity id: the old one is gone, and every caller has a
+ * selection pointing at it.
+ */
+export function replaceFieldType(
+  builderStore: FormBuilderStore,
+  entityId: string,
+  type: FieldType,
+): string | null {
+  const schema = builderStore.getSchema();
+
+  if (!Object.hasOwn(schema.entities, entityId)) return null;
+
+  const previous = schema.entities[entityId]!;
+  const index = schema.root.indexOf(entityId);
+
+  const keepsOptions = type === "select" || type === "multiselect";
+
+  builderStore.deleteEntity(entityId);
+
+  const entity = builderStore.addEntity({
+    type,
+    attributes: {
+      ...previous.attributes,
+      options: keepsOptions ? previous.attributes.options : [],
+    },
+    // `-1` cannot happen — the id came out of `root` — but `addEntity` would
+    // read it as "insert at the end from the right", so it is normalised rather
+    // than trusted.
+    index: index < 0 ? undefined : index,
+  });
+
+  return entity.id;
+}
+
+/**
+ * P7-66 — DUPLICATE, AND THE ID THE LIBRARY DOES NOT HAND BACK.
+ *
+ * `cloneEntity` returns `void`. It inserts the copy directly after the original
+ * (measured in the shipped `dist`: `index: getIndex(entityId) + 1`), which is
+ * exactly where a duplicate belongs — but the caller needs the new id to select
+ * it, and the only way to learn it is to look at what appeared.
+ *
+ * ⚠️ THE COPY'S KEY IS CLEARED, AND THIS IS NOT COSMETIC. `cloneEntity` copies
+ * every attribute verbatim, `key` included — so an unguarded duplicate produces
+ * two fields sharing one storage identity, which `formBuilder.validateSchema`
+ * refuses ("Two fields share the key …") and which would file two questions'
+ * answers in one place if it did not. Blanking it hands the copy back to
+ * `deriveFieldKeys`, which mints a fresh one from the label and de-duplicates it
+ * against every key already in use, archived ones included.
+ *
+ * The label is deliberately NOT changed. "Which pages are affected?" duplicated
+ * as "Which pages are affected? (copy)" is a question somebody now has to edit
+ * twice — once to say what they meant, once to remove the word "copy". The two
+ * rows sit adjacent and numbered, so which is which is not in doubt.
+ */
+export function cloneFieldEntity(
+  builderStore: FormBuilderStore,
+  entityId: string,
+): string | null {
+  const before = new Set(builderStore.getSchema().root);
+
+  builderStore.cloneEntity(entityId);
+
+  const added = builderStore.getSchema().root.find((id) => !before.has(id));
+
+  if (added === undefined) return null;
+
+  builderStore.setEntityAttribute(added, "key", "");
+
+  return added;
 }
 
 /**

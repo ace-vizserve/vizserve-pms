@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -100,6 +100,33 @@ export function FormSettings({
 
   const isActive = watch("is_active");
   const departmentId = watch("department_id");
+
+  /*
+   * ⚠️ P7-66 — THE NAME IS NOW EDITED IN TWO PLACES, AND THIS CARD IS THE ONE
+   * THAT CAN OVERWRITE THE OTHER.
+   *
+   * The builder's top bar renames the form in place (`BuilderTitle`), and the
+   * builder keeps all three tabs MOUNTED so the question canvas survives a tab
+   * change. `defaultValues` is read ONCE, at mount — so after a rename this card
+   * is still holding the name the page loaded with, and the next Save posts it
+   * back over the new one. A settings save that silently undoes a rename made
+   * thirty seconds ago is the kind of bug nobody attributes to the right screen.
+   *
+   * ⚠️ IT DOES NOT FIGHT SOMEBODY TYPING HERE. The effect keys on
+   * `initial?.name` — what the SERVER says — which does not change while this
+   * input is being edited; it changes only when a rename lands and the page
+   * revalidates. So the sequence it corrects is the real one, and the ordinary
+   * one is untouched.
+   *
+   * A name typed here and left unsaved IS discarded by a top-bar rename, which
+   * is correct: the rename is the later explicit instruction.
+   *
+   * `shouldDirty` is deliberately absent. This is not the person's edit, it is
+   * the card catching up with a change that has already been saved.
+   */
+  useEffect(() => {
+    if (initial?.name !== undefined) setValue("name", initial.name);
+  }, [initial?.name, setValue]);
 
   /*
    * P7-66 — the four controls an engagement form has no use for.

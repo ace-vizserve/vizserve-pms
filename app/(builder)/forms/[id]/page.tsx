@@ -20,7 +20,10 @@ import type { FieldType } from "@/lib/schemas/forms";
 import { resolvePage, resolvePageSize } from "@/components/pagination";
 import { FieldBuilder } from "./field-builder";
 import { FormResponses } from "./responses";
-import { SettingsDisclosure } from "./settings-disclosure";
+import { BuilderTabs, resolveBuilderTab } from "./builder-tabs";
+import { BuilderTitle } from "./builder-title";
+import { ClientRequestsPanel } from "./client-requests-panel";
+import { SaveStatusLine, SaveStatusProvider } from "./save-status";
 import { administersForm } from "@/app/(app)/forms/administers";
 import { countFormSubmissions } from "@/app/(app)/forms/submission-count";
 import { loadRoutableDepartments } from "@/app/(app)/forms/routable-departments";
@@ -45,10 +48,18 @@ export const metadata: Metadata = { title: "Edit form" };
  * left edge.
  */
 function BuilderHeader({
-  name,
+  title,
   children,
 }: {
-  name?: string;
+  /**
+   * The page's `<h1>`.
+   *
+   * A NODE rather than a string, because on the loaded page it is an editable
+   * input (`BuilderTitle`) and on a failed read it is plain text — there is
+   * nothing to edit when the form did not arrive, and offering a box that saves
+   * a name onto a form nobody could read is worse than offering nothing.
+   */
+  title?: React.ReactNode;
   children?: React.ReactNode;
 }) {
   return (
@@ -66,9 +77,9 @@ function BuilderHeader({
         className="data-vertical:h-4 data-vertical:self-auto"
       />
 
-      <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">
-        {name ?? "Edit form"}
-      </h1>
+      {title ?? (
+        <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">Edit form</h1>
+      )}
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
         {children}
@@ -104,7 +115,13 @@ function FormLoadFailure({
 }) {
   return (
     <>
-      <BuilderHeader name={formName} />
+      <BuilderHeader
+        title={
+          formName === undefined ? undefined : (
+            <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">{formName}</h1>
+          )
+        }
+      />
       <div className="mx-auto w-full max-w-3xl p-5">
         <QueryError what={what} message={message} />
       </div>
@@ -122,10 +139,10 @@ export default async function EditFormPage({
    * lives in the URL rather than in component state so Back works and a link to
    * page 3 is a link to page 3. Nothing else on this route reads a query param.
    */
-  searchParams: Promise<{ page?: string; size?: string }>;
+  searchParams: Promise<{ page?: string; size?: string; tab?: string }>;
 }) {
   const { id } = await params;
-  const { page: rawPage, size: rawSize } = await searchParams;
+  const { page: rawPage, size: rawSize, tab: rawTab } = await searchParams;
   const context = await requireRole("team_leader");
   const supabase = await createClient();
 
@@ -380,8 +397,19 @@ export default async function EditFormPage({
      * question never stretches across an ultrawide monitor while the rail stays
      * pinned to the edge where the eye expects a tool rail.
      */
-    <>
-      <BuilderHeader name={form.name}>
+    <SaveStatusProvider>
+      <BuilderHeader
+        title={
+          <div className="flex min-w-0 flex-col justify-center">
+            <BuilderTitle formId={form.id} name={form.name} />
+            {/* Directly under the name, where a Save button used to be — this
+                is what replaced it. See `save-status.tsx`. */}
+            <span className="pl-1.5">
+              <SaveStatusLine />
+            </span>
+          </div>
+        }
+      >
         {form.is_active ? (
           <Chip tone="success" label="Live" />
         ) : (
@@ -424,92 +452,106 @@ export default async function EditFormPage({
         ) : null}
       </BuilderHeader>
 
-      <div className="flex flex-1 flex-col gap-4 p-5">
-        {/*
-          ONE SENTENCE NOW, BECAUSE THE GUARANTEE IS THE SAME ON BOTH.
+      <BuilderTabs
+        initialTab={resolveBuilderTab(rawTab)}
+        /* An engagement form collects ANSWERS; a client form mints REQUESTS.
+           See the prop's note — the two are different products. */
+        responsesLabel={isEngagement ? "Responses" : "Requests"}
+        responsesCount={submissionCount}
+        questions={
+          <div className="flex flex-col gap-4 p-5">
+            {/*
+              ONE SENTENCE NOW, BECAUSE THE GUARANTEE IS THE SAME ON BOTH.
 
-          This used to say two different things. `vizserve_pms_form_field_protect`
-          refuses a key rename or a field delete once the form has submissions,
-          but it counted `vizserve_pms_requests` and nothing else — and an
-          engagement form never produces one. So on a staff survey the lock did
-          not fire, and the honest sentence there was a WARNING that renaming a
-          question orphans its answers, not a promise that it cannot happen.
+              This used to say two different things. `vizserve_pms_form_field_protect`
+              refuses a key rename or a field delete once the form has submissions,
+              but it counted `vizserve_pms_requests` and nothing else — and an
+              engagement form never produces one. So on a staff survey the lock did
+              not fire, and the honest sentence there was a WARNING that renaming a
+              question orphans its answers, not a promise that it cannot happen.
 
-          20260902110000_p7_66_form_responses.sql closes that: the guard now
-          asks both tables, so a key with an answer under it is immutable
-          whichever kind of form it belongs to. The screen can make the promise
-          again, in one sentence, because Postgres is now making it.
+              20260902110000_p7_66_form_responses.sql closes that: the guard now
+              asks both tables, so a key with an answer under it is immutable
+              whichever kind of form it belongs to. The screen can make the promise
+              again, in one sentence, because Postgres is now making it.
 
-          Only the NOUN still differs — an engagement form collects answers and
-          a client form collects submissions, and calling a colleague's survey
-          answer a "submission" is the kind of small wrongness that makes a
-          screen feel like it was built for something else.
-        */}
-        {submissionCount > 0 ? (
-          <p className="text-xs text-muted-foreground">
-            {submissionCount} {isEngagement ? "answer" : "submission"}
-            {submissionCount === 1 ? "" : "s"} — field keys are locked.
-          </p>
-        ) : null}
+              Only the NOUN still differs — an engagement form collects answers and
+              a client form collects submissions, and calling a colleague's survey
+              answer a "submission" is the kind of small wrongness that makes a
+              screen feel like it was built for something else.
+            */}
+            {submissionCount > 0 ? (
+              <p className="text-xs text-muted-foreground">
+                {submissionCount} {isEngagement ? "answer" : "submission"}
+                {submissionCount === 1 ? "" : "s"} — field keys are locked.
+              </p>
+            ) : null}
 
-        <FieldBuilder formId={form.id} purpose={form.purpose} initialSchema={initialSchema} />
-
-        {/* COLLAPSED BY DEFAULT. The questions are the work on this screen; the
-            slug, the SLA and the routing are set once and then left alone, and
-            a six-row card of them under the canvas made the form itself look
-            like the smaller half of the page. */}
-        <SettingsDisclosure>
-          <FormSettings
-            departments={departments}
-            lists={lists ?? []}
-            formId={form.id}
-            hasSubmissions={submissionCount > 0}
-            initial={{
-              name: form.name,
-              slug: form.slug,
-              description: form.description,
-              department_id: form.department_id,
-              reference_prefix: form.reference_prefix,
-              // P7-66 — `purpose` is settable here and `is_public` is not.
-              // `updateFormSettings` derives the boolean from it, and the
-              // schema no longer carries it, so it cannot be sent at all.
-              purpose: form.purpose,
-              // P7-66 — the card only OFFERS this on an engagement form; it is
-              // loaded on both so a client form's save resends the false it
-              // already holds rather than a value the schema never received.
-              is_anonymous: form.is_anonymous,
-              is_active: form.is_active,
-              requires_attachment: form.requires_attachment,
-              sla_minutes: form.sla_minutes,
-              default_list_id: form.default_list_id,
-              client_approval_days: form.client_approval_days,
-            }}
-          />
-        </SettingsDisclosure>
-
-        {/*
-          ⚠️ ENGAGEMENT FORMS ONLY. A client form's submissions are
-          `vizserve_pms_requests` and are already read at /requests, with a
-          reference number, a status, a Gate 1 decision and an SLA clock — none
-          of which a flat answers table has anywhere to put. Rendering both
-          would be two screens for one thing, and the wrong one would be the
-          more convenient.
-
-          Below the settings rather than above them: this is what you come here
-          to READ, and the canvas is what you come here to CHANGE. Reading
-          survives a scroll; editing does not.
-        */}
-        {isEngagement ? (
-          <FormResponses
-            formId={form.id}
-            departmentId={form.department_id}
-            isAnonymous={form.is_anonymous}
-            schema={initialSchema}
-            page={resolvePage(rawPage)}
-            pageSize={resolvePageSize(rawSize)}
-          />
-        ) : null}
-      </div>
-    </>
+            <FieldBuilder
+              formId={form.id}
+              purpose={form.purpose}
+              isAnonymous={form.is_anonymous}
+              formName={form.name}
+              description={form.description}
+              hasSubmissions={submissionCount > 0}
+              initialSchema={initialSchema}
+            />
+          </div>
+        }
+        responses={
+          /*
+            ⚠️ TWO DIFFERENT PANELS, NOT ONE WITH A BRANCH INSIDE IT. A client
+            form's submissions are `vizserve_pms_requests` and are already read
+            at /requests — with a reference number, a status, a Gate 1 decision
+            and an SLA clock, none of which a flat answers table has anywhere to
+            put. The engagement table has no column for any of it and no query
+            that would fill one, so pretending they are one screen would mean a
+            component that is really two.
+          */
+          isEngagement ? (
+            <FormResponses
+              formId={form.id}
+              departmentId={form.department_id}
+              isAnonymous={form.is_anonymous}
+              schema={initialSchema}
+              page={resolvePage(rawPage)}
+              pageSize={resolvePageSize(rawSize)}
+            />
+          ) : (
+            <ClientRequestsPanel formName={form.name} submissionCount={submissionCount} />
+          )
+        }
+        settings={
+          <div className="mx-auto w-full max-w-3xl p-5">
+            <FormSettings
+              departments={departments}
+              lists={lists ?? []}
+              formId={form.id}
+              hasSubmissions={submissionCount > 0}
+              initial={{
+                name: form.name,
+                slug: form.slug,
+                description: form.description,
+                department_id: form.department_id,
+                reference_prefix: form.reference_prefix,
+                // P7-66 — `purpose` is settable here and `is_public` is not.
+                // `updateFormSettings` derives the boolean from it, and the
+                // schema no longer carries it, so it cannot be sent at all.
+                purpose: form.purpose,
+                // P7-66 — the card only OFFERS this on an engagement form; it is
+                // loaded on both so a client form's save resends the false it
+                // already holds rather than a value the schema never received.
+                is_anonymous: form.is_anonymous,
+                is_active: form.is_active,
+                requires_attachment: form.requires_attachment,
+                sla_minutes: form.sla_minutes,
+                default_list_id: form.default_list_id,
+                client_approval_days: form.client_approval_days,
+              }}
+            />
+          </div>
+        }
+      />
+    </SaveStatusProvider>
   );
 }

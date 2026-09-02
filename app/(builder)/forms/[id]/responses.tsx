@@ -171,11 +171,23 @@ export async function FormResponses({
 
   function hrefFor(target: number) {
     const query = new URLSearchParams();
-    // The default stays out of the URL, so the everyday link is just the form.
+    /*
+     * ⚠️ `tab=responses` ON EVERY PAGING LINK, AND IT IS NOT OPTIONAL.
+     *
+     * The builder opens on Questions unless `?tab=` says otherwise
+     * (`resolveBuilderTab`). A paging link without it is a Next page link that
+     * navigates away from the table it pages — press 2, and the browser lands
+     * back on the question canvas with the answers a tab click away and no clue
+     * that anything moved.
+     *
+     * It goes in FIRST, before the page number, so the everyday link reads
+     * `?tab=responses&page=2` rather than burying the tab behind the paging.
+     */
+    query.set("tab", "responses");
+    // The default stays out of the URL, so the everyday link is just the tab.
     if (pageSize !== PAGE_SIZES[0]) query.set("size", String(pageSize));
     if (target > 1) query.set("page", String(target));
-    const search = query.toString();
-    return search ? `${basePath}?${search}` : basePath;
+    return `${basePath}?${query.toString()}`;
   }
 
   return (

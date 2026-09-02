@@ -1,6 +1,6 @@
 import type { FormSchema, FormSchemaEntity } from "@/lib/form-builder/builder";
 import { planEntityReorder, type EntityIndexMove } from "@/lib/form-builder/schema";
-import { FIELD_TYPES, type FieldType } from "@/lib/schemas/forms";
+import { FIELD_TYPES, suggestFieldKey, type FieldType } from "@/lib/schemas/forms";
 
 /**
  * P7-66 Phase 4a — EVERY DECISION THE DRAG-AND-DROP BUILDER MAKES, WITH NO DOM
@@ -253,4 +253,187 @@ function sameAttributes(
     left.options.length === right.options.length &&
     left.options.every((option, index) => option === right.options[index])
   );
+}
+
+
+/**
+ * P7-66 — THE FIELD KEY IS GENERATED, AND THERE IS NO LONGER A BOX FOR IT.
+ *
+ * ⚠️ WHY THE INPUT WENT. `field_key` is the STORAGE identity: every answer in
+ * `vizserve_pms_requests.field_values` and `vizserve_pms_form_responses.
+ * field_values` is filed under it (§1), and it is immutable once the field has
+ * data. So the old builder asked somebody building a form to invent a unique,
+ * lower-case, underscore-separated identifier they would never see again and
+ * could never change — a database concern, asked as a question, in the middle of
+ * writing a survey. The label already contains the answer.
+ *
+ * ⚠️ UNIQUE ACROSS ACTIVE **AND** ARCHIVED, which is the part a naive derivation
+ * gets wrong. An archived question is not gone: its `field_values` are still
+ * stored under its key, and the Responses table still draws a column for it. Two
+ * fields sharing a key would file two different questions' answers in one place
+ * — so a question labelled "Notes" added to a form that once had a "Notes" it
+ * later archived gets `note_2`, not `note`. `formBuilder.validateSchema` refuses
+ * a duplicate outright ("Two fields share the key …"), so getting this wrong is
+ * a form that cannot be saved rather than one that corrupts data — but the
+ * refusal names a box that no longer exists, which is no help to anybody.
+ *
+ * ⚠️ ONLY A FIELD THAT IS NOT YET A ROW IS TOUCHED. `lockedEntityIds` is the
+ * saved document's `root` — those keys are what stored answers are filed under,
+ * `vizserve_pms_form_field_protect` refuses to rename one, and re-deriving from
+ * a retyped label would orphan every answer behind it. So a locked field keeps
+ * its key forever, whatever its label becomes, and its key is RESERVED against
+ * the derivations below.
+ *
+ * Deterministic, and by `root` order rather than by object key order: the same
+ * document always derives the same keys, which is what makes this testable at
+ * all.
+ *
+ * Returns only the changes, so a caller can skip the store writes entirely when
+ * there is nothing to do — which is the common case on every save after the
+ * first.
+ */
+export function deriveFieldKeys(
+  schema: FormSchema,
+  lockedEntityIds: ReadonlySet<string>,
+): { entityId: string; key: string }[] {
+  const taken = new Set<string>();
+
+  /*
+   * Two passes, and the order matters. Every key that is NOT up for derivation —
+   * a locked field's, and an unlocked one whose label is still blank and so has
+   * nothing to derive from — has to be reserved BEFORE anything is generated, or
+   * a new question could be handed a key that a locked field two places down is
+   * already using.
+   */
+  for (const entityId of schema.root) {
+    if (!Object.hasOwn(schema.entities, entityId)) continue;
+
+    const entity = schema.entities[entityId]!;
+    const derivable = !lockedEntityIds.has(entityId) && entity.attributes.label.trim() !== "";
+
+    if (!derivable && entity.attributes.key !== "") taken.add(entity.attributes.key);
+  }
+
+  const changes: { entityId: string; key: string }[] = [];
+
+  for (const entityId of schema.root) {
+    if (!Object.hasOwn(schema.entities, entityId)) continue;
+    if (lockedEntityIds.has(entityId)) continue;
+
+    const entity = schema.entities[entityId]!;
+    if (entity.attributes.label.trim() === "") continue;
+
+    const stem = suggestFieldKey(entity.attributes.label);
+
+    // `_2`, `_3`, … — the same shape `nextCandidate` gives a clashing slug, and
+    // legal under FIELD_KEY_PATTERN because the stem already is.
+    let key = stem;
+    for (let n = 2; taken.has(key); n += 1) key = `${stem}_${n}`;
+
+    taken.add(key);
+    if (key !== entity.attributes.key) changes.push({ entityId, key });
+  }
+
+  return changes;
+}
+
+/**
+ * Why this document cannot be saved yet — or `null` when it can.
+ *
+ * ⚠️ THIS IS WHAT AUTOSAVE NEEDED AND A SAVE BUTTON DID NOT.
+ *
+ * With a Save button, an incomplete question was somebody pressing Save and
+ * being told what was missing. With no button the builder decides for itself
+ * when to write, and it writes the WHOLE document — so a half-typed question
+ * blocks the save of everything around it, and the person is not looking for an
+ * explanation because they did not ask for anything.
+ *
+ * `formBuilder.validateSchema` would answer the same question, and is still the
+ * rule at save time. It is the wrong tool for this one:
+ *
+ *   IT HAS A SIDE EFFECT. `validateSchema` WRITES errors into the store — that
+ *   is documented and is what makes the message under an input appear. Called
+ *   speculatively on every keystroke's debounce, it paints "Give the field a
+ *   label" in red under a question somebody has been typing into for four
+ *   hundred milliseconds.
+ *
+ *   IT IS ASYNCHRONOUS, and this decision is needed during a render to say
+ *   whether the form is waiting on something.
+ *
+ * So this is a pure, synchronous, no-side-effect predicate that answers the same
+ * question for the cases autosave actually meets, and `validateSchema` remains
+ * the authority at the moment of writing. The two agreeing is a property worth
+ * stating: everything refused here would be refused there.
+ *
+ * ⚠️ IT REPORTS ONE PROBLEM, NOT ALL OF THEM, and names the question it is on.
+ * The canvas has one place to put this sentence — under the question being
+ * edited — and a list of everything wrong with a form somebody is still writing
+ * is a wall of red at the moment of least interest.
+ *
+ * Archived entities are checked too. They cannot normally be invalid — they were
+ * saved once, so they carry a label — but they travel in the same document and a
+ * save carries them, so excluding them here would report "ready" on a document
+ * Postgres then refuses for a reason nothing on screen mentions.
+ */
+export function unsavableReason(
+  schema: FormSchema,
+): { entityId: string; message: string } | null {
+  for (const entityId of schema.root) {
+    if (!Object.hasOwn(schema.entities, entityId)) continue;
+
+    const entity = schema.entities[entityId]!;
+
+    // `.trim()`, matching `labelAttribute` — a label of three spaces is not a
+    // question, and accepting one here would hand the save a document the
+    // library refuses.
+    if (entity.attributes.label.trim() === "") {
+      return { entityId, message: "Give this question a name and it will save itself." };
+    }
+
+    if (entity.type === "select" || entity.type === "multiselect") {
+      if (entity.attributes.options.length === 0) {
+        return { entityId, message: "Add at least one choice." };
+      }
+
+      /*
+       * ⚠️ AN EMPTY CHOICE BLOCKS THE SAVE RATHER THAN BEING DROPPED FROM IT.
+       * `optionsAttribute` refuses `""` outright, so a document carrying one
+       * cannot be written — and silently removing the row would delete a choice
+       * somebody had cleared in order to retype, mid-keystroke, with no way back.
+       */
+      const blank = entity.attributes.options.findIndex((option) => option.trim() === "");
+
+      if (blank >= 0) {
+        return {
+          entityId,
+          message: `Choice ${blank + 1} is empty — type it, or remove the row.`,
+        };
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * The placeholder for a newly added choice.
+ *
+ * ⚠️ NOT `Option ${length + 1}`, WHICH REPEATS ITSELF. Add three choices, remove
+ * the second, add another: the list is length 2, so the new row is "Option 3" —
+ * which is already there. Nothing rejects duplicate options (`optionsAttribute`
+ * only refuses an empty one), so `z.enum(["Option 1", "Option 3", "Option 3"])`
+ * ships, and the respondent is offered two choices they cannot tell apart and an
+ * answer that cannot say which was meant.
+ *
+ * So it counts up until it finds a name nothing else is using. Bounded by the
+ * list's own length plus one: there can be at most `n` collisions among `n`
+ * rows, so a free name is always found within that.
+ */
+export function nextOptionLabel(options: ReadonlyArray<string>): string {
+  const taken = new Set(options);
+
+  for (let n = options.length + 1; ; n += 1) {
+    const candidate = `Option ${n}`;
+    if (!taken.has(candidate)) return candidate;
+  }
 }

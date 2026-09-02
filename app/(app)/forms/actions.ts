@@ -471,6 +471,57 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
  * follow their form` are the enforcement, exactly as they were when these
  * actions wrote the rows directly.
  */
+/**
+ * P7-66 — RENAMING THE FORM FROM THE BUILDER'S TOP BAR.
+ *
+ * ⚠️ A SECOND WRITE PATH TO ONE COLUMN, AND THE NARROWNESS IS THE WHOLE POINT.
+ * `updateFormSettings` can also set the name — and it demands a COMPLETE
+ * `formSettingsSchema` payload while it does, because that schema defaults
+ * nothing and every key it parses is handed straight to `.update()`. Sending
+ * eleven other settings back to change one word is how a rename ends up
+ * republishing a draft or blanking a description that was edited in another
+ * tab. This writes `name` and nothing else.
+ *
+ * The trade is stated plainly: the field is now settable from two places, and
+ * both of them must keep agreeing about what a legal name is. They do, by
+ * construction — this schema IS `formSettingsSchema.shape.name`, so there is one
+ * rule and no copy of it. A second constraint would drift; a reference cannot.
+ *
+ * ⚠️ NO SLUG DERIVATION. `slugFromName` runs on CREATE only. A form that has
+ * been renamed keeps the URL it was published under, because that URL is in a
+ * client's inbox and in whatever email pointed staff at it — see the note on
+ * `slugFromName`. Renaming is a display change, deliberately.
+ *
+ * ⚠️ RENAMING A LIVE FORM IS ALLOWED. The name is what a client reads above the
+ * questions, so it can be wrong and it should be fixable without unpublishing.
+ * There is no lock to add here: unlike the prefix, the purpose and the anonymity
+ * flag, nothing downstream is keyed to the name, and no submission is orphaned
+ * by it changing.
+ */
+export async function renameForm(formId: string, name: unknown): Promise<ActionResult> {
+  const { supabase } = await assertCanEditForm(formId);
+
+  const parsed = formSettingsSchema.shape.name.safeParse(name);
+
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Give the form a name." };
+  }
+
+  const { error } = await supabase
+    .from("vizserve_pms_forms")
+    .update({ name: parsed.data })
+    .eq("id", formId);
+
+  // `name` carries no unique index — two departments may legitimately both run a
+  // "Feedback" form; the slug is the identifier and it is untouched here. So
+  // there is no `isUniqueViolation` branch: any error is a real one.
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath("/forms");
+  revalidatePath(`/forms/${formId}`);
+  return { ok: true, data: undefined };
+}
+
 export async function saveSchema(formId: string, input: unknown): Promise<ActionResult> {
   const { supabase } = await assertCanEditForm(formId);
 
