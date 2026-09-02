@@ -15,6 +15,9 @@ import { z } from "zod";
 
 export const MAX_GRACE_MINUTES = 120;
 
+/** P8-05. Eight hours — the CHECK on `break_minutes` says the same. */
+export const MAX_BREAK_MINUTES = 480;
+
 export const appSettingsSchema = z.object({
   /**
    * How far either side of a scheduled time a punch may land before the DTR
@@ -32,6 +35,28 @@ export const appSettingsSchema = z.object({
     .max(
       MAX_GRACE_MINUTES,
       "Two hours is the ceiling. A grace period longer than that is a different schedule, not a tolerance.",
+    ),
+
+  /**
+   * P8-05 — the unpaid break inside the scheduled day.
+   *
+   * Recorded hours are measured against `work_end - work_start - this`, so it
+   * is what turns an 08:00–17:00 span into the eight-hour day everybody
+   * actually means by it. A person who takes a different break gets their own
+   * figure on their staff record; this is what everyone else inherits.
+   *
+   * ZERO IS LEGAL AND MEANS NO UNPAID BREAK. The ceiling of eight hours is a
+   * typo guard rather than a policy: a break longer than the day it sits inside
+   * makes every schedule in the company compute to nothing, which would switch
+   * the shortfall check off for everybody without anybody noticing.
+   */
+  break_minutes: z
+    .number({ error: "Enter a number of minutes." })
+    .int("Whole minutes only.")
+    .min(0, "That cannot be negative. Zero means no unpaid break.")
+    .max(
+      MAX_BREAK_MINUTES,
+      "Eight hours is the ceiling. A break longer than a working day leaves no working day to measure.",
     ),
 });
 

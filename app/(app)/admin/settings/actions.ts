@@ -65,7 +65,7 @@ export async function updateAppSettings(input: unknown): Promise<ActionResult> {
 
   const { data: before } = await admin
     .from("vizserve_pms_app_settings")
-    .select("grace_minutes")
+    .select("grace_minutes, break_minutes")
     .maybeSingle();
 
   /**
@@ -84,6 +84,7 @@ export async function updateAppSettings(input: unknown): Promise<ActionResult> {
       {
         id: true,
         grace_minutes: parsed.data.grace_minutes,
+        break_minutes: parsed.data.break_minutes,
         updated_at: new Date().toISOString(),
         updated_by: context.userId,
       },
@@ -94,14 +95,27 @@ export async function updateAppSettings(input: unknown): Promise<ActionResult> {
 
   // Only record a change that actually changed something. An audit trail full of
   // no-op saves is an audit trail nobody reads.
-  if ((before?.grace_minutes ?? null) !== parsed.data.grace_minutes) {
+  //
+  // P8-05 adds the break to the comparison AND to the `after` payload. It has a
+  // stronger claim on the log than the grace period does: it decides what a
+  // timesheet week must reach before it can be submitted at all, so "why did
+  // everybody's week start being refused" is a question the log has to answer,
+  // and it can only answer it if the before and after are both in there.
+  const changed =
+    (before?.grace_minutes ?? null) !== parsed.data.grace_minutes ||
+    (before?.break_minutes ?? null) !== parsed.data.break_minutes;
+
+  if (changed) {
     await admin.rpc("vizserve_pms_write_audit_log", {
       p_entity_type: "app_settings",
       p_entity_id: SETTINGS_AUDIT_ID,
       p_action: "updated",
       p_actor_id: context.userId,
       p_before: before ?? null,
-      p_after: { grace_minutes: parsed.data.grace_minutes },
+      p_after: {
+        grace_minutes: parsed.data.grace_minutes,
+        break_minutes: parsed.data.break_minutes,
+      },
     });
   }
 
@@ -115,6 +129,10 @@ export async function updateAppSettings(input: unknown): Promise<ActionResult> {
   revalidatePath("/dtr");
   revalidatePath("/dashboard");
   revalidatePath("/");
+  // P8-05. The week status bar computes the scheduled week from the break, and
+  // it is the one screen where a stale figure would say "you are 30m short"
+  // against a threshold the database no longer applies.
+  revalidatePath("/timesheet");
 
   return { ok: true, data: undefined };
 }

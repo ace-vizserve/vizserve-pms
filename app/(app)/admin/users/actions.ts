@@ -61,7 +61,7 @@ async function readProfileForAudit(
   const { data: profile } = await admin
     .from("vizserve_pms_users")
     .select(
-      "email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access, work_start, work_end",
+      "email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -193,6 +193,10 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
       // DTR simply says nothing about this person's punches.
       work_start: values.work_start,
       work_end: values.work_end,
+      // P8-05. Null means INHERIT the company break, and it is the normal state
+      // — a new account has never been assessed for one. Writing 0 here would
+      // claim they take no break and raise their weekly minimum accordingly.
+      break_minutes: values.break_minutes,
     },
     { onConflict: "id" },
   );
@@ -292,6 +296,10 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
       // "they do not work fixed hours".
       work_start: values.work_start,
       work_end: values.work_end,
+      // P8-05. Clearing this is a real edit too: it hands the person back to
+      // the company break rather than pinning them to whatever number was
+      // there. Null and 0 are different answers all the way down to the CHECK.
+      break_minutes: values.break_minutes,
     })
     .eq("id", userId);
 

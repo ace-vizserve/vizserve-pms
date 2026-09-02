@@ -570,6 +570,64 @@ export const submitTimesheetWeekSchema = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// P8-05 — the week a schedule adds up to
+// ---------------------------------------------------------------------------
+
+/**
+ * What this person's week was supposed to come to, in minutes.
+ *
+ * ⚠️ THIS IS A MIRROR, NOT THE RULE. `vizserve_pms_submit_timesheet_week`
+ * computes the same figure and REFUSES the submission below it; this exists so
+ * the refusal is never the first anybody hears of the shortfall. The database is
+ * the authority and this is the copy that gets to say it early — the same
+ * posture every other rule in this file takes, and the reason the arithmetic is
+ * written out here rather than guessed at in the component.
+ *
+ * NULL MEANS "SAY NOTHING", and the three ways to reach it are the three
+ * exemptions the function short-circuits on, in the same order:
+ *
+ *   1. No scheduled day — nobody set this person's hours, so nothing is owed.
+ *   2. A scheduled day of zero or less — a broken record, never a demand.
+ *   3. No expected days — a week entirely holiday or entirely approved leave.
+ *
+ * A caller reading null must render nothing at all. Rendering "0 expected"
+ * would state a fact about somebody's week that this app has no basis for.
+ *
+ * PURE AND DEPENDENCY-FREE on purpose: it is the one piece of this feature both
+ * the server component and its tests can hold still. Working days and leave days
+ * are COUNTS handed in, not dates — deciding what counts as a working day is
+ * `vizserve_pms_is_working_day`'s job and expanding leave spans is
+ * `expandLeaveDays`', and re-deriving either here would be a third opinion.
+ *
+ * `leaveDays` is fractional by design: P7-16 leave can start or end at midday,
+ * so half a day of leave removes half a day of expectation.
+ */
+export function scheduledWeekMinutes({
+  scheduledDayMinutes,
+  workingDays,
+  leaveDays = 0,
+}: {
+  /** `(work_end - work_start) - break`, or null when there is no schedule. */
+  scheduledDayMinutes: number | null;
+  /** Days in the week that were not a weekend or a proclaimed holiday. */
+  workingDays: number;
+  /** Approved leave falling inside the week, in days. Halves allowed. */
+  leaveDays?: number;
+}): { expectedDays: number; minimumMinutes: number } | null {
+  if (scheduledDayMinutes === null || !Number.isFinite(scheduledDayMinutes)) return null;
+  if (scheduledDayMinutes <= 0) return null;
+  if (!Number.isFinite(workingDays) || !Number.isFinite(leaveDays)) return null;
+
+  const expectedDays = workingDays - leaveDays;
+  if (expectedDays <= 0) return null;
+
+  // Rounded once, at the end — 4.5 days of a 450-minute day is 2025 minutes, and
+  // rounding the day or the count first would move that. The SQL rounds in the
+  // same place for the same reason.
+  return { expectedDays, minimumMinutes: Math.round(expectedDays * scheduledDayMinutes) };
+}
+
+// ---------------------------------------------------------------------------
 // P7-06 — the eight-hour day
 // ---------------------------------------------------------------------------
 

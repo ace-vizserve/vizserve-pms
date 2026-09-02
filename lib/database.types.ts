@@ -222,6 +222,16 @@ export type Database = {
            */
           work_start: string | null;
           work_end: string | null;
+          /**
+           * P8-05. This person's unpaid break, in minutes.
+           *
+           * ⚠️ NULL MEANS INHERIT the company figure in
+           * `vizserve_pms_app_settings.break_minutes` — it does NOT mean zero,
+           * and `0` is a different, deliberate answer meaning no break at all.
+           * `?? DEFAULT_BREAK_MINUTES` on this column is correct; `|| 60` is
+           * not, and neither is defaulting it anywhere.
+           */
+          break_minutes: number | null;
           created_at: string;
           updated_at: string;
         };
@@ -237,6 +247,8 @@ export type Database = {
           is_hr?: boolean;
           work_start?: string | null;
           work_end?: string | null;
+          /** P8-05. NULL means inherit the company break, never zero. */
+          break_minutes?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -252,6 +264,8 @@ export type Database = {
           is_hr?: boolean;
           work_start?: string | null;
           work_end?: string | null;
+          /** P8-05. NULL means inherit the company break, never zero. */
+          break_minutes?: number | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -433,17 +447,26 @@ export type Database = {
         Row: {
           id: boolean;
           grace_minutes: number;
+          /**
+           * P8-05. The unpaid break inside the scheduled day, company-wide.
+           * NOT NULL with a default of 60 — the per-person override on
+           * `vizserve_pms_users.break_minutes` is the nullable one, and this is
+           * what a null there falls through to.
+           */
+          break_minutes: number;
           updated_at: string;
           updated_by: string | null;
         };
         Insert: {
           id?: boolean;
           grace_minutes?: number;
+          break_minutes?: number;
           updated_at?: string;
           updated_by?: string | null;
         };
         Update: {
           grace_minutes?: number;
+          break_minutes?: number;
           updated_at?: string;
           updated_by?: string | null;
         };

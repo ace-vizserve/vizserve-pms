@@ -57,6 +57,22 @@ export type Deviation = {
 /** The default the migration seeds, restated so a caller with no row still works. */
 export const DEFAULT_GRACE_MINUTES = 5;
 
+/**
+ * P8-05 — the unpaid break inside the scheduled day, company-wide.
+ *
+ * Mirrors `vizserve_pms_app_settings.break_minutes`' column default, restated
+ * here for the same reason and with the same caveat as `DEFAULT_GRACE_MINUTES`:
+ * a settings read that fails must degrade to a number rather than take out the
+ * screen. If this and the column default ever drift, THE MIGRATION WINS and
+ * this is the line to change.
+ *
+ * ⚠️ This is the COMPANY default, never a person's. A null
+ * `vizserve_pms_users.break_minutes` means "inherit the company figure", and an
+ * explicit 0 means "no break" — collapsing those two is exactly what the
+ * migration refuses to do, and no caller here may do it either.
+ */
+export const DEFAULT_BREAK_MINUTES = 60;
+
 const CLOCK = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /**
@@ -95,6 +111,45 @@ export function scheduleFor(source: {
 
   if (start === null || end === null) return { workStart: null, workEnd: null };
   return { workStart: clockString(start), workEnd: clockString(end) };
+}
+
+/**
+ * P8-05 — how many minutes a scheduled day is actually worth.
+ *
+ * ⚠️ THE SPAN IS NOT THE ANSWER, which is the trap P7-36's column comment left
+ * a warning about: `work_end - work_start` INCLUDES the unpaid break, so
+ * 08:00-17:00 is a nine-hour span describing an eight-hour day. Every caller
+ * that wants "hours short of schedule" wants this function and not that
+ * subtraction.
+ *
+ * NULL MEANS "DO NOT JUDGE THIS PERSON", and there are two ways to reach it —
+ * no schedule recorded, and a schedule whose break swallows it. Both are cases
+ * where the honest answer is silence: the first because nobody set the hours,
+ * the second because the hours that were set are broken, and a broken record
+ * must never become a demand made of the person it describes. This mirrors the
+ * first two exemptions in `vizserve_pms_submit_timesheet_week` exactly, so the
+ * screen and the database agree about who is exempt.
+ *
+ * `breakMinutes` is the RESOLVED figure — the person's own if they have one,
+ * the company's otherwise. Resolving it is the caller's job because only the
+ * caller can see both rows, and because `null ?? company` and `0 ?? company`
+ * must give different answers.
+ */
+export function scheduledDayMinutes(
+  source: { work_start?: string | null; work_end?: string | null },
+  breakMinutes: number = DEFAULT_BREAK_MINUTES,
+): number | null {
+  const { workStart, workEnd } = scheduleFor(source);
+  if (!workStart || !workEnd) return null;
+
+  const start = clockMinutes(workStart);
+  const end = clockMinutes(workEnd);
+  if (start === null || end === null) return null;
+
+  const rest = Number.isFinite(breakMinutes) ? Math.max(0, breakMinutes) : DEFAULT_BREAK_MINUTES;
+  const worked = end - start - rest;
+
+  return worked > 0 ? worked : null;
 }
 
 /**

@@ -10,8 +10,11 @@ import {
   todayInAppZone,
   weekDates,
 } from "@/lib/dates";
+import { scheduledDayMinutes } from "@/lib/dtr-schedule";
+import { expandLeaveDays, leaveKey, type LeaveSpan } from "@/lib/leave";
 import { isTerminal } from "@/lib/schemas/tasks";
-import { isWeekLocked } from "@/lib/schemas/timesheet";
+import { isWeekLocked, scheduledWeekMinutes } from "@/lib/schemas/timesheet";
+import { loadAppSettings } from "@/lib/settings-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
@@ -91,6 +94,10 @@ export default async function TimesheetPage({
     overtimeResult,
     departmentsResult,
     listsResult,
+    profileResult,
+    holidaysResult,
+    leaveResult,
+    settings,
   ] = await Promise.all([
     // NOTE: the third query is at the bottom of this array — the week row.
     supabase
@@ -189,6 +196,61 @@ export default async function TimesheetPage({
     // read than the thing it is guarding.
     supabase.from("vizserve_pms_departments").select("id, name"),
     supabase.from("vizserve_pms_lists").select("id, name"),
+
+    /*
+     * P8-05 — everything needed to say, BEFORE the button is pressed, whether
+     * this week reaches the schedule.
+     *
+     * `vizserve_pms_submit_timesheet_week` computes the same figure and refuses
+     * the submission below it. Without these four reads the database's refusal
+     * would be the first anybody heard of a shortfall — after they had pressed
+     * submit, with a toast, on a week they thought was finished.
+     *
+     * THE DATABASE REMAINS THE AUTHORITY. Nothing here can let a short week
+     * through; a disagreement between this and the function shows up as a bar
+     * that said "fine" and a submission that was refused, which is annoying and
+     * safe, rather than the reverse.
+     */
+    supabase
+      .from("vizserve_pms_users")
+      .select("work_start, work_end, break_minutes")
+      .eq("id", context.userId)
+      .maybeSingle(),
+
+    // The proclaimed holidays inside this week. Read from the TABLE, not from
+    // `isBusinessDay` in lib/dates — that helper carries a seeded 2026 list and
+    // says so, and a holiday an admin added would be missing from it. The
+    // database counts expected days through `vizserve_pms_is_working_day`,
+    // which reads this table, so this is the only reading that agrees with it.
+    supabase
+      .from("vizserve_pms_holidays")
+      .select("holiday_date")
+      .gte("holiday_date", monday)
+      .lte("holiday_date", sunday),
+
+    /*
+     * Approved leave OVERLAPPING the week, not contained by it — leave running
+     * Thursday to next Tuesday reduces what is expected of both weeks.
+     *
+     * The halves come along because `expandLeaveDays` needs them, and expanding
+     * span → days is also what keeps the clipping right: a half-day marker
+     * belongs to the request's own end, so a span that runs out of this week is
+     * simply whole on every day inside it. Nothing is clipped, so nothing can
+     * carry a marker across a clip.
+     *
+     * `requester_id` narrows a policy result rather than replacing one.
+     */
+    supabase
+      .from("vizserve_pms_internal_requests")
+      .select("requester_id, start_date, end_date, start_half, end_half")
+      .eq("requester_id", context.userId)
+      .eq("request_type", "LEAVE")
+      .eq("status", "APPROVED")
+      .lte("start_date", sunday)
+      .gte("end_date", monday),
+
+    // `cache()`d, so a page that also renders the punch panel pays once.
+    loadAppSettings(),
   ]);
 
   /**
@@ -322,6 +384,128 @@ export default async function TimesheetPage({
     0,
   );
 
+  /*
+   * P8-05 — what this week was supposed to come to.
+   *
+   * ⚠️ THE BREAK IS RESOLVED HERE AND NOWHERE ELSE, because this is the only
+   * place both rows are in hand. `?? settings.breakMinutes` and not
+   * `|| settings.breakMinutes`: a person whose break is deliberately 0 must
+   * keep their 0, and `||` would quietly hand them the company hour and demand
+   * an hour a day less of them than their schedule actually says. The SQL says
+   * the same thing as `coalesce(u.break_minutes, s.break_minutes)`.
+   */
+  const dayMinutes = scheduledDayMinutes(
+    profileResult.data ?? {},
+    profileResult.data?.break_minutes ?? settings.breakMinutes,
+  );
+
+  const holidays = new Set((holidaysResult.data ?? []).map((row) => row.holiday_date));
+
+  // `user_id` rather than `requester_id`, and `type_name: null` because the
+  // type is not read here — `expandLeaveDays` keys days by person, and this
+  // page has exactly one. The name is what the DTR's export needs; a shortfall
+  // sentence has no room for it and no reason to say it.
+  const leaveSpans: LeaveSpan[] = (leaveResult.data ?? [])
+    .filter((row) => row.start_date !== null && row.end_date !== null)
+    .map((row) => ({
+      user_id: row.requester_id,
+      start_date: row.start_date!,
+      end_date: row.end_date!,
+      start_half: row.start_half,
+      end_half: row.end_half,
+      type_name: null,
+    }));
+
+  const leaveByDay = expandLeaveDays(leaveSpans, monday, sunday ?? monday);
+
+  /*
+   * Working days in the week, and the approved leave sitting on them.
+   *
+   * `days.slice(0, 5)` IS the weekend test. `weekDates` is built from
+   * `startOfWeek`, which is Monday-anchored and constrained to be so by
+   * `vizserve_pms_timesheet_weeks_monday`, so the last two entries are always
+   * Saturday and Sunday — no date parsing, and therefore no timezone to get
+   * wrong. `vizserve_pms_is_working_day` reaches the same answer from `dow`.
+   *
+   * A half day of leave removes half a day of expectation, and only ever from a
+   * day that was counted in the first place — the loop never deducts a half on
+   * a day it did not add.
+   *
+   * ⚠️ THE DEDUPLICATION IS `expandLeaveDays`, AND IT IS LOAD-BEARING. This
+   * counts DAYS, not requests: two approved LEAVE rows both covering Wednesday
+   * subtract one day, because a person is absent on a day rather than absent
+   * twice. `vizserve_pms_submit_timesheet_week` used to sum per request, so it
+   * subtracted that Wednesday twice and asked for 960 minutes where this screen
+   * asked for 1440 — a false "you are short" on a week Postgres accepts. The
+   * SQL now walks the week's own dates the same way this loop does, and the two
+   * agree by construction.
+   */
+  let workingDays = 0;
+  let leaveDays = 0;
+
+  for (const day of days.slice(0, 5)) {
+    if (holidays.has(day)) continue;
+    workingDays += 1;
+
+    const leave = leaveByDay.get(leaveKey(context.userId, day));
+    if (leave) leaveDays += leave.portion === "full" ? 1 : 0.5;
+  }
+
+  /*
+   * ⚠️ NO MINIMUM WHEN WE COULD NOT WORK ONE OUT — and note which way the error
+   * pushes it.
+   *
+   * Both reads above only ever SUBTRACT: a holiday drops a working day, approved
+   * leave drops a day or a half. So `?? []` on a failed read does not degrade the
+   * figure gracefully, it INFLATES it — a week with one holiday in it would
+   * demand 2400 minutes instead of 1920 and the bar would tell somebody they are
+   * eight hours short of a week the database will accept without a murmur, since
+   * `vizserve_pms_submit_timesheet_week` recomputes the minimum from its own
+   * tables and never sees this arithmetic.
+   *
+   * A warning that is wrong in the direction of accusing somebody of
+   * under-logging is worse than no warning, so the whole claim is withheld
+   * rather than guessed at: `scheduledWeek` goes null and `WeekStatusBar`
+   * renders no shortfall line at all. The failure is still said out loud below —
+   * silently dropping it is what `entriesResult`'s QueryError exists to stop.
+   *
+   * FOUR INPUTS, NOT TWO. The profile row and the settings row are the other
+   * half of the same arithmetic and they fail the same way:
+   *
+   *   - `profileResult` failing leaves `dayMinutes` computed from `{}`, which is
+   *     null and therefore silent — but silently dropping the check is exactly
+   *     what the banner below exists to say out loud.
+   *   - `loadAppSettings` never throws by design (three other screens depend on
+   *     that), so a failed read arrives as the fallback 60. If the company break
+   *     is really 30 the minimum comes out 2.5h A DAY too LOW, the bar says
+   *     nothing, and the database then refuses the submission with a figure this
+   *     screen never mentioned. `fellBack` is how that read owns up.
+   *
+   * The rule is one line: never show a minimum derived from a value that was not
+   * actually read.
+   */
+  const scheduleReadFailure = holidaysResult.error
+    ? "Holidays"
+    : leaveResult.error
+      ? "Approved leave"
+      : profileResult.error
+        ? "Your working hours"
+        : settings.fellBack
+          ? "The company break setting"
+          : null;
+
+  const scheduleReadFailed = scheduleReadFailure !== null;
+
+  // Null when this person is exempt — no schedule, a broken one, or a week that
+  // expected nothing of them. The bar renders nothing at all in that case.
+  const scheduledWeek = scheduleReadFailed
+    ? null
+    : scheduledWeekMinutes({
+        scheduledDayMinutes: dayMinutes,
+        workingDays,
+        leaveDays,
+      });
+
   /**
    * Everything this person may log against — INCLUDING finished tasks.
    *
@@ -403,7 +587,33 @@ export default async function TimesheetPage({
         </Link>
       </div>
 
-      <WeekStatusBar weekStart={monday} week={week} weekTotalMinutes={weekTotalMinutes} />
+      <WeekStatusBar
+        weekStart={monday}
+        week={week}
+        weekTotalMinutes={weekTotalMinutes}
+        scheduledWeek={scheduledWeek}
+        /* Strictly before this week: the minimum covers all five working days,
+           so a week still being worked is short by construction and would warn
+           every day of every week. A FUTURE week cannot be submitted at all
+           (`v_week > v_this_week` refuses it), so "not current" and "finished"
+           are the same set here. */
+        weekHasEnded={thisWeek ? monday < thisWeek : false}
+      />
+
+      {/* Said out loud rather than swallowed, the same way the DTR says it when
+          its leave query dies. Without this the page would simply stop warning
+          about short weeks and nobody would know it had — and the person would
+          meet the rule as a refusal at submit time instead. */}
+      {scheduleReadFailed ? (
+        <p
+          role="status"
+          className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
+        >
+          {scheduleReadFailure} could not be loaded, so this week cannot be checked against your
+          schedule before you hand it in. Your hours are unaffected — the check still runs when you
+          submit.
+        </p>
+      ) : null}
 
       {/* A failed query used to render as an empty week — indistinguishable
           from a week nobody worked, on the screen where that distinction

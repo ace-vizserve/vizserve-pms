@@ -11,7 +11,13 @@ export const metadata: Metadata = { title: "Settings" };
 /**
  * P7-37 — the company-wide settings an admin can change without a deploy.
  *
- * One setting today. The screen exists as its own route rather than as a card on
+ * Two settings since P8-05: the grace period, which decides what the DTR SAYS
+ * about a punch, and the unpaid break, which decides what a scheduled day is
+ * WORTH and so what a timesheet week has to reach before it can be handed in.
+ * The second is the first thing on this screen that refuses something rather
+ * than advising about it, and the field says so.
+ *
+ * The screen exists as its own route rather than as a card on
  * `/admin/users` because the next one will not be about users either, and a
  * settings field hidden inside the staff editor is a settings field nobody
  * finds.
@@ -36,7 +42,7 @@ export default async function SettingsPage() {
         described, not what was recorded.
       </p>
 
-      <SettingsForm graceMinutes={settings.graceMinutes} />
+      <SettingsForm graceMinutes={settings.graceMinutes} breakMinutes={settings.breakMinutes} />
     </PageShell>
   );
 }

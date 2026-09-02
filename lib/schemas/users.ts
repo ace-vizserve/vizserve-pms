@@ -72,6 +72,44 @@ const workClockSchema = z
   .or(z.literal("").transform(() => null));
 
 /**
+ * P8-05 — this person's unpaid break, or the absence of an answer.
+ *
+ * ⚠️ BLANK IS NULL AND NULL IS NOT ZERO, and that distinction is the entire
+ * reason this field is not a plain number.
+ *
+ *   ""  → null → inherit the company break from /admin/settings
+ *   "0" → 0    → this person takes no unpaid break
+ *
+ * A blank coerced to 0 would silently declare that everybody an admin has ever
+ * opened works straight through lunch, and their timesheet week would then have
+ * to reach an hour a day more than it should before the database would accept
+ * it. So the empty string is caught FIRST, before any coercion can turn it into
+ * a number — the same order `timeOfDay` in the timesheet schema uses, and the
+ * opposite of `blankToNaN`, which is right for a field where blank is a mistake
+ * and wrong for one where blank is an answer.
+ *
+ * The 0-480 bounds mirror `vizserve_pms_users_break_range`. The database is the
+ * rule; this is the sentence an admin reads instead of a constraint name.
+ */
+const blankToNull = (value: unknown) =>
+  value === undefined || (typeof value === "string" && value.trim() === "") ? null : value;
+
+const breakMinutesSchema = z
+  .preprocess(
+    blankToNull,
+    z.coerce
+      .number({ message: "Enter a number of minutes, or leave it blank to use the company break." })
+      .int("Whole minutes only.")
+      .min(0, "That cannot be negative. Zero means no unpaid break.")
+      .max(480, "Eight hours is the ceiling. A break longer than a working day leaves nothing to measure.")
+      // Outside the coercion, not inside it: `Number(null)` is 0, so a nullable
+      // wrapped around a coercion is the only ordering that keeps "unset" from
+      // becoming "no break".
+      .nullable(),
+  )
+  .default(null);
+
+/**
  * Both times or neither, and the end after the start.
  *
  * NO OVERNIGHT SCHEDULE. A 22:00–06:00 shift is a real thing that this app does
@@ -123,6 +161,8 @@ export const createUserSchema = withWorkHourRules(
     managed_department_ids: managedDepartmentsSchema,
     work_start: workClockSchema,
     work_end: workClockSchema,
+    /** P8-05. Blank means inherit the company break — see the schema above. */
+    break_minutes: breakMinutesSchema,
   }),
 );
 
@@ -167,6 +207,14 @@ export const updateUserSchema = withWorkHourRules(
      */
     work_start: workClockSchema,
     work_end: workClockSchema,
+    /**
+     * P8-05. Optional on edit for the same reason the hours are, and one more:
+     * the company break is the right answer for almost everybody, so a blank
+     * here is the NORMAL state rather than an unfinished record. Filling it in
+     * is how somebody departs from the company arrangement, not how they
+     * confirm it.
+     */
+    break_minutes: breakMinutesSchema,
   }),
 );
 

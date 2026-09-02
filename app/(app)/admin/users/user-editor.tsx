@@ -83,6 +83,12 @@ export type EditableUser = {
    */
   work_start: string | null;
   work_end: string | null;
+  /**
+   * P8-05. This person's unpaid break, in minutes, or NULL to inherit the
+   * company figure from /admin/settings. NULL is the normal state and is NOT
+   * zero — held as a string in the form below for exactly that reason.
+   */
+  break_minutes: number | null;
   managed_department_ids: string[];
   /** P7-33. `leave_type_id` → days allocated for `balanceYear`. Sparse. */
   leave_allocations: Record<string, number>;
@@ -197,6 +203,19 @@ function UserForm({
    */
   const [workStart, setWorkStart] = useState(user?.work_start?.slice(0, 5) ?? "");
   const [workEnd, setWorkEnd] = useState(user?.work_end?.slice(0, 5) ?? "");
+  /**
+   * P8-05 — the break override, HELD AS A STRING, like every other numeric cell
+   * on this screen.
+   *
+   * `user.break_minutes ?? ""` and not `?? "60"`: a blank field is what "no
+   * override, use the company break" looks like, and seeding it with the
+   * company figure would turn every save into an explicit override that then
+   * stops following the company setting. The `== null` test rather than a
+   * falsy one is the whole point — `0` is a real answer and must render as "0".
+   */
+  const [breakMinutes, setBreakMinutes] = useState(
+    user?.break_minutes == null ? "" : String(user.break_minutes),
+  );
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
   const [isHr, setIsHr] = useState(user?.is_hr ?? false);
   const [hasAppAccess, setHasAppAccess] = useState(
@@ -313,6 +332,10 @@ function UserForm({
       // turns it into null — "no fixed schedule" — rather than a parse error.
       work_start: workStart,
       work_end: workEnd,
+      // The empty string again, and here it means INHERIT rather than "none".
+      // Sent as typed so the schema — not this component — decides that blank
+      // is null and "0" is zero. See `breakMinutesSchema`.
+      break_minutes: breakMinutes,
     };
 
     startTransition(async () => {
@@ -532,6 +555,58 @@ function UserForm({
               Optional. Leave both blank for no fixed schedule — the DTR then says nothing about
               when this person clocks in or out. With hours set, a punch more than the company
               grace period away from them prompts a correction request.
+            </p>
+          )}
+        </div>
+
+        {/* ------------------------------------------------------------------
+            P8-05 — the break inside those hours.
+
+            Directly under the schedule, because it only means anything next to
+            it: the hours above are a SPAN and this is what comes out of it, so
+            09:00–18:00 with 60 here is the eight-hour day the timesheet is
+            measured against.
+
+            ⚠️ BLANK IS NOT ZERO. Blank inherits the company break; a typed 0
+            says this person takes none, which raises what their week has to
+            reach by an hour a day. Both are legitimate answers and the helper
+            text has to keep them apart, because the failure is silent in one
+            direction — somebody who genuinely takes no break, left blank, is
+            simply never asked for the hour.
+            ------------------------------------------------------------------ */}
+        <div className="space-y-2">
+          <Label htmlFor="break_minutes">Unpaid break</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id="break_minutes"
+              name="break_minutes"
+              type="number"
+              inputMode="numeric"
+              min={0}
+              max={480}
+              step={5}
+              placeholder="Company"
+              className="w-28 tabular-nums"
+              value={breakMinutes}
+              onChange={(event) => setBreakMinutes(event.target.value)}
+              aria-invalid={Boolean(fieldErrors.break_minutes)}
+              aria-describedby="break_minutes_hint"
+            />
+            <span className="text-sm text-muted-foreground">minutes</span>
+            {breakMinutes ? (
+              <Button type="button" variant="ghost" size="sm" onClick={() => setBreakMinutes("")}>
+                Use company break
+              </Button>
+            ) : null}
+          </div>
+          {fieldErrors.break_minutes ? (
+            <p className="text-xs text-destructive">{fieldErrors.break_minutes[0]}</p>
+          ) : (
+            <p id="break_minutes_hint" className="text-xs text-muted-foreground">
+              Leave blank to use the company break set in Settings — that is the usual answer.
+              Fill it in only for someone whose break differs, and type 0 for someone who takes
+              none. The hours above less this break is the day a timesheet week is measured
+              against, so a week short of it cannot be handed in.
             </p>
           )}
         </div>
