@@ -35,7 +35,6 @@ export type ReportRow = {
 };
 
 export function ReportsTable({ rows }: { rows: ReportRow[] }) {
-  const { visibility, onVisibilityChange } = useColumnVisibility("reports");
 
   const columns: Column<ReportRow>[] = [
     {
@@ -63,6 +62,49 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
           ),
       }),
     ),
+    {
+      /*
+       * P7-66 — `total` and `done` were computed on every row and printed
+       * nowhere. The eight per-status columns are the breakdown; without a
+       * total beside them a reader has to add eight numbers to answer "how much
+       * work does this department have", which is the first question the report
+       * is opened for.
+       */
+      key: "total",
+      header: "Total",
+      hideable: true,
+      defaultHidden: true,
+      sortKey: "total",
+      className: "tabular-nums",
+      align: "end",
+      cell: (row) =>
+        row.total === 0 ? <span className="text-foreground-faint">—</span> : row.total,
+    },
+    {
+      key: "completion",
+      header: "Done",
+      hideable: true,
+      defaultHidden: true,
+      sortKey: "completion",
+      className: "tabular-nums",
+      align: "end",
+      /*
+       * A PERCENTAGE, because the counts are not comparable between departments
+       * of different sizes — 12 done means one thing against 15 and another
+       * against 200.
+       *
+       * ⚠️ Guarded on `total`, not just rendered: a department with no work in
+       * the period would otherwise read `NaN%`.
+       */
+      cell: (row) =>
+        row.total === 0 ? (
+          <span className="text-foreground-faint">—</span>
+        ) : (
+          <span title={`${row.done} of ${row.total} completed`}>
+            {Math.round((row.done / row.total) * 100)}%
+          </span>
+        ),
+    },
     {
       key: "overdue",
       hideable: true,
@@ -94,6 +136,8 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         ),
     },
   ];
+
+  const { visibility, onVisibilityChange } = useColumnVisibility("reports", columns);
 
   return (
     <div className="space-y-3">

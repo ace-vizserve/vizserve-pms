@@ -3,6 +3,7 @@
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
@@ -24,7 +25,10 @@ import { requestDetail } from "./request-summary";
 
 export type Row = InternalRequestRow & { vizserve_pms_users: { full_name: string } | null };
 
-function columnsFor(showWho: boolean): Column<Row>[] {
+function columnsFor(
+  showWho: boolean,
+  reviewerName?: (id: string) => string | undefined,
+): Column<Row>[] {
   return [
     {
       key: "request",
@@ -49,6 +53,7 @@ function columnsFor(showWho: boolean): Column<Row>[] {
     {
       key: "reason",
       header: "Reason",
+      hideable: true,
       className: "hidden sm:table-cell max-w-xs",
       /*
        * P7-56. The FLATTENED reason, not the column.
@@ -70,6 +75,36 @@ function columnsFor(showWho: boolean): Column<Row>[] {
       cell: (request) => formatDate(request.created_at),
     },
     {
+      /*
+       * P7-66 — WHEN IT WAS SETTLED, AND BY WHOM.
+       *
+       * The query already selects `*`, so `reviewed_at` and `reviewed_by` were
+       * both in hand and neither was shown: a decided row said only that it was
+       * decided. On a page people open to chase an approval, "who has it" and
+       * "who closed it" are the two questions, and only the first was answerable.
+       *
+       * Empty on a pending row BY DESIGN — an em dash there is the honest
+       * answer, not a gap.
+       */
+      key: "decided",
+      header: "Decided",
+      hideable: true,
+      defaultHidden: true,
+      sortKey: "decided",
+      className: "hidden lg:table-cell whitespace-nowrap text-muted-foreground",
+      cell: (request) =>
+        request.reviewed_at ? (
+          <>
+            <div className="tabular-nums">{formatDate(request.reviewed_at)}</div>
+            {request.reviewed_by ? (
+              <div className="text-2xs">{reviewerName?.(request.reviewed_by) ?? ""}</div>
+            ) : null}
+          </>
+        ) : (
+          <span className="text-foreground-faint">—</span>
+        ),
+    },
+    {
       key: "status",
       header: "Status",
       sortKey: "status",
@@ -83,26 +118,45 @@ export function Section({
   description,
   rows,
   showWho,
+  reviewerNames,
   empty,
 }: {
   title: string;
   description: string;
   rows: Row[];
   showWho: boolean;
+  /** Reviewer id → name, for the Decided column. A Map cannot cross the wire. */
+  reviewerNames?: Record<string, string>;
   empty: React.ReactNode;
 }) {
+  const columns = columnsFor(showWho, (id) => reviewerNames?.[id]);
+  /* Both sections on this page share one storage key deliberately: they are the
+     same columns over the same shape, and hiding "Reason" in one while it stays
+     in the other would read as the setting not applying. */
+  const { visibility, onVisibilityChange } = useColumnVisibility("approvals", columns);
+
   return (
     <section className="space-y-3">
-      <div>
-        <h2 className="text-sm font-semibold">{title}</h2>
-        <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+      <div className="flex items-end justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-semibold">{title}</h2>
+          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+        </div>
+
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
       </div>
 
       <DataTable
-        columns={columnsFor(showWho)}
+        columns={columns}
         rows={rows}
         getRowKey={(request) => request.id}
         urlSort
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
         empty={empty}
       />
     </section>

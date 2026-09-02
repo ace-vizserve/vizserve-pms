@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { cn } from "@/lib/utils";
 import type { Gender } from "@/lib/schemas/users";
@@ -226,6 +227,10 @@ export function BalancesGrid({
     {
       key: "person",
       header: "Employee",
+      /* One column per leave type means this grid scrolls sideways on any real
+         data set. Freezing the name is what keeps a row identifiable once the
+         numbers have scrolled past it. */
+      pin: "left",
       className: "min-w-[200px]",
       cell: (person) => (
         <div className="flex flex-col">
@@ -237,6 +242,48 @@ export function BalancesGrid({
           ) : null}
         </div>
       ),
+    },
+    {
+      /*
+       * P7-66. `primary_department_id` is on every row and `departments` is
+       * already a prop — the grid simply never showed which team a person is
+       * on, which is the first thing somebody allocating leave wants to group
+       * by.
+       */
+      key: "department",
+      header: "Department",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden lg:table-cell whitespace-nowrap text-muted-foreground",
+      cell: (person) =>
+        person.primary_department_id ? (
+          (departments.find((d) => d.id === person.primary_department_id)?.name ?? "—")
+        ) : (
+          <span className="text-foreground-faint">—</span>
+        ),
+    },
+    {
+      key: "allocated",
+      header: "Total",
+      hideable: true,
+      defaultHidden: true,
+      align: "end",
+      className: "hidden xl:table-cell tabular-nums font-medium",
+      /*
+       * The sum of the row, so the per-type columns have something to be read
+       * against. It reads the DRAFT, not the saved allocations, so an edit in
+       * progress is reflected — a total that disagrees with the numbers beside
+       * it would be worse than no total.
+       */
+      cell: (person) => {
+        const total = columnsTypes.reduce((sum, type) => {
+          const raw = draft[`${person.id}:${type.id}`] ?? cellValue(allocations[`${person.id}:${type.id}`]);
+          const days = Number(raw);
+          return sum + (Number.isFinite(days) ? days : 0);
+        }, 0);
+
+        return total === 0 ? <span className="text-foreground-faint">—</span> : total;
+      },
     },
     ...columnsTypes.map((type): Column<BalancePerson> => ({
       key: type.id,
@@ -323,6 +370,8 @@ export function BalancesGrid({
       },
     })),
   ];
+
+  const { visibility, onVisibilityChange } = useColumnVisibility("hr-balances", columns);
 
   return (
     <>
@@ -421,7 +470,17 @@ export function BalancesGrid({
 
       {/* No wrapper: `DataTable` renders inside `DataTableShell`, which is
           already the bordered panel AND the horizontal scroll container. */}
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
       <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
         rows={visiblePeople}
         getRowKey={(person) => person.id}

@@ -1,7 +1,13 @@
 import { ListChecks } from "lucide-react";
 import type { Metadata } from "next";
 
-import { TaskGroupTable, type ListRow, type TaskRow } from "./tasks-table";
+import {
+  TaskColumnsMenu,
+  TaskColumnsProvider,
+  TaskGroupTable,
+  type ListRow,
+  type TaskRow,
+} from "./tasks-table";
 import { isTaskStatus } from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
@@ -586,6 +592,10 @@ export default async function TasksPage({
 
   return (
     <PageShell>
+      {/* Wraps the toolbar AND the groups: the menu lives in the filter row and
+          the tables it controls are further down, so the provider has to span
+          both. */}
+      <TaskColumnsProvider>
       {/* Which list you are in, in the breadcrumb — the same fix the board
           carries. Since the Tasks nav group was removed, a list is opened from
           the project tree and List/Board are two shapes of it, so the page has
@@ -605,7 +615,14 @@ export default async function TasksPage({
         </div>
       </div>
 
-      <TaskFilters lists={lists ?? []} groups={groups ?? []} />
+      <div className="flex flex-wrap items-end gap-3">
+        <TaskFilters lists={lists ?? []} groups={groups ?? []} />
+
+        {/* One menu for all eight group tables — see `TaskColumnsProvider`. */}
+        <div className="ml-auto">
+          <TaskColumnsMenu />
+        </div>
+      </div>
 
       {/*
         THE QUEUE, ABOVE THE STAGES — and OUTSIDE the empty-state branch below.
@@ -715,6 +732,7 @@ export default async function TasksPage({
         </div>
         </TaskSelectionProvider>
       )}
+      </TaskColumnsProvider>
     </PageShell>
   );
 }

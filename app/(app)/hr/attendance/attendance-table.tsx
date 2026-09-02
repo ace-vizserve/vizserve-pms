@@ -9,6 +9,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import type { AttendanceSummary } from "@/lib/attendance-summary";
 
 /** `2026-03` → `March 2026`, from the parts rather than through `Date`. */
@@ -60,9 +61,28 @@ export function AttendanceTable({
     );
   }, [summaries, query]);
 
+  /*
+   * P7-66 — THE COUNTS ARE NOT COMPARABLE BETWEEN PEOPLE.
+   *
+   * Somebody with 4 absences out of 8 working days and somebody with 4 out of
+   * 22 read identically in the Absent column, and this table exists to be
+   * scanned down. The rate is the figure that makes a row mean something on its
+   * own.
+   *
+   * ⚠️ `unscheduled` rather than a division guard. It is true exactly when every
+   * count is zero because no schedule is recorded, which is a different fact
+   * from "present on none of their days" — and dividing would print `NaN%` for
+   * it.
+   */
+  function attendanceRate(row: AttendanceSummary): number | null {
+    if (row.unscheduled || row.workingDays === 0) return null;
+    return Math.round((row.present / row.workingDays) * 100);
+  }
+
   const columns: Column<AttendanceSummary>[] = [
     {
       key: "person",
+      sortKey: "person",
       header: "Employee",
       cell: (row) => (
         <div className="flex flex-col">
@@ -75,12 +95,15 @@ export function AttendanceTable({
     },
     {
       key: "workingDays",
+      sortKey: "workingDays",
+      hideable: true,
       header: "Working days",
       align: "end",
       cell: (row) => <span className="tabular-nums">{row.workingDays}</span>,
     },
     {
       key: "present",
+      sortKey: "present",
       header: "Present",
       align: "end",
       cell: (row) =>
@@ -94,12 +117,15 @@ export function AttendanceTable({
     },
     {
       key: "onLeave",
+      sortKey: "onLeave",
+      hideable: true,
       header: "On leave",
       align: "end",
       cell: (row) => <span className="tabular-nums">{row.unscheduled ? "—" : row.onLeave}</span>,
     },
     {
       key: "absent",
+      sortKey: "absent",
       header: "Absent",
       align: "end",
       cell: (row) =>
@@ -115,6 +141,7 @@ export function AttendanceTable({
     },
     {
       key: "late",
+      sortKey: "late",
       header: "Late",
       align: "end",
       cell: (row) =>
@@ -136,11 +163,37 @@ export function AttendanceTable({
     },
     {
       key: "undertime",
+      sortKey: "undertime",
       header: "Undertime",
       align: "end",
       cell: (row) => <span className="tabular-nums">{row.unscheduled ? "—" : row.undertime}</span>,
     },
+    {
+      key: "rate",
+      header: "Rate",
+      sortKey: "rate",
+      hideable: true,
+      defaultHidden: true,
+      align: "end",
+      className: "hidden lg:table-cell tabular-nums",
+      cell: (row) => {
+        const rate = attendanceRate(row);
+        if (rate === null) return <span className="text-foreground-faint">—</span>;
+
+        // Never colour alone: the number is the carrier and the tone is a
+        // second reading of it, so greyscale loses nothing.
+        return (
+          <span
+            className={rate < 80 ? "font-medium text-warning" : undefined}
+            title={`${row.present} of ${row.workingDays} working days`}>
+            {rate}%
+          </span>
+        );
+      },
+    },
   ];
+
+  const { visibility, onVisibilityChange } = useColumnVisibility("hr-attendance", columns);
 
   return (
     <>
@@ -182,7 +235,17 @@ export function AttendanceTable({
         </div>
       </div>
 
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
       <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
         rows={rows}
         getRowKey={(row) => row.userId}

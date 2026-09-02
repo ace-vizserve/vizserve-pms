@@ -104,6 +104,19 @@ export type Column<T> = {
   /** Offered in the columns menu. A column nobody may hide simply omits it. */
   hideable?: boolean;
   /**
+   * Present in the menu but switched OFF until somebody turns it on.
+   *
+   * For a column that is genuinely useful and genuinely not wanted by default —
+   * most of what P7-66 added, which is data these queries were already fetching
+   * and throwing away. Widening every table by four columns to surface it would
+   * have made the common case worse to fix the uncommon one.
+   *
+   * ⚠️ MEANINGLESS WITHOUT `hideable`, and unreachable without a menu on the
+   * page: a column hidden by default with no way to show it is a column that
+   * does not exist.
+   */
+  defaultHidden?: boolean;
+  /**
    * Freeze this column against the left edge while the rest scrolls sideways.
    *
    * ⚠️ ONE COLUMN ONLY, AND IT MUST BE THE FIRST. TanStack can offset a stack of

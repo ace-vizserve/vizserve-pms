@@ -22,6 +22,8 @@ export type HideableColumn = {
   key: string;
   header: React.ReactNode;
   hideable?: boolean;
+  /** Starts switched off, until somebody says otherwise. See the merge below. */
+  defaultHidden?: boolean;
 };
 
 /**
@@ -61,6 +63,34 @@ function parse(raw: string | null): VisibilityState | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * P7-66 — THE STORED CHOICE WINS, KEY BY KEY.
+ *
+ * `defaultHidden` seeds the columns nobody has expressed an opinion about. It
+ * must not be layered on top of the stored object, or a column somebody
+ * deliberately switched ON would be switched off again on their next visit —
+ * which reads as the preference not saving at all.
+ *
+ * So a default fills only the keys storage does not mention. A key present in
+ * storage is a decision; a key absent from it is not.
+ *
+ * Exported, and pure, because this is the one piece of the columns menu with a
+ * rule in it worth a test — `tests/unit/column-visibility.test.ts`.
+ */
+export function resolveVisibility(
+  raw: string | null,
+  defaultHiddenKeys: string[],
+): VisibilityState {
+  const stored = parse(raw) ?? {};
+  const seeded: VisibilityState = {};
+
+  for (const key of defaultHiddenKeys) {
+    if (!(key in stored)) seeded[key] = false;
+  }
+
+  return { ...seeded, ...stored };
 }
 
 function write(key: string, value: VisibilityState) {
@@ -104,7 +134,7 @@ function subscribe(onChange: () => void) {
   };
 }
 
-export function useColumnVisibility(tableId: string) {
+export function useColumnVisibility(tableId: string, columns?: HideableColumn[]) {
   const storageKey = `vizserve-pms.columns.${tableId}`;
 
   const raw = useSyncExternalStore(
@@ -120,7 +150,22 @@ export function useColumnVisibility(tableId: string) {
     () => null,
   );
 
-  const visibility = useMemo<VisibilityState>(() => parse(raw) ?? {}, [raw]);
+  /*
+   * ⚠️ KEYED ON THE STRING, NOT THE ARRAY. Every caller builds its `columns`
+   * inline, so the array is a new reference on every render and depending on it
+   * would rebuild `visibility` each time — handing `DataTable` a fresh state
+   * object on every pass for a value that almost never changes.
+   */
+  const defaults = (columns ?? [])
+    .filter((column) => column.defaultHidden)
+    .map((column) => column.key)
+    .sort()
+    .join(",");
+
+  const visibility = useMemo<VisibilityState>(
+    () => resolveVisibility(raw, defaults ? defaults.split(",") : []),
+    [raw, defaults],
+  );
 
   const onVisibilityChange = useCallback(
     (next: VisibilityState) => {

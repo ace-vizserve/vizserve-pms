@@ -49,11 +49,37 @@ export default async function FormsPage() {
     // `created_by` is not drawn anywhere — it is read so `administersForm` can
     // recognise an unrouted draft as its author's.
     .select(
-      "id, name, slug, purpose, is_public, is_active, reference_prefix, department_id, created_by, created_at",
+      "id, name, slug, purpose, is_public, is_active, reference_prefix, department_id, created_by, created_at, sla_minutes, requires_attachment",
     )
     .order("created_at", { ascending: false });
 
   const { data: departments } = await supabase.from("vizserve_pms_departments").select("id, name");
+
+  /*
+   * P7-66 — HOW MUCH EACH FORM IS ACTUALLY USED.
+   *
+   * The single most useful fact about a form, and the list never showed it: a
+   * published form nobody has submitted to and one carrying half the department
+   * s work looked identical.
+   *
+   * Two ids per row rather than a count per form: PostgREST has no GROUP BY, so
+   * the alternative is one `count` query per form. At this row count pulling the
+   * ids and tallying them here is one round trip instead of N.
+   */
+  const { data: submissions } = await supabase
+    .from("vizserve_pms_requests")
+    .select("form_id, submitted_at");
+
+  const submissionCounts: Record<string, number> = {};
+  const lastSubmission: Record<string, string> = {};
+
+  for (const row of submissions ?? []) {
+    submissionCounts[row.form_id] = (submissionCounts[row.form_id] ?? 0) + 1;
+    // Newest wins. The query has no order, so compare rather than assume.
+    if (!lastSubmission[row.form_id] || row.submitted_at > lastSubmission[row.form_id]) {
+      lastSubmission[row.form_id] = row.submitted_at;
+    }
+  }
 
   /* A Map cannot cross the RSC boundary. */
   const departmentNames = Object.fromEntries((departments ?? []).map((d) => [d.id, d.name]));
@@ -77,7 +103,12 @@ export default async function FormsPage() {
         </Link>
       </div>
 
-      <FormsTable rows={rows} departmentNames={departmentNames} />
+      <FormsTable
+        rows={rows}
+        departmentNames={departmentNames}
+        submissionCounts={submissionCounts}
+        lastSubmission={lastSubmission}
+      />
     </PageShell>
   );
 }

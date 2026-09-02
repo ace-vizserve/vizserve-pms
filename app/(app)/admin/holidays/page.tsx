@@ -56,7 +56,7 @@ export default async function HolidaysPage({
 
   const { data: holidays, error } = await supabase
     .from("vizserve_pms_holidays")
-    .select("holiday_date, name")
+    .select("holiday_date, name, created_at")
     .gte("holiday_date", `${year}-01-01`)
     .lte("holiday_date", `${year}-12-31`)
     .order("holiday_date");

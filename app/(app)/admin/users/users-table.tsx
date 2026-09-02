@@ -17,8 +17,10 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { Chip } from "@/components/status-badge";
+import { formatAppTime } from "@/lib/dates";
 import { GENDER_LABELS, ROLE_LABELS } from "@/lib/schemas/users";
 
 import { sendPasswordReset } from "./actions";
@@ -114,6 +116,7 @@ export function UsersTable({
   const columns: Column<EditableUser>[] = [
     {
       key: "name",
+      sortKey: "name",
       header: "Name",
       cell: (user) => (
         <>
@@ -129,6 +132,7 @@ export function UsersTable({
     },
     {
       key: "role",
+      sortKey: "role",
       header: "Role",
       cell: (user) => ROLE_LABELS[user.role].label,
     },
@@ -176,7 +180,67 @@ export function UsersTable({
         ),
     },
     {
+      /*
+       * P7-66 — THREE FIELDS THIS QUERY ALREADY FETCHED AND NEVER SHOWED.
+       *
+       * `app_access`, `is_hr` and the work schedule were all in the `.select()`
+       * and rendered nowhere, so the only way to see whether somebody could
+       * actually sign in was to open the editor on them one at a time.
+       *
+       * Hidden by default: seven columns already do not fit a phone, and these
+       * answer occasional questions rather than everyday ones.
+       */
+      key: "access",
+      header: "App access",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden xl:table-cell",
+      // The words matter more than usual here. "No access" is a deliberate
+      // setting, not a missing value — an account can be active and still be
+      // barred from the app.
+      cell: (user) =>
+        user.app_access ? (
+          <Chip tone="success" label="Can sign in" />
+        ) : (
+          <Chip tone="neutral" label="No access" />
+        ),
+    },
+    {
+      key: "hr",
+      header: "HR",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden xl:table-cell",
+      // P7-52 made HR a capability rather than a role, which means it is
+      // invisible in the Role column — this is the only place it can be read.
+      cell: (user) =>
+        user.is_hr ? (
+          <Chip tone="brand" label="HR" />
+        ) : (
+          <span className="text-foreground-faint">—</span>
+        ),
+    },
+    {
+      key: "schedule",
+      header: "Schedule",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden 2xl:table-cell whitespace-nowrap text-muted-foreground tabular-nums",
+      /*
+       * What the DTR measures lateness against. A blank one is why somebody's
+       * attendance row reads as unscheduled with every count at zero, and that
+       * connection is impossible to make from the attendance page alone.
+       */
+      cell: (user) =>
+        user.work_start && user.work_end ? (
+          `${formatAppTime(user.work_start)} – ${formatAppTime(user.work_end)}`
+        ) : (
+          <span className="text-warning">Not set</span>
+        ),
+    },
+    {
       key: "status",
+      sortKey: "status",
       header: "Status",
       /*
        * `Chip`, not a hand-rolled span. This is a real state, so it goes through
@@ -219,6 +283,8 @@ export function UsersTable({
     },
   ];
 
+  const { visibility, onVisibilityChange } = useColumnVisibility("admin-users", columns);
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
@@ -255,7 +321,17 @@ export function UsersTable({
           ring, and the two least-load-bearing columns collapse below `lg` — the
           page itself never scrolls sideways, which is the thing that actually
           breaks a layout. */}
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
       <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
         rows={filtered}
         getRowKey={(user) => user.id}

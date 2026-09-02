@@ -51,17 +51,54 @@ export default async function ApprovalsPage({
     date?: string | string[];
     /** P7-40. The scheduled time the DTR suggests. A seed, not an assertion. */
     time?: string | string[];
+    sort?: string | string[];
+    dir?: string | string[];
   }>;
 }) {
   const context = await requireAuthContext();
   const supabase = await createClient();
-  const prefill = narrowRequestPrefill(await searchParams);
+  const params = await searchParams;
+  const prefill = narrowRequestPrefill(params);
+
+  /*
+   * P7-66 — THE SORT THE HEADERS WERE ALREADY WRITING.
+   *
+   * P7-64 gave this table `urlSort` and sortable headers, and never taught the
+   * server to read the param — so clicking a heading changed the URL and
+   * nothing else. This is the missing half.
+   *
+   * `?sort=` is user input, so it selects a LITERAL column rather than being
+   * interpolated into `.order()`.
+   */
+  const first = (value: string | string[] | undefined) =>
+    Array.isArray(value) ? value[0] : value;
+
+  const SORTS = ["request", "submitted", "status", "decided"] as const;
+  type Sort = (typeof SORTS)[number];
+  const rawSort = first(params.sort);
+  const sort: Sort = (SORTS as readonly string[]).includes(rawSort ?? "")
+    ? (rawSort as Sort)
+    : "submitted";
+
+  const ORDER_COLUMN: Record<Sort, string> = {
+    // The "Request" heading reads as its type plus its detail, and the type is
+    // the only part of that the database can order by.
+    request: "request_type",
+    submitted: "created_at",
+    status: "status",
+    decided: "reviewed_at",
+  };
+
+  // A queue reads newest-first; anything else reads ascending.
+  const ascending = first(params.dir)
+    ? first(params.dir) !== "desc"
+    : !(sort === "submitted" || sort === "decided");
 
   const [{ data, error: requestsError }, { data: leaveTypes }, { data: balances }] = await Promise.all([
     supabase
       .from("vizserve_pms_internal_requests")
       .select("*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)")
-      .order("created_at", { ascending: false })
+      .order(ORDER_COLUMN[sort], { ascending, nullsFirst: false })
       // One more than shown, so truncation is detectable. The list splits into
       // "mine" and "pending on me" AFTER this, so a silent cap here does not just
       // hide old rows — it can drop something out of somebody's approval queue
@@ -123,6 +160,25 @@ export default async function ApprovalsPage({
     (row) => row.requester_id !== context.userId && row.status === "PENDING_REVIEW",
   );
 
+  /*
+   * P7-66 — names for the Decided column.
+   *
+   * One `in` query over the reviewers actually on screen rather than a join on
+   * the main select: `reviewed_by` is null on every pending row, so joining
+   * would widen the hot query to answer a question only the decided rows ask.
+   */
+  const reviewerIds = [...new Set(rows.map((row) => row.reviewed_by).filter(Boolean))] as string[];
+
+  const { data: reviewers } =
+    reviewerIds.length > 0
+      ? await supabase.from("vizserve_pms_users").select("id, full_name").in("id", reviewerIds)
+      : { data: null };
+
+  /* A plain object: a Map cannot cross the RSC boundary. */
+  const reviewerNames = Object.fromEntries(
+    (reviewers ?? []).map((person) => [person.id, person.full_name]),
+  );
+
   return (
     <PageShell className="gap-8">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -169,6 +225,7 @@ export default async function ApprovalsPage({
           description="Requests from the departments you lead."
           rows={pendingOnMe}
           showWho
+          reviewerNames={reviewerNames}
           empty={null}
         />
       ) : null}
@@ -178,6 +235,7 @@ export default async function ApprovalsPage({
         description="Everything you have submitted."
         rows={mine}
         showWho={false}
+        reviewerNames={reviewerNames}
         empty={
           requestsError ? (
             <QueryError what="your requests" message={requestsError.message} />

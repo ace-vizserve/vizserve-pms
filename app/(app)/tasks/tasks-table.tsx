@@ -3,7 +3,14 @@
 import { ChevronRight, CornerDownRight, ListTree } from "lucide-react";
 import Link from "next/link";
 
+import { createContext, useContext } from "react";
+
 import { DataTable, type Column } from "@/components/data-table";
+import {
+  DataTableColumns,
+  useColumnVisibility,
+  type HideableColumn,
+} from "@/components/data-table-columns";
 import {
   TaskCategoryBadge,
   TaskStatusGlyph,
@@ -123,6 +130,56 @@ export type TaskLookups = {
   byDepartment: Record<string, { id: string; full_name: string }[]>;
 };
 
+
+/**
+ * P7-66 — ONE COLUMNS MENU ABOVE EIGHT TABLES.
+ *
+ * `/tasks` renders a `bare` table per status group, so the usual arrangement —
+ * each table owning its own `useColumnVisibility` — would give eight
+ * independent settings: hiding "Time tracked" under Ongoing would leave it on
+ * under For QA, which reads as the control not working. The state has to live
+ * above the groups, so it lives here.
+ *
+ * ⚠️ THE MENU'S LIST IS STATIC, and deliberately. The real columns are built
+ * per group from lookups the page header does not have, so rebuilding them just
+ * to populate a dropdown would mean passing every lookup twice. The menu needs
+ * only a key and a label, and the keys are asserted against the real columns by
+ * `tests/unit/task-columns.test.ts`.
+ */
+const TASK_MENU_COLUMNS: HideableColumn[] = [
+  { key: "progress", header: "Progress", hideable: true },
+  { key: "assignee", header: "Assignee", hideable: true },
+  { key: "start", header: "Start date", hideable: true },
+  { key: "closed", header: "Date closed", hideable: true },
+  { key: "estimate", header: "Time estimate", hideable: true },
+  { key: "tracked", header: "Time tracked", hideable: true },
+  { key: "comment", header: "Latest comment", hideable: true },
+];
+
+type TaskColumnState = ReturnType<typeof useColumnVisibility>;
+
+const TaskColumnsContext = createContext<TaskColumnState | null>(null);
+
+export function TaskColumnsProvider({ children }: { children: React.ReactNode }) {
+  const state = useColumnVisibility("tasks", TASK_MENU_COLUMNS);
+
+  return <TaskColumnsContext.Provider value={state}>{children}</TaskColumnsContext.Provider>;
+}
+
+/** The control itself, for the toolbar row above the groups. */
+export function TaskColumnsMenu() {
+  const state = useContext(TaskColumnsContext);
+  if (!state) return null;
+
+  return (
+    <DataTableColumns
+      columns={TASK_MENU_COLUMNS}
+      visibility={state.visibility}
+      onVisibilityChange={state.onVisibilityChange}
+    />
+  );
+}
+
 export function TaskGroupTable({
   group,
   status,
@@ -136,6 +193,9 @@ export function TaskGroupTable({
   lookups: TaskLookups;
   assignable: { id: string; full_name: string }[];
 }) {
+  /* Null outside the provider — the board and any future caller render a group
+     table without the page chrome, and a missing menu must not be a crash. */
+  const columnState = useContext(TaskColumnsContext);
   const isAdmin = roleAtLeast(viewer.role, "admin");
   /**
    * P7-19 — whether to offer the trash on this row.
@@ -585,6 +645,8 @@ export function TaskGroupTable({
       rows={group}
       getRowKey={(task) => task.id}
       getSubRows={(task) => task.subRows}
+      columnVisibility={columnState?.visibility}
+      onColumnVisibilityChange={columnState?.onVisibilityChange}
       /* The server orders the query BEFORE it is split into stages, so a header
          click reorders all eight group tables together. */
       urlSort

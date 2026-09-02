@@ -19,13 +19,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { formatDate } from "@/lib/dates";
 import { isClosedYear } from "@/lib/schemas/holidays";
 
 import { createHoliday, deleteHoliday, renameHoliday } from "./actions";
 
-export type Holiday = { holiday_date: string; name: string };
+export type Holiday = { holiday_date: string; name: string; created_at: string };
 
 /** `2027-01-01` → `Friday`. The weekday is why an admin is checking the list. */
 function weekdayOf(holidayDate: string): string {
@@ -135,6 +136,20 @@ export function HolidaysTable({
         ),
     },
     {
+      /*
+       * P7-66. The weekday already sits under the date — it is why an admin
+       * opens this list at all — so the only fact this table was not showing is
+       * WHEN a holiday was declared. Useful when a date appears that nobody
+       * remembers agreeing to.
+       */
+      key: "added",
+      header: "Added",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden lg:table-cell whitespace-nowrap text-muted-foreground tabular-nums",
+      cell: (holiday) => formatDate(holiday.created_at),
+    },
+    {
       key: "actions",
       header: <span className="sr-only">Actions</span>,
       align: "end",
@@ -152,6 +167,8 @@ export function HolidaysTable({
       ),
     },
   ];
+
+  const { visibility, onVisibilityChange } = useColumnVisibility("admin-holidays", columns);
 
   return (
     <>
@@ -202,7 +219,17 @@ export function HolidaysTable({
         </p>
       ) : null}
 
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
       <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
         rows={holidays}
         getRowKey={(holiday) => holiday.holiday_date}
