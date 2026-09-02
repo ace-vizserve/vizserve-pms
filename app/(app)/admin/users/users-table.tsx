@@ -117,6 +117,13 @@ export function UsersTable({
     {
       key: "name",
       sortKey: "name",
+      /* ⚠️ THE FIELD IS `full_name`. Keyed `name` for the column, so the default
+         accessor reads a property that does not exist and every row compares
+         equal — a header that flips its arrow over rows that never move. The
+         email is the fallback because that is what an unnamed account shows
+         under "Unnamed", and sorting a block of them by nothing is no order at
+         all. */
+      sortValue: (user) => user.full_name || user.email,
       header: "Name",
       cell: (user) => (
         <>
@@ -241,6 +248,10 @@ export function UsersTable({
     {
       key: "status",
       sortKey: "status",
+      /* No `status` field either — the state is the boolean `is_active`. The
+         chip's own words are the sort value, so ascending puts Active above
+         Deactivated exactly as the column reads. */
+      sortValue: (user) => (user.is_active ? "Active" : "Deactivated"),
       header: "Status",
       /*
        * `Chip`, not a hand-rolled span. This is a real state, so it goes through

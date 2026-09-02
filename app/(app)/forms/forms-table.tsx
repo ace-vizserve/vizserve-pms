@@ -63,6 +63,10 @@ export function FormsTable({
     {
       key: "form",
       sortKey: "name",
+      // ⚠️ THE COLUMN IS KEYED `form` AND THE FIELD IS `name`, so the default
+      // accessor reads nothing at all — the header sorted alphabetically by
+      // `undefined`, which is to say not at all.
+      sortValue: (form) => form.name,
       header: "Form",
       cell: (form) => (
         <>
@@ -96,6 +100,13 @@ export function FormsTable({
     {
       key: "department",
       sortKey: "department",
+      /* The row holds `department_id`, an opaque uuid, and nothing called
+         `department` — so sorting had no value to read, and reading the id
+         would have ordered the column by something invisible. The NAME is what
+         the cell prints. An unrouted form sorts under its own words rather than
+         to the top of an alphabet it is not part of. */
+      sortValue: (form) =>
+        form.department_id ? (departmentNames[form.department_id] ?? "") : "Not routed",
       hideable: true,
       header: "Department",
       className: "hidden sm:table-cell text-muted-foreground",
@@ -111,6 +122,9 @@ export function FormsTable({
     {
       key: "status",
       sortKey: "status",
+      // The state is the boolean `is_active`; there is no `status` field. Sorts
+      // on the chip's own words, so "Draft" and "Live" group the way they read.
+      sortValue: (form) => (form.is_active ? "Live" : "Draft"),
       header: "Status",
       cell: (form) =>
         /* Status is never colour alone — the label carries it. */

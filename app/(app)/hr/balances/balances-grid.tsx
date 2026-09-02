@@ -243,10 +243,53 @@ export function BalancesGrid({
     });
   }
 
+  /**
+   * The row's own total, in days.
+   *
+   * Reads the DRAFT, so the cell always prints the figure that is on screen.
+   */
+  function rowTotal(person: BalancePerson): number {
+    return sumAllocations(person, (key) => draft[key] ?? cellValue(allocations[key]));
+  }
+
+  /**
+   * The same total from SAVED allocations only, for sorting.
+   *
+   * ⚠️ IT MUST NOT READ THE DRAFT, and this stopped being a style question when
+   * browser-side sorting started working: `sortValue` runs on every render, so a
+   * grid ordered by Total would re-sort itself on each keystroke, carrying the
+   * row — and the focused `<input>` inside it — out from under the person
+   * typing. Sorting on what is saved keeps the order still while an edit is in
+   * progress; the cell still shows the live figure, so nothing on screen lies.
+   */
+  function savedRowTotal(person: BalancePerson): number {
+    return sumAllocations(person, (key) => cellValue(allocations[key]));
+  }
+
+  /* One piece of arithmetic behind both, so the printed total and the sorted
+     one can never drift into disagreeing about how a blank or a stray
+     non-number counts. */
+  function sumAllocations(person: BalancePerson, valueFor: (key: string) => string): number {
+    return columnsTypes.reduce((sum, type) => {
+      const days = Number(valueFor(`${person.id}:${type.id}`));
+      return sum + (Number.isFinite(days) ? days : 0);
+    }, 0);
+  }
+
+  /** The name the Department cell prints, or "" for nobody — same for sorting. */
+  function departmentNameOf(person: BalancePerson): string {
+    if (!person.primary_department_id) return "";
+    return departments.find((d) => d.id === person.primary_department_id)?.name ?? "";
+  }
+
   const columns: Column<BalancePerson>[] = [
     {
       key: "person",
       sortKey: "person",
+      // ⚠️ THE FIELD IS `full_name`. Keyed `person` for the column, so without
+      // this the default accessor returns `undefined` on every row: the header
+      // would flip its arrow over a list that never reorders.
+      sortValue: (person) => person.full_name,
       header: "Employee",
       /* One column per leave type means this grid scrolls sideways on any real
          data set. Freezing the name is what keeps a row identifiable once the
@@ -273,21 +316,29 @@ export function BalancesGrid({
        */
       key: "department",
       sortKey: "department",
+      // The row carries `primary_department_id`, an opaque uuid — sorting on it
+      // would order the column by nothing anybody can see, and keyed
+      // `department` the default accessor finds no field at all. The NAME is
+      // what the cell prints, so the name is what it sorts by.
+      sortValue: (person) => departmentNameOf(person),
       header: "Department",
       hideable: true,
       defaultHidden: true,
       className: "hidden lg:table-cell whitespace-nowrap text-muted-foreground",
-      cell: (person) =>
-        person.primary_department_id ? (
-          (departments.find((d) => d.id === person.primary_department_id)
-            ?.name ?? "—")
-        ) : (
-          <span className="text-foreground-faint">—</span>
-        ),
+      cell: (person) => {
+        const name = departmentNameOf(person);
+        return name ? name : <span className="text-foreground-faint">—</span>;
+      },
     },
     {
       key: "allocated",
       sortKey: "allocated",
+      // The total is COMPUTED — there is no `allocated` field to fall back on,
+      // so this is the only thing standing between the header and a sort
+      // control that does nothing. SAVED values, not the draft — see
+      // `savedRowTotal` for why sorting on an edit in progress moves the row
+      // out from under the person typing into it.
+      sortValue: (person) => savedRowTotal(person),
       header: "Total",
       hideable: true,
       defaultHidden: true,
@@ -300,13 +351,7 @@ export function BalancesGrid({
        * it would be worse than no total.
        */
       cell: (person) => {
-        const total = columnsTypes.reduce((sum, type) => {
-          const raw =
-            draft[`${person.id}:${type.id}`] ??
-            cellValue(allocations[`${person.id}:${type.id}`]);
-          const days = Number(raw);
-          return sum + (Number.isFinite(days) ? days : 0);
-        }, 0);
+        const total = rowTotal(person);
 
         return total === 0 ? (
           <span className="text-foreground-faint">—</span>

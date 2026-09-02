@@ -75,16 +75,38 @@ export default async function DtrPage({
    */
   const DTR_SORTS = ["date", "in", "out"] as const;
   type DtrSort = (typeof DTR_SORTS)[number];
-  const dtrSort: DtrSort = (DTR_SORTS as readonly string[]).includes(params.sort ?? "")
+  /*
+   * The order applied when the URL asks for none. Newest day first — a record is
+   * read backwards from the most recent day, which is what this screen is opened
+   * for. `dtr-table.tsx` passes the same pair to `DataTable` as `defaultSort`,
+   * and that is the only reason its header can draw an arrow for an order nobody
+   * put in the query string. One fact stated on either side of the wire: change
+   * one and change the other, or the header goes back to lying.
+   */
+  const DTR_DEFAULT_SORT = { sort: "date", ascending: false } as const;
+
+  /* `undefined` when the URL named no sort we recognise, and that distinction is
+     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
+     collapsed into `dtrSort` below. */
+  const requestedSort: DtrSort | undefined = (DTR_SORTS as readonly string[]).includes(
+    params.sort ?? "",
+  )
     ? (params.sort as DtrSort)
-    : "date";
+    : undefined;
+  const dtrSort: DtrSort = requestedSort ?? DTR_DEFAULT_SORT.sort;
   const DTR_ORDER: Record<DtrSort, string> = {
     date: "work_date",
     in: "time_in",
     out: "time_out",
   };
-  // A record reads newest-day-first; a punch time reads earliest-first.
-  const dtrAscending = params.dir ? params.dir !== "desc" : dtrSort !== "date";
+  /* ONE SOURCE FOR THE DIRECTION. An explicit sort obeys `?dir=` — ascending
+     unless it says otherwise, which is why the table leaves `asc` out of the URL
+     — and no explicit sort takes the default's. Deriving the direction from the
+     COLUMN NAME, as this did (`dtrSort !== "date"`), meant a click on Date wrote
+     `?sort=date` with no `dir`, the header drew ascending and Postgres returned
+     descending: the arrow and the rows disagreed, and Date could not be read
+     oldest-first at all. */
+  const dtrAscending = requestedSort ? params.dir !== "desc" : DTR_DEFAULT_SORT.ascending;
 
   const today = todayInAppZone();
   // Default to the last 30 days rather than the calendar month: on the 1st, a
@@ -359,16 +381,43 @@ export default async function DtrPage({
       };
     });
 
-  // Newest first, matching the query's own order. Ties broken by name so a day
-  // with several people on it does not reshuffle between renders.
-  const entries: Entry[] = [...punchEntries, ...leaveEntries].sort(
-    (a, b) =>
-      b.work_date.localeCompare(a.work_date) ||
-      (a.vizserve_pms_users?.full_name ?? "").localeCompare(
-        b.vizserve_pms_users?.full_name ?? "",
-      ) ||
-      a.user_id.localeCompare(b.user_id),
-  );
+  /*
+   * ⚠️ THIS MERGE HAS TO SORT THE WAY THE QUERY DID, and it is the last word on
+   * screen. Postgres orders the punch rows, but the leave rows are synthesised
+   * above and have to be interleaved — so the combined list is sorted here in
+   * full, and whatever this says is what the table renders. It used to say
+   * "newest first" unconditionally, which quietly overrode `?sort=` and `?dir=`
+   * entirely: every header on this table was a control the rows ignored.
+   *
+   * The comparator reads the same column the query ordered by, so the two agree
+   * by construction rather than by both remembering.
+   */
+  const sortedOn = (entry: Entry): string | null =>
+    dtrSort === "in" ? entry.time_in : dtrSort === "out" ? entry.time_out : entry.work_date;
+
+  // Ties broken by name so a day with several people on it does not reshuffle
+  // between renders.
+  const tieBreak = (a: Entry, b: Entry) =>
+    (a.vizserve_pms_users?.full_name ?? "").localeCompare(b.vizserve_pms_users?.full_name ?? "") ||
+    a.user_id.localeCompare(b.user_id);
+
+  const entries: Entry[] = [...punchEntries, ...leaveEntries].sort((a, b) => {
+    const left = sortedOn(a);
+    const right = sortedOn(b);
+
+    /* NULLS LAST IN BOTH DIRECTIONS, matching `nullsFirst: false` on the query.
+       A day that was never timed out, and every leave-only row, has no punch to
+       compare — those belong at the end of the list rather than at the head of a
+       descending one, where they would push the rows somebody came to read off
+       the screen. */
+    if (left === null || right === null) {
+      if (left === right) return tieBreak(a, b);
+      return left === null ? 1 : -1;
+    }
+
+    const ordered = left.localeCompare(right);
+    return (dtrAscending ? ordered : -ordered) || tieBreak(a, b);
+  });
 
   const totalMinutes = entries.reduce(
     (sum, entry) => sum + (workedMinutes(entry.time_in, entry.time_out) ?? 0),

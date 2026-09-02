@@ -78,17 +78,34 @@ export default async function InboxPage({
    */
   const SORTS = ["when", "type", "read", "emailed"] as const;
   type Sort = (typeof SORTS)[number];
-  const sort: Sort = (SORTS as readonly string[]).includes(params.sort ?? "")
+  /*
+   * The order applied when the URL asks for none. Newest first is the inbox's
+   * whole point. `inbox-table.tsx` passes the same pair to `DataTable` as
+   * `defaultSort`, which is the only reason its header can draw an arrow for an
+   * order nobody put in the query string — change one and change the other or it
+   * goes back to lying about it.
+   */
+  const DEFAULT_SORT = { sort: "when", ascending: false } as const;
+
+  /* `undefined` when the URL named no sort we recognise, and that distinction is
+     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
+     collapsed into `sort` below. */
+  const requested: Sort | undefined = (SORTS as readonly string[]).includes(params.sort ?? "")
     ? (params.sort as Sort)
-    : "when";
+    : undefined;
+  const sort: Sort = requested ?? DEFAULT_SORT.sort;
   const NOTIFICATION_ORDER: Record<Sort, string> = {
     when: "created_at",
     type: "type",
     read: "read_at",
     emailed: "emailed_at",
   };
-  // Newest first is the inbox's whole point, so "when" defaults to descending.
-  const ascending = params.dir ? params.dir !== "desc" : sort !== "when";
+  /* ONE SOURCE FOR THE DIRECTION. An explicit sort obeys `?dir=` — ascending
+     unless it says otherwise, which is why the table leaves `asc` out of the URL
+     — and no explicit sort takes the default's. Reading a column name back out
+     of the URL to decide the direction, as this did, meant the arrow and the
+     rows could disagree and "When" could never be sorted oldest-first. */
+  const ascending = requested ? params.dir !== "desc" : DEFAULT_SORT.ascending;
 
   const from = (page - 1) * pageSize;
 
@@ -154,9 +171,11 @@ export default async function InboxPage({
     /* ⚠️ WITHOUT THESE TWO, PAGE 2 SILENTLY REVERTS TO THE DEFAULT ORDER.
        `hrefFor` rebuilds the query string from narrowed values rather than
        copying the incoming URL, so every param it forgets is a param the
-       paginator drops. */
-    if (sort !== "when") next.set("sort", sort);
-    if (params.dir === "desc" || (sort !== "when" && params.dir === "desc")) next.set("dir", "desc");
+       paginator drops. Only what the URL actually named, though — emitting the
+       default back would be a link claiming a choice nobody made, and `dir`
+       without a `sort` beside it now means nothing at all. */
+    if (requested) next.set("sort", requested);
+    if (requested && params.dir === "desc") next.set("dir", "desc");
     if (target > 1) next.set("page", String(target));
     const query = next.toString();
     return query ? `/inbox?${query}` : "/inbox";

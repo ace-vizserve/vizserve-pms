@@ -59,6 +59,16 @@ function isSort(value: string | undefined): value is Sort {
   return typeof value === "string" && (SORTS as readonly string[]).includes(value);
 }
 
+/**
+ * The order applied when the URL asks for none: by deadline, soonest first.
+ *
+ * `tasks-table.tsx` passes the same pair to `DataTable` as `defaultSort`, which
+ * is the only reason the headers can draw an arrow for an order nobody put in
+ * the query string — change one and change the other or it goes back to lying
+ * about it.
+ */
+const DEFAULT_SORT = { sort: "due", ascending: true } as const;
+
 function isPriority(value: string | undefined): value is TaskPriority {
   return typeof value === "string" && (TASK_PRIORITIES as readonly string[]).includes(value);
 }
@@ -136,7 +146,11 @@ export default async function TasksPage({
    */
   const kind = params.kind === "internal" || params.kind === "client" ? params.kind : "all";
   const priorityFilter = isPriority(params.priority) ? params.priority : null;
-  const sort: Sort = isSort(params.sort) ? params.sort : "due";
+  /* `undefined` when the URL named no sort we recognise, and that distinction is
+     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
+     collapsed into `sort`. */
+  const requested: Sort | undefined = isSort(params.sort) ? params.sort : undefined;
+  const sort: Sort = requested ?? DEFAULT_SORT.sort;
 
   /*
    * P7-18 — filtering by FOLDER needs an embed, not an `.eq()`.
@@ -177,13 +191,20 @@ export default async function TasksPage({
    * is the question you ask when there is more work than time.
    */
   /*
-   * P7-65 — `?dir=`, and the default that belongs to each column.
+   * P7-65 — ONE SOURCE FOR THE DIRECTION.
    *
-   * Priority reads highest-first and everything else reads ascending, so the
-   * default is per-column rather than one global direction. An explicit `?dir=`
-   * from a header click overrides it.
+   * An explicit sort obeys `?dir=` — ascending unless it says otherwise, which
+   * is why the table leaves `asc` out of the URL — and no explicit sort takes
+   * the default's. This used to read the direction off the COLUMN NAME instead,
+   * so a click on "Priority" wrote `?sort=priority` with no `dir`, the header
+   * drew an ascending arrow and the server returned descending rows, and that
+   * column could not be sorted ascending at all.
+   *
+   * Priority still reads highest-first where it is meant to: the toolbar Select
+   * writes `dir=desc` beside it, because that is now the only thing that says
+   * so.
    */
-  const ascending = params.dir ? params.dir !== "desc" : sort !== "priority";
+  const ascending = requested ? params.dir !== "desc" : DEFAULT_SORT.ascending;
 
   /*
    * ⚠️ A LITERAL COLUMN PER KEY, NEVER `.order(params.sort)`. `?sort=` is a

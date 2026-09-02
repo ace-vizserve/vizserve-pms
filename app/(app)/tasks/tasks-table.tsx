@@ -650,6 +650,10 @@ export function TaskGroupTable({
       /* The server orders the query BEFORE it is split into stages, so a header
          click reorders all eight group tables together. */
       urlSort
+      /* What the server orders by when the URL says nothing. Display only — it
+         puts the arrow on the right column instead of leaving every header
+         neutral, and it is the same pair `page.tsx` builds its query from. */
+      defaultSort={{ key: "due", dir: "asc" }}
       /* P7-27. The accented left edge on client work, so a column of rows says
          which ones have somebody outside waiting without anybody reading a
          word. Empty string for the other two - an accent on every row is not an

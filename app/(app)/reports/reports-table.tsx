@@ -141,6 +141,10 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
       hideable: true,
       header: "Logged",
       sortKey: "hours",
+      // ⚠️ THERE IS NO `hours` ON THE ROW — the figure is `minutes`, formatted
+      // for display. The column key is the label's word, so the default
+      // accessor read `undefined` and this header sorted nothing at all.
+      sortValue: (row) => row.minutes,
       className: "tabular-nums",
       align: "end",
       cell: (row) =>

@@ -106,6 +106,11 @@ export function HolidaysTable({
     {
       key: "date",
       sortKey: "date",
+      // ⚠️ THE ROW HAS NO `date`. The column is keyed for display and the field
+      // is `holiday_date`, so the default accessor would read `undefined` on
+      // every row — the arrow would flip and the list would never move. Sorts
+      // as an ISO string, which is chronological by construction.
+      sortValue: (holiday) => holiday.holiday_date,
       header: "Date",
       cell: (holiday) => (
         <>
@@ -146,6 +151,8 @@ export function HolidaysTable({
        */
       key: "added",
       sortKey: "added",
+      // Same trap as "Date" — the field is `created_at`, not `added`.
+      sortValue: (holiday) => holiday.created_at,
       header: "Added",
       hideable: true,
       defaultHidden: true,

@@ -96,12 +96,29 @@ export default async function AuditPage({
    */
   const SORTS = ["when", "action"] as const;
   type Sort = (typeof SORTS)[number];
-  const sort: Sort = (SORTS as readonly string[]).includes(params.sort ?? "")
+  /*
+   * The order applied when the URL asks for none: a trail reads newest-first.
+   * `audit-table.tsx` passes the same pair to `DataTable` as `defaultSort`,
+   * which is the only reason its header can draw an arrow for an order nobody
+   * put in the query string — change one and change the other or it goes back
+   * to lying about it.
+   */
+  const DEFAULT_SORT = { sort: "when", ascending: false } as const;
+
+  /* `undefined` when the URL named no sort we recognise, and that distinction is
+     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
+     collapsed into `sort` below. */
+  const requested: Sort | undefined = (SORTS as readonly string[]).includes(params.sort ?? "")
     ? (params.sort as Sort)
-    : "when";
+    : undefined;
+  const sort: Sort = requested ?? DEFAULT_SORT.sort;
   const AUDIT_ORDER: Record<Sort, string> = { when: "created_at", action: "action" };
-  // A trail reads newest-first by default; any other column reads ascending.
-  const ascending = params.dir ? params.dir !== "desc" : sort !== "when";
+  /* ONE SOURCE FOR THE DIRECTION. An explicit sort obeys `?dir=` — ascending
+     unless it says otherwise, which is why the table leaves `asc` out of the URL
+     — and no explicit sort takes the default's. Reading a column name back out
+     of the URL to decide the direction meant the arrow and the rows could
+     disagree, and "When" could never be read oldest-first at all. */
+  const ascending = requested ? params.dir !== "desc" : DEFAULT_SORT.ascending;
 
   const from = (page - 1) * pageSize;
 
@@ -216,9 +233,12 @@ export default async function AuditPage({
     // Defaults stay out of the URL, so the everyday link is just /admin/audit.
     if (pageSize !== PAGE_SIZES[0]) next.set("size", String(pageSize));
     /* ⚠️ Without these, page 2 silently reverts to the default order — this
-       builder rebuilds the query string rather than copying the URL. */
-    if (sort !== "when") next.set("sort", sort);
-    if (params.dir === "desc") next.set("dir", "desc");
+       builder rebuilds the query string rather than copying the URL. Only what
+       the URL actually named, though: emitting the default back would be a link
+       claiming a choice nobody made, and `dir` without a `sort` beside it now
+       means nothing at all. */
+    if (requested) next.set("sort", requested);
+    if (requested && params.dir === "desc") next.set("dir", "desc");
     if (target > 1) next.set("page", String(target));
     const query = next.toString();
     return query ? `/admin/audit?${query}` : "/admin/audit";

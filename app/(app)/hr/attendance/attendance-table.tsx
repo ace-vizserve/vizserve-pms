@@ -82,6 +82,10 @@ export function AttendanceTable({
     {
       key: "person",
       sortKey: "person",
+      // ⚠️ THE FIELD IS `fullName`, not `person` — without this the default
+      // accessor returns `undefined` for every row and the only alphabetical
+      // control on the page does nothing.
+      sortValue: (row) => row.fullName,
       header: "Employee",
       cell: (row) => (
         <div className="flex flex-col">

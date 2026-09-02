@@ -78,10 +78,23 @@ export default async function ApprovalsPage({
 
   const SORTS = ["request", "submitted", "status", "decided"] as const;
   type Sort = (typeof SORTS)[number];
+  /*
+   * The order applied when the URL asks for none: a queue reads newest-first.
+   * `approvals-table.tsx` passes the same pair to `DataTable` as `defaultSort`,
+   * which is the only reason its headers can draw an arrow for an order nobody
+   * put in the query string — change one and change the other or it goes back
+   * to lying about it. Both sections order by it, so one default covers both.
+   */
+  const DEFAULT_SORT = { sort: "submitted", ascending: false } as const;
+
   const rawSort = first(params.sort);
-  const sort: Sort = (SORTS as readonly string[]).includes(rawSort ?? "")
+  /* `undefined` when the URL named no sort we recognise, and that distinction is
+     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
+     collapsed into `sort` below. */
+  const requested: Sort | undefined = (SORTS as readonly string[]).includes(rawSort ?? "")
     ? (rawSort as Sort)
-    : "submitted";
+    : undefined;
+  const sort: Sort = requested ?? DEFAULT_SORT.sort;
 
   const ORDER_COLUMN: Record<Sort, string> = {
     // The "Request" heading reads as its type plus its detail, and the type is
@@ -92,10 +105,12 @@ export default async function ApprovalsPage({
     decided: "reviewed_at",
   };
 
-  // A queue reads newest-first; anything else reads ascending.
-  const ascending = first(params.dir)
-    ? first(params.dir) !== "desc"
-    : !(sort === "submitted" || sort === "decided");
+  /* ONE SOURCE FOR THE DIRECTION. An explicit sort obeys `?dir=` — ascending
+     unless it says otherwise, which is why the table leaves `asc` out of the URL
+     — and no explicit sort takes the default's. Deciding it from the column name
+     instead, as this did, meant a click on "Submitted" or "Decided" drew an
+     ascending arrow over descending rows and neither could be reversed. */
+  const ascending = requested ? first(params.dir) !== "desc" : DEFAULT_SORT.ascending;
 
   /*
    * P7-66 — TWO QUERIES, BECAUSE THE PAGE IS TWO LISTS.
@@ -198,8 +213,11 @@ export default async function ApprovalsPage({
   /* Rebuilt from the narrowed values, so the paginator cannot drop the sort. */
   function hrefFor(target: number) {
     const next = new URLSearchParams();
-    if (sort !== "submitted") next.set("sort", sort);
-    if (first(params.dir) === "desc") next.set("dir", "desc");
+    /* Only what the URL actually named. Emitting the default back would be a
+       link claiming a choice nobody made, and `dir` without a `sort` beside it
+       now means nothing at all. */
+    if (requested) next.set("sort", requested);
+    if (requested && first(params.dir) === "desc") next.set("dir", "desc");
     if (pageSize !== PAGE_SIZES[0]) next.set("size", String(pageSize));
     if (target > 1) next.set("page", String(target));
     const query = next.toString();

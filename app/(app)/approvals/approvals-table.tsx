@@ -142,6 +142,11 @@ export function Section({
         rows={rows}
         getRowKey={(request) => request.id}
         urlSort
+        /* What the server orders BOTH sections by when the URL says nothing.
+           Display only — it puts the arrow on the right column instead of
+           leaving every header neutral, and it is the same pair `page.tsx`
+           builds its queries from. */
+        defaultSort={{ key: "submitted", dir: "desc" }}
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
         /* The section heading IS this table's toolbar. Two tables stacked on one

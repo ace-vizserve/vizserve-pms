@@ -177,6 +177,10 @@ export function InboxTable({
       toolbar={toolbar}
       count={count}
       urlSort
+      /* What the server orders by when the URL says nothing. Display only — it
+         puts the arrow on the right column instead of leaving every header
+         neutral, and it is the same pair `page.tsx` builds its query from. */
+      defaultSort={{ key: "when", dir: "desc" }}
       empty={empty}
       />
   );

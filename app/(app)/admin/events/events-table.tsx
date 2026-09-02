@@ -110,6 +110,11 @@ export function EventsTable({
     {
       key: "when",
       sortKey: "when",
+      /* ⚠️ NO `when` ON THE ROW. The dates are `start_date`/`end_date`, so the
+         default accessor would hand TanStack `undefined` for every row and the
+         header would be a control that moves nothing. The span is ordered by
+         where it STARTS, which is what the cell reads left to right. */
+      sortValue: (event) => event.start_date,
       header: "When",
       cell: (event) => (
         <div className="font-medium tabular-nums whitespace-nowrap">
@@ -120,6 +125,8 @@ export function EventsTable({
     {
       key: "event",
       sortKey: "event",
+      // The field is `title`; `event` is only what the column is called.
+      sortValue: (event) => event.title,
       header: "Event",
       cell: (event) => (
         <>
@@ -135,6 +142,12 @@ export function EventsTable({
     {
       key: "category",
       sortKey: "category",
+      /* `row.category` exists, so this one was not dead — but it is the ENUM,
+         and a department event's pill reads the department's name. Sorting on
+         the enum would have grouped fifteen visibly different pills under one
+         invisible value. Sort on what the pill says. */
+      sortValue: (event) =>
+        eventScopeLabel(event.category, departmentName.get(event.department_id ?? "")),
       hideable: true,
       header: "Category",
       // The pill carries its own LABEL, not just the tone — state is never

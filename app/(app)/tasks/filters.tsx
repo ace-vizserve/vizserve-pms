@@ -59,6 +59,33 @@ export function TaskFilters({
     router.push(`/tasks?${next.toString()}`);
   }
 
+  /*
+   * SORT AND DIRECTION MOVE TOGETHER, because the server now takes the
+   * direction from `?dir=` and from nothing else.
+   *
+   * `priority` is a Postgres enum declared LOW → HIGH, so highest-first IS
+   * `dir=desc` — and the page used to infer that from the column name, which is
+   * exactly what let a header's arrow disagree with the rows it sat over.
+   * Choosing Priority has to say it out loud now, or the list would open on the
+   * least urgent work.
+   *
+   * `due` is the default and reads ascending, so it CLEARS both rather than
+   * pinning them: a URL that says `?sort=due` claims a choice somebody did not
+   * make, and it survives every later filter change.
+   */
+  function setSort(value: string | null) {
+    const next = new URLSearchParams(params.toString());
+    if (!value || value === "due") {
+      next.delete("sort");
+      next.delete("dir");
+    } else {
+      next.set("sort", value);
+      if (value === "priority") next.set("dir", "desc");
+      else next.delete("dir");
+    }
+    router.push(`/tasks?${next.toString()}`);
+  }
+
   const hasFilters = ["status", "view", "list", "group", "priority", "sort"].some((key) =>
     params.get(key),
   );
@@ -222,10 +249,7 @@ export function TaskFilters({
         <Select
           items={sortItems}
           value={params.get("sort") ?? "due"}
-          // `due` is the default, so choosing it REMOVES the parameter rather
-          // than pinning it — a URL that says `?sort=due` claims a choice
-          // somebody did not make, and it survives every later filter change.
-          onValueChange={(value) => setParam("sort", value === "due" ? null : value)}
+          onValueChange={setSort}
         >
           <SelectTrigger id="sort" className="w-36">
             <SelectValue />

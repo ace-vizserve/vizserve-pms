@@ -149,7 +149,8 @@ export type Column<T> = {
    * this is for the columns where that is not the value: a count kept in a
    * lookup, a percentage that is computed, a number nested under `byStatus`.
    *
-   * Tables using `urlSort` ignore it — Postgres does their ordering.
+   * Tables using `urlSort` ignore it — Postgres does their ordering, and the
+   * rows arrive already in it.
    */
   sortValue?: (row: T) => string | number | null | undefined;
 };
@@ -232,19 +233,28 @@ export function DataTable<T>({
    */
   urlSort?: boolean;
   /**
-   * The order the SERVER already applies when the URL names none.
+   * The order the table STARTS IN when the URL names none.
    *
-   * ⚠️ IT DESCRIBES THE ROWS, IT NEVER ASKS FOR THEM. Nothing here reaches the
-   * query string, so a first paint still carries no `?sort=`. What it fixes is
-   * a header that was lying: `/requests` arrives ordered newest-first, the URL
-   * said nothing, so every column drew the neutral two-way glyph — and the
-   * first click on that column then asked for the order the rows were ALREADY
-   * in, which is why "Submitted at" could not be sorted ascending at all.
+   * ⚠️ IT NEVER REACHES THE QUERY STRING. A first paint still carries no
+   * `?sort=`. What it fixes is a header that was lying: `/requests` arrives
+   * ordered newest-first, the URL said nothing, so every column drew the
+   * neutral two-way glyph — and the first click on that column then asked for
+   * the order the rows were ALREADY in, which is why "Submitted at" could not
+   * be sorted ascending at all.
+   *
+   * It means two subtly different things either side of `urlSort`. On a
+   * server-sorted table it DESCRIBES an order Postgres already applied, and
+   * `?sort=` overrides it. On a browser-sorted one it ASKS for that order:
+   * `getSortedRowModel` really does reorder the rows to match, and the first
+   * click moves away from it like any other seeded state. Seeding it here used
+   * to be forbidden for exactly that reason — the rows would have been PINNED,
+   * because every click on a browser table was discarded. They are not any
+   * more, so the gate is gone.
    *
    * `key` is a `sortKey` value — what `?sort=` speaks — not a column `key`, the
-   * same namespace `Column.sortKey` uses. The server page holds this default
-   * too, because it has to build the query; the two are one fact stated on
-   * either side of the wire, and they have to be changed together.
+   * same namespace `Column.sortKey` uses. A server page holds this default too,
+   * because it has to build the query; the two are one fact stated on either
+   * side of the wire, and they have to be changed together.
    */
   defaultSort?: { key: string; dir: SortDirection };
   /**
@@ -282,26 +292,72 @@ export function DataTable<T>({
   const [expanded, setExpanded] = useState<ExpandedState>(true);
 
   const manual = urlSort;
-  const sort = urlSort ? (params.get("sort") ?? undefined) : undefined;
+
+  /*
+   * ⚠️ `?sort=` IS ONLY HONOURED WHEN IT NAMES A COLUMN THIS TABLE HAS.
+   *
+   * Every server page runs its raw `?sort=` past a `SORTS` allowlist and falls
+   * back to its own default when the URL names something it does not recognise
+   * — see `app/(app)/approvals/page.tsx`, where the `undefined` is explicitly
+   * load-bearing because it also decides whether `?dir=` is obeyed. Taking the
+   * raw value here meant `/requests?sort=nonsense` ordered by the server's
+   * default while the header drew neutral glyphs on every column and set
+   * `aria-sort` on none — the header lying about the order on screen, which is
+   * the exact state this work exists to remove.
+   *
+   * `columns` is the allowlist: a `sortKey` is what the URL and the server
+   * speak. Unrecognised reads as silence, so `defaultSort` fills it in for both
+   * the key and the direction, which is what the server did with the same URL.
+   */
+  const rawSort = urlSort ? (params.get("sort") ?? undefined) : undefined;
+  const sort =
+    rawSort && columns.some((column) => column.sortKey === rawSort) ? rawSort : undefined;
   const dir: SortDirection = params.get("dir") === "desc" ? "desc" : "asc";
 
   /*
-   * What the header draws and what TanStack is told it is showing. The URL wins
-   * wherever it speaks; `defaultSort` fills in its silence and nothing else.
+   * ⚠️ TWO SORTING MODES, AND THEY MUST NOT SHARE A STORE.
    *
-   * Seeding it is also what makes the first click on a defaulted column
-   * REVERSE the order rather than re-request it — the toggle starts from the
-   * direction on screen, so it can only move away from it.
+   * A `urlSort` table's order lives in the query string, because the server is
+   * what applies it — there is nothing local to hold. A browser-sorted one has
+   * no query string to live in and used to have nowhere else either: `sorting`
+   * was controlled and permanently `[]`, and `onSortingChange` early-returned,
+   * so `getSortedRowModel` read a state that could never change and every
+   * header announcing "Click to sort by this column" did nothing at all. This
+   * is that missing store, and it exists ONLY for the non-`urlSort` case.
    *
-   * ⚠️ ONLY WHERE THE SERVER SORTS. The prop describes an order Postgres
-   * already applied, so on a browser-sorted table it describes nothing — and
-   * `getSortedRowModel` IS installed there, so seeding the state would really
-   * reorder the rows and then pin them, because `onSortingChange` throws away
-   * every click on those tables.
+   * Seeded from `defaultSort` once. `keyOf` because the state is keyed by
+   * column `key` while `defaultSort` speaks `sortKey`.
    */
-  const fallbackSort = urlSort ? defaultSort : undefined;
-  const activeSort = sort ?? fallbackSort?.key;
-  const activeDir: SortDirection = sort ? dir : (fallbackSort?.dir ?? dir);
+  const [localSorting, setLocalSorting] = useState<SortingState>(() =>
+    urlSort || !defaultSort
+      ? []
+      : [{ id: keyOf(columns, defaultSort.key), desc: defaultSort.dir === "desc" }],
+  );
+
+  /*
+   * What the header draws, as a `sortKey` on both paths so the render below
+   * stays one branch.
+   *
+   * Under `urlSort` the URL wins wherever it speaks and `defaultSort` fills in
+   * its silence — seeding it is what makes the first click on a defaulted
+   * column REVERSE the order rather than re-request it, since the toggle starts
+   * from the direction already on screen. Otherwise the local state IS the
+   * answer, read back through the column list because TanStack knows only the
+   * `key`.
+   */
+  const localFirst = localSorting[0];
+  const localSortKey = localFirst
+    ? columns.find((column) => column.key === localFirst.id)?.sortKey
+    : undefined;
+
+  const activeSort = urlSort ? (sort ?? defaultSort?.key) : localSortKey;
+  const activeDir: SortDirection = urlSort
+    ? sort
+      ? dir
+      : (defaultSort?.dir ?? dir)
+    : localFirst?.desc
+      ? "desc"
+      : "asc";
 
   /*
    * Our `Column<T>` mapped onto TanStack's shape rather than replaced by it.
@@ -339,12 +395,17 @@ export function DataTable<T>({
     [columns],
   );
 
+  /* The URL-derived pair on one side, the local state verbatim on the other.
+     Rebuilding `localSorting` out of `activeSort` would lose the "unsorted"
+     third step, which on a browser table is a real state and not an absence. */
   const sorting = useMemo<SortingState>(
     () =>
-      activeSort
-        ? [{ id: keyOf(columns, activeSort), desc: activeDir === "desc" }]
-        : [],
-    [columns, activeSort, activeDir],
+      urlSort
+        ? activeSort
+          ? [{ id: keyOf(columns, activeSort), desc: activeDir === "desc" }]
+          : []
+        : localSorting,
+    [urlSort, columns, activeSort, activeDir, localSorting],
   );
 
   const table = useReactTable({
@@ -364,10 +425,10 @@ export function DataTable<T>({
        default cycle is asc → desc → unsorted, and `onSortingChange` below has
        no way to express "unsorted" — there is no `?sort=` that means "however
        Postgres felt", so it bails and the click does nothing. Two directions
-       only here. The removal step can only matter where sorting is handled
-       here at all, and browser-side sorting is inert today — `onSortingChange`
-       early-returns for every non-`urlSort` table and discards the click — so
-       this flag is in practice about the URL-sorted path. */
+       only here. A browser-sorted table keeps the third step, and it is now a
+       REAL one: the local state empties, `getSortedRowModel` stops reordering,
+       and the rows fall back to the order the server sent them in — a state
+       that table can genuinely be in. */
     enableSortingRemoval: !manual,
     onExpandedChange: setExpanded,
     state: {
@@ -384,8 +445,17 @@ export function DataTable<T>({
           )
       : undefined,
     onSortingChange: (updater) => {
-      if (!urlSort) return;
+      // TanStack hands over an updater function OR a value, and both arrive here.
       const next = typeof updater === "function" ? updater(sorting) : updater;
+
+      /* No URL to write to, so the click lands in local state and
+         `getSortedRowModel` does the rest. An empty `next` is the cycle's third
+         step and is kept rather than discarded. */
+      if (!urlSort) {
+        setLocalSorting(next);
+        return;
+      }
+
       const first = next[0];
       if (!first) return;
 

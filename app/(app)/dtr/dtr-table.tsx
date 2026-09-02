@@ -357,6 +357,13 @@ export function DtrTable({
         /* The range is capped at DTR_PAGE_SIZE, so the browser must not pretend
          to order days it never received. */
         urlSort
+        /* The order the page has ALREADY applied when the URL names none —
+           `DTR_DEFAULT_SORT` in page.tsx, and the two have to move together.
+           It never reaches the query string; it stops the Date header drawing
+           the neutral glyph over rows that are plainly newest-first, and seeds
+           the toggle so the first click REVERSES the order rather than
+           re-requesting the one on screen. */
+        defaultSort={{ key: "date", dir: "desc" }}
         empty={empty}
         footer={
           <TableRow className="hover:bg-transparent">
