@@ -10,10 +10,17 @@ import { createAdminClient } from "@/utils/supabase/admin";
 /**
  * P4-02 — issuing a token and sending the email it lives in.
  *
- * THE RAW TOKEN NEVER LEAVES THIS MODULE. It is minted by Postgres, returned
- * once, put into an email, and dropped. Nothing here returns it to a caller,
- * logs it, or stores it — a token in a server log is a token in whatever ships
- * those logs somewhere else.
+ * THE RAW APPROVAL TOKEN NEVER LEAVES THIS MODULE. It is minted by Postgres,
+ * returned once, put into an email, and dropped. Nothing here returns it to a
+ * caller, logs it, or stores it — a token in a server log is a token in
+ * whatever ships those logs somewhere else.
+ *
+ * P8-04 carves out ONE exception: the *feedback* token is handed back to the
+ * caller so the approve page can render the rating form inline instead of
+ * making the client wait for a second email. That is safe where the approval
+ * token is not — a feedback token can only leave a rating on work that is
+ * already complete, and it goes to the same browser that just approved it. It
+ * is still never logged.
  *
  * Issuance is service-role and deliberately NOT granted to `authenticated`: a
  * staff member who could mint a token could approve their own work as the
@@ -22,6 +29,16 @@ import { createAdminClient } from "@/utils/supabase/admin";
 
 type IssueOutcome =
   | { ok: true; sent: boolean }
+  | { ok: false; error: string };
+
+/**
+ * Same shape, plus the raw token — present only when this call actually minted
+ * one. A task that already has feedback returns `ok: true` with NO token, so
+ * every caller has to handle its absence rather than assume a success carries
+ * one.
+ */
+type FeedbackIssueOutcome =
+  | { ok: true; sent: boolean; token?: string }
   | { ok: false; error: string };
 
 /**
@@ -95,17 +112,39 @@ export async function issueAndSendApproval(taskId: string): Promise<IssueOutcome
 }
 
 /**
- * P4-10 — the feedback request, on any completion.
+ * Everything the feedback email needs, gathered while the token is minted.
  *
- * Including an auto-completed one. A client who never answered is exactly the
- * client worth hearing from: silence is data, and this is the cheapest way to
- * find out whether it meant "fine" or "I never saw the email" — which is also
- * the early warning that P4-14 deliverability has regressed.
+ * It carries the raw token, so it is as sensitive as the token is — pass it to
+ * the sender and drop it. Nothing here is worth a second round of queries later.
  */
-export async function issueAndSendFeedbackRequest(
-  taskId: string,
-  options: { autoCompleted: boolean },
-): Promise<IssueOutcome> {
+export type FeedbackEmailPayload = {
+  to: string;
+  requesterName: string;
+  referenceNo: string;
+  title: string;
+  token: string;
+};
+
+/**
+ * `issued: false` is a SUCCESS, not a failure: the task already has feedback,
+ * so there is nothing to mint and nothing to send. Split from the error case
+ * because a caller must not log "feedback failed" for a task that simply
+ * answered already.
+ */
+type FeedbackTokenOutcome =
+  | { ok: true; issued: true; token: string; email: FeedbackEmailPayload }
+  | { ok: true; issued: false }
+  | { ok: false; error: string };
+
+/**
+ * P4-10, first half — mint the token and gather what the email will say.
+ *
+ * SEPARATED FROM THE SEND (P8-04) because the two have different urgencies.
+ * This half is database-only and fast, and the approve page cannot render the
+ * inline rating form without its result, so it is awaited. The mail transport
+ * is a third party over HTTP and must not be — see the callers.
+ */
+export async function issueFeedbackToken(taskId: string): Promise<FeedbackTokenOutcome> {
   const admin = createAdminClient();
 
   // Nothing to ask about twice.
@@ -115,7 +154,7 @@ export async function issueAndSendFeedbackRequest(
     .eq("task_id", taskId)
     .maybeSingle();
 
-  if (existing) return { ok: true, sent: false };
+  if (existing) return { ok: true, issued: false };
 
   const { data: issued, error } = await admin.rpc("vizserve_pms_issue_approval_token", {
     p_task_id: taskId,
@@ -144,14 +183,65 @@ export async function issueAndSendFeedbackRequest(
         .maybeSingle()
     : { data: null };
 
-  const outcome = await sendFeedbackRequestEmail({
-    to: token.requester_email,
-    requesterName: request?.requester_name ?? "there",
-    referenceNo: request?.reference_no ?? "your request",
-    title: task?.title ?? "your request",
+  return {
+    ok: true,
+    issued: true,
     token: token.token,
+    email: {
+      to: token.requester_email,
+      requesterName: request?.requester_name ?? "there",
+      referenceNo: request?.reference_no ?? "your request",
+      title: task?.title ?? "your request",
+      token: token.token,
+    },
+  };
+}
+
+/**
+ * P4-10, second half — the send, and nothing else.
+ *
+ * `autoCompleted` only changes the wording, so it belongs here rather than with
+ * the token: the same token reads differently depending on whether a human
+ * approved or the window closed.
+ */
+export async function sendFeedbackRequestEmailFor(
+  payload: FeedbackEmailPayload,
+  options: { autoCompleted: boolean },
+): Promise<boolean> {
+  const outcome = await sendFeedbackRequestEmail({
+    ...payload,
     autoCompleted: options.autoCompleted,
   });
 
-  return { ok: true, sent: outcome.status === "sent" || outcome.status === "dry-run" };
+  return outcome.status === "sent" || outcome.status === "dry-run";
+}
+
+/**
+ * P4-10 — the feedback request, on any completion.
+ *
+ * Including an auto-completed one. A client who never answered is exactly the
+ * client worth hearing from: silence is data, and this is the cheapest way to
+ * find out whether it meant "fine" or "I never saw the email" — which is also
+ * the early warning that P4-14 deliverability has regressed.
+ *
+ * Both halves, awaited, for callers with nobody waiting on them — the cron run
+ * counts what it sent and has a whole invocation to do it in. A caller that is
+ * holding an HTTP response open should compose the two itself and let go of the
+ * email.
+ */
+export async function issueAndSendFeedbackRequest(
+  taskId: string,
+  options: { autoCompleted: boolean },
+): Promise<FeedbackIssueOutcome> {
+  const issued = await issueFeedbackToken(taskId);
+
+  if (!issued.ok) return { ok: false, error: issued.error };
+  if (!issued.issued) return { ok: true, sent: false };
+
+  const sent = await sendFeedbackRequestEmailFor(issued.email, options);
+
+  // P8-04 — the token goes back to the caller as well as into the email. The
+  // email stays: it is the fallback for a client who closes the tab, and
+  // answering twice is impossible because the RPC consumes the token.
+  return { ok: true, sent, token: issued.token };
 }

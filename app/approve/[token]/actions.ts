@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 
-import { issueAndSendFeedbackRequest } from "@/lib/client-approval-server";
+import { issueFeedbackToken, sendFeedbackRequestEmailFor } from "@/lib/client-approval-server";
 import {
   clientDecisionSchema,
   feedbackSchema,
@@ -25,7 +25,8 @@ import { createClient } from "@/utils/supabase/server";
  */
 
 export type DecisionResult =
-  { ok: true; decision: string; status: string } | { ok: false; error: string };
+  | { ok: true; decision: string; status: string; feedbackToken?: string }
+  | { ok: false; error: string };
 
 /** Every failure said the same way, so a probe learns nothing from the wording. */
 const MESSAGES: Record<string, string> = {
@@ -80,18 +81,49 @@ export async function submitClientDecision(token: string, input: unknown): Promi
     return { ok: false, error: MESSAGES[result.error ?? ""] ?? MESSAGES.invalid! };
   }
 
-  // P4-10 — feedback goes out on every completion, including this one. Not
-  // awaited: the client is looking at a confirmation screen and should not wait
-  // on our mail server to see it.
+  // P4-10 — feedback goes out on every completion, including this one.
+  //
+  // P8-04 — TWO HALVES, AND ONLY ONE OF THEM IS AWAITED.
+  //
+  // The TOKEN is awaited: it is a round trip to our own database, and the
+  // confirmation screen cannot render the inline rating form without it. A
+  // token we did not wait for is a token we do not have.
+  //
+  // The EMAIL is NOT, and that is the load-bearing half. The decision is
+  // ALREADY COMMITTED in Postgres by this point, and awaiting an outbound
+  // request to a mail provider would put a recorded approval at the mercy of
+  // how long that provider takes to answer. `try/catch` does not cover this: a
+  // serverless timeout is not an exception, it kills the invocation, and the
+  // browser's `await submitClientDecision(...)` would reject with no
+  // confirmation at all for a decision that stands. So it is fired and
+  // forgotten, with the rejection swallowed — the email is the fallback for a
+  // client who closes the tab, not something this response depends on.
+  //
+  // Every path below therefore still ends in `ok: true`; a missing token just
+  // means the confirmation card falls back to plain text.
+  let feedbackToken: string | undefined;
+
   if (result.decision === "APPROVED") {
-    void issueAndSendFeedbackRequest((data as { task_id?: string }).task_id ?? "", {
-      autoCompleted: false,
-    }).catch(() => {
-      // Best effort. A missing feedback email is not worth failing an approval.
-    });
+    try {
+      const feedback = await issueFeedbackToken((data as { task_id?: string }).task_id ?? "");
+
+      if (!feedback.ok) {
+        console.error(`[gate3] feedback request failed: ${feedback.error}`);
+      } else if (feedback.issued) {
+        feedbackToken = feedback.token;
+
+        void sendFeedbackRequestEmailFor(feedback.email, { autoCompleted: false }).catch(
+          (cause: unknown) => {
+            console.error(`[gate3] feedback email failed: ${String(cause)}`);
+          },
+        );
+      }
+    } catch (cause) {
+      console.error(`[gate3] feedback request threw: ${String(cause)}`);
+    }
   }
 
-  return { ok: true, decision: result.decision!, status: result.status! };
+  return { ok: true, decision: result.decision!, status: result.status!, feedbackToken };
 }
 
 export async function submitFeedback(

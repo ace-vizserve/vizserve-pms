@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 
+import { FeedbackForm } from "../../feedback/[token]/feedback-form";
 import { submitClientDecision } from "./actions";
 
 /**
@@ -39,6 +40,10 @@ export function ApprovalForm({
   const [name, setName] = useState(requesterName);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState<"APPROVED" | "REVISION_REQUESTED" | null>(null);
+  // P8-04 — minted by the same call that recorded the approval. Absent if
+  // issuing failed, or if this task already had feedback; either way the card
+  // still has to read correctly, so nothing here may assume it is there.
+  const [feedbackToken, setFeedbackToken] = useState<string | null>(null);
 
   function submit(decision: "APPROVED" | "REVISION_REQUESTED") {
     setError(null);
@@ -55,13 +60,21 @@ export function ApprovalForm({
         return;
       }
 
+      setFeedbackToken(result.feedbackToken ?? null);
       setDone(decision);
     });
   }
 
   if (done) {
+    // P8-04 — the rating is asked here, while the client is still on the page.
+    // The email still goes out for anyone who closes the tab, but we do not
+    // PROMISE one any more: telling someone to wait for an email while the form
+    // is sitting in front of them is how a request-level rating never gets
+    // answered. Submitting twice is impossible — the RPC consumes the token.
+    const askNow = done === "APPROVED" && feedbackToken !== null;
+
     return (
-      <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-8 text-center">
+      <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 text-center sm:p-8">
         <div className="mx-auto mb-4 flex size-11 items-center justify-center rounded-full bg-success-subtle text-success">
           <Check className="size-5" />
         </div>
@@ -69,10 +82,21 @@ export function ApprovalForm({
           {done === "APPROVED" ? "Approved — thank you" : "Thanks, we are on it"}
         </h2>
         <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
-          {done === "APPROVED"
-            ? "The team has been told and this request is now complete. We will email you shortly to ask how it went."
-            : "Your comments have gone straight to the person who did the work. They will come back to you with a revision."}
+          {done !== "APPROVED"
+            ? "Your comments have gone straight to the person who did the work. They will come back to you with a revision."
+            : askNow
+              ? "The team has been told and this request is now complete. One last thing — how did we do?"
+              : "The team has been told and this request is now complete. We will email you shortly to ask how it went."}
         </p>
+
+        {/* Reused as-is from the standalone feedback page — same component, same
+            server action, so the two paths can never drift apart. Left-aligned:
+            it is a form, not a message. */}
+        {askNow ? (
+          <div className="mt-6 border-t pt-6 text-left">
+            <FeedbackForm token={feedbackToken} />
+          </div>
+        ) : null}
       </div>
     );
   }
