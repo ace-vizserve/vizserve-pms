@@ -463,7 +463,14 @@ export default async function EditFormPage({
           it into an email. An internal form's face is /respond/<slug>, which
           needs a session and is where colleagues fill it in — a different URL,
           a different audience, and calling it "public" would be exactly the
-          wrong thing to tell somebody about a staff survey.
+          wrong thing to tell somebody about an internal form.
+
+          ⚠️ THE WORD IS "INTERNAL", NOT "STAFF". Both were in use and they read
+          as two different things to somebody who has met only one of them. The
+          purpose is called INTERNAL, the settings card is headed for an internal
+          form, and the chooser at /forms/new offers an internal form — so a
+          header button reading "staff form" was the last place claiming there
+          was a third kind.
 
           `is_public` rather than `purpose` on the client branch, because that
           boolean is what /request/<slug> actually filters on. The CHECK ties
@@ -476,7 +483,7 @@ export default async function EditFormPage({
             target="_blank"
             className={buttonVariants({ variant: "ghost", size: "sm" })}
           >
-            Open the staff form
+            Open the internal form
             <ExternalLink />
           </Link>
         ) : null}
@@ -555,6 +562,13 @@ export default async function EditFormPage({
               formId={form.id}
               departmentId={form.department_id}
               isAnonymous={form.is_anonymous}
+              /* P7-66 Phase 6 — the roster of "who has not answered" IS this
+                 audience. The same two values the settings card edits, read
+                 once above and handed to both. */
+              audience={{
+                isAllDepartments: form.audience_is_all_departments,
+                departmentIds: (audienceRows ?? []).map((row) => row.department_id),
+              }}
             />
           ) : undefined
         }

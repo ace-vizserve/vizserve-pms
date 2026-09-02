@@ -65,7 +65,7 @@ import { submitFormResponse } from "../actions";
  */
 const unsupportedUpload: UploadFn = async () => ({
   ok: false,
-  error: "Files cannot be attached to a staff form yet. Send it to whoever asked for it instead.",
+  error: "Files cannot be attached to an internal form yet. Send it to whoever asked for it instead.",
 });
 
 export function RespondForm({
@@ -291,7 +291,7 @@ export function RespondForm({
               {formName} requires a file for
               {" “"}
               {blockingFileField.attributes.label}
-              {"”"}, and attachments are not collected on staff forms yet — so there is no
+              {"”"}, and attachments are not collected on internal forms yet — so there is no
               way to send it.
             </p>
             <p className="text-xs leading-relaxed text-muted-foreground">
@@ -328,7 +328,7 @@ export function RespondForm({
           >
             <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span>
-              This form asks for a file. Attachments are not collected on staff forms yet — send
+              This form asks for a file. Attachments are not collected on internal forms yet — send
               the file to whoever asked for it instead. The rest of your answers still go
               through.
             </span>

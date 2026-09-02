@@ -65,7 +65,7 @@ export function RespondentPreview({
   const isClient = purpose === "CLIENT_REQUEST";
 
   return (
-    <section aria-label="Respondent view" className="overflow-y-auto bg-muted pb-10">
+    <section aria-label="Respondent view" className="min-h-0 overflow-y-auto bg-muted pb-10">
       <div className="sticky top-0 z-5 flex items-center gap-2 border-b bg-muted px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-primary">
           <User aria-hidden className="size-4" />

@@ -587,6 +587,27 @@ export function FieldBuilder({
           212px rail beside a 300px column is two unusable columns.
         */}
         <div className="grid h-[calc(100svh-6.3125rem)] grid-cols-1 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible min-[760px]:grid-cols-[212px_minmax(0,1fr)] min-[1180px]:grid-cols-[236px_minmax(400px,1fr)_minmax(440px,1.15fr)]">
+          {/*
+            ⚠️ EVERY SCROLLING PANE BELOW CARRIES `min-h-0`, AND WITHOUT IT THEY
+            DO NOT SCROLL — THEY GET CUT OFF.
+
+            A grid item defaults to `min-height: auto`, which means it refuses to
+            shrink below its own content. So a pane with `overflow-y-auto` and a
+            form taller than the viewport does not become a scroll container at
+            all: it grows to the full height of its content, overflows this
+            fixed-height grid, and `overflow-hidden` here shears the bottom off.
+            The scrollbar never appears, so there is no way to reach what was
+            cut — the last question simply is not there.
+
+            Reported from the browser, on the preview pane, which is the one that
+            shows it first: it is the tallest of the three, because it draws the
+            five fixed client fields ABOVE the questions.
+
+            `min-h-0` lets the item shrink to its grid track, at which point
+            `overflow-y-auto` has a bounded box to scroll inside and behaves the
+            way it reads. This is the single most common flex/grid scrolling bug
+            and it is invisible in a screenshot of a short form.
+          */}
           <QuestionTypes
             types={offerableFieldTypes}
             currentType={selected?.entity.type ?? null}
@@ -594,7 +615,7 @@ export function FieldBuilder({
             onAdd={addField}
           />
 
-          <div className="overflow-y-auto border-r pb-10 max-[1180px]:overflow-visible">
+          <div className="min-h-0 overflow-y-auto border-r pb-10 max-[1180px]:overflow-visible">
             <div className="p-4">
               <FixedFieldsNote purpose={purpose} isAnonymous={isAnonymous} />
 
@@ -699,7 +720,7 @@ function FixedFieldsNote({
   /**
    * ⚠️ THE SENTENCE HERE MUST NOT CONTRADICT THE NOTICE IN THE PREVIEW PANE,
    * WHICH IS SIX INCHES TO THE RIGHT. This said "every answer is filed under
-   * that person's name" on every staff form — while `AnonymityNotice` said "your
+   * that person's name" on every internal form — while `AnonymityNotice` said "your
    * name is not recorded" about the same form, at the same time, on the same
    * screen. On the one setting where being wrong is a broken promise rather than
    * a wrong label.
@@ -711,7 +732,7 @@ function FixedFieldsNote({
   return (
     <div className="mb-3 rounded-lg border border-dashed bg-muted px-3 py-2.5">
       <p className="text-2xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
-        {isClient ? "Always collected" : "Staff form"}
+        {isClient ? "Always collected" : "Internal form"}
       </p>
       <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
         {isClient

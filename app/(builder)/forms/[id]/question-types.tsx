@@ -61,7 +61,7 @@ export function QuestionTypes({
   /**
    * The types this form may ask for, in the order they are offered.
    *
-   * ⚠️ NOT THE WHOLE ENUM. A staff form is not offered File upload, because
+   * ⚠️ NOT THE WHOLE ENUM. An internal form is not offered File upload, because
    * `/respond` can accept no upload — the attachment machinery is request-shaped
    * end to end. See `offerableFieldTypes`.
    */
@@ -81,7 +81,7 @@ export function QuestionTypes({
   return (
     <aside
       aria-label="Add question"
-      className="overflow-y-auto border-r bg-card px-3 pt-4 pb-10"
+      className="min-h-0 overflow-y-auto border-r bg-card px-3 pt-4 pb-10"
     >
       <h2 className="px-2 pb-2.5 text-2xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
         Add question
@@ -136,7 +136,7 @@ export function QuestionTypes({
         Click a type to add it under the question you have open.{" "}
         {types.includes("file")
           ? "The type is fixed once the question has answers."
-          : "File upload is not offered on a staff form — there is nowhere to put the file."}
+          : "File upload is not offered on an internal form — there is nowhere to put the file."}
       </p>
     </aside>
   );

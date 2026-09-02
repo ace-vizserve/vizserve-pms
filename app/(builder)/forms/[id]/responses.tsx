@@ -1,8 +1,13 @@
-import { Info, TriangleAlert, Users } from "lucide-react";
+import { Info, TriangleAlert, UserRoundX, Users } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
 import { QueryError } from "@/components/query-error";
 import { formatDateTime } from "@/lib/dates";
+import {
+  canShowPendingAnswerers,
+  pendingAnswerers,
+  type RosterMember,
+} from "@/lib/form-builder/roster";
 import { createClient } from "@/utils/supabase/server";
 
 import { ExportAnswers } from "./export-answers";
@@ -78,6 +83,7 @@ export async function FormResponses({
   formId,
   departmentId,
   isAnonymous,
+  audience,
 }: {
   formId: string;
   /** Null on an unrouted draft — see the note below. */
@@ -93,6 +99,15 @@ export async function FormResponses({
    * INSERT policy enforced, and it is locked once the form has an answer.
    */
   isAnonymous: boolean;
+  /**
+   * P7-66 Phase 6 — WHO SHOULD HAVE ANSWERED, as Phase 5 stored it.
+   *
+   * The roster of "who has not answered" is derived from exactly this, and it is
+   * why Phase 6 could not be built before Phase 5: without an audience,
+   * "not answered" would have meant the whole company minus this list, which is
+   * a number that means nothing.
+   */
+  audience: { isAllDepartments: boolean; departmentIds: string[] };
 }) {
   const supabase = await createClient();
 
@@ -186,6 +201,34 @@ export async function FormResponses({
 
   const unnamed = answerers.filter((person) => person.name === null).length;
 
+  /*
+   * P7-66 Phase 6 — THE ROSTER.
+   *
+   * ⚠️ NOT ASKED FOR ON AN ANONYMOUS FORM, and the guard is before the query
+   * rather than around the render. See `canShowPendingAnswerers`: the answer
+   * would be the ENTIRE audience, because no row carries an author — a page
+   * telling an admin that nobody has answered, beside a count of four hundred.
+   * Not fetching it is how that stays impossible rather than merely unrendered.
+   */
+  const { roster, error: rosterError } = canShowPendingAnswerers(isAnonymous)
+    ? await readRoster(supabase, audience)
+    : { roster: [], error: null };
+
+  /*
+   * Not fatal, and deliberately not grouped with the response read: a failed
+   * roster costs the "who has not answered" list, and hiding the answers because
+   * of it would be the more damaging failure. The section says so itself rather
+   * than rendering an empty list, which would read as "everybody answered".
+   */
+  if (rosterError) {
+    console.error("[P7-66] could not read the form audience roster", {
+      formId,
+      message: rosterError.message,
+    });
+  }
+
+  const pending = pendingAnswerers(roster, byPerson.keys());
+
   return (
     <ResponsesSection>
       <div className="rounded-lg border bg-card p-5 grade-surface shadow-raised">
@@ -275,6 +318,15 @@ export async function FormResponses({
       {isAnonymous ? null : (
         <Answerers answerers={answerers} unnamed={unnamed} total={total} read={rows.length} />
       )}
+
+      {canShowPendingAnswerers(isAnonymous) ? (
+        <Pending
+          pending={pending}
+          rosterSize={roster.length}
+          failed={rosterError !== null}
+          capped={total > rows.length}
+        />
+      ) : null}
     </ResponsesSection>
   );
 }
@@ -449,6 +501,210 @@ async function readAnonymousRows(
     count,
     error,
   };
+}
+
+/**
+ * P7-66 Phase 6 — THE PEOPLE THE FORM IS FOR.
+ *
+ * ⚠️⚠️ THIS QUERY IS THE SQL TWIN OF `vizserve_pms_form_targets_me`, AND IF THE
+ * TWO EVER DISAGREE THIS PAGE LIES.
+ *
+ * The function decides who may ANSWER; this decides who is EXPECTED to. A person
+ * the function admits but this query misses never appears as outstanding, so an
+ * admin closes a survey believing everybody replied. A person this query
+ * includes but the function refuses gets chased for an answer they are not
+ * allowed to give. Rule for rule, the function reads:
+ *
+ *   f.audience_is_all_departments
+ *   or exists (… a.department_id = u.primary_department_id)
+ *
+ * so:
+ *   ALL DEPARTMENTS  no department filter at all — which INCLUDES somebody whose
+ *                    `primary_department_id` is null, because the function's
+ *                    first branch never looks at their department either.
+ *   SPECIFIC         `.in(...)`, which excludes a null exactly as the function's
+ *                    `=` does. Neither admits an unassigned person.
+ *
+ * ⚠️ `is_active` AND `app_access` ARE PART OF THE TWIN, not tidying. The function
+ * is only ever ANDed with policies that ran `vizserve_pms_current_role()` first,
+ * and that returns NULL — no role, no read, no insert — for a deactivated user
+ * or one without `vizserve-pms` in `app_access`. Somebody who cannot sign into
+ * this app at all is not outstanding; they are not in the audience.
+ *
+ * ⚠️ READ AS THE CALLER, THROUGH RLS, AND THAT IS SAFE ONLY BECAUSE OF PHASE 5.
+ * `users read managed departments` is `vizserve_pms_manages_department(...)`,
+ * which is TRUE for an admin on every department — and since 20260902140000 only
+ * an admin reaches this page at all. This is exactly why the roster needed
+ * internal forms to become admin-only first: read by a team leader, the policy
+ * would silently drop every colleague outside the departments they lead, and the
+ * list would be confidently, invisibly short.
+ */
+async function readRoster(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  audience: { isAllDepartments: boolean; departmentIds: string[] },
+): Promise<{ roster: RosterMember[]; error: { message: string } | null }> {
+  /*
+   * ⚠️ AN EMPTY LIST UNDER "SPECIFIC DEPARTMENTS" IS NOBODY, NOT EVERYBODY, and
+   * it short-circuits rather than issuing an `.in(…, [])`.
+   *
+   * It is a state the database can reach without anybody asking for it — a
+   * department deleted elsewhere cascades its audience row away — and
+   * `vizserve_pms_form_targets_me` answers false for every caller when it
+   * happens, so the form is answerable by nobody. The roster must agree.
+   * Answering "everybody" here would list the whole company as outstanding on a
+   * form none of them can open.
+   */
+  if (!audience.isAllDepartments && audience.departmentIds.length === 0) {
+    return { roster: [], error: null };
+  }
+
+  const query = supabase
+    .from("vizserve_pms_users")
+    .select("id, full_name, primary_department_id")
+    .eq("is_active", true)
+    .contains("app_access", ["vizserve-pms"]);
+
+  if (!audience.isAllDepartments) query.in("primary_department_id", audience.departmentIds);
+
+  const { data, error } = await query.order("full_name");
+
+  return { roster: data ?? [], error };
+}
+
+/**
+ * Who has not answered.
+ *
+ * ⚠️ NEVER RENDERED ON AN ANONYMOUS FORM — the caller checks
+ * `canShowPendingAnswerers` before the roster is even fetched. See that function
+ * for why that is a correctness rule rather than a preference.
+ */
+function Pending({
+  pending,
+  rosterSize,
+  failed,
+  capped,
+}: {
+  pending: RosterMember[];
+  rosterSize: number;
+  /** The roster read failed — see below on why that is not an empty list. */
+  failed: boolean;
+  /**
+   * The ANSWERS were capped, so the set of authors may be short — which would
+   * put somebody on this list who did answer. Said out loud when it can happen.
+   */
+  capped: boolean;
+}) {
+  /*
+   * ⚠️ A FAILED READ IS NOT "EVERYBODY ANSWERED". Both states produce an empty
+   * array, and one of them is the most encouraging screen this tab can show. So
+   * the failure is drawn as a failure.
+   */
+  if (failed) {
+    return (
+      <PendingSection>
+        <p className="flex gap-2.5 px-5 py-3 text-xs leading-relaxed text-warning">
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            The list of people this form was sent to could not be read, so this is not a
+            statement that everybody answered. Reload the page.
+          </span>
+        </p>
+      </PendingSection>
+    );
+  }
+
+  /*
+   * Nobody is in the audience at all — worth distinguishing from "everybody
+   * answered", and reachable two ways: a form narrowed to departments that have
+   * since been emptied or deleted, and a form whose audience rows were lost
+   * while the flag still says "specific departments".
+   */
+  if (rosterSize === 0) {
+    return (
+      <PendingSection>
+        <p className="flex gap-2.5 px-5 py-3 text-xs leading-relaxed text-warning">
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            Nobody is in this form&rsquo;s audience, so nobody can answer it. Check who it is for
+            under Settings.
+          </span>
+        </p>
+      </PendingSection>
+    );
+  }
+
+  if (pending.length === 0) {
+    return (
+      <PendingSection>
+        <p className="px-5 py-3 text-sm">
+          Everyone the form was sent to has answered
+          <span className="text-muted-foreground"> — all {rosterSize} of them.</span>
+        </p>
+      </PendingSection>
+    );
+  }
+
+  return (
+    <PendingSection
+      count={
+        <span className="font-normal tabular-nums text-muted-foreground">
+          {pending.length} of {rosterSize}
+        </span>
+      }
+    >
+      {/*
+        ⚠️ SAID WHENEVER THE ANSWERS WERE CAPPED. The authors come from the capped
+        read, so past the cap somebody who answered long ago is missing from that
+        set — and therefore appears HERE, on the one list whose whole purpose is
+        to be chased. Wrong in the direction that costs somebody an awkward
+        conversation about a form they already filled in.
+      */}
+      {capped ? (
+        <p className="flex gap-2.5 border-b border-warning-border bg-warning-subtle px-5 py-2.5 text-xs leading-relaxed text-warning">
+          <TriangleAlert aria-hidden className="mt-0.5 size-4 shrink-0" />
+          <span>
+            This form has more answers than the page reads at once, so somebody who answered
+            early may be listed here by mistake. Check the export before chasing anyone.
+          </span>
+        </p>
+      ) : null}
+
+      <ul className="divide-y">
+        {pending.map((person) => (
+          <li key={person.id} className="px-5 py-2.5 text-sm">
+            {person.full_name.trim() === "" ? (
+              // `full_name` defaults to '' on the column, so somebody invited but
+              // never set up would otherwise render as a blank row — a
+              // name-shaped hole in a list of names.
+              <span className="text-muted-foreground">Unnamed account</span>
+            ) : (
+              person.full_name
+            )}
+          </li>
+        ))}
+      </ul>
+    </PendingSection>
+  );
+}
+
+/** The panel, shared by all four states so none of them changes the page shape. */
+function PendingSection({
+  count,
+  children,
+}: {
+  count?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-lg border bg-card grade-surface shadow-raised">
+      <h3 className="flex items-baseline gap-2 border-b px-5 py-3 text-sm font-semibold tracking-tight">
+        <UserRoundX aria-hidden className="size-4 self-center text-muted-foreground" />
+        Who hasn&rsquo;t answered
+        {count}
+      </h3>
+      {children}
+    </section>
+  );
 }
 
 /**

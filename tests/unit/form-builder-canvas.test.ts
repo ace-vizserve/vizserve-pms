@@ -683,4 +683,45 @@ describe("nextOptionLabel", () => {
  *      `formSettingsSchema` defaults nothing — so a save that silently fails, or
  *      one that blanks the slug, is exactly what this is looking for. Save,
  *      reload, and confirm the slug and prefix are unchanged.
+ *
+ *  --- P7-66 Phase 5: internal forms are an admin instrument ---
+ *  28. AS A TEAM LEADER: /forms/new offers ONE card, Client request. Hand-type
+ *      `?purpose=INTERNAL` and it falls back to the chooser rather than showing
+ *      a create form whose Save the server refuses. /forms lists no internal
+ *      form, and opening one by id 404s.
+ *  29. ⚠️ AS A TEAM LEADER, THAT THE QUESTIONS ARE LOCKED TOO. This is the half
+ *      that is easy to miss and the one that matters: `save_form_schema` is
+ *      SECURITY INVOKER and writes the field rows directly, so a lock on the
+ *      form row alone would leave every question editable. There should be no
+ *      route to the canvas at all.
+ *
+ *  --- P7-66 Phase 5: the audience ---
+ *  30. THE PICKER. On a staff form as an admin: Everyone vs Specific
+ *      departments, the tick boxes appearing only under Specific, and — the
+ *      case worth doing deliberately — that ticking a department does NOT
+ *      silently flip the radio, and unticking the last one does NOT flip it
+ *      back. Save with Specific and none ticked: it must be refused with a
+ *      sentence under the boxes, not quietly reinterpreted as everyone.
+ *  31. ⚠️ THAT IT ACTUALLY NARROWS, WHICH IS THE ONLY PROOF THAT COUNTS. Target
+ *      one department, then sign in as somebody OUTSIDE it: /respond must not
+ *      list the form and /respond/<slug> must 404. Then sign in as somebody
+ *      INSIDE it and answer normally. A read-only narrowing looks identical to
+ *      a real one from the admin side.
+ *  32. That flipping to Everyone and back to Specific KEEPS the ticked
+ *      departments — they are ignored while the flag is true, never cleared.
+ *
+ *  --- P7-66 Phase 6: who has not answered ---
+ *  33. THE ROSTER. On a named staff form with a couple of answers in: the
+ *      section lists exactly the people in the audience who have not answered,
+ *      "N of M" in the heading, and somebody who answered TWICE appears in
+ *      neither list twice nor in this one at all.
+ *  34. ⚠️ THAT AN ANONYMOUS FORM HAS NO SUCH SECTION ANYWHERE ON THE PAGE. Not
+ *      empty, not "unavailable" — absent. On an anonymous form the subtraction
+ *      would return the whole audience, which reads as "nobody answered" beside
+ *      a count saying they did. Check the page source too: the guard runs before
+ *      the roster is fetched, so no name should be in the RSC payload either.
+ *  35. That the four states of the section are distinguishable: people
+ *      outstanding, everybody answered, nobody in the audience at all (narrow
+ *      it to a department with no members), and a failed read. The middle two
+ *      are both empty lists and must never look alike.
  */

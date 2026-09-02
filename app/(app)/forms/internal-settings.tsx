@@ -280,15 +280,27 @@ export function InternalSettings({
           </SelectContent>
         </Select>
         {/*
-          ⚠️ OWNERSHIP, NOT ROUTING. The same column means something different on
-          a client form, where it decides whose queue a request lands in. Here
-          nothing is routed anywhere: this is who READS the answers, because
-          `form responses readable by the owning department` scopes them to an
-          admin and this department's lead. It is also what publishing requires
-          (`vizserve_pms_forms_active_requires_department`).
+          ⚠️ OWNERSHIP, AND SINCE PHASE 5 THAT IS ALL IT IS.
+
+          The same column means three different things across this app, and this
+          is the weakest of the three — which is exactly why the sentence under
+          it had to change. On a CLIENT form it is ROUTING: whose Gate 1 queue a
+          submission lands in. The new multi-select above is AUDIENCE: who should
+          answer. This is neither.
+
+          It used to decide who could READ the answers — `form responses readable
+          by the owning department` — and the helper text said so. 20260902140000
+          replaced that policy with `form responses readable by admins`, so the
+          sentence became a lie the moment Phase 5 landed: a department lead
+          cannot read these answers whatever this box says.
+
+          What it still does, and the only honest reason it is a required field:
+          `vizserve_pms_forms_active_requires_department` refuses to publish a
+          form with no department. It is the organisational owner — who ran this
+          survey — and nothing more.
         */}
         <p className="text-xs text-muted-foreground">
-          Who owns the form and can read its answers. Required before it can be published.
+          Which department this form belongs to. Required before it can be published.
         </p>
         {errors.department_id ? (
           <p className="text-xs text-destructive">{errors.department_id.message}</p>
