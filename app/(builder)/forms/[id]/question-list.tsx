@@ -26,25 +26,28 @@ import { FieldDragHandle, SortableFieldRow } from "@/lib/form-builder/dnd";
  * because eight rows with four buttons each is a wall of chrome — but
  * `focus-visible` keeps them reachable by Tab, which is the whole point.
  *
- * ⚠️ ARCHIVED QUESTIONS ARE A SEPARATE LIST, BELOW, NOT GREYED ROWS AMONG THE
- * LIVE ONES. An archived question is not on the form: it renders nowhere, it
- * cannot be answered, and it does not take a number. Leaving it in the sequence
- * would make the numbering on this screen disagree with the numbering the
- * respondent sees, which is the one thing the numbers are for.
+ * ⚠️ ARCHIVED QUESTIONS ARE NOT IN THIS LIST AT ALL — NOT EVEN GREYED, AND NO
+ * LONGER IN A SECTION UNDERNEATH IT. An archived question is not on the form: it
+ * renders nowhere, it cannot be answered, and it does not take a number. Leaving
+ * it in the sequence would make the numbering on this screen disagree with the
+ * numbering the respondent sees, which is the one thing the numbers are for.
+ *
+ * They used to sit in a second section at the foot of this column, below the
+ * open editor. Nothing is ever deleted (R5), so that pile only grew, and it grew
+ * in the column whose job is showing what IS on the form. They now live behind a
+ * count in the left rail — `QuestionTypes`, which owns both the button and the
+ * dialog — so this component is only ever the live form.
  */
 
 export function QuestionList({
   active,
-  archived,
   selectedId,
   answeredIds,
   busy,
   onSelect,
   onMove,
-  onRestore,
 }: {
   active: CanvasField[];
-  archived: CanvasField[];
   selectedId: string | null;
   /**
    * Questions with answers behind them.
@@ -60,67 +63,25 @@ export function QuestionList({
   busy: boolean;
   onSelect: (entityId: string) => void;
   onMove: (entityId: string, direction: "up" | "down") => void;
-  onRestore: (entityId: string) => void;
 }) {
   return (
-    <>
-      <ul className="flex flex-col gap-2">
-        {active.map((field, index) => (
-          <SortableFieldRow key={field.id} id={field.id} disabled={busy}>
-            <QuestionRow
-              field={field}
-              index={index}
-              selected={selectedId === field.id}
-              answered={answeredIds.has(field.id)}
-              busy={busy}
-              first={index === 0}
-              last={index === active.length - 1}
-              onSelect={() => onSelect(field.id)}
-              onMove={(direction) => onMove(field.id, direction)}
-            />
-          </SortableFieldRow>
-        ))}
-      </ul>
-
-      {archived.length > 0 ? (
-        <section className="space-y-2 pt-5" aria-labelledby="archived-questions">
-          <h3
-            id="archived-questions"
-            className="text-2xs font-semibold tracking-[0.04em] text-muted-foreground uppercase"
-          >
-            Archived · {archived.length}
-          </h3>
-          {/* Said once, above the list, rather than on every row: their answers
-              are why these cannot simply be deleted (R5). */}
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            Off the form, and kept. Answers already given to these are still
-            stored and still have a column on the Responses tab.
-          </p>
-
-          <ul className="flex flex-col gap-1.5">
-            {archived.map((field) => (
-              <li
-                key={field.id}
-                className="flex items-center gap-2.5 rounded-lg border border-dashed px-3 py-2"
-              >
-                <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
-                  {field.entity.attributes.label || "Untitled question"}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => onRestore(field.id)}
-                >
-                  Restore
-                </Button>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-    </>
+    <ul className="flex flex-col gap-2">
+      {active.map((field, index) => (
+        <SortableFieldRow key={field.id} id={field.id} disabled={busy}>
+          <QuestionRow
+            field={field}
+            index={index}
+            selected={selectedId === field.id}
+            answered={answeredIds.has(field.id)}
+            busy={busy}
+            first={index === 0}
+            last={index === active.length - 1}
+            onSelect={() => onSelect(field.id)}
+            onMove={(direction) => onMove(field.id, direction)}
+          />
+        </SortableFieldRow>
+      ))}
+    </ul>
   );
 }
 

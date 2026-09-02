@@ -35,16 +35,34 @@ import { requireAuthContext } from "@/lib/auth/authorization";
  *     pointing at a breadcrumb that no longer renders. The page's own header
  *     carries the form name instead.
  *
- * The wrapper is the same object `app/page.tsx` uses: `min-h-svh`, the one
- * ambient wash the product UI has, and a real background token so the page has
- * something to sit on in both themes.
+ * The wrapper is the same object `app/page.tsx` uses: the one ambient wash the
+ * product UI has, and a real background token so the page has something to sit
+ * on in both themes.
+ *
+ * ⚠️ `h-svh overflow-hidden`, NOT `min-h-svh` — THE PAGE IS THE WINDOW AND IT
+ * DOES NOT SCROLL.
+ *
+ * The builder is an application shell, not a document: three panes that each
+ * scroll on their own. With `min-h-svh` the wrapper grew with its contents, so
+ * anything a pixel over the viewport gave the WHOLE PAGE a scrollbar on top of
+ * the panes' own — two scrollbars down the right edge, and a header that only
+ * looked pinned because it was `sticky`.
+ *
+ * The mockup has no wrapper at all: `.top`, `.maintabs` and `.panes` sit on
+ * `<body>`, and `.panes` is `height:calc(100svh - 60px - 45px); overflow:hidden`.
+ * That subtraction is the same trick spelled arithmetically, and it is wrong by
+ * however many pixels the real header and tab strip differ from the numbers in
+ * it. A fixed-height flex column measures instead: the header and the tab strip
+ * are `shrink-0`, the panel takes what is left, and nothing has to be counted.
+ *
+ * ⚠️ SO EVERY TAB PANEL MUST SCROLL ITSELF. `overflow-hidden` here means a
+ * panel that runs past the bottom is CLIPPED, not scrolled to — which is why
+ * `BuilderTabs` gives Responses and Settings `overflow-y-auto` and the Questions
+ * panel hands its height to the three panes. A new panel that forgets this loses
+ * its bottom half silently.
  */
 export default async function BuilderLayout({ children }: { children: React.ReactNode }) {
   await requireAuthContext();
 
-  return (
-    <div className="flex min-h-svh flex-col grade-ambient bg-background bg-no-repeat">
-      {children}
-    </div>
-  );
+  return <div className="flex  flex-col overflow-hidden grade-ambient bg-background">{children}</div>;
 }

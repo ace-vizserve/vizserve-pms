@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
 import { FilePlus2 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { saveSchema } from "@/app/(app)/forms/actions";
 import type { FormSchema } from "@/lib/form-builder/builder";
 import {
   ADDABLE_FIELD_TYPES,
@@ -25,10 +26,9 @@ import {
   validateBuilderSchema,
 } from "@/lib/form-builder/components";
 import { FieldDndProvider, type FieldDrag } from "@/lib/form-builder/dnd";
-import { planEntityReorder } from "@/lib/form-builder/schema";
 import { planSchemaSave, type SchemaSaveAttempt } from "@/lib/form-builder/save-outcome";
+import { planEntityReorder } from "@/lib/form-builder/schema";
 import type { FieldType, FormPurpose } from "@/lib/schemas/forms";
-import { saveSchema } from "@/app/(app)/forms/actions";
 
 import { QuestionEditor } from "./question-editor";
 import { QuestionList } from "./question-list";
@@ -106,7 +106,7 @@ export function FieldBuilder({
   isAnonymous,
   formName,
   description,
-  hasSubmissions,
+  submissionCount,
   initialSchema,
 }: {
   formId: string;
@@ -124,14 +124,18 @@ export function FieldBuilder({
   formName: string;
   description: string;
   /**
-   * ⚠️ WHETHER THE FORM HAS ANY SUBMISSIONS AT ALL, WHICH IS THE GRANULARITY THE
-   * DATABASE WORKS AT. `vizserve_pms_form_field_protect` refuses a key rename or
-   * a field delete once the FORM has submissions — not once the FIELD has
-   * answers — so a question added a minute ago to a form with a thousand answers
-   * is equally locked, and the screen has to say so rather than let somebody
-   * discover it from a refusal.
+   * ⚠️ HOW MANY ANSWERS THE FORM HAS — AND WHETHER IT HAS ANY IS THE
+   * GRANULARITY THE DATABASE WORKS AT. `vizserve_pms_form_field_protect`
+   * refuses a key rename or a field delete once the FORM has submissions — not
+   * once the FIELD has answers — so a question added a minute ago to a form with
+   * a thousand answers is equally locked, and the screen has to say so rather
+   * than let somebody discover it from a refusal.
+   *
+   * The COUNT rather than the boolean, because the sentence that says the keys
+   * are locked also says how many answers locked them, and one fact should not
+   * arrive as two props that can disagree.
    */
-  hasSubmissions: boolean;
+  submissionCount: number;
   /**
    * ⚠️ RECONCILED AGAINST THE ROWS BY THE LOADER, never the stored blob as read.
    * See `reconcileFormSchema` — a blob that Phase 1's dual-write failed to write
@@ -141,6 +145,9 @@ export function FieldBuilder({
   initialSchema: FormSchema;
 }) {
   const { track, setDirty } = useSaveStatus();
+
+  /** The only thing the lock turns on: whether the count is above zero. */
+  const hasSubmissions = submissionCount > 0;
 
   const builderStore = useFormBuilderStore(initialSchema);
   const schema = useFormBuilderSchema(builderStore);
@@ -173,10 +180,7 @@ export function FieldBuilder({
     [hasSubmissions, lockedEntityIds],
   );
 
-  const runtime = useMemo(
-    () => ({ mode: "builder" as const, lockedEntityIds }),
-    [lockedEntityIds],
-  );
+  const runtime = useMemo(() => ({ mode: "builder" as const, lockedEntityIds }), [lockedEntityIds]);
 
   const { active, archived } = splitCanvasFields(schema);
 
@@ -449,8 +453,7 @@ export function FieldBuilder({
    * enforced by the thing that decides rather than by a comment.
    */
   function addField(type: FieldType) {
-    const slot =
-      selectedId === null ? active.length : active.findIndex((f) => f.id === selectedId) + 1;
+    const slot = selectedId === null ? active.length : active.findIndex((f) => f.id === selectedId) + 1;
 
     setSelectedId(addFieldEntity(builderStore, type, rootIndexForSlot(schema, slot)));
     setError(null);
@@ -550,9 +553,7 @@ export function FieldBuilder({
    */
   const offerableFieldTypes = useMemo(
     () =>
-      purpose === "INTERNAL"
-        ? ADDABLE_FIELD_TYPES.filter((fieldType) => fieldType !== "file")
-        : ADDABLE_FIELD_TYPES,
+      purpose === "INTERNAL" ? ADDABLE_FIELD_TYPES.filter((fieldType) => fieldType !== "file") : ADDABLE_FIELD_TYPES,
     [purpose],
   );
 
@@ -571,8 +572,7 @@ export function FieldBuilder({
           <div className="pointer-events-none max-w-64 truncate rounded-md border bg-card px-2.5 py-1.5 text-xs font-medium shadow-overlay">
             {schema.entities[drag.entityId]?.attributes.label || "Untitled question"}
           </div>
-        )}
-      >
+        )}>
         {/*
           ⚠️ THREE INDEPENDENTLY SCROLLING COLUMNS, NOT ONE LONG PAGE. A form with
           thirty questions makes the middle column tall; the type rail and the
@@ -586,7 +586,32 @@ export function FieldBuilder({
           scroll. Below 760px the rail goes full-width above the list, because a
           212px rail beside a 300px column is two unusable columns.
         */}
-        <div className="grid h-[calc(100svh-6.3125rem)] grid-cols-1 overflow-hidden max-[1180px]:h-auto max-[1180px]:overflow-visible min-[760px]:grid-cols-[212px_minmax(0,1fr)] min-[1180px]:grid-cols-[236px_minmax(400px,1fr)_minmax(440px,1.15fr)]">
+        {/*
+          ⚠️ `flex-1`, NOT A HEIGHT. This used to read
+          `h-[calc(100svh-6.3125rem)]` — the viewport less 56px of header and
+          45px of tab strip, counted by hand. Two numbers that have to be kept in
+          step with two other files, and wrong by a pixel is a scrollbar down the
+          whole page. The panel above is a flex column now, so the grid just
+          takes the row it is given.
+
+          ⚠️ `grid-rows-1` IS WHY THE PANES REACH THE BOTTOM OF THE SCREEN.
+
+          Without it the single row is sized `auto` — as tall as the TALLEST
+          PANE'S CONTENT, not as tall as this grid. The panes stretch to the row,
+          so on a form with two questions they stop a third of the way down and
+          the rest of the fixed height below them is dead space: a grey band
+          under the preview, and the type rail and question column ending in
+          mid-air.
+
+          It only shows on a SHORT form, which is why it survived — every form
+          used for design work had enough questions to fill the row. The mockup
+          has the same gap for the same reason and never showed it.
+
+          `min-[1180px]:` only: below that the panes stack into two rows and then
+          three, and forcing a single row would crush them into a third of a
+          screen each.
+        */}
+        <div className="grid min-h-0 flex-1 grid-cols-1 overflow-hidden max-[1180px]:flex-none max-[1180px]:overflow-visible min-[760px]:grid-cols-[212px_minmax(0,1fr)] min-[1180px]:grid-cols-[236px_minmax(400px,1fr)_minmax(440px,1.15fr)] min-[1180px]:grid-rows-1">
           {/*
             ⚠️ EVERY SCROLLING PANE BELOW CARRIES `min-h-0`, AND WITHOUT IT THEY
             DO NOT SCROLL — THEY GET CUT OFF.
@@ -612,11 +637,47 @@ export function FieldBuilder({
             types={offerableFieldTypes}
             currentType={selected?.entity.type ?? null}
             disabled={listBusy}
+            /* P7-66 — the archived pile moved out of the middle column and into
+               the rail, behind a count. See the note on the prop. */
+            archived={archived}
             onAdd={addField}
+            onRestore={(entityId) => setArchived(entityId, false)}
           />
 
           <div className="min-h-0 overflow-y-auto border-r pb-10 max-[1180px]:overflow-visible">
             <div className="p-4">
+              {/*
+                ONE SENTENCE, BECAUSE THE GUARANTEE IS THE SAME ON BOTH.
+
+                This used to say two different things. `vizserve_pms_form_field_protect`
+                refuses a key rename or a field delete once the form has submissions,
+                but it counted `vizserve_pms_requests` and nothing else — and an
+                internal form never produces one. So on a staff survey the lock did
+                not fire, and the honest sentence there was a WARNING that renaming a
+                question orphans its answers, not a promise that it cannot happen.
+
+                20260902110000_p7_66_form_responses.sql closes that: the guard now
+                asks both tables, so a key with an answer under it is immutable
+                whichever kind of form it belongs to. The screen can make the promise
+                again, in one sentence, because Postgres is now making it.
+
+                Only the NOUN still differs — an internal form collects answers and
+                a client form collects submissions, and calling a colleague's survey
+                answer a "submission" is the kind of small wrongness that makes a
+                screen feel like it was built for something else.
+
+                ⚠️ IN THIS PANE, NOT ABOVE THE GRID. It used to sit in a padded
+                wrapper around all three panes, which is what pushed the panes off
+                the bottom of the window. It belongs beside the questions whose keys
+                it is talking about anyway.
+              */}
+              {hasSubmissions ? (
+                <p className="mb-3 text-xs text-muted-foreground">
+                  {submissionCount} {purpose === "INTERNAL" ? "answer" : "submission"}
+                  {submissionCount === 1 ? "" : "s"} — field keys are locked.
+                </p>
+              ) : null}
+
               <FixedFieldsNote purpose={purpose} isAnonymous={isAnonymous} />
 
               {active.length === 0 && archived.length === 0 ? (
@@ -624,7 +685,6 @@ export function FieldBuilder({
               ) : (
                 <QuestionList
                   active={active}
-                  archived={archived}
                   selectedId={selectedId}
                   answeredIds={answeredIds}
                   busy={listBusy}
@@ -634,7 +694,6 @@ export function FieldBuilder({
                     setError(null);
                   }}
                   onMove={move}
-                  onRestore={(entityId) => setArchived(entityId, false)}
                 />
               )}
 
@@ -670,8 +729,7 @@ export function FieldBuilder({
                 <button
                   type="button"
                   onClick={() => setSelectedId(blocked.entityId)}
-                  className="mt-3 flex w-full items-start gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-left text-xs leading-relaxed text-warning"
-                >
+                  className="mt-3 flex w-full items-start gap-1.5 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-left text-xs leading-relaxed text-warning">
                   {blocked.message} Open it to finish.
                 </button>
               ) : null}
@@ -681,8 +739,7 @@ export function FieldBuilder({
               {error !== null && selectedId === null ? (
                 <p
                   role="alert"
-                  className="mt-3 rounded-sm border border-destructive-border bg-destructive-subtle px-3 py-2 text-xs text-destructive"
-                >
+                  className="mt-3 rounded-sm border border-destructive-border bg-destructive-subtle px-3 py-2 text-xs text-destructive">
                   {error}
                 </p>
               ) : null}
@@ -730,7 +787,7 @@ function FixedFieldsNote({
   const isClient = purpose === "CLIENT_REQUEST";
 
   return (
-    <div className="mb-3 rounded-lg border border-dashed bg-muted px-3 py-2.5">
+    <div className="mb-3 rounded-lg border border-dashed bg-card px-3 py-2.5">
       <p className="text-2xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
         {isClient ? "Always collected" : "Internal form"}
       </p>

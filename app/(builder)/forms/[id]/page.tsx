@@ -1,35 +1,31 @@
+import { ArrowLeft, ExternalLink } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, ExternalLink } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/authorization";
-import { createClient } from "@/utils/supabase/server";
-import { Chip } from "@/components/status-badge";
+import { ClientFormSettings } from "@/app/(app)/forms/form-settings";
+import { InternalSettings } from "@/app/(app)/forms/internal-settings";
 import { QueryError } from "@/components/query-error";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { ClientFormSettings } from "@/app/(app)/forms/form-settings";
-import { InternalSettings } from "@/app/(app)/forms/internal-settings";
-import {
-  optionsFromRow,
-  reconcileFormSchema,
-  type FormFieldRow,
-} from "@/lib/form-builder/schema";
+import { requireRole } from "@/lib/auth/authorization";
+import { optionsFromRow, reconcileFormSchema, type FormFieldRow } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
-import { FieldBuilder } from "./field-builder";
-import { FormResponses } from "./responses";
+import { createClient } from "@/utils/supabase/server";
 import { BuilderTabs } from "./builder-tabs";
+import { FieldBuilder } from "./field-builder";
+import { PublishSwitch } from "./publish-switch";
+import { FormResponses } from "./responses";
 // ⚠️ NOT from "./builder-tabs" — that module is `"use client"`, and calling a
 // pure export of a client module from a server component is a runtime crash
 // typecheck cannot see. See the note in ./tabs.ts.
-import { builderTabsFor, resolveBuilderTab } from "./tabs";
+import { administersForm } from "@/app/(app)/forms/administers";
+import { loadRoutableDepartments } from "@/app/(app)/forms/routable-departments";
+import { countFormSubmissions } from "@/app/(app)/forms/submission-count";
 import { BuilderTitle } from "./builder-title";
 import { SaveStatusLine, SaveStatusProvider } from "./save-status";
-import { administersForm } from "@/app/(app)/forms/administers";
-import { countFormSubmissions } from "@/app/(app)/forms/submission-count";
-import { loadRoutableDepartments } from "@/app/(app)/forms/routable-departments";
+import { builderTabsFor, resolveBuilderTab } from "./tabs";
 
 export const metadata: Metadata = { title: "Edit form" };
 
@@ -67,22 +63,14 @@ function BuilderHeader({
 }) {
   return (
     <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-panel px-5 shadow-chrome backdrop-blur-md backdrop-saturate-150">
-      <Link
-        href="/forms"
-        className={buttonVariants({ variant: "outline", size: "sm" })}
-      >
+      <Link href="/forms" className={buttonVariants({ variant: "outline", size: "sm" })}>
         <ArrowLeft />
         Forms
       </Link>
 
-      <Separator
-        orientation="vertical"
-        className="data-vertical:h-4 data-vertical:self-auto"
-      />
+      <Separator orientation="vertical" className="data-vertical:h-4 data-vertical:self-auto" />
 
-      {title ?? (
-        <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">Edit form</h1>
-      )}
+      {title ?? <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">Edit form</h1>}
 
       <div className="ml-auto flex shrink-0 items-center gap-2">
         {children}
@@ -107,15 +95,7 @@ function BuilderHeader({
  * page in the shell breadcrumb; there is no breadcrumb on this route any more,
  * so the same value goes to the header this route carries instead.)
  */
-function FormLoadFailure({
-  formName,
-  what,
-  message,
-}: {
-  formName?: string;
-  what: string;
-  message?: string;
-}) {
+function FormLoadFailure({ formName, what, message }: { formName?: string; what: string; message?: string }) {
   return (
     <>
       <BuilderHeader
@@ -125,8 +105,11 @@ function FormLoadFailure({
           )
         }
       />
-      <div className="mx-auto w-full max-w-3xl p-5">
-        <QueryError what={what} message={message} />
+      {/* Its own scroller: the shell clips at the window. */}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl p-5">
+          <QueryError what={what} message={message} />
+        </div>
       </div>
     </>
   );
@@ -201,9 +184,7 @@ export default async function EditFormPage({
    */
   const { data: fieldRows, error: fieldsError } = await supabase
     .from("vizserve_pms_form_fields")
-    .select(
-      "id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order, created_at",
-    )
+    .select("id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order, created_at")
     .eq("form_id", id)
     .order("sort_order");
 
@@ -267,10 +248,7 @@ export default async function EditFormPage({
    * nobody rather than silently widening.
    */
   const { data: audienceRows, error: audienceError } = isInternal
-    ? await supabase
-        .from("vizserve_pms_form_audience_departments")
-        .select("department_id")
-        .eq("form_id", id)
+    ? await supabase.from("vizserve_pms_form_audience_departments").select("department_id").eq("form_id", id)
     : { data: [], error: null };
 
   const countError = counted.ok ? null : { message: counted.message };
@@ -291,10 +269,7 @@ export default async function EditFormPage({
    * `loadRoutableDepartments` answers that with an empty list and no round trip,
    * and keeps a genuine failure in `error`. See the note there.
    */
-  const { departments, error: departmentsError } = await loadRoutableDepartments(
-    supabase,
-    context,
-  );
+  const { departments, error: departmentsError } = await loadRoutableDepartments(supabase, context);
 
   /*
    * ⚠️ A FAILED FIELDS READ MUST NOT OPEN THE BUILDER. THIS IS THE DESTRUCTIVE
@@ -339,16 +314,11 @@ export default async function EditFormPage({
    * and it is the exact failure the column exists to prevent on the database
    * side. It must not be reintroduced by the screen.
    */
-  const readFailure =
-    fieldsError ?? countError ?? listsError ?? departmentsError ?? audienceError;
+  const readFailure = fieldsError ?? countError ?? listsError ?? departmentsError ?? audienceError;
 
   if (readFailure) {
     return (
-      <FormLoadFailure
-        formName={form.name}
-        what="this form's fields and settings"
-        message={readFailure.message}
-      />
+      <FormLoadFailure formName={form.name} what="this form's fields and settings" message={readFailure.message} />
     );
   }
 
@@ -448,13 +418,10 @@ export default async function EditFormPage({
               <SaveStatusLine />
             </span>
           </div>
-        }
-      >
-        {form.is_active ? (
-          <Chip tone="success" label="Live" />
-        ) : (
-          <Chip tone="neutral" label="Draft" />
-        )}
+        }>
+        {/* P7-66 — the pill that only REPORTED this is now the control that sets
+            it. See `PublishSwitch`. */}
+        <PublishSwitch formId={form.id} isActive={form.is_active} isInternal={isInternal} />
         {/*
           P7-66 Phase 4b — THE LINK GOES WHERE THE FORM ACTUALLY LIVES.
 
@@ -481,8 +448,7 @@ export default async function EditFormPage({
           <Link
             href={`/respond/${form.slug}`}
             target="_blank"
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
-          >
+            className={buttonVariants({ variant: "ghost", size: "sm" })}>
             Open the internal form
             <ExternalLink />
           </Link>
@@ -491,8 +457,7 @@ export default async function EditFormPage({
           <Link
             href={`/request/${form.slug}`}
             target="_blank"
-            className={buttonVariants({ variant: "ghost", size: "sm" })}
-          >
+            className={buttonVariants({ variant: "ghost", size: "sm", className: "text-xs" })}>
             View public form
             <ExternalLink />
           </Link>
@@ -503,44 +468,34 @@ export default async function EditFormPage({
         initialTab={resolveBuilderTab(rawTab, builderTabsFor(form.purpose))}
         responsesCount={submissionCount}
         questions={
-          <div className="flex flex-col gap-4 p-5">
-            {/*
-              ONE SENTENCE NOW, BECAUSE THE GUARANTEE IS THE SAME ON BOTH.
+          /*
+            ⚠️ NO WRAPPER, NO PADDING — `FieldBuilder` IS THE PANEL.
 
-              This used to say two different things. `vizserve_pms_form_field_protect`
-              refuses a key rename or a field delete once the form has submissions,
-              but it counted `vizserve_pms_requests` and nothing else — and an
-              internal form never produces one. So on a staff survey the lock did
-              not fire, and the honest sentence there was a WARNING that renaming a
-              question orphans its answers, not a promise that it cannot happen.
+            This used to be `<div className="flex flex-col gap-4 p-5">` holding a
+            sentence and the builder. The wrapper is what put the three panes
+            20px below the tab strip and made the DOCUMENT 40px taller than the
+            window: the panes are already sized `100svh` less the 56px header and
+            the 45px strip, so any padding around them is height the viewport
+            does not have. The page then scrolled as a whole, on top of three
+            panes that each scroll on their own.
 
-              20260902110000_p7_66_form_responses.sql closes that: the guard now
-              asks both tables, so a key with an answer under it is immutable
-              whichever kind of form it belongs to. The screen can make the promise
-              again, in one sentence, because Postgres is now making it.
+            The mockup is three flush siblings — `.top`, `.maintabs`, `.panes` —
+            and `.pane` carries its own `padding:16px 12px 40px`. Same here: each
+            pane pads itself, and nothing pads the grid.
 
-              Only the NOUN still differs — an internal form collects answers and
-              a client form collects submissions, and calling a colleague's survey
-              answer a "submission" is the kind of small wrongness that makes a
-              screen feel like it was built for something else.
-            */}
-            {submissionCount > 0 ? (
-              <p className="text-xs text-muted-foreground">
-                {submissionCount} {isInternal ? "answer" : "submission"}
-                {submissionCount === 1 ? "" : "s"} — field keys are locked.
-              </p>
-            ) : null}
-
-            <FieldBuilder
-              formId={form.id}
-              purpose={form.purpose}
-              isAnonymous={form.is_anonymous}
-              formName={form.name}
-              description={form.description}
-              hasSubmissions={submissionCount > 0}
-              initialSchema={initialSchema}
-            />
-          </div>
+            The sentence the wrapper used to carry moved INTO the middle pane,
+            beside the questions whose keys it is talking about. See
+            `FieldBuilder`.
+          */
+          <FieldBuilder
+            formId={form.id}
+            purpose={form.purpose}
+            isAnonymous={form.is_anonymous}
+            formName={form.name}
+            description={form.description}
+            submissionCount={submissionCount}
+            initialSchema={initialSchema}
+          />
         }
         responses={
           /*

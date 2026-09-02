@@ -439,22 +439,35 @@ export function ClientFormSettings({
         </div>
       </div>
 
+      {/*
+        ⚠️ NO "REQUIRE AN ATTACHMENT" TOGGLE — THE BUILDER ASKS THE QUESTION NOW.
+
+        The form-level flag predates dynamic fields (D20). With a File upload
+        question on the canvas it says the same thing twice, from two screens,
+        and the two can disagree: a form could require a file with nothing on the
+        page to attach one, which is the hole `needsOwnAttachment` in
+        `app/request/[slug]/public-form.tsx` exists to paper over.
+
+        A required File upload question says it once, in the place the question
+        is asked, and the database is satisfied either way — `submit_request`
+        counts ATTACHMENTS, not which field they arrived from, so a file picked
+        in a `file` field discharges the flag exactly as the form-level slot did.
+        See the note above the total in `public-form.tsx`.
+
+        ⚠️ THE VALUE IS STILL SENT, UNCHANGED. `formSettingsSchema` defaults
+        nothing — deliberately, after six fields once silently overwrote stored
+        values — so `requires_attachment` stays in `defaultValues` and the save
+        resends what is stored. Dropping it from the payload would fail the parse;
+        hard-coding `false` would turn the flag off behind the back of anybody who
+        opens this card to change the SLA.
+
+        ⚠️ SO A FORM ALREADY SET TO `true` CANNOT BE UNSET FROM HERE. Nothing
+        breaks — such a form keeps requiring a file, and gets a slot to attach one
+        — but retiring the column for real needs a migration, and that is Ace's to
+        write and apply. `P7-31` in docs/10-open-questions.md is where that lives.
+      */}
       <div className="space-y-3 rounded-lg border p-4">
         <div className="flex items-start justify-between gap-4">
-          <div>
-            <Label htmlFor="requires_attachment">Require an attachment</Label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Submissions without a file are rejected.
-            </p>
-          </div>
-          <Switch
-            id="requires_attachment"
-            checked={watch("requires_attachment")}
-            onCheckedChange={(checked) => setValue("requires_attachment", checked)}
-          />
-        </div>
-
-        <div className="flex items-start justify-between gap-4 border-t pt-3">
           <div>
             <Label htmlFor="is_active">Published</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">

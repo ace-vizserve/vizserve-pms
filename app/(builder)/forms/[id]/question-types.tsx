@@ -1,19 +1,14 @@
 "use client";
 
-import {
-  AlignLeft,
-  Calendar,
-  CircleDot,
-  Hash,
-  Mail,
-  SquareCheckBig,
-  Type,
-  Upload,
-} from "lucide-react";
+import { AlignLeft, Archive, Calendar, CircleDot, Hash, Mail, SquareCheckBig, Type, Upload } from "lucide-react";
+import { useState } from "react";
 
-import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import type { CanvasField } from "@/lib/form-builder/canvas";
 import { FIELD_TYPE_HINTS, FIELD_TYPE_LABELS } from "@/lib/form-builder/canvas";
 import type { FieldType } from "@/lib/schemas/forms";
+import { cn } from "@/lib/utils";
 
 /**
  * P7-66 — THE LEFT PANE: CLICK A TYPE, GET A QUESTION.
@@ -56,7 +51,9 @@ export function QuestionTypes({
   types,
   currentType,
   disabled,
+  archived,
   onAdd,
+  onRestore,
 }: {
   /**
    * The types this form may ask for, in the order they are offered.
@@ -76,13 +73,28 @@ export function QuestionTypes({
    * document simply waits for both.
    */
   disabled: boolean;
+  /**
+   * The questions that are off the form but kept (`is_active = false`, R5).
+   *
+   * ⚠️ THEY LIVE IN THE RAIL, NOT UNDER THE LIST. This used to be a third
+   * section at the foot of the middle column, below the questions and below the
+   * open editor — so on a form with a few archived questions the canvas ended in
+   * a block of things that are NOT on the form, in the column whose whole job is
+   * showing what is. Worse, it grew without bound: nothing is ever deleted here,
+   * so the pile only gets longer, and it pushed the editor further off screen
+   * every time somebody archived something.
+   *
+   * A count in the rail says the same thing in one line and costs nothing when
+   * the answer is "none" — the button is not rendered at all then.
+   */
+  archived: CanvasField[];
   onAdd: (type: FieldType) => void;
+  onRestore: (entityId: string) => void;
 }) {
+  const [archiveOpen, setArchiveOpen] = useState(false);
+
   return (
-    <aside
-      aria-label="Add question"
-      className="min-h-0 overflow-y-auto border-r bg-card px-3 pt-4 pb-10"
-    >
+    <aside aria-label="Add question" className="min-h-0 overflow-y-auto border-r bg-card px-3 pt-4 pb-10">
       <h2 className="px-2 pb-2.5 text-2xs font-semibold tracking-[0.04em] text-muted-foreground uppercase">
         Add question
       </h2>
@@ -105,8 +117,7 @@ export function QuestionTypes({
                   "hover:border-accent-border hover:bg-accent hover:text-accent-foreground",
                   "disabled:pointer-events-none disabled:opacity-50 disabled:shadow-none",
                   currentType === type && "border-primary bg-accent text-accent-foreground",
-                )}
-              >
+                )}>
                 <Icon
                   className={cn(
                     "size-4 shrink-0",
@@ -138,6 +149,92 @@ export function QuestionTypes({
           ? "The type is fixed once the question has answers."
           : "File upload is not offered on an internal form — there is nowhere to put the file."}
       </p>
+
+      {/*
+        ⚠️ NOTHING AT ALL WHEN NOTHING IS ARCHIVED. A row reading "Archived · 0"
+        is a permanent invitation to open an empty drawer; most forms never
+        archive a question and should never learn the word.
+      */}
+      {archived.length === 0 ? null : (
+        <>
+          <Button className="mt-4 w-full" variant={"warning"} onClick={() => setArchiveOpen(true)}>
+            <Archive aria-hidden className="size-4 shrink-0" />
+            <span className="truncate">Archived</span>
+            <span className="ml-auto tabular-nums">{archived.length}</span>
+          </Button>
+
+          <ArchivedDialog
+            open={archiveOpen}
+            onOpenChange={setArchiveOpen}
+            archived={archived}
+            busy={disabled}
+            onRestore={onRestore}
+          />
+        </>
+      )}
     </aside>
+  );
+}
+
+/**
+ * The archived questions, on demand.
+ *
+ * ⚠️ IT CLOSES ITSELF WHEN THE LAST ONE IS RESTORED. The button that opened it
+ * is not rendered at all at zero, so a dialog left standing over an empty list
+ * would be a panel with no way back to it and nothing in it. `archived` is
+ * derived from the builder store, so this re-renders on every restore and the
+ * check is just a render-time one — no effect, no second source of truth.
+ *
+ * ⚠️ RESTORE, NOT DELETE. There is no delete here and there must not be: a
+ * question is archived precisely because answers are filed under its
+ * `field_key`, and `vizserve_pms_form_field_protect` refuses the delete anyway
+ * (D20/R5). The sentence says so rather than leaving somebody hunting for the
+ * button.
+ */
+function ArchivedDialog({
+  open,
+  onOpenChange,
+  archived,
+  busy,
+  onRestore,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  archived: CanvasField[];
+  busy: boolean;
+  onRestore: (entityId: string) => void;
+}) {
+  const empty = archived.length === 0;
+
+  return (
+    <Dialog open={open && !empty} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Archived · {archived.length}</DialogTitle>
+          {/* Said once, above the list, rather than on every row: their answers
+              are why these cannot simply be deleted (R5). */}
+          <DialogDescription>
+            Off the form, and kept. Answers already given to these are still stored and still have a column on the
+            Responses tab.
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Capped and scrolling: nothing here is ever deleted, so the list only
+            grows, and a dialog taller than the window has no scrollbar of its
+            own. */}
+        <ul className="flex max-h-[60svh] flex-col gap-1.5 overflow-y-auto">
+          {archived.map((field) => (
+            <li key={field.id} className="flex items-center gap-2.5 rounded-lg border border-dashed px-3 py-2">
+              <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground">
+                {field.entity.attributes.label || "Untitled question"}
+              </span>
+              <Button type="button" variant="outline" size="sm" disabled={busy} onClick={() => onRestore(field.id)}>
+                Restore
+              </Button>
+            </li>
+          ))}
+        </ul>
+      </DialogContent>
+    </Dialog>
   );
 }

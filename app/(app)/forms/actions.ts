@@ -722,6 +722,57 @@ export async function renameForm(formId: string, name: unknown): Promise<ActionR
 }
 
 /**
+ * P7-66 — PUBLISH OR UNPUBLISH, FROM THE BUILDER'S HEADER.
+ *
+ * ⚠️ ITS OWN ACTION, NOT `updateFormSettings` WITH ONE FIELD CHANGED.
+ * `formSettingsSchema` DEFAULTS NOTHING — deliberately, after six absent fields
+ * once silently overwrote stored values and one of them published a staff form.
+ * So a caller that only knows `is_active` cannot use it: it would have to send
+ * eleven other values it has no business holding, and the header does not have
+ * them. `renameForm` above is the same shape and the same reasoning.
+ *
+ * ⚠️ PUBLISHING WITHOUT A DEPARTMENT IS REFUSED BY POSTGRES, NOT BY THIS.
+ * `20260729100000_p1_01_forms.sql` carries
+ * `check (not is_active or department_id is not null)` — submissions route to a
+ * department's team leader, so a live form without one has nowhere to send them.
+ * The constraint is the rule (CLAUDE.md: rules live in the database); this only
+ * translates its message into the sentence the switch shows, because
+ * "violates check constraint" is not something to put in front of anybody.
+ */
+export async function setFormPublished(
+  formId: string,
+  isActive: unknown,
+): Promise<ActionResult> {
+  const { supabase } = await assertCanEditForm(formId);
+
+  const parsed = formSettingsSchema.shape.is_active.safeParse(isActive);
+
+  if (!parsed.success) {
+    return { ok: false, error: "Publishing takes a yes or a no." };
+  }
+
+  const { error } = await supabase
+    .from("vizserve_pms_forms")
+    .update({ is_active: parsed.data })
+    .eq("id", formId);
+
+  if (error) {
+    // The one refusal worth naming. Anything else is a real fault and says so.
+    if (error.message.includes("vizserve_pms_forms_active_requires_department")) {
+      return {
+        ok: false,
+        error: "Choose a routing department on the Settings tab before publishing.",
+      };
+    }
+    return { ok: false, error: error.message };
+  }
+
+  revalidatePath("/forms");
+  revalidatePath(`/forms/${formId}`);
+  return { ok: true, data: undefined };
+}
+
+/**
  * P7-66 — DOWNLOAD A STAFF FORM'S ANSWERS.
  *
  * ⚠️ IT RUNS AS THE CALLER, WITH NO SERVICE-ROLE CLIENT ANYWHERE. `form

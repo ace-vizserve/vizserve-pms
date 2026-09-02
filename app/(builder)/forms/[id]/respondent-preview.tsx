@@ -64,8 +64,32 @@ export function RespondentPreview({
   const [width, setWidth] = useState<"desktop" | "mobile">("desktop");
   const isClient = purpose === "CLIENT_REQUEST";
 
+  /*
+     ⚠️ `h-full`, OR THIS IS NOT A SCROLL CONTAINER AND ITS BACKGROUND STOPS
+     SHORT.
+
+     `FieldBuilder` puts the grid item — a wrapper carrying the responsive
+     `col-span-full` — around this section rather than on it. A grid item
+     stretches to its track; a child of one does not. So with `height: auto`
+     this section was as tall as its CONTENT, which does two wrong things at
+     once: `overflow-y-auto` has no bounded box to scroll inside, so a long
+     preview is sheared off by the grid's `overflow-hidden` instead of
+     scrolling, and a SHORT preview leaves the rest of the stretched wrapper
+     painted in page background — the grey band under the preview.
+
+     `min-[1180px]:grid-rows-1` on the grid is the other half of that band and
+     neither half fixes it alone: the row has to be `1fr` for the wrapper to
+     be full height, and this has to be `h-full` for the muted surface to
+     reach the bottom of it.
+
+     Below 1180px the panes stack and the document scrolls as one, so the
+     height goes back to `auto` with it.
+   */
   return (
-    <section aria-label="Respondent view" className="min-h-0 overflow-y-auto bg-muted pb-10">
+    <section
+      aria-label="Respondent view"
+      className="h-full min-h-0 overflow-y-auto bg-muted pb-10 max-[1180px]:h-auto max-[1180px]:overflow-visible"
+    >
       <div className="sticky top-0 z-5 flex items-center gap-2 border-b bg-muted px-4 py-3">
         <h2 className="flex items-center gap-2 text-sm font-semibold text-primary">
           <User aria-hidden className="size-4" />

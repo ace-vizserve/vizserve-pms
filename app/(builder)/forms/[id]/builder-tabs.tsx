@@ -37,7 +37,6 @@ import type { BuilderTab } from "./tabs";
  * the starting value; from then on the state is local, because a tab click is
  * not something Back should have to undo.
  */
-
 export function BuilderTabs({
   initialTab,
   responsesCount,
@@ -71,42 +70,49 @@ export function BuilderTabs({
     <Tabs
       value={tab}
       onValueChange={(value) => setTab(value as BuilderTab)}
-      // `gap-0`: the strip is a sticky rule directly under the top bar, and the
-      // Root's default gap would open a stripe of page background between them.
-      className="min-h-0 flex-1 gap-0"
-    >
+      /*
+        A FLEX COLUMN INSIDE A FIXED-HEIGHT ONE, so the panel below gets a real
+        height to hand on. `flex-1` takes what the header left, `min-h-0` lets it
+        be shorter than its content (without it a flex item refuses to shrink
+        below `min-content` and pushes the column past the window), and `gap-0`
+        closes the Root's default gap, which would otherwise open a stripe of
+        page background between the tab strip and the panes.
+      */
+      className="flex min-h-0 flex-1 flex-col gap-0">
       {/*
-        Sticky at 56px — the height of `BuilderHeader` — so the tabs stay
-        reachable while a form with thirty questions scrolls under them, exactly
-        as the header does.
+        `shrink-0`, NOT `sticky`. The strip used to be `sticky top-14`, pinned to
+        the header's height, because the page scrolled underneath it. Nothing
+        scrolls past it any more — it is a fixed row of a fixed-height column, so
+        it is always where it is, and the 56px in that `top-14` is one more
+        number that had to stay in step with the header by hand.
+
+        The rest is the mockup's `.maintabs`: full width, centred, `bg-card`, a
+        hairline underneath.
       */}
       <TabsList
         variant="line"
-        className="sticky top-14 z-20 h-auto w-full justify-center rounded-none border-b bg-card p-0"
-      >
-        <TabsTrigger value="questions" className="h-auto flex-none px-4.5 py-3">
-          Questions
-        </TabsTrigger>
-        {responses === undefined ? null : (
-          <TabsTrigger value="responses" className="h-auto flex-none gap-1.5 px-4.5 py-3">
-            Responses
-            {/*
+        className="w-full shrink-0 justify-center rounded-none border-0 border-b border-border bg-card py-6">
+        <div className="max-w-md mx-auto space-x-4">
+          <TabsTrigger value="questions">Questions</TabsTrigger>
+          {responses === undefined ? null : (
+            <TabsTrigger value="responses">
+              Responses
+              {/*
               ⚠️ NO BADGE ON AN EMPTY FORM. A pill reading 0 beside the word
               "Responses" is a count of nothing dressed as a count — and on the
               tab somebody visits precisely to find out whether anybody has
               answered yet, the empty state inside says it better than a zero on
               the way in.
             */}
-            {responsesCount > 0 ? (
-              <span className="inline-grid h-[19px] min-w-[19px] place-items-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular-nums">
-                {responsesCount}
-              </span>
-            ) : null}
-          </TabsTrigger>
-        )}
-        <TabsTrigger value="settings" className="h-auto flex-none px-4.5 py-3">
-          Settings
-        </TabsTrigger>
+              {responsesCount > 0 ? (
+                <span className="inline-grid h-[19px] min-w-[19px] place-items-center rounded-full bg-primary px-1.5 text-[11px] font-semibold text-primary-foreground tabular-nums">
+                  {responsesCount}
+                </span>
+              ) : null}
+            </TabsTrigger>
+          )}
+          <TabsTrigger value="settings">Settings</TabsTrigger>
+        </div>
       </TabsList>
 
       {/*
@@ -114,15 +120,29 @@ export function BuilderTabs({
         panel holds the builder store, and the others are cheap server output
         that is already on the page by the time this renders.
       */}
-      <TabsContent value="questions" keepMounted className="min-h-0">
+      {/*
+        ⚠️ QUESTIONS DOES NOT SCROLL — IT HANDS ITS HEIGHT TO THE THREE PANES.
+
+        A flex column so `FieldBuilder`'s grid can be `flex-1` and stop
+        subtracting the chrome from `100svh` by hand. Below 1180px the panes
+        stack into one column and there is nothing left to scroll them, so the
+        panel takes the job back.
+      */}
+      <TabsContent value="questions" keepMounted className="flex flex-1 flex-col max-[1180px]:overflow-y-auto">
         {questions}
       </TabsContent>
+
+      {/*
+        ⚠️ THESE TWO SCROLL THEMSELVES. `app/(builder)/layout.tsx` clips the page
+        at the window, so a panel that is taller than its row and does not scroll
+        is simply cut off — no scrollbar, no way to reach the rest.
+      */}
       {responses === undefined ? null : (
-        <TabsContent value="responses" keepMounted className="min-h-0">
+        <TabsContent value="responses" keepMounted className="min-h-0 flex-1 overflow-y-auto">
           {responses}
         </TabsContent>
       )}
-      <TabsContent value="settings" keepMounted className="min-h-0">
+      <TabsContent value="settings" keepMounted className="min-h-0 flex-1 overflow-y-auto">
         {settings}
       </TabsContent>
     </Tabs>
