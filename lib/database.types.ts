@@ -78,6 +78,14 @@ export type VizservePmsGender = "MALE" | "FEMALE";
 export type VizservePmsEventCategory = "COMPANY" | "MANAGEMENT" | "DEPARTMENT";
 
 /**
+ * P7-66, 20260902100000_p7_66_form_purpose.sql. What a form is FOR, and the
+ * source of truth for `is_public` — the two are tied by
+ * `vizserve_pms_forms_purpose_matches_public`, so never write them separately.
+ * `lib/schemas/forms.ts` holds the labels and `isPublicForPurpose`.
+ */
+export type VizservePmsFormPurpose = "CLIENT_REQUEST" | "EMPLOYEE_ENGAGEMENT";
+
+/**
  * P7-38 added the last two. NO_TIME_* means there is no punch to read;
  * *_CORRECTION means there is one and it is wrong. Same payload, same DTR
  * write-back, different claim — see the migration's header for why they are not
@@ -418,6 +426,18 @@ export type Database = {
           description: string;
           department_id: string | null;
           reference_prefix: string;
+          /**
+           * P7-66 — what the form is for, and the source of truth for
+           * `is_public` below.
+           */
+          purpose: VizservePmsFormPurpose;
+          /**
+           * DERIVED FROM `purpose`, never written beside it by hand:
+           * `vizserve_pms_forms_purpose_matches_public` refuses any row where
+           * the two disagree. Still read directly by the public lookup, the
+           * attachment guard and the tracking link, all of which care only
+           * about reachability.
+           */
           is_public: boolean;
           is_active: boolean;
           requires_attachment: boolean;
@@ -443,6 +463,7 @@ export type Database = {
           description?: string;
           department_id?: string | null;
           reference_prefix: string;
+          purpose?: VizservePmsFormPurpose;
           is_public?: boolean;
           is_active?: boolean;
           requires_attachment?: boolean;
@@ -459,6 +480,7 @@ export type Database = {
           description: string;
           department_id: string | null;
           reference_prefix: string;
+          purpose: VizservePmsFormPurpose;
           is_public: boolean;
           is_active: boolean;
           requires_attachment: boolean;
@@ -2142,6 +2164,7 @@ export type Database = {
       vizserve_pms_timesheet_week_status: VizservePmsTimesheetWeekStatus;
       vizserve_pms_gender: VizservePmsGender;
       vizserve_pms_event_category: VizservePmsEventCategory;
+      vizserve_pms_form_purpose: VizservePmsFormPurpose;
     };
     CompositeTypes: Record<never, never>;
   };

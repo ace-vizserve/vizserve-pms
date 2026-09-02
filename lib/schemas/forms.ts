@@ -222,6 +222,71 @@ export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 // ---------------------------------------------------------------------------
 
 /**
+ * P7-66 — WHAT THE FORM IS FOR.
+ *
+ * Two lifecycles behind one builder. A client request is public, mints a
+ * reference number, carries an SLA and a client approval window, and routes
+ * through Gate 1 to a task. An engagement form is filled in by signed-in staff
+ * and its answers are collected — there is no client, nothing to approve, and
+ * four of the settings on the card are meaningless on it.
+ *
+ * `is_public` predates this and is NOT a second way to say the same thing: it
+ * is the consequence. The database ties them with a CHECK
+ * (`is_public = (purpose = 'CLIENT_REQUEST')`, 20260902100000_p7_66_form_
+ * purpose.sql) and the server derives one from the other, which is why
+ * `is_public` is absent from both schemas below — a client that cannot send it
+ * cannot send a contradiction for the constraint to reject.
+ */
+export const FORM_PURPOSES = ["CLIENT_REQUEST", "EMPLOYEE_ENGAGEMENT"] as const;
+
+export type FormPurpose = (typeof FORM_PURPOSES)[number];
+
+/**
+ * How each purpose reads, and what it commits you to.
+ *
+ * The hint is not decoration. The choice is made once, before the form exists,
+ * and it decides whether the thing ends up on the open internet — so the picker
+ * has to say that in the picker, not in a doc.
+ *
+ * `short` is here rather than inline in the forms table because a chip cannot
+ * hold "Employee engagement" without breaking the row rhythm, and a label
+ * written at the call site is the second copy of a map that then drifts — which
+ * has happened five times in this repo already. One map, three registers.
+ */
+export const FORM_PURPOSE_LABELS: Record<
+  FormPurpose,
+  { label: string; short: string; hint: string }
+> = {
+  CLIENT_REQUEST: {
+    label: "Client request",
+    short: "Client",
+    hint: "Public link, no login. Goes to a Team Leader for approval.",
+  },
+  EMPLOYEE_ENGAGEMENT: {
+    label: "Employee engagement",
+    short: "Engagement",
+    hint: "Staff fill it in signed in. Answers are collected, not approved.",
+  },
+};
+
+export const formPurposeSchema = z.enum(FORM_PURPOSES, {
+  message: "Choose what this form is for.",
+});
+
+/**
+ * THE DERIVATION, IN ONE PLACE, MIRRORING THE CHECK CONSTRAINT.
+ *
+ * `vizserve_pms_forms_purpose_matches_public` is `is_public = (purpose =
+ * 'CLIENT_REQUEST')`. This is that expression in TypeScript, and every server
+ * action that writes a form calls it rather than re-typing the comparison — the
+ * second copy of a rule like this is the one that drifts, and drifting here
+ * means an internal form answering at /request/<slug> to anybody with the URL.
+ */
+export function isPublicForPurpose(purpose: FormPurpose): boolean {
+  return purpose === "CLIENT_REQUEST";
+}
+
+/**
  * P7-31 — the SLA as a duration, not a count of days.
  *
  * Accepts `5d`, `8h`, `2d 4h`; stores MINUTES, where a day is 480 of them (a
@@ -233,6 +298,13 @@ export type SubmissionResult = z.infer<typeof submissionResultSchema>;
  * input holds is a string, what the database gets is a number.
  */
 const SLA_MESSAGE = "Use a duration like 5d, 8h or 2d 4h — up to 365d.";
+
+/**
+ * Five working days, the same figure `vizserve_pms_forms.sla_minutes` defaults
+ * to. Named because three files were about to hard-code `2400` and one of them
+ * would have been the odd one out.
+ */
+export const DEFAULT_SLA_MINUTES = 2400;
 
 const slaMinutesField = z.union([z.string(), z.number()]).transform((raw, ctx) => {
   const minutes = typeof raw === "number" ? raw : parseSlaDuration(raw);
@@ -250,37 +322,82 @@ const slaMinutesField = z.union([z.string(), z.number()]).transform((raw, ctx) =
   return minutes;
 });
 
+/**
+ * ⚠️ P7-66 — THIS SCHEMA HAS NO DEFAULTS, AND THAT IS THE WHOLE POINT.
+ *
+ * It validates an UPDATE to a form that already exists and already holds a
+ * configuration somebody chose. A `.default()` here does not mean "a sensible
+ * starting value"; it means "if the payload leaves this out, OVERWRITE what is
+ * stored with this" — because every key that parses is then handed straight to
+ * `.update()`.
+ *
+ * The one that made it a security bug rather than an annoyance was `purpose`.
+ * It was `.default("CLIENT_REQUEST")`, so an `updateFormSettings` payload that
+ * simply omitted it flipped an EMPLOYEE_ENGAGEMENT form to CLIENT_REQUEST; the
+ * live CHECK `is_public = (purpose = 'CLIENT_REQUEST')` then set `is_public`
+ * true, and a published STAFF form became answerable at /request/<slug> with no
+ * session. The purpose lock could not stop it — it counts
+ * `vizserve_pms_requests`, and an engagement form never produces one.
+ *
+ * A SECURITY-RELEVANT FIELD MUST NEVER DEFAULT TO THE MORE PUBLIC VALUE ON AN
+ * UPDATE. The other five defaults that were here did not widen access, but each
+ * silently DISCARDED configuration when omitted — a blanked description, an
+ * unpublished form, a dropped attachment requirement, lost routing, a reset
+ * Gate 3 window. All six moved to `formCreateSchema`, which is the schema for a
+ * form that has no configuration to lose.
+ */
 export const formSettingsSchema = z.object({
+  /**
+   * P7-66 — FIRST, because it changes what the rest of the card means.
+   *
+   * REQUIRED, never defaulted. See the block above: this is the field whose
+   * default put a staff form on the public internet.
+   */
+  purpose: formPurposeSchema,
   name: z.string().trim().min(1, "Give the form a name."),
   slug: z
     .string()
     .trim()
     .min(1, "A URL slug is required.")
     .regex(/^[a-z0-9]+(-[a-z0-9]+)*$/, "Use lower-case letters, numbers and hyphens."),
-  description: z.string().trim().default(""),
+  /** May be empty — but the payload has to SAY it is empty. */
+  description: z.string().trim(),
   department_id: z.uuid("Choose the department that owns this form.").nullable(),
   reference_prefix: z
     .string()
     .trim()
     .regex(/^[A-Z][A-Z0-9]{1,7}$/, "2–8 upper-case letters or digits, e.g. COL."),
-  is_public: z.boolean().default(true),
-  is_active: z.boolean().default(false),
-  requires_attachment: z.boolean().default(false),
+  /*
+   * ⚠️ `is_public` IS DELIBERATELY NOT HERE. P7-66 makes it a consequence of
+   * `purpose`, tied by a CHECK the database will not let anybody past — so the
+   * server derives it with `isPublicForPurpose` and the browser never sends it.
+   * A field the client cannot fill in is a contradiction the client cannot
+   * cause. Restoring it here would put the two back in a race whose loser is a
+   * staff form on the public internet.
+   */
+  /**
+   * Published or not. Undefaulted because `false` is not a safe fallback, it is
+   * an UNPUBLISH — a live form taken off the air by a payload that merely
+   * forgot to mention it.
+   */
+  is_active: z.boolean(),
+  /** Undefaulted: `false` DROPS a rule the form was relying on. */
+  requires_attachment: z.boolean(),
   sla_minutes: slaMinutesField,
   /**
    * Where approved requests from this form land (P2-06 / Q18).
    *
    * Null is a real answer — a department that has not organised itself into
-   * lists yet should not be forced to invent one.
+   * lists yet should not be forced to invent one. Which is exactly why it is
+   * not a DEFAULT: "route nowhere" has to be stated, not fallen into.
    */
-  default_list_id: z.uuid().nullable().default(null),
+  default_list_id: z.uuid().nullable(),
   /** Business days the client gets at Gate 3 before auto-completion (Q6). */
   client_approval_days: z.coerce
     .number()
     .int()
     .min(1, "At least one working day.")
-    .max(30)
-    .default(3),
+    .max(30),
 });
 
 export type FormSettingsInput = z.infer<typeof formSettingsSchema>;
@@ -297,19 +414,64 @@ export type FormSettingsValues = z.input<typeof formSettingsSchema>;
 /**
  * P7-29 — the same settings, on a form that does not exist yet.
  *
- * The ONLY difference is that the slug and the reference prefix may arrive
- * blank, meaning "derive one from the name". `formSettingsSchema` requires
- * both, and it has to: on an existing form a blank slug would take a URL
- * somebody has shared away.
+ * The difference is that this schema is allowed to FILL THINGS IN and
+ * `formSettingsSchema` is not. A blank slug or prefix here means "derive one
+ * from the name"; on an existing form it would mean "take away a URL somebody
+ * has shared". Two schemas rather than one loose one, so an UPDATE cannot
+ * accidentally accept the blank an INSERT is allowed to.
  *
- * Two schemas rather than one loose one, so an UPDATE cannot accidentally
- * accept the blank an INSERT is allowed to.
+ * P7-66 WIDENS THAT ARGUMENT TO THE SETTINGS NOBODY SHOULD BE ASKED FOR.
+ * An engagement form has no reference number, no turnaround standard and no
+ * queue to file into, so /forms/new asks it for a NAME and nothing else — which
+ * only works if this schema can accept `{ name, purpose }` and fill the rest
+ * in:
+ *
+ *   - `sla_minutes` falls to the column's own five working days. Meaningless on
+ *     an engagement form, and the value the settings card has always started a
+ *     client form on.
+ *   - `department_id` falls to null — an UNROUTED DRAFT, which the RLS policy
+ *     "forms readable by author while unrouted" exists to keep visible to the
+ *     person who just made it. It cannot be published in that state
+ *     (`vizserve_pms_forms_active_requires_department`), which is the correct
+ *     place for that argument to be had.
+ *   - `purpose`, `description`, `is_active`, `requires_attachment`,
+ *     `default_list_id` and `client_approval_days` are the six that USED to be
+ *     defaulted on both schemas. Read the block on `formSettingsSchema` for
+ *     why exactly one of them was a security hole and the other five were
+ *     silent configuration loss.
+ *
+ * `formSettingsSchema` demands every one of them, so an UPDATE still cannot
+ * quietly blank a form's routing — or republish a staff form.
  */
 export const formCreateSchema = formSettingsSchema.extend({
   slug: z.union([z.literal(""), formSettingsSchema.shape.slug]).default(""),
   reference_prefix: z
     .union([z.literal(""), formSettingsSchema.shape.reference_prefix])
     .default(""),
+  sla_minutes: formSettingsSchema.shape.sla_minutes.default(DEFAULT_SLA_MINUTES),
+  department_id: formSettingsSchema.shape.department_id.default(null),
+  /*
+   * ⚠️ EVERY DEFAULT IN THE PAIR LIVES HERE, AND ONLY HERE.
+   *
+   * These four moved down from `formSettingsSchema` along with `purpose` when
+   * that one's default turned out to be a way to publish a staff form. On an
+   * INSERT a default is a starting value and there is nothing to lose; on an
+   * UPDATE the same line overwrites a choice somebody made. The rule this
+   * encodes: a default belongs on the schema for the row that does not exist
+   * yet, never on the schema for the row that does.
+   *
+   * `purpose` is the exception to its own rule and stays CLIENT_REQUEST here,
+   * because that is what `vizserve_pms_forms.purpose` defaults to and what all
+   * four live forms are — but note this is the SAFE direction on a create: a
+   * form that does not exist yet has no staff answers behind it, and the
+   * creator is looking at the Purpose control while they do it.
+   */
+  purpose: formSettingsSchema.shape.purpose.default("CLIENT_REQUEST"),
+  description: formSettingsSchema.shape.description.default(""),
+  is_active: formSettingsSchema.shape.is_active.default(false),
+  requires_attachment: formSettingsSchema.shape.requires_attachment.default(false),
+  default_list_id: formSettingsSchema.shape.default_list_id.default(null),
+  client_approval_days: formSettingsSchema.shape.client_approval_days.default(3),
 });
 
 export type FormCreateInput = z.infer<typeof formCreateSchema>;

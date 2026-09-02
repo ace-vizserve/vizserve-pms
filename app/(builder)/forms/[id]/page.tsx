@@ -5,11 +5,12 @@ import { ArrowLeft, ExternalLink } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
-import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { Chip } from "@/components/status-badge";
-import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
-import { FormSettings } from "../form-settings";
+import { ThemeToggle } from "@/components/theme-toggle";
+import { buttonVariants } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
+import { FormSettings } from "@/app/(app)/forms/form-settings";
 import {
   optionsFromRow,
   reconcileFormSchema,
@@ -17,20 +18,59 @@ import {
 } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
 import { FieldBuilder } from "./field-builder";
-import { loadRoutableDepartments } from "../routable-departments";
+import { SettingsDisclosure } from "./settings-disclosure";
+import { loadRoutableDepartments } from "@/app/(app)/forms/routable-departments";
 
 export const metadata: Metadata = { title: "Edit form" };
 
-/** The crumb back to the list, shared by the page and its failure state. */
-function BackToForms() {
+/**
+ * P7-66 Phase 4a — THE BUILDER'S OWN CHROME.
+ *
+ * This route left the `(app)` shell (see `app/(builder)/layout.tsx`), so the
+ * sidebar, the breadcrumb and the theme toggle it used to sit inside are gone.
+ * The same three jobs still have to be done, and this bar does them: say which
+ * form you are in, give one obvious way back to the list, and keep the theme
+ * switch reachable.
+ *
+ * Same object as the shell's top bar and `app/page.tsx`'s: 56px, frosted
+ * `bg-panel` behind a blur with `shadow-chrome` and a hairline, sticky — so the
+ * canvas visibly passes UNDER it and the way out never scrolls away from a form
+ * with thirty questions on it.
+ *
+ * Full-bleed `px-5`, matching `PageShell`, so the bar and the content share a
+ * left edge.
+ */
+function BuilderHeader({
+  name,
+  children,
+}: {
+  name?: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <Link
-      href="/forms"
-      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-    >
-      <ArrowLeft className="size-3.5" />
-      Forms
-    </Link>
+    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-panel px-5 shadow-chrome backdrop-blur-md backdrop-saturate-150">
+      <Link
+        href="/forms"
+        className={buttonVariants({ variant: "outline", size: "sm" })}
+      >
+        <ArrowLeft />
+        Forms
+      </Link>
+
+      <Separator
+        orientation="vertical"
+        className="data-vertical:h-4 data-vertical:self-auto"
+      />
+
+      <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">
+        {name ?? "Edit form"}
+      </h1>
+
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {children}
+        <ThemeToggle />
+      </div>
+    </header>
   );
 }
 
@@ -44,8 +84,10 @@ function BackToForms() {
  * standing between a dropped query and DATA LOSS. See the note on the fields
  * read below.
  *
- * The name is passed when it is known, so the shell breadcrumb still says which
- * form failed rather than showing the raw UUID from the URL.
+ * The name is passed when it is known, so the header still says which form
+ * failed rather than falling back to the generic title. (It used to name the
+ * page in the shell breadcrumb; there is no breadcrumb on this route any more,
+ * so the same value goes to the header this route carries instead.)
  */
 function FormLoadFailure({
   formName,
@@ -57,11 +99,12 @@ function FormLoadFailure({
   message?: string;
 }) {
   return (
-    <PageShell className="mx-auto w-full max-w-5xl">
-      {formName ? <BreadcrumbLabel value={formName} /> : null}
-      <BackToForms />
-      <QueryError what={what} message={message} />
-    </PageShell>
+    <>
+      <BuilderHeader name={formName} />
+      <div className="mx-auto w-full max-w-3xl p-5">
+        <QueryError what={what} message={message} />
+      </div>
+    </>
   );
 }
 
@@ -76,7 +119,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, reference_prefix, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
+      "id, name, slug, description, department_id, reference_prefix, purpose, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -252,47 +295,54 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   }
 
   return (
-    // Wider than the old max-w-3xl. This page is a builder, not a document: the
-    // settings card lays its fields out in two and three columns, and the narrow
-    // measure squeezed "Owning department" and "Reference prefix" into a width
-    // where neither could show its own value. max-w-5xl keeps a sensible line
-    // length for the description textarea while giving those rows room.
-    <PageShell className="mx-auto w-full max-w-5xl">
-      {/* Names this page in the shell breadcrumb. Without it the crumb is the
-          raw UUID from the URL. */}
-      <BreadcrumbLabel value={form.name} />
+    /*
+     * FULL-BLEED, AND NO `PageShell`.
+     *
+     * The page used to be capped at `max-w-5xl` inside the 304px sidebar. The
+     * Elementor rework puts a palette on the left of the canvas and an edit
+     * panel on its right, and a sidebar beside those is a third rail competing
+     * for the same screen — which is why this route moved out of the shell
+     * entirely (`app/(builder)/layout.tsx`). What is left is the builder and
+     * nothing else, so it gets the whole window.
+     *
+     * Full-bleed is not unbounded: `FieldBuilder` caps its own CANVAS column, so
+     * a question card never stretches across an ultrawide monitor while the
+     * palette and the panel stay pinned to the edges where the eye expects them.
+     */
+    <>
+      <BuilderHeader name={form.name}>
+        {form.is_active ? (
+          <Chip tone="success" label="Live" />
+        ) : (
+          <Chip tone="neutral" label="Draft" />
+        )}
+        {form.is_active && form.is_public ? (
+          <Link
+            href={`/request/${form.slug}`}
+            target="_blank"
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+          >
+            View public form
+            <ExternalLink />
+          </Link>
+        ) : null}
+      </BuilderHeader>
 
-      <div>
-        <BackToForms />
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold tracking-tight">{form.name}</h1>
-          {form.is_active ? <Chip tone="success" label="Live" /> : <Chip tone="neutral" label="Draft" />}
-          {form.is_active && form.is_public ? (
-            <Link
-              href={`/request/${form.slug}`}
-              target="_blank"
-              className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground hover:underline"
-            >
-              View public form
-              <ExternalLink className="size-3" />
-            </Link>
-          ) : null}
-        </div>
+      <div className="flex flex-1 flex-col gap-4 p-5">
         {submissionCount && submissionCount > 0 ? (
-          <p className="mt-1 text-xs text-muted-foreground">
-            {submissionCount} submission{submissionCount === 1 ? "" : "s"} — field keys are locked.
+          <p className="text-xs text-muted-foreground">
+            {submissionCount} submission{submissionCount === 1 ? "" : "s"} — field keys are
+            locked.
           </p>
         ) : null}
-      </div>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Fields</h2>
         <FieldBuilder formId={form.id} initialSchema={initialSchema} />
-      </section>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold">Settings</h2>
-        <div className="rounded-lg border bg-card grade-surface p-6 shadow-raised-lg">
+        {/* COLLAPSED BY DEFAULT. The questions are the work on this screen; the
+            slug, the SLA and the routing are set once and then left alone, and
+            a six-row card of them under the canvas made the form itself look
+            like the smaller half of the page. */}
+        <SettingsDisclosure>
           <FormSettings
             departments={departments}
             lists={lists ?? []}
@@ -304,7 +354,10 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
               description: form.description,
               department_id: form.department_id,
               reference_prefix: form.reference_prefix,
-              is_public: form.is_public,
+              // P7-66 — `purpose` is settable here and `is_public` is not.
+              // `updateFormSettings` derives the boolean from it, and the
+              // schema no longer carries it, so it cannot be sent at all.
+              purpose: form.purpose,
               is_active: form.is_active,
               requires_attachment: form.requires_attachment,
               sla_minutes: form.sla_minutes,
@@ -312,8 +365,8 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
               client_approval_days: form.client_approval_days,
             }}
           />
-        </div>
-      </section>
-    </PageShell>
+        </SettingsDisclosure>
+      </div>
+    </>
   );
 }

@@ -12,8 +12,10 @@ import {
 } from "@/lib/form-builder/schema";
 import { createClient } from "@/utils/supabase/server";
 import {
+  FORM_PURPOSE_LABELS,
   formCreateSchema,
   formSettingsSchema,
+  isPublicForPurpose,
   nextCandidate,
   prefixFromName,
   slugFromName,
@@ -81,10 +83,10 @@ async function assertCanEditForm(formId: string) {
 
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
-    // `reference_prefix` so `updateFormSettings` can tell a change from a
-    // resubmission of the same value — the lock below must not fire on a Save
-    // that touched something else entirely.
-    .select("id, department_id, created_by, reference_prefix")
+    // `reference_prefix` and `purpose` so `updateFormSettings` can tell a
+    // change from a resubmission of the same value — the two locks below must
+    // not fire on a Save that touched something else entirely.
+    .select("id, department_id, created_by, reference_prefix, purpose")
     .eq("id", formId)
     .maybeSingle();
 
@@ -97,6 +99,57 @@ async function assertCanEditForm(formId: string) {
 
   assertDepartmentAccess(context, form.department_id);
   return { context, supabase, form };
+}
+
+/**
+ * P7-66 — HOW MANY ANSWERS ARE ALREADY BEHIND THIS FORM.
+ *
+ * The number both locks in `updateFormSettings` turn on: the reference prefix
+ * locks once a request quotes it, and the PURPOSE locks once anything has been
+ * submitted at all. Read once, used twice, so the two can never disagree about
+ * whether a form is live.
+ *
+ * The count is exact for everyone who reaches this line. The requests SELECT
+ * policy is `manages_department(form.department_id)` — the identical test
+ * `assertCanEditForm` just applied — so there is no viewer for whom it
+ * under-reports.
+ *
+ * ⚠️⚠️ PHASE 4b ADDS THE SECOND COUNT HERE, IN THE SAME CHANGE THAT CREATES
+ * `vizserve_pms_form_responses`. NOT AFTER IT — the window between the table
+ * existing and this function knowing about it IS the vulnerability.
+ *
+ * `vizserve_pms_requests` is the only table a submission can land in today, so
+ * it is the whole count. An EMPLOYEE_ENGAGEMENT form never produces a request:
+ * its answers go to `vizserve_pms_form_responses`, which does not exist yet. So
+ * the moment that table ships, a pulse survey with hundreds of staff answers
+ * still counts ZERO here, the purpose lock never engages, and somebody can flip
+ * it to CLIENT_REQUEST — whereupon the live CHECK
+ * `is_public = (purpose = 'CLIENT_REQUEST')` sets `is_public` true and the form,
+ * with every one of those answers behind it, is answerable at /request/<slug>
+ * with no session.
+ *
+ * THE FIX IS ONE MORE COUNT, AND IT GOES IN THIS FUNCTION:
+ *
+ *   const { count: responses } = await supabase
+ *     .from("vizserve_pms_form_responses")
+ *     .select("id", { count: "exact", head: true })
+ *     .eq("form_id", formId);
+ *   return (requests ?? 0) + (responses ?? 0);
+ *
+ * Cover it with a test that a form with responses and zero requests still
+ * refuses a purpose change. Everything else — both call sites, both messages —
+ * already reads whatever this returns.
+ */
+async function countFormSubmissions(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  formId: string,
+): Promise<number> {
+  const { count: requests } = await supabase
+    .from("vizserve_pms_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("form_id", formId);
+
+  return requests ?? 0;
 }
 
 /**
@@ -159,7 +212,22 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   for (let attempt = 1; attempt <= 20; attempt += 1) {
     const { data, error } = await supabase
       .from("vizserve_pms_forms")
-      .insert({ ...parsed.data, slug, reference_prefix, created_by: context.userId })
+      .insert({
+        ...parsed.data,
+        slug,
+        reference_prefix,
+        /*
+         * ⚠️ P7-66 — DERIVED HERE, NEVER SENT. `is_public` is off both zod
+         * schemas precisely so this line is the only thing that decides it, and
+         * `vizserve_pms_forms_purpose_matches_public` refuses the row if it is
+         * ever wrong. Getting it wrong the other way — an engagement form
+         * inserted with `is_public = true` — would put a staff form on the open
+         * internet at /request/<slug>, because the public lookup filters on
+         * `is_public and is_active` and has never heard of `purpose`.
+         */
+        is_public: isPublicForPurpose(parsed.data.purpose),
+        created_by: context.userId,
+      })
       .select("id")
       .single();
 
@@ -221,32 +289,64 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
    * so the old ones simply stop matching. Same shape as `field_key`
    * immutability (D20/R5), and the same reason it is a rule rather than a
    * disabled input: the front end will be bypassed.
-   *
-   * The count is exact for everyone who reaches this line. The requests SELECT
-   * policy is `manages_department(form.department_id)` — the identical test
-   * `assertCanEditForm` just applied — so anybody allowed to edit this form can
-   * see every request on it. There is no viewer for whom this under-reports.
    */
-  if (parsed.data.reference_prefix !== form.reference_prefix) {
-    const { count } = await supabase
-      .from("vizserve_pms_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("form_id", formId);
+  /*
+   * ⚠️ P7-66 — AND SO DOES THE PURPOSE, FOR THE SAME REASON ONE LEVEL UP.
+   *
+   * Turning a client form into an engagement form would flip `is_public` to
+   * false under a URL clients hold, take away the Gate 1 route that every one
+   * of its live requests is sitting on, and orphan the reference series the
+   * prefix lock exists to protect. The reverse is worse: a form built for staff
+   * becomes readable at /request/<slug> by anybody with the link, along with
+   * whatever its questions ask for.
+   *
+   * ⚠️ THE LOCK IS NOT THE ONLY THING STANDING BETWEEN A STAFF FORM AND THE
+   * PUBLIC INTERNET, AND IT NEVER WAS. `purpose` is REQUIRED on
+   * `formSettingsSchema` — no default — so a payload that omits it is rejected
+   * outright rather than silently read as CLIENT_REQUEST. That is the guard
+   * that holds on an engagement form with zero requests, which is every
+   * engagement form until Phase 4b ships. See the schema, and see
+   * `countFormSubmissions` for the second count 4b owes this lock.
+   *
+   * The count is read ONCE for both locks — see `countFormSubmissions`.
+   */
+  const purposeChanged = parsed.data.purpose !== form.purpose;
+  const prefixChanged = parsed.data.reference_prefix !== form.reference_prefix;
 
-    if ((count ?? 0) > 0) {
+  if (purposeChanged || prefixChanged) {
+    const submissions = await countFormSubmissions(supabase, formId);
+
+    if (submissions > 0 && purposeChanged) {
+      return {
+        ok: false,
+        error: "What a form is for cannot change once it has submissions.",
+        fieldErrors: {
+          purpose: [
+            `Locked as ${FORM_PURPOSE_LABELS[form.purpose].label.toLowerCase()} — ` +
+              `${submissions} submission${submissions === 1 ? "" : "s"} already went through it.`,
+          ],
+        },
+      };
+    }
+
+    if (submissions > 0 && prefixChanged) {
       return {
         ok: false,
         error: "The reference prefix cannot change once requests are using it.",
         fieldErrors: {
           reference_prefix: [
-            `Locked at ${form.reference_prefix} — ${count} request${count === 1 ? "" : "s"} already quote it.`,
+            `Locked at ${form.reference_prefix} — ${submissions} request${submissions === 1 ? "" : "s"} already quote it.`,
           ],
         },
       };
     }
   }
 
-  const { error } = await supabase.from("vizserve_pms_forms").update(parsed.data).eq("id", formId);
+  const { error } = await supabase
+    .from("vizserve_pms_forms")
+    // `is_public` derived, exactly as on the insert — see the note there.
+    .update({ ...parsed.data, is_public: isPublicForPurpose(parsed.data.purpose) })
+    .eq("id", formId);
 
   if (error) {
     if (isUniqueViolation(error)) {

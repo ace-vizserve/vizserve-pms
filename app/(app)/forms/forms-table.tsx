@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/empty-state";
 import { Chip } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { formatDate } from "@/lib/dates";
+import { FORM_PURPOSE_LABELS, type FormPurpose } from "@/lib/schemas/forms";
 
 /**
  * P7-64 — the columns, in a client component, because the table is one now.
@@ -26,6 +27,7 @@ export type FormRow = {
   id: string;
   name: string;
   slug: string;
+  purpose: FormPurpose;
   is_public: boolean;
   is_active: boolean;
   reference_prefix: string;
@@ -60,6 +62,26 @@ export function FormsTable({
           </Link>
           <span className="ml-2 text-xs text-muted-foreground">{form.reference_prefix}</span>
         </>
+      ),
+    },
+    {
+      /*
+       * P7-66 — WHAT THE FORM IS, beside what state it is in.
+       *
+       * Two chips in one row could read as one status split in two, which is
+       * why this one is worded as a noun ("Client", "Engagement") and Status is
+       * worded as a state ("Live", "Draft"), and why the tones are drawn from
+       * the two families Status never uses. The LABEL carries it either way —
+       * greyscale this table and both columns still say what they say.
+       */
+      key: "type",
+      hideable: true,
+      header: "Type",
+      cell: (form) => (
+        <Chip
+          tone={form.purpose === "CLIENT_REQUEST" ? "brand" : "info"}
+          label={FORM_PURPOSE_LABELS[form.purpose].short}
+        />
       ),
     },
     {

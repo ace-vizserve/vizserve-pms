@@ -19,10 +19,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  DEFAULT_SLA_MINUTES,
+  FORM_PURPOSES,
+  FORM_PURPOSE_LABELS,
   formCreateSchema,
   formSettingsSchema,
   prefixFromName,
   slugFromName,
+  type FormPurpose,
   type FormSettingsInput,
   type FormSettingsValues,
 } from "@/lib/schemas/forms";
@@ -75,15 +79,17 @@ export function FormSettings({
       formId ? formSettingsSchema : formCreateSchema,
     ) as unknown as Resolver<FormSettingsValues>,
     defaultValues: {
+      // P7-66. First in the object as it is first on screen: everything under
+      // it means something different depending on this one value.
+      purpose: initial?.purpose ?? "CLIENT_REQUEST",
       name: initial?.name ?? "",
       slug: initial?.slug ?? "",
       description: initial?.description ?? "",
       department_id: initial?.department_id ?? null,
       reference_prefix: initial?.reference_prefix ?? "",
-      is_public: initial?.is_public ?? true,
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
-      sla_minutes: formatSlaDuration(initial?.sla_minutes ?? 2400),
+      sla_minutes: formatSlaDuration(initial?.sla_minutes ?? DEFAULT_SLA_MINUTES),
       default_list_id: initial?.default_list_id ?? null,
       client_approval_days: initial?.client_approval_days ?? 3,
     },
@@ -91,6 +97,25 @@ export function FormSettings({
 
   const isActive = watch("is_active");
   const departmentId = watch("department_id");
+
+  /*
+   * P7-66 — the four controls an engagement form has no use for.
+   *
+   * A reference prefix mints `COL-2026-0142` for a client to quote, an SLA is a
+   * turnaround standard on client work, a default list is where an APPROVED
+   * request files, and the client approval window is Gate 3. None of the four
+   * exists on a form staff fill in, so none of them is shown.
+   *
+   * HIDDEN, NOT UNREGISTERED. react-hook-form keeps a field's value when its
+   * input unmounts (`shouldUnregister` defaults to false), which is what this
+   * relies on: `formSettingsSchema` still demands a legal prefix and a legal
+   * SLA on every UPDATE, and they are supplied by the values the form loaded
+   * with. Switching to `shouldUnregister: true` would make this card
+   * unsaveable on an engagement form, with the error landing on a field nobody
+   * can see.
+   */
+  const purpose = watch("purpose") ?? "CLIENT_REQUEST";
+  const isClientRequest = purpose === "CLIENT_REQUEST";
 
   /*
    * P7-29 — what the server will fill in if these are left blank.
@@ -155,6 +180,9 @@ export function FormSettings({
   // Select.Value falls back to rendering the raw value, and these two are the
   // worst case of that: a bare UUID and the literal string "__none__".
   const departmentItems = Object.fromEntries(departments.map((d) => [d.id, d.name]));
+  const purposeItems = Object.fromEntries(
+    FORM_PURPOSES.map((value) => [value, FORM_PURPOSE_LABELS[value].label]),
+  );
   const listItems = {
     [NO_LIST]: "No list",
     ...Object.fromEntries(departmentLists.map((list) => [list.id, ownListLabel(list)])),
@@ -190,6 +218,46 @@ export function FormSettings({
 
   return (
     <form onSubmit={onSubmit} className="space-y-5" noValidate>
+      {/* P7-66 — FIRST, above the name, because it changes what every control
+          below it means. `items` is not optional here: without it Base UI's
+          Select.Value renders the raw enum, and "EMPLOYEE_ENGAGEMENT" on a
+          screen is the exact thing check:select-items exists to fail. */}
+      <div className="space-y-2">
+        <Label htmlFor="purpose">Purpose</Label>
+        <Select
+          items={purposeItems}
+          value={purpose}
+          onValueChange={(value) =>
+            setValue("purpose", value as FormPurpose, { shouldValidate: true })
+          }
+          disabled={hasSubmissions}
+        >
+          <SelectTrigger id="purpose" className="w-full sm:w-1/2" aria-invalid={Boolean(errors.purpose)}>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {/* The label goes in BOTH the items map and the children — Base UI
+                reads the map for the trigger and the children for the popup. */}
+            {FORM_PURPOSES.map((value) => (
+              <SelectItem key={value} value={value}>
+                {FORM_PURPOSE_LABELS[value].label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">
+          {hasSubmissions
+            ? // Not just disabled — `updateFormSettings` refuses the change too.
+              // Flipping this on a live form would either strand its requests
+              // off the Gate 1 route or put a staff form on the open internet.
+              `Locked — ${FORM_PURPOSE_LABELS[purpose].label.toLowerCase()}, with submissions already through it.`
+            : FORM_PURPOSE_LABELS[purpose].hint}
+        </p>
+        {errors.purpose ? (
+          <p className="text-xs text-destructive">{errors.purpose.message}</p>
+        ) : null}
+      </div>
+
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="name">Name</Label>
@@ -206,8 +274,15 @@ export function FormSettings({
             {...register("slug")}
           />
           <p className="text-xs text-muted-foreground">
-            Public at /request/{shownSlug || "…"}
-            {willDeriveSlug ? " — from the name. Type your own to change it." : null}
+            {/* An engagement form is not at /request/… — that route is the
+                public one and refuses anything `is_public` is false on. It gets
+                a slug all the same, because it is the form's address wherever
+                staff open it from; promising a URL this phase has not built
+                would be worse than naming none. */}
+            {isClientRequest
+              ? `Public at /request/${shownSlug || "…"}. `
+              : `Its address is /${shownSlug || "…"}. Staff open it signed in, not from a public link. `}
+            {willDeriveSlug ? "Derived from the name — type your own to change it." : null}
           </p>
           {errors.slug ? <p className="text-xs text-destructive">{errors.slug.message}</p> : null}
         </div>
@@ -219,7 +294,7 @@ export function FormSettings({
         <p className="text-xs text-muted-foreground">Shown to the client above the fields.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className={isClientRequest ? "grid gap-4 sm:grid-cols-3" : "grid gap-4 sm:grid-cols-2"}>
         <div className="space-y-2">
           <Label htmlFor="department">Owning department</Label>
           {/* `items` is what makes the trigger show "VizBytes" instead of the
@@ -241,15 +316,23 @@ export function FormSettings({
               ))}
             </SelectContent>
           </Select>
-          {/* This is what decides which Team Leader the request lands on. */}
+          {/* On a client form this decides which Team Leader the request lands
+              on. On an engagement form nothing is routed anywhere — but the
+              department is still what RLS scopes the form by, and publishing is
+              refused without one (vizserve_pms_forms_active_requires_
+              department), so the field is asked for either way. */}
           <p className="text-xs text-muted-foreground">
-            Routes submissions to this department&apos;s TL.
+            {isClientRequest
+              ? "Routes submissions to this department's TL."
+              : "Who owns the form. Required before it can be published."}
           </p>
           {errors.department_id ? (
             <p className="text-xs text-destructive">{errors.department_id.message}</p>
           ) : null}
         </div>
 
+        {isClientRequest ? (
+          <>
         <div className="space-y-2">
           <Label htmlFor="reference_prefix">Reference prefix</Label>
           <Input
@@ -293,8 +376,11 @@ export function FormSettings({
           ) : null}
 
         </div>
+          </>
+        ) : null}
       </div>
 
+      {isClientRequest ? (
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="default_list">Default list</Label>
@@ -366,6 +452,7 @@ export function FormSettings({
           ) : null}
         </div>
       </div>
+      ) : null}
 
       <div className="space-y-3 rounded-lg border p-4">
         <div className="flex items-start justify-between gap-4">
@@ -385,14 +472,24 @@ export function FormSettings({
         <div className="flex items-start justify-between gap-4 border-t pt-3">
           <div>
             <Label htmlFor="is_active">Published</Label>
+            {/* P7-66 — "anyone with the URL, no login" is TRUE of a client form
+                and would be a lie about an engagement one. The whole point of
+                the purpose column is that these are two different promises, so
+                the sentence that describes publishing has to be two sentences. */}
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {isActive
-                ? "Live — anyone with the URL can submit, no login."
-                : "Draft — the public URL returns not found."}
+              {isClientRequest
+                ? isActive
+                  ? "Live — anyone with the URL can submit, no login."
+                  : "Draft — the public URL returns not found."
+                : isActive
+                  ? "Live — signed-in staff can fill it in. There is no public link."
+                  : "Draft — nobody can fill it in yet."}
             </p>
             {isActive && !departmentId ? (
               <p className="mt-1 text-xs text-warning">
-                Choose a department first, or submissions have nowhere to go.
+                {isClientRequest
+                  ? "Choose a department first, or submissions have nowhere to go."
+                  : "Choose a department first — a form with none cannot be published."}
               </p>
             ) : null}
           </div>

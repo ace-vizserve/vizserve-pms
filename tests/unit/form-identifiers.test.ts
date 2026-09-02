@@ -18,12 +18,21 @@ import {
 
 /** The regexes live in `formSettingsSchema`; parse through it rather than copying them. */
 function accepts(field: "slug" | "reference_prefix", value: string): boolean {
+  // P7-66 — every key is stated. `formSettingsSchema` has no defaults: an
+  // UPDATE that omits a field is refused rather than silently overwriting what
+  // is stored, which is the whole point of that change.
   const parsed = formSettingsSchema.safeParse({
+    purpose: "CLIENT_REQUEST",
     name: "A form",
     slug: field === "slug" ? value : "a-form",
-    reference_prefix: field === "reference_prefix" ? value : "AAA",
+    description: "",
     department_id: null,
+    reference_prefix: field === "reference_prefix" ? value : "AAA",
+    is_active: false,
+    requires_attachment: false,
     sla_minutes: 2400,
+    default_list_id: null,
+    client_approval_days: 3,
   });
   return parsed.success;
 }

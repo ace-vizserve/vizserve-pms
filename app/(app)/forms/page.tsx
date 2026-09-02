@@ -26,7 +26,13 @@ export default async function FormsPage() {
 
   const { data: forms } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, name, slug, is_public, is_active, reference_prefix, department_id, created_at")
+    // P7-66 — `purpose` for the Type column, `is_public` still for the public
+    // URL cell. They cannot disagree (the CHECK sees to that), but they answer
+    // different questions: one is what the form IS, the other is whether the
+    // /request/ route will serve it.
+    .select(
+      "id, name, slug, purpose, is_public, is_active, reference_prefix, department_id, created_at",
+    )
     .order("created_at", { ascending: false });
 
   const { data: departments } = await supabase.from("vizserve_pms_departments").select("id, name");
