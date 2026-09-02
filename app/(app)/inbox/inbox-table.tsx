@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import type { VizservePmsNotificationType } from "@/lib/database.types";
 import { formatDateTime } from "@/lib/dates";
 import { NOTIFICATION_TYPE_LABELS } from "@/lib/notifications";
@@ -31,7 +31,18 @@ export type Notification = {
   created_at: string;
 };
 
-export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React.ReactNode }) {
+export function InboxTable({
+  rows,
+  empty,
+  toolbar,
+  count,
+}: {
+  rows: Notification[];
+  empty: React.ReactNode;
+  /** Search and filters, for the table's own header strip. */
+  toolbar?: React.ReactNode;
+  count?: React.ReactNode;
+}) {
 
   const columns: Column<Notification>[] = [
     {
@@ -137,24 +148,16 @@ export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React
   const { visibility, onVisibilityChange } = useColumnVisibility("inbox", columns);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
-
-      <DataTable
+    <DataTable
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
       rows={rows}
       getRowKey={(item) => item.id}
+      toolbar={toolbar}
+      count={count}
       urlSort
       empty={empty}
       />
-    </div>
   );
 }

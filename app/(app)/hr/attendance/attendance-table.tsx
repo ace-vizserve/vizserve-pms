@@ -7,9 +7,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import type { AttendanceSummary } from "@/lib/attendance-summary";
 
 /** `2026-03` → `March 2026`, from the parts rather than through `Date`. */
@@ -224,26 +223,6 @@ export function AttendanceTable({
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-1.5">
-          <Label htmlFor="search" className="text-xs">
-            Find someone
-          </Label>
-          <Input
-            id="search"
-            value={query}
-            placeholder="Name or department"
-            onChange={(event) => setQuery(event.target.value)}
-            className="h-8 w-56"
-          />
-        </div>
-      </div>
-
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
       </div>
 
       <DataTable
@@ -251,6 +230,22 @@ export function AttendanceTable({
         onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
         rows={rows}
+        toolbar={
+          <Input
+            id="search"
+            value={query}
+            placeholder="Find someone by name or department"
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-9 w-full sm:w-64"
+            aria-label="Find someone"
+          />
+        }
+        count={
+          <>
+            <span className="tabular-nums">{rows.length}</span>{" "}
+            {rows.length === 1 ? "person" : "people"}
+          </>
+        }
         getRowKey={(row) => row.userId}
         empty="Nobody to show for this month."
       />

@@ -172,28 +172,29 @@ export default async function RequestsPage({
 
   return (
     <PageShell>
-      <div className="flex flex-wrap items-end gap-3">
-        <ListSearch
-          initial={term}
-          basePath="/requests"
-          id="requests-search"
-          placeholder="Search reference, title or requester"
-          className="w-full sm:w-64 lg:w-72"
-        />
-
-        <RequestFilters forms={forms ?? []} />
-      </div>
-
-      {/* The readout describes the RESULTS when anything is narrowing them.
-          A total that ignores the filters above it is the kind of mismatch that
-          makes people distrust both numbers. */}
-      <p className="-mt-1 text-xs text-muted-foreground">
-        <span className="tabular-nums">{total}</span> {total === 1 ? "request" : "requests"}
-        {isFiltered ? " matching" : " in total"}
-        {term ? <> for &ldquo;{term}&rdquo;</> : null}
-      </p>
-
       <RequestsTable
+        toolbar={
+          <>
+            <ListSearch
+              initial={term}
+              basePath="/requests"
+              id="requests-search"
+              placeholder="Search reference, title or requester"
+              className="w-full sm:w-56 lg:w-64"
+            />
+
+            <RequestFilters forms={forms ?? []} />
+          </>
+        }
+        /* The readout describes the RESULTS, beside the filters that produced
+           them — a total that ignores the filters above it is the kind of
+           mismatch that makes people distrust both numbers. */
+        count={
+          <>
+            <span className="tabular-nums">{total}</span> {total === 1 ? "request" : "requests"}
+            {isFiltered ? " matching" : " in total"}
+          </>
+        }
         rows={rows}
         formNames={formNames}
         formSlaMinutes={formSlaMinutes}

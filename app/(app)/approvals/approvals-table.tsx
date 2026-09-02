@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
 import type { InternalRequestRow } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
@@ -137,19 +137,6 @@ export function Section({
 
   return (
     <section className="space-y-3">
-      <div className="flex items-end justify-between gap-3">
-        <div>
-          <h2 className="text-sm font-semibold">{title}</h2>
-          <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
-        </div>
-
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
-
       <DataTable
         columns={columns}
         rows={rows}
@@ -157,6 +144,22 @@ export function Section({
         urlSort
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
+        /* The section heading IS this table's toolbar. Two tables stacked on one
+           page need to say which is which, and a heading floating above an
+           unrelated bordered box is the arrangement that made them look like
+           captions for the wrong list. */
+        toolbar={
+          <div>
+            <h2 className="text-sm font-semibold">{title}</h2>
+            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          </div>
+        }
+        count={
+          <>
+            <span className="tabular-nums">{rows.length}</span>{" "}
+            {rows.length === 1 ? "request" : "requests"}
+          </>
+        }
         empty={empty}
       />
     </section>

@@ -3,7 +3,7 @@
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { Chip } from "@/components/status-badge";
 import { auditActionTone, auditEntityHref, auditEntityLabel } from "@/lib/audit";
 import { AuditDetails, type AuditEntry } from "./audit-details";
@@ -19,7 +19,18 @@ import { AuditDetails, type AuditEntry } from "./audit-details";
  * the whole history — on the one page in this app people read for
  * accountability.
  */
-export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.ReactNode }) {
+export function AuditTable({
+  rows,
+  empty,
+  toolbar,
+  count,
+}: {
+  rows: AuditEntry[];
+  empty: React.ReactNode;
+  /** Search and filters, for the table's own header strip. */
+  toolbar?: React.ReactNode;
+  count?: React.ReactNode;
+}) {
 
   const columns: Column<AuditEntry>[] = [
     {
@@ -103,24 +114,16 @@ export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.R
   const { visibility, onVisibilityChange } = useColumnVisibility("audit", columns);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
-
-      <DataTable
+    <DataTable
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
       rows={rows}
       getRowKey={(entry) => entry.id}
+      toolbar={toolbar}
+      count={count}
       urlSort
       empty={empty}
       />
-    </div>
   );
 }

@@ -15,6 +15,7 @@ import {
 } from "@tanstack/react-table";
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 
+import { DataTableColumns } from "@/components/data-table-columns";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -38,9 +39,18 @@ import {
  */
 export function DataTableShell({
   className,
+  header,
   children,
 }: {
   className?: string;
+  /**
+   * The controls strip, ABOVE the horizontal scroller rather than inside it.
+   *
+   * ⚠️ THE PLACEMENT IS THE POINT. The rows scroll sideways on a wide table; a
+   * search box that scrolled away with them would be a control you have to go
+   * looking for. It sits outside the scroller so it stays put.
+   */
+  header?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -50,6 +60,7 @@ export function DataTableShell({
         className,
       )}
     >
+      {header}
       <div className="overflow-x-auto">{children}</div>
     </div>
   );
@@ -167,6 +178,8 @@ export function DataTable<T>({
   appendRow,
   className,
   urlSort = false,
+  toolbar,
+  count,
   getSubRows,
   columnVisibility,
   onColumnVisibilityChange,
@@ -217,6 +230,19 @@ export function DataTable<T>({
    * each side of the wire, no prop to keep in step.
    */
   urlSort?: boolean;
+  /**
+   * The search box and filter controls, rendered in the table's own header
+   * strip.
+   *
+   * ⚠️ THEY BELONG TO THE TABLE, so they live inside its border. Every page
+   * used to lay its own controls out and the columns menu was rendered
+   * separately by the table component, which is exactly how the button ended up
+   * stranded on its own row underneath: two owners, one row, no way to align
+   * them. One owner now.
+   */
+  toolbar?: React.ReactNode;
+  /** The result count, beside the filters that produced it. */
+  count?: React.ReactNode;
   /**
    * The children of a row, if it has any. Supplying it turns on expand/collapse.
    *
@@ -496,9 +522,46 @@ export function DataTable<T>({
     </Table>
   );
 
+  /*
+   * `bare` tables get no strip. They are already inside somebody else's panel —
+   * the status groups on /tasks — and that page carries ONE columns menu above
+   * all eight of them, so a strip per group would be eight menus disagreeing
+   * about the same setting.
+   */
   if (bare) return body;
 
-  return <DataTableShell className={className}>{body}</DataTableShell>;
+  const hasStrip = Boolean(toolbar || count || onColumnVisibilityChange);
+
+  return (
+    <DataTableShell
+      className={className}
+      header={
+        hasStrip ? (
+          <div className="flex flex-wrap items-center gap-3 border-b px-3 py-2.5">
+            {toolbar}
+
+            {/* `ml-auto` on the right-hand group rather than a spacer element,
+                so the row still collapses sensibly when it wraps narrow. */}
+            <div className="ml-auto flex items-center gap-3">
+              {count ? (
+                <span className="text-xs text-muted-foreground">{count}</span>
+              ) : null}
+
+              {onColumnVisibilityChange ? (
+                <DataTableColumns
+                  columns={columns}
+                  visibility={columnVisibility ?? {}}
+                  onVisibilityChange={onColumnVisibilityChange}
+                />
+              ) : null}
+            </div>
+          </div>
+        ) : null
+      }
+    >
+      {body}
+    </DataTableShell>
+  );
 }
 
 /**

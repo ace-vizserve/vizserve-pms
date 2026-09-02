@@ -27,7 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { formatDate } from "@/lib/dates";
 import {
@@ -215,14 +215,6 @@ export function EventsTable({
           <Plus />
           Add event
         </Button>
-      </div>
-
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
       </div>
 
       <DataTable

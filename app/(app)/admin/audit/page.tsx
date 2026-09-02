@@ -241,28 +241,29 @@ export default async function AuditPage({
         <QueryError what="the audit trail" message={error.message} />
       ) : (
         <>
-          <div className="flex flex-wrap items-end gap-3">
-            <ListSearch
-              initial={term}
-              basePath="/admin/audit"
-              id="audit-search"
-              placeholder="Action, or paste a record id"
-              className="w-full sm:w-64 lg:w-72"
-            />
-
-            <AuditFilters entity={entity} actor={actor} period={period} actors={actors} />
-          </div>
-
-          {/* The readout for the filters directly above it. The window is named
-              even when nothing else is filtering, because "412 entries" without
-              "in the last 30 days" is a number that means the wrong thing. */}
-          <p className="-mt-1 text-xs text-muted-foreground">
-            <span className="tabular-nums">{total}</span> {total === 1 ? "entry" : "entries"}
-            {term ? <> matching &ldquo;{term}&rdquo;</> : null}
-            {period === "all" ? " in total" : ` in the last ${period} days`}
-          </p>
-
           <AuditTable
+            toolbar={
+              <>
+                <ListSearch
+                  initial={term}
+                  basePath="/admin/audit"
+                  id="audit-search"
+                  placeholder="Action, or paste a record id"
+                  className="w-full sm:w-56 lg:w-64"
+                />
+
+                <AuditFilters entity={entity} actor={actor} period={period} actors={actors} />
+              </>
+            }
+            /* The window is named even when nothing else is filtering, because
+               "412 entries" without "in the last 30 days" is a number that means
+               the wrong thing. */
+            count={
+              <>
+                <span className="tabular-nums">{total}</span> {total === 1 ? "entry" : "entries"}
+                {period === "all" ? " in total" : ` in the last ${period} days`}
+              </>
+            }
             rows={rows}
             empty={
               isFiltered ? (

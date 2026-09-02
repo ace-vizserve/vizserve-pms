@@ -4,7 +4,6 @@ import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
 import {
-  DataTableColumns,
   useColumnVisibility,
 } from "@/components/data-table-columns";
 import { TableCell, TableHead, TableRow } from "@/components/ui/table";
@@ -348,16 +347,7 @@ export function DtrTable({
   ];
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
-
-      <DataTable
+    <DataTable
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
         className={className}
@@ -382,7 +372,6 @@ export function DtrTable({
           </TableRow>
         }
       />
-    </div>
   );
 }
 

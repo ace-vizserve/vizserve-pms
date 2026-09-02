@@ -5,7 +5,6 @@ import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
 import {
-  DataTableColumns,
   useColumnVisibility,
 } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
@@ -53,6 +52,8 @@ export function RequestsTable({
   reviewerNames,
   isFiltered,
   errorMessage,
+  toolbar,
+  count,
 }: {
   rows: RequestRow[];
   formNames: Record<string, string>;
@@ -62,6 +63,9 @@ export function RequestsTable({
   reviewerNames: Record<string, string>;
   isFiltered: boolean;
   errorMessage?: string;
+  /** Search and filters, for the table's own header strip. */
+  toolbar?: React.ReactNode;
+  count?: React.ReactNode;
 }) {
 
   const columns: Column<RequestRow>[] = [
@@ -234,19 +238,12 @@ export function RequestsTable({
   const { visibility, onVisibilityChange } = useColumnVisibility("requests", columns);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
-
-      <DataTable
+    <DataTable
         columns={columns}
         rows={rows}
         getRowKey={(request) => request.id}
+      toolbar={toolbar}
+      count={count}
         /* Capped at 200 rows on the server, so the browser must not pretend to
          sort the whole queue. */
         urlSort
@@ -270,6 +267,5 @@ export function RequestsTable({
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
       />
-    </div>
   );
 }

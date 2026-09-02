@@ -17,7 +17,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { Chip } from "@/components/status-badge";
 import { formatAppTime } from "@/lib/dates";
@@ -287,17 +287,10 @@ export function UsersTable({
 
   return (
     <>
+      {/* The two buttons are PAGE actions, not table controls — they create and
+          export rather than narrow what is on screen — so they stay out here.
+          The search belongs to the table and has moved into its header strip. */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="relative min-w-0 flex-1 sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Search name, email, role or gender"
-            className="pl-8"
-            aria-label="Search users"
-          />
-        </div>
         <div className="flex shrink-0 items-center gap-2 sm:ml-auto">
           {/* P7-53. This WAS a year picker beside a one-click download, on the
               argument that a dialog to confirm a download nobody configures is
@@ -321,13 +314,6 @@ export function UsersTable({
           ring, and the two least-load-bearing columns collapse below `lg` — the
           page itself never scrolls sideways, which is the thing that actually
           breaks a layout. */}
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
 
       <DataTable
         columnVisibility={visibility}
@@ -335,6 +321,24 @@ export function UsersTable({
         columns={columns}
         rows={filtered}
         getRowKey={(user) => user.id}
+        toolbar={
+          <div className="relative w-full sm:w-64">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search name, email, role or gender"
+              className="h-9 pl-8"
+              aria-label="Search users"
+            />
+          </div>
+        }
+        count={
+          <>
+            <span className="tabular-nums">{filtered.length}</span>{" "}
+            {filtered.length === 1 ? "user" : "users"}
+          </>
+        }
         empty={
           <EmptyState
             icon={<Search />}

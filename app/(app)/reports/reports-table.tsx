@@ -3,7 +3,7 @@
 import { BarChart3 } from "lucide-react";
 
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { TASK_STATUSES, TASK_STATUS_LABELS } from "@/lib/schemas/tasks";
@@ -155,16 +155,7 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
   const { visibility, onVisibilityChange } = useColumnVisibility("reports", columns);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
-
-      <DataTable
+    <DataTable
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
@@ -178,6 +169,5 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         />
       }
       />
-    </div>
   );
 }

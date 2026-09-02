@@ -4,7 +4,7 @@ import { FileText } from "lucide-react";
 import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { Chip } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
@@ -203,16 +203,7 @@ export function FormsTable({
   const { visibility, onVisibilityChange } = useColumnVisibility("forms", columns);
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
-
-      <DataTable
+    <DataTable
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
@@ -232,6 +223,5 @@ export function FormsTable({
         />
       }
       />
-    </div>
   );
 }

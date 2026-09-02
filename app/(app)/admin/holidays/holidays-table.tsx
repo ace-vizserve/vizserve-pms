@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { formatDate } from "@/lib/dates";
 import { isClosedYear } from "@/lib/schemas/holidays";
@@ -221,14 +221,6 @@ export function HolidaysTable({
           been reported — and possibly paid. Every change is written to the audit log.
         </p>
       ) : null}
-
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
 
       <DataTable
         columnVisibility={visibility}

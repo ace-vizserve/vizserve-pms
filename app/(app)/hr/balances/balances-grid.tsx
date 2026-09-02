@@ -17,9 +17,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { DataTable, type Column } from "@/components/data-table";
-import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
+import { useColumnVisibility } from "@/components/data-table-columns";
 import { leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { cn } from "@/lib/utils";
 import type { Gender } from "@/lib/schemas/users";
@@ -111,7 +115,9 @@ export function BalancesGrid({
       leaveTypes.filter(
         (type) =>
           type.is_active ||
-          people.some((person) => allocations[`${person.id}:${type.id}`] !== undefined),
+          people.some(
+            (person) => allocations[`${person.id}:${type.id}`] !== undefined,
+          ),
       ),
     [leaveTypes, people, allocations],
   );
@@ -119,7 +125,10 @@ export function BalancesGrid({
   const visiblePeople = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return people.filter((person) => {
-      if (department !== ALL_DEPARTMENTS && person.primary_department_id !== department) {
+      if (
+        department !== ALL_DEPARTMENTS &&
+        person.primary_department_id !== department
+      ) {
         return false;
       }
       if (!needle) return true;
@@ -143,7 +152,10 @@ export function BalancesGrid({
 
   /** Cells whose value differs from what the server sent. */
   const changedKeys = useMemo(
-    () => Object.keys(draft).filter((key) => draft[key] !== cellValue(allocations[key])),
+    () =>
+      Object.keys(draft).filter(
+        (key) => draft[key] !== cellValue(allocations[key]),
+      ),
     [draft, allocations],
   );
 
@@ -176,7 +188,13 @@ export function BalancesGrid({
     setDraft((current) => {
       const next = { ...current };
       for (const person of visiblePeople) {
-        if (!leaveTypeApplies(typeFor(typeId)?.applies_to_gender ?? null, person.gender)) continue;
+        if (
+          !leaveTypeApplies(
+            typeFor(typeId)?.applies_to_gender ?? null,
+            person.gender,
+          )
+        )
+          continue;
         next[`${person.id}:${typeId}`] = value;
       }
       return next;
@@ -218,7 +236,9 @@ export function BalancesGrid({
         return;
       }
 
-      toast.success(`Saved ${result.data.saved} ${result.data.saved === 1 ? "person" : "people"}.`);
+      toast.success(
+        `Saved ${result.data.saved} ${result.data.saved === 1 ? "person" : "people"}.`,
+      );
       router.refresh();
     });
   }
@@ -259,7 +279,8 @@ export function BalancesGrid({
       className: "hidden lg:table-cell whitespace-nowrap text-muted-foreground",
       cell: (person) =>
         person.primary_department_id ? (
-          (departments.find((d) => d.id === person.primary_department_id)?.name ?? "—")
+          (departments.find((d) => d.id === person.primary_department_id)
+            ?.name ?? "—")
         ) : (
           <span className="text-foreground-faint">—</span>
         ),
@@ -280,12 +301,18 @@ export function BalancesGrid({
        */
       cell: (person) => {
         const total = columnsTypes.reduce((sum, type) => {
-          const raw = draft[`${person.id}:${type.id}`] ?? cellValue(allocations[`${person.id}:${type.id}`]);
+          const raw =
+            draft[`${person.id}:${type.id}`] ??
+            cellValue(allocations[`${person.id}:${type.id}`]);
           const days = Number(raw);
           return sum + (Number.isFinite(days) ? days : 0);
         }, 0);
 
-        return total === 0 ? <span className="text-foreground-faint">—</span> : total;
+        return total === 0 ? (
+          <span className="text-foreground-faint">—</span>
+        ) : (
+          total
+        );
       },
     },
     ...columnsTypes.map((type): Column<BalancePerson> => ({
@@ -304,11 +331,16 @@ export function BalancesGrid({
           and `break-words` stops a single long word forcing the column wider.
         */
         <div className="flex flex-col items-end gap-0.5 text-right">
-          <span title={type.label} className="line-clamp-2 break-words whitespace-normal">
+          <span
+            title={type.label}
+            className="line-clamp-2 break-words whitespace-normal"
+          >
             {type.label}
           </span>
           {!type.is_active ? (
-            <span className="text-2xs font-normal text-muted-foreground">retired</span>
+            <span className="text-2xs font-normal text-muted-foreground">
+              retired
+            </span>
           ) : null}
         </div>
       ),
@@ -322,7 +354,10 @@ export function BalancesGrid({
         // so an allocation here would be days they can never spend.
         if (!leaveTypeApplies(type.applies_to_gender, person.gender)) {
           return (
-            <span className="text-xs text-foreground-faint" title="Does not apply to this person">
+            <span
+              className="text-xs text-foreground-faint"
+              title="Does not apply to this person"
+            >
               —
             </span>
           );
@@ -374,7 +409,10 @@ export function BalancesGrid({
     })),
   ];
 
-  const { visibility, onVisibilityChange } = useColumnVisibility("hr-balances", columns);
+  const { visibility, onVisibilityChange } = useColumnVisibility(
+    "hr-balances",
+    columns,
+  );
 
   return (
     <>
@@ -394,14 +432,24 @@ export function BalancesGrid({
               <Link
                 href={`/hr/balances?year=${year - 1}`}
                 aria-label={`Go to ${year - 1}`}
-                className={buttonVariants({ variant: "outline", size: "icon-sm" })}>
+                className={buttonVariants({
+                  variant: "outline",
+                  size: "icon-sm",
+                })}
+              >
                 <ChevronLeft />
               </Link>
-              <span className="min-w-14 text-center text-sm font-medium tabular-nums">{year}</span>
+              <span className="min-w-14 text-center text-sm font-medium tabular-nums">
+                {year}
+              </span>
               <Link
                 href={`/hr/balances?year=${year + 1}`}
                 aria-label={`Go to ${year + 1}`}
-                className={buttonVariants({ variant: "outline", size: "icon-sm" })}>
+                className={buttonVariants({
+                  variant: "outline",
+                  size: "icon-sm",
+                })}
+              >
                 <ChevronRight />
               </Link>
             </div>
@@ -414,7 +462,8 @@ export function BalancesGrid({
             <Select
               items={departmentItems}
               value={department}
-              onValueChange={(value) => setDepartment(value ?? ALL_DEPARTMENTS)}>
+              onValueChange={(value) => setDepartment(value ?? ALL_DEPARTMENTS)}
+            >
               <SelectTrigger id="department" className="h-9 w-44">
                 <SelectValue />
               </SelectTrigger>
@@ -429,28 +478,21 @@ export function BalancesGrid({
             </Select>
           </div>
 
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="search" className="text-xs">
-              Find someone
-            </Label>
-            <Input
-              id="search"
-              value={query}
-              placeholder="Name or email"
-              onChange={(event) => setQuery(event.target.value)}
-              className="h-9 w-52"
-            />
-          </div>
-
           {/* Nine [box][button] pairs, wrapping onto two lines, for a job done
               once each January. One control now — see `FillColumn`. */}
           {columnsTypes.length > 0 ? (
-            <FillColumn types={columnsTypes} people={visiblePeople.length} onFill={fillColumn} />
+            <FillColumn
+              types={columnsTypes}
+              people={visiblePeople.length}
+              onFill={fillColumn}
+            />
           ) : null}
         </div>
 
         <div className="flex items-center gap-3">
-          {year !== currentYear ? <Badge variant="outline">Not the current year</Badge> : null}
+          {year !== currentYear ? (
+            <Badge variant="outline">Not the current year</Badge>
+          ) : null}
           {/*
             OUTLINE UNTIL THERE IS SOMETHING TO SAVE. A disabled PRIMARY button
             is a brand-filled rectangle at half opacity, and that is this page's
@@ -463,7 +505,8 @@ export function BalancesGrid({
             variant={changedKeys.length === 0 ? "outline" : "default"}
             onClick={save}
             loading={pending}
-            disabled={changedKeys.length === 0}>
+            disabled={changedKeys.length === 0}
+          >
             {changedKeys.length === 0
               ? "No changes"
               : `Save ${changedKeys.length} ${changedKeys.length === 1 ? "change" : "changes"}`}
@@ -473,13 +516,6 @@ export function BalancesGrid({
 
       {/* No wrapper: `DataTable` renders inside `DataTableShell`, which is
           already the bordered panel AND the horizontal scroll container. */}
-      <div className="flex justify-end">
-        <DataTableColumns
-          columns={columns}
-          visibility={visibility}
-          onVisibilityChange={onVisibilityChange}
-        />
-      </div>
 
       <DataTable
         columnVisibility={visibility}
@@ -487,6 +523,25 @@ export function BalancesGrid({
         columns={columns}
         rows={visiblePeople}
         getRowKey={(person) => person.id}
+        /* The department Select stays in the page row above: it narrows who is
+           ELIGIBLE and pairs with the Fill control that acts on that scope. The
+           name search narrows what is on screen, so it belongs to the table. */
+        toolbar={
+          <Input
+            id="search"
+            value={query}
+            placeholder="Find someone by name or email"
+            onChange={(event) => setQuery(event.target.value)}
+            className="h-9 w-full sm:w-64"
+            aria-label="Find someone"
+          />
+        }
+        count={
+          <>
+            <span className="tabular-nums">{visiblePeople.length}</span>{" "}
+            {visiblePeople.length === 1 ? "person" : "people"}
+          </>
+        }
         rowClassName={(person) => (person.is_active ? undefined : "opacity-60")}
         empty="Nobody matches these filters."
       />
@@ -527,7 +582,9 @@ function FillColumn({
 
   // Without this the trigger showed the leave type's UUID. See the note beside
   // `departmentItems`.
-  const typeItems = Object.fromEntries(types.map((type) => [type.id, type.label]));
+  const typeItems = Object.fromEntries(
+    types.map((type) => [type.id, type.label]),
+  );
 
   const ready = typeId !== "" && value.trim() !== "" && people > 0;
 
@@ -544,9 +601,14 @@ function FillColumn({
       onOpenChange={(next) => {
         setOpen(next);
         if (!next) setValue("");
-      }}>
+      }}
+    >
       <PopoverTrigger
-        className={cn(buttonVariants({ variant: "outline", size: "sm" }), "h-9 gap-1.5")}>
+        className={cn(
+          buttonVariants({ variant: "outline", size: "sm" }),
+          "h-9 gap-1.5",
+        )}
+      >
         <CopyPlus className="size-3.5" aria-hidden />
         Fill a column
       </PopoverTrigger>
@@ -558,7 +620,8 @@ function FillColumn({
             <Select
               items={typeItems}
               value={typeId}
-              onValueChange={(next) => setTypeId(next ?? "")}>
+              onValueChange={(next) => setTypeId(next ?? "")}
+            >
               <SelectTrigger id="fill-type" className="w-full">
                 <SelectValue />
               </SelectTrigger>

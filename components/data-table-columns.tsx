@@ -9,6 +9,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
@@ -134,7 +135,10 @@ function subscribe(onChange: () => void) {
   };
 }
 
-export function useColumnVisibility(tableId: string, columns?: HideableColumn[]) {
+export function useColumnVisibility(
+  tableId: string,
+  columns?: HideableColumn[],
+) {
   const storageKey = `vizserve-pms.columns.${tableId}`;
 
   const raw = useSyncExternalStore(
@@ -218,26 +222,36 @@ export function DataTableColumns({
       />
 
       <DropdownMenuContent align="end" className="w-52">
-        <DropdownMenuLabel>Columns</DropdownMenuLabel>
-        <DropdownMenuSeparator />
+        {/*
+          ⚠️ THE GROUP IS REQUIRED, NOT DECORATION. `DropdownMenuLabel` is Base
+          UI's `Menu.GroupLabel` and `DropdownMenuCheckboxItem` its
+          `Menu.CheckboxItem`; both read `MenuGroupContext`, so outside a
+          `Menu.Group` they throw "MenuGroupContext is missing" and take the
+          whole page down with them. Radix tolerated a bare label — this is one
+          of the places the two libraries genuinely differ.
+        */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Columns</DropdownMenuLabel>
+          <DropdownMenuSeparator />
 
-        {hideable.map((column) => (
-          <DropdownMenuCheckboxItem
-            key={column.key}
-            checked={visibility[column.key] !== false}
-            onCheckedChange={(checked) =>
-              onVisibilityChange({
-                ...visibility,
-                [column.key]: Boolean(checked),
-              })
-            }
-          >
-            {/* `header` is a ReactNode and is usually a plain string; anything
-                richer would not belong in a menu row, so it is rendered as-is
-                and the column is expected to keep its heading readable. */}
-            {column.header}
-          </DropdownMenuCheckboxItem>
-        ))}
+          {hideable.map((column) => (
+            <DropdownMenuCheckboxItem
+              key={column.key}
+              checked={visibility[column.key] !== false}
+              onCheckedChange={(checked) =>
+                onVisibilityChange({
+                  ...visibility,
+                  [column.key]: Boolean(checked),
+                })
+              }
+            >
+              {/* `header` is a ReactNode and is usually a plain string; anything
+                  richer would not belong in a menu row, so it is rendered as-is
+                  and the column is expected to keep its heading readable. */}
+              {column.header}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );

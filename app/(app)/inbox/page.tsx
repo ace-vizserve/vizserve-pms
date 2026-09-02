@@ -181,51 +181,46 @@ export default async function InboxPage({
         stationary toolbar cannot go out of register with a header it does not
         touch.
       */}
-      <div className="flex flex-wrap items-end gap-3">
-        <ListSearch
-          initial={term}
-          basePath="/inbox"
-          id="inbox-search"
-          placeholder="Search notifications"
-          className="w-full sm:w-64 lg:w-72"
-        />
-
-        <InboxFilters type={type} read={read} />
-
-        {/* Marking all read while a search is active would silently clear rows
-            the person cannot see, so the control goes away — searching is a
-            reading task, not a triage one. */}
-        {unreadCount > 0 && !term ? (
-          <form action={markAllRead} className="ml-auto">
-            <Button type="submit" variant="outline">
-              <CheckCheck />
-              Mark all read
-            </Button>
-          </form>
-        ) : null}
-      </div>
-
-      {/* The readout for the filters directly above it. When anything is
-          narrowing the list the count has to describe the RESULTS — showing
-          "1609 unread" above nine filtered rows is the kind of mismatch that
-          makes people distrust both numbers. */}
-      <p className="-mt-1 text-xs text-muted-foreground">
-        {isFiltered ? (
+      <InboxTable
+        toolbar={
           <>
-            <span className="tabular-nums">{total}</span> {total === 1 ? "result" : "results"}
-            {term ? <> for &ldquo;{term}&rdquo;</> : null}
-            {unreadCount > 0 ? (
-              <span className="text-muted-foreground/70"> · {unreadCount} unread in total</span>
+            <ListSearch
+              initial={term}
+              basePath="/inbox"
+              id="inbox-search"
+              placeholder="Search notifications"
+              className="w-full sm:w-56 lg:w-64"
+            />
+
+            <InboxFilters type={type} read={read} />
+
+            {/* Marking all read while a search is active would silently clear
+                rows the person cannot see, so the control goes away — searching
+                is a reading task, not a triage one. */}
+            {unreadCount > 0 && !term ? (
+              <form action={markAllRead}>
+                <Button type="submit" variant="outline" size="sm">
+                  <CheckCheck />
+                  Mark all read
+                </Button>
+              </form>
             ) : null}
           </>
-        ) : unreadCount > 0 ? (
-          `${unreadCount} unread`
-        ) : (
-          "All read"
-        )}
-      </p>
-
-      <InboxTable
+        }
+        count={
+          isFiltered ? (
+            <>
+              <span className="tabular-nums">{total}</span> {total === 1 ? "result" : "results"}
+              {unreadCount > 0 ? (
+                <span className="text-muted-foreground/70"> · {unreadCount} unread</span>
+              ) : null}
+            </>
+          ) : unreadCount > 0 ? (
+            `${unreadCount} unread`
+          ) : (
+            "All read"
+          )
+        }
         rows={rows}
         empty={
           isFiltered ? (
