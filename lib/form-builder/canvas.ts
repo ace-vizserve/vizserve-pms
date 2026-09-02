@@ -392,7 +392,16 @@ export function unsavableReason(
     // question, and accepting one here would hand the save a document the
     // library refuses.
     if (entity.attributes.label.trim() === "") {
-      return { entityId, message: "Give this question a name and it will save itself." };
+      // A page break needs a title for the same reason a question does — the
+      // NOT NULL `field_key` is derived from it — but calling it a question is
+      // the screen describing the wrong thing.
+      return {
+        entityId,
+        message:
+          entity.type === "section"
+            ? "Give this page break a title and it will save itself."
+            : "Give this question a name and it will save itself.",
+      };
     }
 
     if (entity.type === "select" || entity.type === "multiselect") {

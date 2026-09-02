@@ -1,23 +1,18 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { useForm, type Resolver } from "react-hook-form";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
+import { formatSlaDuration } from "@/lib/schemas/duration";
 import {
   DEFAULT_SLA_MINUTES,
   formCreateSchema,
@@ -27,7 +22,6 @@ import {
   type FormSettingsInput,
   type FormSettingsValues,
 } from "@/lib/schemas/forms";
-import { formatSlaDuration } from "@/lib/schemas/duration";
 import { createForm, updateFormSettings } from "./actions";
 
 type Department = { id: string; name: string };
@@ -109,9 +103,7 @@ export function ClientFormSettings({
      * server draws the same distinction; this is only so the client stops
      * reporting a required field the create path is happy to fill in itself.
      */
-    resolver: zodResolver(
-      formId ? formSettingsSchema : formCreateSchema,
-    ) as unknown as Resolver<FormSettingsValues>,
+    resolver: zodResolver(formId ? formSettingsSchema : formCreateSchema) as unknown as Resolver<FormSettingsValues>,
     defaultValues: {
       // See the note above: a constant, not a control and not a pass-through.
       purpose: "CLIENT_REQUEST",
@@ -197,8 +189,7 @@ export function ClientFormSettings({
      */
     .sort((a, b) => Number(b.form_id === formId) - Number(a.form_id === formId));
 
-  const ownListLabel = (list: List) =>
-    list.form_id === formId ? `${list.name} — this form's list` : list.name;
+  const ownListLabel = (list: List) => (list.form_id === formId ? `${list.name} — this form's list` : list.name);
 
   /*
    * P7-24 — SAY WHERE REQUESTS ACTUALLY LAND.
@@ -256,7 +247,7 @@ export function ClientFormSettings({
   });
 
   return (
-    <form onSubmit={onSubmit} className="space-y-5" noValidate>
+    <form onSubmit={onSubmit} className="p-6 bg-card rounded-xl grade-card border space-y-5" noValidate>
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="name">Name</Label>
@@ -295,8 +286,7 @@ export function ClientFormSettings({
           <Select
             items={departmentItems}
             value={departmentId ?? ""}
-            onValueChange={(value) => setValue("department_id", value, { shouldValidate: true })}
-          >
+            onValueChange={(value) => setValue("department_id", value, { shouldValidate: true })}>
             <SelectTrigger id="department" aria-invalid={Boolean(errors.department_id)}>
               <SelectValue placeholder="Choose" />
             </SelectTrigger>
@@ -315,12 +305,8 @@ export function ClientFormSettings({
             lands in, which is the first thing that happens to a client request
             and the one nobody can undo from the outside.
           */}
-          <p className="text-xs text-muted-foreground">
-            Routes submissions to this department&rsquo;s TL.
-          </p>
-          {errors.department_id ? (
-            <p className="text-xs text-destructive">{errors.department_id.message}</p>
-          ) : null}
+          <p className="text-xs text-muted-foreground">Routes submissions to this department&rsquo;s TL.</p>
+          {errors.department_id ? <p className="text-xs text-destructive">{errors.department_id.message}</p> : null}
         </div>
 
         <div className="space-y-2">
@@ -358,12 +344,10 @@ export function ClientFormSettings({
             {...register("sla_minutes")}
           />
           <p className="text-xs text-muted-foreground">
-            Turnaround standard for this form&rsquo;s work. 1d = 8 working hours. Internal
-            &mdash; the client never sees it.
+            Turnaround standard for this form&rsquo;s work. 1d = 8 working hours. Internal &mdash; the client never sees
+            it.
           </p>
-          {errors.sla_minutes ? (
-            <p className="text-xs text-destructive">{errors.sla_minutes.message}</p>
-          ) : null}
+          {errors.sla_minutes ? <p className="text-xs text-destructive">{errors.sla_minutes.message}</p> : null}
         </div>
       </div>
 
@@ -374,8 +358,7 @@ export function ClientFormSettings({
             items={listItems}
             value={watch("default_list_id") ?? NO_LIST}
             onValueChange={(value) => setValue("default_list_id", value === NO_LIST ? null : value)}
-            disabled={departmentLists.length === 0}
-          >
+            disabled={departmentLists.length === 0}>
             <SelectTrigger id="default_list">
               <SelectValue />
             </SelectTrigger>
@@ -405,13 +388,12 @@ export function ClientFormSettings({
               tell that from a bug. */}
           {routedElsewhere && ownList ? (
             <p className="rounded-md border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-foreground">
-              Requests from this form do <strong>not</strong> go to its own list
-              (&ldquo;{ownList.name}&rdquo;), which will stay empty.{" "}
+              Requests from this form do <strong>not</strong> go to its own list (&ldquo;{ownList.name}&rdquo;), which
+              will stay empty.{" "}
               <button
                 type="button"
                 className="font-medium underline underline-offset-2"
-                onClick={() => setValue("default_list_id", ownList.id, { shouldDirty: true })}
-              >
+                onClick={() => setValue("default_list_id", ownList.id, { shouldDirty: true })}>
                 Send them there instead
               </button>
             </p>
@@ -430,9 +412,7 @@ export function ClientFormSettings({
           />
           {/* Q6 — BUSINESS days. On calendar days, work sent Friday afternoon
               closes itself on Monday having given the client one working day. */}
-          <p className="text-xs text-muted-foreground">
-            Working days a client gets before the request auto-completes.
-          </p>
+          <p className="text-xs text-muted-foreground">Working days a client gets before the request auto-completes.</p>
           {errors.client_approval_days ? (
             <p className="text-xs text-destructive">{errors.client_approval_days.message}</p>
           ) : null}
@@ -476,24 +456,17 @@ export function ClientFormSettings({
                 : "Draft — the public URL returns not found."}
             </p>
             {isActive && !departmentId ? (
-              <p className="mt-1 text-xs text-warning">
-                Choose a department first, or submissions have nowhere to go.
-              </p>
+              <p className="mt-1 text-xs text-warning">Choose a department first, or submissions have nowhere to go.</p>
             ) : null}
           </div>
-          <Switch
-            id="is_active"
-            checked={isActive}
-            onCheckedChange={(checked) => setValue("is_active", checked)}
-          />
+          <Switch id="is_active" checked={isActive} onCheckedChange={(checked) => setValue("is_active", checked)} />
         </div>
       </div>
 
       {formError ? (
         <p
           role="alert"
-          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-        >
+          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {formError}
         </p>
       ) : null}

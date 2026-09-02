@@ -89,9 +89,7 @@ export function BuilderTabs({
         The rest is the mockup's `.maintabs`: full width, centred, `bg-card`, a
         hairline underneath.
       */}
-      <TabsList
-        variant="line"
-        className="w-full shrink-0 justify-center rounded-none border-0 border-b border-border bg-card py-6">
+      <TabsList className="w-full shrink-0 justify-center rounded-none border-0 border-b border-border bg-card py-6">
         <div className="max-w-md mx-auto space-x-4">
           <TabsTrigger value="questions">Questions</TabsTrigger>
           {responses === undefined ? null : (

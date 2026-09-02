@@ -12,7 +12,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { FileField } from "@/components/file-field";
 import {
   FieldRuntimeProvider,
+  FormPageNav,
   InterpreterFields,
+  useFormPages,
+  validateInterpreterPage,
   initialEntityValues,
   useFormInterpreterStore,
 } from "@/lib/form-builder/components";
@@ -131,6 +134,7 @@ export function PublicFormRenderer({
   const hasFileField = form.fields.some((field) => field.field_type === "file");
   const needsOwnAttachment = form.requires_attachment && !hasFileField;
 
+
   const [formAttachments, setFormAttachments] = useState<AttachmentRef[]>([]);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
@@ -192,6 +196,8 @@ export function PublicFormRenderer({
     control,
     handleSubmit,
     setError,
+    // P7-66 Phase 7 — Continue validates page one's fixed fields. See `onContinue`.
+    trigger,
     formState: { errors, isSubmitting },
   } = useForm<SubmissionFormValues>({
     // The five fixed fields only. The per-form fields are validated by their own
@@ -207,6 +213,56 @@ export function PublicFormRenderer({
       target_date: "",
     },
   });
+
+  /*
+   * P7-66 Phase 7 — WHICH PAGE IS SHOWING.
+   *
+   * The same `paginateFields` split the internal form and the builder's preview
+   * use, so a client walks the form in exactly the pages the builder drew. A
+   * form with no page breaks is one page and `FormPageNav` renders no navigation
+   * for it — the form is byte-for-byte what it was before this phase.
+   */
+  const pages = useFormPages(interpreterStore);
+  const [page, setPage] = useState(0);
+
+  function back() {
+    setFormError(null);
+    setPage((current) => Math.max(0, current - 1));
+  }
+
+  /*
+   * ⚠️ CONTINUE VALIDATES BEFORE IT ADVANCES, AND ON PAGE ONE IT HAS TWO
+   * HALVES TO VALIDATE.
+   *
+   * This form has two state owners — `react-hook-form` holds the five fixed
+   * fields, the interpreter store holds everything the form was built with — and
+   * page one carries both. So Continue asks both, and asks BOTH BEFORE
+   * deciding: `&&` would short-circuit, leaving the built questions on page one
+   * unmarked whenever a fixed field was also blank, and the client would be sent
+   * round the same page twice. Same reasoning as the submit handler's second
+   * argument below.
+   *
+   * Later pages have no fixed fields on them, so `trigger()` is not called —
+   * running it would mark the name and email fields red on page three, where
+   * nobody can see or fix them.
+   */
+  async function onContinue() {
+    setFormError(null);
+
+    const items = pages[page]?.items ?? [];
+
+    const [fixedOk, builtOk] = await Promise.all([
+      page === 0 ? trigger() : Promise.resolve(true),
+      validateInterpreterPage(interpreterStore, items),
+    ]);
+
+    if (!fixedOk || !builtOk) {
+      setFormError("Please correct the highlighted fields before continuing.");
+      return;
+    }
+
+    setPage((current) => Math.min(pages.length - 1, current + 1));
+  }
 
   async function submit(values: SubmissionFormValues) {
     setFormError(null);
@@ -379,8 +435,18 @@ export function PublicFormRenderer({
           <input id="company_website" name="company_website" tabIndex={-1} autoComplete="off" />
         </div>
 
-        <fieldset className="space-y-4">
-          <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your details</legend>
+        {/*
+          P7-66 Phase 7 — THE FIVE FIXED FIELDS ARE PAGE ONE.
+
+          Every client request carries name, email, title, description and target
+          date whatever the form was built with, so they cannot belong to a page
+          break somebody added — they come before the first one. On a form with
+          no page breaks this `hidden` is never true and the markup is what it
+          always was.
+        */}
+        <div hidden={page !== 0} className="space-y-6">
+          <fieldset className="space-y-4">
+            <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your details</legend>
 
           <div className="grid gap-4 sm:grid-cols-2">
             <div className="space-y-2">
@@ -482,15 +548,32 @@ export function PublicFormRenderer({
             ) : null}
           </div>
 
-          {/*
-            Every field this form was BUILT with, rendered from the same
-            component map the builder previews them in (lib/form-builder/
-            components.tsx). It replaces a `form.fields.map(...)` that switched
-            on `field_type` and drew each control inline — the switch that had to
-            stay in step with `buildFieldSchema` by hand.
-          */}
-          <InterpreterFields interpreterStore={interpreterStore} />
+          </fieldset>
+        </div>
 
+        {/*
+          Every field this form was BUILT with, rendered from the same component
+          map the builder previews them in (lib/form-builder/components.tsx). It
+          replaces a `form.fields.map(...)` that switched on `field_type` and
+          drew each control inline — the switch that had to stay in step with
+          `buildFieldSchema` by hand.
+
+          ⚠️ OUTSIDE THE "Your request" FIELDSET SINCE PHASE 7. It used to sit
+          inside it, which was harmless while the form was one page — but a page
+          break puts pages two onwards under a legend reading "Your request" that
+          belongs to three fixed fields on page one. The built questions are
+          their own pages now, with their own headings.
+        */}
+        <InterpreterFields interpreterStore={interpreterStore} activePage={page} />
+
+        {/*
+          ⚠️ THE ATTACHMENT SLOT IS ON THE LAST PAGE, WITH THE SUBMIT BUTTON.
+          `vizserve_pms_submit_request` refuses the whole submission without a
+          file, so the control that satisfies it has to be on the page carrying
+          the button that trips it — a required upload two pages back is a
+          refusal with nothing on screen to act on.
+        */}
+        <div hidden={page !== pages.length - 1}>
           {needsOwnAttachment ? (
             <div className="space-y-2">
               <Label htmlFor="request_attachment">
@@ -531,7 +614,7 @@ export function PublicFormRenderer({
               ) : null}
             </div>
           ) : null}
-        </fieldset>
+        </div>
 
         {formError ? (
           <p
@@ -541,15 +624,23 @@ export function PublicFormRenderer({
           </p>
         ) : null}
 
-        <div className="flex flex-col gap-3 border-t pt-5 sm:flex-row-reverse sm:items-center sm:justify-between">
-          <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
-            {isSubmitting ? "Submitting…" : "Submit request"}
-          </Button>
-          {/* What happens next, next to the button that makes it happen. */}
-          <p className="text-xs text-muted-foreground">
-            A team leader reviews this and may propose a different date.
-          </p>
-        </div>
+        <FormPageNav
+          page={page}
+          pageCount={pages.length}
+          onBack={back}
+          onContinue={onContinue}
+          submit={
+            <div className="flex flex-col gap-3 sm:flex-row-reverse sm:items-center">
+              <Button type="submit" disabled={isSubmitting} className="w-full sm:w-auto">
+                {isSubmitting ? "Submitting…" : "Submit request"}
+              </Button>
+              {/* What happens next, next to the button that makes it happen. */}
+              <p className="text-xs text-muted-foreground">
+                A team leader reviews this and may propose a different date.
+              </p>
+            </div>
+          }
+        />
       </form>
     </FieldRuntimeProvider>
   );

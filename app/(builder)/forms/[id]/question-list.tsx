@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronUp, Lock } from "lucide-react";
+import { ChevronDown, ChevronUp, Lock, SeparatorHorizontal } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -70,7 +70,24 @@ export function QuestionList({
         <SortableFieldRow key={field.id} id={field.id} disabled={busy}>
           <QuestionRow
             field={field}
-            index={index}
+            /*
+             * ⚠️ P7-66 Phase 7 — A PAGE BREAK DOES NOT TAKE A NUMBER, AND THE
+             * ONES AFTER IT DO NOT SKIP ONE.
+             *
+             * The numbers on this screen have exactly one job: agree with what
+             * the respondent sees. A respondent is never shown a page break as
+             * "question 3", so counting it here would make every question after
+             * it one higher than the form it is previewing — the same reason
+             * archived questions are not in this sequence.
+             *
+             * Counted from the slice rather than carried in a running total, so
+             * it cannot drift out of step with the list it is numbering.
+             */
+            number={
+              field.entity.type === "section"
+                ? null
+                : active.slice(0, index + 1).filter((f) => f.entity.type !== "section").length
+            }
             selected={selectedId === field.id}
             answered={answeredIds.has(field.id)}
             busy={busy}
@@ -87,7 +104,7 @@ export function QuestionList({
 
 function QuestionRow({
   field,
-  index,
+  number,
   selected,
   answered,
   busy,
@@ -97,7 +114,8 @@ function QuestionRow({
   onMove,
 }: {
   field: CanvasField;
-  index: number;
+  /** Its position among the QUESTIONS, or `null` for a page break. */
+  number: number | null;
   selected: boolean;
   answered: boolean;
   busy: boolean;
@@ -107,6 +125,7 @@ function QuestionRow({
   onMove: (direction: "up" | "down") => void;
 }) {
   const { attributes } = field.entity;
+  const isSection = field.entity.type === "section";
 
   return (
     /*
@@ -120,7 +139,21 @@ function QuestionRow({
     <div
       onClick={onSelect}
       className={cn(
-        "group relative flex cursor-pointer items-center gap-2.5 rounded-lg border bg-card py-3 pr-3 pl-2 grade-raised shadow-raised",
+        "group relative flex cursor-pointer items-center gap-2.5 rounded-lg border py-3 pr-3 pl-2",
+        /*
+         * ⚠️ A PAGE BREAK LOOKS DIFFERENT BECAUSE IT IS DIFFERENT. Every other
+         * row is a raised card standing for a control the respondent fills in;
+         * this one is the seam between two of those. A dashed, unraised, muted
+         * row reads as a rule across the list rather than another card in it —
+         * which is what it draws on the form.
+         *
+         * ⚠️ AND IT IS NOT ONLY A COLOUR. The type line under the title says
+         * "Page break" in words, exactly as every other row names its type
+         * (CLAUDE.md: state is never conveyed by colour alone).
+         */
+        isSection
+          ? "border-dashed bg-muted"
+          : "bg-card grade-raised shadow-raised",
         "hover:border-accent-border",
         selected && "border-primary bg-accent",
       )}
@@ -136,7 +169,11 @@ function QuestionRow({
       ) : null}
 
       <span className="w-5.5 shrink-0 text-center text-xs font-semibold text-muted-foreground tabular-nums">
-        {index + 1}.
+        {number === null ? (
+          <SeparatorHorizontal aria-hidden className="mx-auto size-3.5" />
+        ) : (
+          `${number}.`
+        )}
       </span>
 
       <span className="min-w-0 flex-1">
@@ -151,7 +188,9 @@ function QuestionRow({
           className="block max-w-full truncate text-left text-sm font-medium after:absolute after:inset-0 after:content-['']"
         >
           {attributes.label || (
-            <span className="text-muted-foreground">Untitled question</span>
+            <span className="text-muted-foreground">
+              {isSection ? "Untitled page break" : "Untitled question"}
+            </span>
           )}
           {attributes.required ? (
             <>

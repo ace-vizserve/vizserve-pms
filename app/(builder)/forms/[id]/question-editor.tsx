@@ -119,9 +119,22 @@ export function QuestionEditor({
 
   const shownTypes = offerableTypes.includes(type) ? offerableTypes : [...offerableTypes, type];
 
+  /*
+   * ⚠️ P7-66 Phase 7 — A SECTION IS NOT A QUESTION, AND THIS PANEL IS WRITTEN
+   * FOR QUESTIONS.
+   *
+   * The same editor edits both — a page break is a row in the same table with a
+   * label and a help text — but three of its sentences are about answers, and a
+   * page break collects none. Left alone they read as instructions for something
+   * the person is not doing: "Answer type" over a picker whose current value is
+   * "Page break", and "Answers will be filed under …" under a thing no answer is
+   * ever filed under.
+   */
+  const isSection = type === "section";
+
   return (
     <section
-      aria-label="Edit question"
+      aria-label={isSection ? "Edit page break" : "Edit question"}
       className="mt-4 overflow-hidden rounded-lg border bg-card grade-raised shadow-raised-lg"
     >
       <div className="space-y-3.5 p-4">
@@ -129,7 +142,7 @@ export function QuestionEditor({
         <FieldHeadAttributes builderStore={builderStore} entityId={entityId} />
 
         <div className="space-y-1.5">
-          <Label htmlFor={typeSelectId}>Answer type</Label>
+          <Label htmlFor={typeSelectId}>{isSection ? "Type" : "Answer type"}</Label>
           <Select
             items={typeItems}
             value={type}
@@ -168,7 +181,18 @@ export function QuestionEditor({
           and it is what an export column is headed with — and because once it is
           fixed, this sentence is the only place the fact appears.
         */}
-        <p className="flex items-start gap-1.5 pt-0.5 text-xs text-muted-foreground">
+        {/*
+          ⚠️ NOTHING AT ALL FOR A PAGE BREAK. Its `field_key` exists — the column
+          is NOT NULL and unique per form, so the row cannot be written without
+          one — but nothing ever reads it: no answer is filed under it,
+          `responseColumns` skips it, and it heads no export column. Stating a
+          key that governs nothing is a sentence somebody has to work out is
+          irrelevant.
+        */}
+        <p
+          className="flex items-start gap-1.5 pt-0.5 text-xs text-muted-foreground"
+          hidden={isSection}
+        >
           {answered ? (
             <>
               <Lock aria-hidden className="mt-0.5 size-3 shrink-0" />

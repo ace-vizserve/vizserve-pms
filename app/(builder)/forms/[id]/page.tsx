@@ -62,7 +62,7 @@ function BuilderHeader({
   children?: React.ReactNode;
 }) {
   return (
-    <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-panel px-5 shadow-chrome backdrop-blur-md backdrop-saturate-150">
+    <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-panel px-5 shadow-chrome backdrop-blur-md backdrop-saturate-150">
       <Link href="/forms" className={buttonVariants({ variant: "outline", size: "sm" })}>
         <ArrowLeft />
         Forms
@@ -72,7 +72,7 @@ function BuilderHeader({
 
       {title ?? <h1 className="min-w-0 truncate text-sm font-semibold tracking-tight">Edit form</h1>}
 
-      <div className="ml-auto flex shrink-0 items-center gap-2">
+      <div className="ml-auto flex shrink-0 items-center gap-4">
         {children}
         <ThemeToggle />
       </div>
@@ -457,7 +457,7 @@ export default async function EditFormPage({
           <Link
             href={`/request/${form.slug}`}
             target="_blank"
-            className={buttonVariants({ variant: "ghost", size: "sm", className: "text-xs" })}>
+            className={buttonVariants({ variant: "outline", size: "sm", className: "text-xs" })}>
             View public form
             <ExternalLink />
           </Link>

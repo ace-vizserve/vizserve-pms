@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Info, Monitor, Smartphone, TriangleAlert, User } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { CanvasField } from "@/lib/form-builder/canvas";
+import { paginateFields, type CanvasField } from "@/lib/form-builder/canvas";
 import { FieldPreview, type FormBuilderStore } from "@/lib/form-builder/components";
 import type { FormPurpose } from "@/lib/schemas/forms";
 
@@ -63,6 +63,43 @@ export function RespondentPreview({
 }) {
   const [width, setWidth] = useState<"desktop" | "mobile">("desktop");
   const isClient = purpose === "CLIENT_REQUEST";
+
+  /*
+   * P7-66 Phase 7 — THE PAGES THIS FORM SPLITS INTO.
+   *
+   * WARNING: THE SAME `paginateFields` BOTH LIVE FORMS USE. A preview that pages
+   * a form differently from the way it pages for the person answering is worse
+   * than a preview that does not page at all — it would be confidently wrong
+   * about the one thing it exists to show. One function, three callers.
+   */
+  const pages = useMemo(
+    () =>
+      paginateFields(
+        active,
+        (field) => field.entity.type === "section",
+        (field) => ({
+          title: field.entity.attributes.label,
+          blurb: field.entity.attributes.helpText,
+        }),
+      ),
+    [active],
+  );
+
+  const [page, setPage] = useState(0);
+
+  /*
+   * WARNING: CLAMPED ON RENDER, NOT IN AN EFFECT. Deleting the last page break
+   * while looking at the last page drops the page count under the index, and a
+   * preview showing nothing at all is indistinguishable from a form with no
+   * questions. An effect would repaint the empty state first and correct it
+   * after.
+   */
+  const current = Math.min(page, pages.length - 1);
+  const shown = pages[current] ?? pages[0]!;
+
+  /* The fixed five sit on page one — the same rule the public form applies. */
+  const onFirstPage = current === 0;
+  const onLastPage = current === pages.length - 1;
 
   /*
      ⚠️ `h-full`, OR THIS IS NOT A SCROLL CONTAINER AND ITS BACKGROUND STOPS
@@ -144,17 +181,28 @@ export function RespondentPreview({
             ) : null}
           </PreviewCard>
 
-          {isClient ? (
-            <ClientFixedFields stacked={width === "mobile"} />
-          ) : (
-            <AnonymityNotice isAnonymous={isAnonymous} />
-          )}
+          {/* The fixed five are page one's, wherever the breaks fall. */}
+          {onFirstPage ? (
+            isClient ? (
+              <ClientFixedFields stacked={width === "mobile"} />
+            ) : (
+              <AnonymityNotice isAnonymous={isAnonymous} />
+            )
+          ) : null}
 
-          {active.length > 0 ? (
+          {shown.items.length > 0 ? (
             <PreviewCard className="px-5.5 py-4.5">
-              <Legend>{isClient ? "About this request" : "Questions"}</Legend>
+              {/*
+                WARNING: A PAGE OPENED BY A BREAK IS HEADED BY THAT BREAK, NOT BY
+                "About this request". `sectionFieldComponent` draws the title
+                from the section row itself — the same component the live form
+                uses — so the generic legend would be a second heading over it.
+              */}
+              {shown.title === "" && current === 0 ? (
+                <Legend>{isClient ? "About this request" : "Questions"}</Legend>
+              ) : null}
               <div className="grid gap-3.5">
-                {active.map((field, index) => (
+                {shown.items.map((field, index) => (
                   <div key={field.id}>
                     {/*
                       ⚠️ THE NUMBER COMES FROM THIS LIST, NOT FROM THE SCHEMA.
@@ -163,7 +211,9 @@ export function RespondentPreview({
                       questions 1, 2, 4 — and the middle pane, which numbers the
                       same list, would disagree with the form.
                     */}
-                    <span className="sr-only">Question {index + 1}. </span>
+                    {field.entity.type === "section" ? null : (
+                      <span className="sr-only">Question {index + 1}. </span>
+                    )}
                     <FieldPreview builderStore={builderStore} entityId={field.id} />
                   </div>
                 ))}
@@ -171,19 +221,58 @@ export function RespondentPreview({
             </PreviewCard>
           ) : null}
 
+          {/*
+            WARNING: THE SWITCHER IS THE ONLY LIVE CONTROL IN THIS PANE, and it
+            has to be: every other control here is disabled because typing into a
+            preview does nothing, but a paged form cannot be previewed at all
+            without a way to reach page two. It moves the preview; it changes no
+            form data, so there is nothing for it to be a lie about.
+          */}
           <div className="flex items-center gap-3 pt-0.5">
-            {/* Inert, like everything else in the pane — but drawn, because a
-                form with no visible way to send it is not what anybody sees. */}
-            <Button type="button" size="lg" disabled>
-              {isClient ? "Send request" : "Send answer"}
-            </Button>
+            {pages.length > 1 ? (
+              <>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="lg"
+                  disabled={onFirstPage}
+                  onClick={() => setPage(Math.max(0, current - 1))}
+                >
+                  Back
+                </Button>
+                {onLastPage ? (
+                  <Button type="button" size="lg" disabled>
+                    {isClient ? "Send request" : "Send answer"}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="lg"
+                    onClick={() => setPage(Math.min(pages.length - 1, current + 1))}
+                  >
+                    Continue
+                  </Button>
+                )}
+                <p className="text-xs text-muted-foreground tabular-nums">
+                  Page {current + 1} of {pages.length}
+                </p>
+              </>
+            ) : (
+              /* Inert, like everything else in the pane — but drawn, because a
+                 form with no visible way to send it is not what anybody sees. */
+              <Button type="button" size="lg" disabled>
+                {isClient ? "Send request" : "Send answer"}
+              </Button>
+            )}
           </div>
 
-          <p className="px-0.5 text-xs text-muted-foreground">
-            {isClient
-              ? "You will get an email with your reference number."
-              : "Once sent, an answer cannot be edited or withdrawn."}
-          </p>
+          {onLastPage ? (
+            <p className="px-0.5 text-xs text-muted-foreground">
+              {isClient
+                ? "You will get an email with your reference number."
+                : "Once sent, an answer cannot be edited or withdrawn."}
+            </p>
+          ) : null}
         </div>
       </div>
     </section>

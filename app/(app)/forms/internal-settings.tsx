@@ -1,24 +1,18 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
-import { useForm, type Resolver } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
+import { useRouter } from "next/navigation";
+import { useEffect, useState, useTransition } from "react";
+import { useForm, type Resolver } from "react-hook-form";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 import {
   DEFAULT_SLA_MINUTES,
   formSettingsSchema,
@@ -152,8 +146,7 @@ export function InternalSettings({
   const targetsEveryone = chosenAudience.is_all_departments;
   const targetedIds = chosenAudience.department_ids;
 
-  const setAudience = (next: FormAudience) =>
-    setValue("audience", next, { shouldValidate: true, shouldDirty: true });
+  const setAudience = (next: FormAudience) => setValue("audience", next, { shouldValidate: true, shouldDirty: true });
 
   /*
    * ⚠️ TICKING A DEPARTMENT DOES NOT SILENTLY SWITCH THE MODE, and unticking the
@@ -216,9 +209,7 @@ export function InternalSettings({
        * all. It should not happen — the values came out of the database — but
        * "should not happen" is exactly the case that needs a sentence.
        */
-      const hidden = Object.entries(fieldErrors ?? {}).filter(
-        ([key]) => !VISIBLE.has(key as keyof FormSettingsValues),
-      );
+      const hidden = Object.entries(fieldErrors ?? {}).filter(([key]) => !VISIBLE.has(key as keyof FormSettingsValues));
 
       setFormError(
         hidden.length === 0
@@ -242,7 +233,7 @@ export function InternalSettings({
   });
 
   return (
-    <form onSubmit={onSubmit} className="space-y-5" noValidate>
+    <form onSubmit={onSubmit} className="p-6 bg-card rounded-xl grade-card border space-y-5" noValidate>
       <div className="space-y-2">
         <Label htmlFor="name">Name</Label>
         <Input id="name" aria-invalid={Boolean(errors.name)} {...register("name")} />
@@ -252,9 +243,7 @@ export function InternalSettings({
       <div className="space-y-2">
         <Label htmlFor="description">Description</Label>
         <Textarea id="description" rows={2} {...register("description")} />
-        <p className="text-xs text-muted-foreground">
-          Shown to colleagues above the questions.
-        </p>
+        <p className="text-xs text-muted-foreground">Shown to colleagues above the questions.</p>
       </div>
 
       <div className="space-y-2">
@@ -262,13 +251,8 @@ export function InternalSettings({
         <Select
           items={departmentItems}
           value={departmentId ?? ""}
-          onValueChange={(value) => setValue("department_id", value, { shouldValidate: true })}
-        >
-          <SelectTrigger
-            id="department"
-            className="w-full sm:w-1/2"
-            aria-invalid={Boolean(errors.department_id)}
-          >
+          onValueChange={(value) => setValue("department_id", value, { shouldValidate: true })}>
+          <SelectTrigger id="department" className="w-full sm:w-1/2" aria-invalid={Boolean(errors.department_id)}>
             <SelectValue placeholder="Choose" />
           </SelectTrigger>
           <SelectContent>
@@ -302,9 +286,7 @@ export function InternalSettings({
         <p className="text-xs text-muted-foreground">
           Which department this form belongs to. Required before it can be published.
         </p>
-        {errors.department_id ? (
-          <p className="text-xs text-destructive">{errors.department_id.message}</p>
-        ) : null}
+        {errors.department_id ? <p className="text-xs text-destructive">{errors.department_id.message}</p> : null}
       </div>
 
       {/*
@@ -363,9 +345,7 @@ export function InternalSettings({
               name="audience-mode"
               className="mt-0.5 size-4 accent-primary"
               checked={!targetsEveryone}
-              onChange={() =>
-                setAudience({ is_all_departments: false, department_ids: targetedIds })
-              }
+              onChange={() => setAudience({ is_all_departments: false, department_ids: targetedIds })}
             />
             <span>
               <span className="font-medium">Specific departments</span>
@@ -380,8 +360,7 @@ export function InternalSettings({
           <div className="space-y-2 border-t pt-3">
             {departments.length === 0 ? (
               <p className="text-xs text-warning">
-                No departments to choose from. That is a read failure rather than an empty
-                company — reload the page.
+                No departments to choose from. That is a read failure rather than an empty company — reload the page.
               </p>
             ) : (
               <div className="grid gap-2 sm:grid-cols-2">
@@ -419,8 +398,7 @@ export function InternalSettings({
         {errors.audience ? (
           <p className="text-xs text-destructive">
             {errors.audience.message ??
-              (errors.audience as { department_ids?: { message?: string } }).department_ids
-                ?.message}
+              (errors.audience as { department_ids?: { message?: string } }).department_ids?.message}
           </p>
         ) : null}
       </fieldset>
@@ -450,8 +428,7 @@ export function InternalSettings({
               // reason is not "it would be awkward": named→anonymous would label
               // answers that still carry names as anonymous.
               <p className="mt-1 text-xs text-muted-foreground">
-                Locked — answers already came in under this promise. Build a new form to change
-                it.
+                Locked — answers already came in under this promise. Build a new form to change it.
               </p>
             ) : (
               <p className="mt-1 text-xs text-warning">
@@ -487,19 +464,14 @@ export function InternalSettings({
               </p>
             ) : null}
           </div>
-          <Switch
-            id="is_active"
-            checked={isActive}
-            onCheckedChange={(checked) => setValue("is_active", checked)}
-          />
+          <Switch id="is_active" checked={isActive} onCheckedChange={(checked) => setValue("is_active", checked)} />
         </div>
       </div>
 
       {formError ? (
         <p
           role="alert"
-          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-        >
+          className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
           {formError}
         </p>
       ) : null}

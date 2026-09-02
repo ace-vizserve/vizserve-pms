@@ -1,12 +1,13 @@
 "use client";
 
-import { createContext, useContext } from "react";
+import { createContext, useContext, useMemo } from "react";
 import { Plus, X } from "lucide-react";
 import type { BuilderStore, EntitiesValues, InterpreterStore } from "@coltorapps/builder";
 import {
   BuilderEntity,
   BuilderEntityAttributes,
   InterpreterEntities,
+  InterpreterEntity,
   createAttributeComponent,
   createEntityComponent,
   useBuilderStore,
@@ -38,7 +39,7 @@ import {
   requiredAttribute,
 } from "@/lib/form-builder/attributes";
 import { cn } from "@/lib/utils";
-import { nextOptionLabel } from "@/lib/form-builder/canvas";
+import { nextOptionLabel, paginateFields, type FormPage } from "@/lib/form-builder/canvas";
 import { formBuilder, type FormBuilder, type FormSchema } from "@/lib/form-builder/builder";
 import {
   dateEntity,
@@ -653,16 +654,25 @@ const LabelAttribute = createAttributeComponent(
     const controlId = `attr-label-${entity.id}`;
     const error = attributeErrorText(attribute.error);
 
+    /*
+     * ⚠️ P7-66 Phase 7 — A SECTION IS NOT A QUESTION, AND THIS BOX MUST NOT
+     * ASK LIKE ONE. `label` is the same column either way, but "Question /
+     * What are you asking?" over the box that names a page break is the screen
+     * telling somebody they are doing something they are not. The heading of
+     * the new section is what they are typing.
+     */
+    const isSection = entity.type === "section";
+
     return (
       <div className="min-w-0 space-y-1.5">
         {/* "Question", not "Label". The person using this is writing a form, and
             the thing they are typing is the question. "Label" is what the
             attribute is called in the schema, which is nobody's business here. */}
-        <Label htmlFor={controlId}>Question</Label>
+        <Label htmlFor={controlId}>{isSection ? "Section title" : "Question"}</Label>
         <Input
           id={controlId}
           value={attribute.value}
-          placeholder="What are you asking?"
+          placeholder={isSection ? "What is this page called?" : "What are you asking?"}
           aria-invalid={error ? true : undefined}
           onChange={(event) => setValue(event.target.value)}
           onBlur={() => void validateValue()}
@@ -700,14 +710,19 @@ const HelpTextAttribute = createAttributeComponent(
   helpTextAttribute,
   ({ attribute, entity, setValue }) => {
     const controlId = `attr-help-${entity.id}`;
+    // Same column, same control, different thing being written. See
+    // `LabelAttribute`.
+    const isSection = entity.type === "section";
 
     return (
       <div className="space-y-1.5">
-        <Label htmlFor={controlId}>Help text (optional)</Label>
+        <Label htmlFor={controlId}>
+          {isSection ? "Description (optional)" : "Help text (optional)"}
+        </Label>
         <Input
           id={controlId}
           value={attribute.value}
-          placeholder="Shown under the question"
+          placeholder={isSection ? "Shown under the section title" : "Shown under the question"}
           onChange={(event) => setValue(event.target.value)}
         />
       </div>
@@ -1255,21 +1270,208 @@ export function useFormInterpreterStore(
 }
 
 /**
+ * P7-66 Phase 7 — BACK, CONTINUE, AND WHERE YOU ARE.
+ *
+ * Shared by both hosts so the two paged forms cannot end up with different
+ * words, a different button order or a different idea of what "page 2 of 4"
+ * counts. The SUBMIT control is passed in rather than drawn here: a client
+ * request and an internal answer are different products with different verbs
+ * ("Submit request", "Send answer") and different pending states.
+ *
+ * ⚠️ `type="button"` ON BOTH, WHICH IS NOT A DETAIL. Inside a `<form>` a
+ * button with no type is a SUBMIT button — Continue would submit the form from
+ * page one, and on the public form that is a half-empty request with a reference
+ * number. The submit control the caller passes is the only thing here that may
+ * be `type="submit"`, and it is only rendered on the last page.
+ *
+ * ⚠️ THE COUNT IS ANNOUNCED, NOT JUST DRAWN. `aria-live="polite"` on the
+ * position, because moving between pages changes nothing that a screen reader
+ * would otherwise report — focus stays where it was and the heading it lands on
+ * is inside a region that merely stopped being `hidden`.
+ *
+ * Nothing is rendered at all for a single-page form: a "Page 1 of 1" and a
+ * disabled Back are chrome describing a form that does not page.
+ */
+export function FormPageNav({
+  page,
+  pageCount,
+  onBack,
+  onContinue,
+  submit,
+}: {
+  page: number;
+  pageCount: number;
+  onBack: () => void;
+  onContinue: () => void;
+  /** The form's real submit button. Rendered on the last page only. */
+  submit: React.ReactNode;
+}) {
+  if (pageCount <= 1) {
+    return <div className="flex justify-end border-t pt-4">{submit}</div>;
+  }
+
+  const isLast = page === pageCount - 1;
+
+  return (
+    <div className="flex items-center gap-3 border-t pt-4">
+      <Button type="button" variant="outline" onClick={onBack} disabled={page === 0}>
+        Back
+      </Button>
+
+      <p aria-live="polite" className="text-xs text-muted-foreground tabular-nums">
+        Page {page + 1} of {pageCount}
+      </p>
+
+      <div className="ml-auto">
+        {isLast ? (
+          submit
+        ) : (
+          <Button type="button" onClick={onContinue}>
+            Continue
+          </Button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * P7-66 Phase 7 — THE PAGES THIS FORM SPLITS INTO, AS ENTITY IDS.
+ *
+ * The single source both live hosts read for "how many pages, and what is on
+ * each". The builder's preview reads the same split from the same function
+ * (`paginateFields`), one level up, off the builder store — so a preview cannot
+ * page a form differently from the way the form pages for the person answering.
+ *
+ * ⚠️ ARCHIVED ENTITIES DO NOT REACH HERE. `vizserve_pms_get_public_form` and
+ * the respond loader both filter `is_active`, so the interpreter's schema is the
+ * live form already. If that ever changes, the filter belongs BEFORE this call —
+ * an archived page break would split a page in a place the form no longer says
+ * to.
+ */
+export function useFormPages(
+  interpreterStore: FormInterpreterStore,
+): Array<FormPage<string>> {
+  const { schema } = interpreterStore;
+
+  return useMemo(
+    () =>
+      paginateFields(
+        schema.root,
+        (entityId) => schema.entities[entityId]?.type === "section",
+        (entityId) => {
+          const attributes = schema.entities[entityId]?.attributes;
+          return {
+            title: attributes?.label ?? "",
+            blurb: attributes?.helpText ?? "",
+          };
+        },
+      ),
+    [schema],
+  );
+}
+
+/**
+ * P7-66 Phase 7 — VALIDATE ONE PAGE, WHICH IS WHAT CONTINUE HAS TO DO.
+ *
+ * ⚠️ CONTINUE VALIDATES, IT DOES NOT JUST ADVANCE. Without this, a blank
+ * required field on page 1 is not reported until Submit on page 4 — at which
+ * point the person is three pages away from the thing that is wrong, and the
+ * error is under a control they cannot see. Advancing past an invalid page is
+ * the single worst thing a paged form can do.
+ *
+ * ⚠️ IT READS THE ERRORS BACK RATHER THAN TRUSTING THE CALL.
+ * `validateEntityValue` returns `Promise<void>` — it writes the outcome into the
+ * store as a side effect and tells the caller nothing. So the answer comes from
+ * `getEntitiesErrors()` after every one has settled.
+ *
+ * `Promise.all`, not a loop with `await` in it: the validators are independent,
+ * and running them in sequence would report the first bad field on a page and
+ * leave the rest unmarked until the next press.
+ *
+ * A page whose only item is the section row validates trivially — the section is
+ * `shouldBeProcessed: () => false`, so it has no error to have.
+ */
+export async function validateInterpreterPage(
+  interpreterStore: FormInterpreterStore,
+  entityIds: ReadonlyArray<string>,
+): Promise<boolean> {
+  await Promise.all(entityIds.map((entityId) => interpreterStore.validateEntityValue(entityId)));
+
+  const errors = interpreterStore.getEntitiesErrors();
+
+  return entityIds.every((entityId) => errors[entityId] === undefined);
+}
+
+/**
  * Every field of the form, live.
  *
  * `InterpreterEntities` returns an ARRAY rather than an element — it renders one
  * component per root entity and nothing around them — so this wrapper exists to
  * give the call site something it can put in a `<fieldset>` beside the fixed
  * fields.
+ *
+ * ⚠️ EVERY PAGE IS RENDERED. THE ONES YOU CANNOT SEE ARE HIDDEN, NOT UNMOUNTED.
+ *
+ * This is the same hazard `keepMounted` solves on the builder's tabs, and it
+ * costs an answer rather than a selection. Unmounting page 2 to show page 3 and
+ * mounting it again on Back gives every control on it a fresh `useState` — a
+ * half-typed sentence, an unsaved file picker selection and an open date picker
+ * all go. The interpreter store would still hold the committed values, so the
+ * loss is silent and partial, which is worse than total: the form comes back
+ * looking filled in, missing the last thing that was typed.
+ *
+ * `hidden` keeps the tree alive and takes the page out of the layout, out of the
+ * tab order and out of the accessibility tree — which is what "the respondent
+ * sees one at a time" has to mean for somebody using a screen reader, not just
+ * for somebody looking at it.
+ *
+ * ⚠️ `activePage` UNDEFINED MEANS SHOW EVERYTHING, and that is not a dead
+ * branch — it is what the builder's preview does when it is showing the whole
+ * form, and what any host that does not page renders.
  */
 export function InterpreterFields({
   interpreterStore,
+  activePage,
+  className = "space-y-4",
 }: {
   interpreterStore: FormInterpreterStore;
+  /** The page to show, or `undefined` for all of them at once. */
+  activePage?: number;
+  /** The spacing between the fields of ONE page. */
+  className?: string;
 }) {
+  const pages = useFormPages(interpreterStore);
+
+  if (activePage === undefined) {
+    return (
+      <div className={className}>
+        <InterpreterEntities interpreterStore={interpreterStore} components={fieldComponents} />
+      </div>
+    );
+  }
+
   return (
     <>
-      <InterpreterEntities interpreterStore={interpreterStore} components={fieldComponents} />
+      {pages.map((page, index) => (
+        <div
+          // The index is the identity here: pages have no id of their own, and a
+          // page's contents changing is exactly what should re-render it rather
+          // than remount it.
+          key={index}
+          hidden={index !== activePage}
+          className={className}
+        >
+          {page.items.map((entityId) => (
+            <InterpreterEntity
+              key={entityId}
+              entityId={entityId}
+              components={fieldComponents}
+              interpreterStore={interpreterStore}
+            />
+          ))}
+        </div>
+      ))}
     </>
   );
 }

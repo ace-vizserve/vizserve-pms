@@ -7,7 +7,10 @@ import { Button } from "@/components/ui/button";
 import type { UploadFn } from "@/components/file-field";
 import {
   FieldRuntimeProvider,
+  FormPageNav,
   InterpreterFields,
+  useFormPages,
+  validateInterpreterPage,
   initialEntityValues,
   useFormInterpreterStore,
 } from "@/lib/form-builder/components";
@@ -154,6 +157,43 @@ export function RespondForm({
   const blockingFileField = fileFields.find((entity) => entity.attributes.required);
   const hasFileField = fileFields.length > 0;
 
+  /*
+   * P7-66 Phase 7 — WHICH PAGE IS SHOWING.
+   *
+   * `pages` comes from the same `paginateFields` the public form and the
+   * builder's preview use, so all three agree about where this form breaks.
+   * A form with no page breaks is one page and `FormPageNav` draws no
+   * navigation for it at all.
+   */
+  const pages = useFormPages(interpreterStore);
+  const [page, setPage] = useState(0);
+
+  function back() {
+    setFormError(null);
+    setPage((current) => Math.max(0, current - 1));
+  }
+
+  /*
+   * ⚠️ CONTINUE VALIDATES THIS PAGE BEFORE IT ADVANCES.
+   *
+   * Otherwise a blank required answer on page 1 is not reported until Send on
+   * page 4, with the error written against a control three pages back that
+   * nobody can see. `validateInterpreterPage` marks the offending fields on the
+   * page still showing, and the button simply does not move.
+   */
+  async function onContinue() {
+    setFormError(null);
+
+    const ok = await validateInterpreterPage(interpreterStore, pages[page]?.items ?? []);
+
+    if (!ok) {
+      setFormError("Please correct the highlighted answers before continuing.");
+      return;
+    }
+
+    setPage((current) => Math.min(pages.length - 1, current + 1));
+  }
+
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setFormError(null);
@@ -165,6 +205,23 @@ export function RespondForm({
       const validated = await interpreterStore.validateEntitiesValues();
 
       if (!validated.success) {
+        /*
+         * ⚠️ GO TO THE PAGE THE PROBLEM IS ON. Send only exists on the last
+         * page, but `validateEntitiesValues` checks the WHOLE form — so a
+         * refusal can be about a field the person cannot currently see. Without
+         * this, the message says "correct the highlighted answers" and nothing
+         * on screen is highlighted.
+         *
+         * Reachable in practice even though Continue validates each page on the
+         * way: Back, then an answer cleared, then Continue is not pressed again
+         * — the page is already past.
+         */
+        const firstBad = pages.findIndex((formPage) =>
+          formPage.items.some((entityId) => validated.entitiesErrors[entityId] !== undefined),
+        );
+
+        if (firstBad >= 0) setPage(firstBad);
+
         setFormError("Please correct the highlighted answers.");
         return;
       }
@@ -335,9 +392,14 @@ export function RespondForm({
           </p>
         ) : null}
 
-        <div className="space-y-4">
-          <InterpreterFields interpreterStore={interpreterStore} />
-        </div>
+        {/*
+          P7-66 Phase 7 — ONE PAGE AT A TIME, WHEN THE FORM HAS PAGE BREAKS.
+
+          `activePage` is what hides the others; every page stays MOUNTED, so
+          going Back to a page finds it exactly as it was left. See the note on
+          `InterpreterFields`.
+        */}
+        <InterpreterFields interpreterStore={interpreterStore} activePage={page} />
 
         {formError ? (
           <p role="alert" className="text-sm text-destructive">
@@ -345,11 +407,17 @@ export function RespondForm({
           </p>
         ) : null}
 
-        <div className="flex justify-end border-t pt-4">
-          <Button type="submit" loading={pending}>
-            Send answer
-          </Button>
-        </div>
+        <FormPageNav
+          page={page}
+          pageCount={pages.length}
+          onBack={back}
+          onContinue={onContinue}
+          submit={
+            <Button type="submit" loading={pending}>
+              Send answer
+            </Button>
+          }
+        />
       </form>
     </FieldRuntimeProvider>
   );
