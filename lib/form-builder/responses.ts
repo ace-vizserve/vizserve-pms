@@ -1,4 +1,5 @@
 import type { FormSchema } from "@/lib/form-builder/builder";
+import type { FieldType } from "@/lib/schemas/forms";
 
 /**
  * P7-66 Phase 4b — TURNING A PILE OF `field_values` BLOBS INTO A TABLE.
@@ -182,60 +183,287 @@ export function answerFor(fieldValues: unknown, key: string): string | null {
 }
 
 /**
- * ⚠️ AN ANSWER COLUMN'S DataTable ID IS NAMESPACED, AND IT HAS TO BE.
+ * P7-66 — WHICH WAYS OF READING THE ANSWERS THIS FORM OFFERS.
  *
- * `DataTable` uses `Column.key` as the TanStack column id AND as the React key
- * (components/data-table.tsx), and the Responses table draws two fixed identity
- * columns — `submitted_by` and `submitted_at` — before the per-form answer
- * columns. `FIELD_KEY_PATTERN` (`^[a-z][a-z0-9_]*$`) permits both of those
- * words and nothing reserved them, so a form with a question keyed
- * `submitted_by` produced:
+ * ⚠️ AN ANONYMOUS FORM HAS NO INDIVIDUAL VIEW, AND THE REASON IS THAT THERE IS
+ * NO INDIVIDUAL TO SHOW. `submitted_by` is NULL on every row because the INSERT
+ * policy refused to let a name be written, so the view would page through
+ * submissions headed "somebody", with a monogram it cannot draw and a name it
+ * cannot print. A screen whose entire subject is absent is not a screen.
  *
- *   - two TanStack columns with the same id, which is undefined behaviour in
- *     the row model rather than a caught error;
- *   - two React children with the same key in the header and in every row;
- *   - and, worst, `pinnedKey` — `columns.find((c) => c.pin === "left")?.key` —
- *     matching the ANSWER column as well, so the answer cell was painted
- *     `sticky left-0 z-20 bg-card` on top of the frozen identity column.
+ * ⚠️ IT IS NOT A CLAIM THAT THE PER-SUBMISSION GROUPING IS SECRET, AND IT MUST
+ * NOT BE READ AS ONE. One response is one `field_values` blob: the grouping IS
+ * the row. It is in the CSV export, it is in the RSC payload this page sends,
+ * and it is in the table for anyone with SQL. Anonymity here means one specific
+ * thing — NO NAME WAS EVER WRITTEN — and it has never meant that answers cannot
+ * be read together.
  *
- * A colon can never appear in a field key, so the prefix is collision-proof by
- * construction rather than by a reserved-word list somebody has to remember to
- * extend when a third fixed column is added. `tests/unit/form-responses.test.ts`
- * asserts the disjointness against `RESPONSE_IDENTITY_COLUMN_IDS`.
- */
-export const ANSWER_COLUMN_PREFIX = "answer:";
-
-/** The two fixed columns the Responses table can draw before any answer. */
-export const RESPONSE_IDENTITY_COLUMN_IDS = ["submitted_by", "submitted_at"] as const;
-
-/**
- * P7-66 — WHICH OF THE TWO A GIVEN FORM ACTUALLY GETS, and the FORM decides.
- *
- * On an anonymous form `submitted_by` is NULL on every row, because the INSERT
- * policy refused to let a name be written — so the column is not drawn at all.
- * Not drawn empty and not drawn hidden: a column full of dashes reads as "the
- * names were lost", and the point of the setting is that there were none.
+ * ⚠️ WHICH LEAVES A REAL RESIDUAL RISK, STATED RATHER THAN IMPLIED AWAY: on a
+ * small team, one long free-text answer is re-identifiable by writing style, and
+ * a minute-precision timestamp is re-identifiable by whoever watched somebody
+ * fill the form in. Neither is fixed by hiding a tab. If that matters for a
+ * given survey, the answers are what need coarsening — a decision for whoever
+ * runs it, and one this file cannot make on their behalf.
  *
  * ⚠️ THE ARGUMENT IS `vizserve_pms_forms.is_anonymous`, NEVER A PROPERTY OF THE
  * ROWS ON SCREEN. `rows.every((r) => r.submitted_by === null)` is the tempting
  * shortcut and it is wrong in the expensive direction: an empty page, or a page
  * whose only author is outside the reader's department, satisfies it and would
- * declare a NAMED form anonymous — telling a lead their survey collected no
- * names while the table is full of them.
+ * declare a NAMED form anonymous — hiding attribution that exists and telling a
+ * lead their survey collected no names while the table is full of them.
  *
- * A function rather than a ternary inline in the table so the rule is pinned by
- * a test on a machine with no DOM: `tests/unit/form-anonymity.test.ts` asserts
- * both the column set and the pin, and the table consumes exactly this.
+ * A function rather than a ternary inside the component, so the rule is pinned
+ * by a test on a machine with no DOM. Its signature takes a boolean and no
+ * rows, which is the guarantee written into the type.
  *
- * The FIRST id is the pinned one. The answer columns are per-form and there can
- * be a dozen, so the table scrolls sideways as a matter of course — a row whose
- * identity has scrolled off the left edge is a row you cannot place, and on an
- * anonymous form the timestamp is the only identity left to freeze.
+ * This replaced `responseIdentityColumnIds`, which decided the same thing for
+ * the flat table's pinned "Submitted by" column. The table is gone — a summary
+ * replaced it — and the rule moved with the screen rather than being deleted
+ * with it.
  */
-export function responseIdentityColumnIds(isAnonymous: boolean): readonly string[] {
-  return isAnonymous ? [RESPONSE_IDENTITY_COLUMN_IDS[1]] : RESPONSE_IDENTITY_COLUMN_IDS;
+export const RESPONSE_VIEWS = ["summary", "question", "individual"] as const;
+
+export type ResponseView = (typeof RESPONSE_VIEWS)[number];
+
+export function responseViewsFor(isAnonymous: boolean): readonly ResponseView[] {
+  return isAnonymous ? RESPONSE_VIEWS.filter((view) => view !== "individual") : RESPONSE_VIEWS;
 }
 
-export function answerColumnId(fieldKey: string): string {
-  return `${ANSWER_COLUMN_PREFIX}${fieldKey}`;
+
+// ---------------------------------------------------------------------------
+// P7-66 — READING THE ANSWERS, NOT JUST LISTING THEM.
+//
+// ⚠️ THE FLAT TABLE SAID "NO CHART, NO AGGREGATION, NO PER-QUESTION SUMMARY,
+// BECAUSE NONE OF THAT WAS ASKED FOR." It is asked for now, and the reason it
+// was worth waiting for is in that same note: every one of these is a decision
+// about what the numbers MEAN, and the decisions are here, in one pure file,
+// rather than spread through a screen.
+//
+// The three that matter:
+//
+//   WHAT IS THE DENOMINATOR. A percentage against the number of RESPONSES is
+//   wrong on a question four people skipped — the bars would sum to less than
+//   100% with nothing saying why. Against the number who ANSWERED THAT
+//   QUESTION, "60% chose Home" means what it says. `blank` is reported
+//   separately so the skipping is visible rather than hidden in the arithmetic.
+//
+//   WHAT COUNTS AS AN ANSWER. `answerFor`'s rule, unchanged and shared with the
+//   table: `null`, `undefined`, `""` and `[]` are all "not answered". An
+//   OPTIONAL email, date, select or number genuinely stores `""` (a ported
+//   quirk documented in entities.ts), so a rule that counted those as answers
+//   would inflate every optional question on every form.
+//
+//   WHAT HAPPENS TO A CHOICE NOBODY OFFERS ANY MORE. Options are editable, and
+//   an answer given under an option since removed is still a real answer. It is
+//   tallied, at the end, marked `offered: false` — dropping it would make the
+//   counts disagree with the number of people who answered.
+// ---------------------------------------------------------------------------
+
+/** One row of a choice question's tally. */
+export type ChoiceTally = {
+  option: string;
+  count: number;
+  /**
+   * Whether the form still offers this choice.
+   *
+   * False means somebody answered it and it was removed afterwards. The screen
+   * says so rather than dropping it — see the note above.
+   */
+  offered: boolean;
+};
+
+/** One question, summarised over every response the page loaded. */
+export type QuestionSummary = {
+  column: ResponseColumn;
+  /** The entity's type, or null for an orphaned key with no field behind it. */
+  fieldType: FieldType | null;
+  /** How many responses gave an answer to this question. */
+  answered: number;
+  /** How many left it blank. `answered + blank` is the response count. */
+  blank: number;
+} & (
+  | { kind: "choice"; tallies: ChoiceTally[] }
+  | { kind: "date"; earliest: string | null; latest: string | null }
+  | {
+      kind: "text";
+      /**
+       * Every answer, with the index of the response it came from — so the
+       * screen can attach the author and the timestamp without this file
+       * knowing anything about either.
+       */
+      answers: { responseIndex: number; text: string }[];
+    }
+);
+
+/** The stored value for one field on one response, before any formatting. */
+export function rawAnswerFor(fieldValues: unknown, key: string): unknown {
+  if (typeof fieldValues !== "object" || fieldValues === null || Array.isArray(fieldValues)) {
+    return undefined;
+  }
+
+  // `Object.hasOwn` for the reason values.ts gives at length: `"constructor" in
+  // {}` is true on every object there has ever been.
+  if (!Object.hasOwn(fieldValues, key)) return undefined;
+
+  return (fieldValues as Record<string, unknown>)[key];
+}
+
+/**
+ * Every question on the form, summarised.
+ *
+ * ⚠️ THE COLUMNS COME FROM `responseColumns`, WHICH MEANS ARCHIVED AND ORPHANED
+ * QUESTIONS ARE SUMMARISED TOO. A question somebody archived last week still has
+ * a hundred answers behind it, and a summary that quietly stopped counting them
+ * would be a page reporting fewer answers than the form received. The screen
+ * marks them; this decides they exist.
+ *
+ * ⚠️ ORPHANED KEYS HAVE NO ENTITY, SO THEY HAVE NO TYPE. They are summarised as
+ * text, which is the only reading available: there is no field left to say the
+ * answers were choices, and inventing an option list from the values that
+ * happen to be there would be a guess presented as a tally.
+ */
+export function summariseResponses(
+  schema: FormSchema,
+  responses: ReadonlyArray<{ field_values: unknown }>,
+): QuestionSummary[] {
+  const columns = responseColumns(schema, answeredKeysOf(responses));
+
+  /*
+   * key → the entity behind it. Built the same way `responseColumns` claims
+   * keys — first field in form order wins — so a duplicate key summarises the
+   * same field the table draws a column for.
+   */
+  const byKey = new Map<string, FormSchema["entities"][string]>();
+
+  for (const entityId of [
+    ...schema.root,
+    ...Object.keys(schema.entities).filter((id) => !schema.root.includes(id)),
+  ]) {
+    if (!Object.hasOwn(schema.entities, entityId)) continue;
+
+    const entity = schema.entities[entityId]!;
+    if (!byKey.has(entity.attributes.key)) byKey.set(entity.attributes.key, entity);
+  }
+
+  return columns.map((column) => {
+    const entity = byKey.get(column.key);
+    const fieldType = (entity?.type as FieldType | undefined) ?? null;
+
+    /*
+     * ⚠️ ANSWERED IS DECIDED BY `answerFor`, THE FORMATTER, AND THAT IS
+     * DELIBERATE. It is the one place the "what counts as an answer" rule lives,
+     * it is shared with the flat table, and it already handles the `""` that an
+     * optional email/date/select/number stores. A second rule here would drift
+     * from it and the two screens would report different totals for one form.
+     */
+    const answeredIndexes: number[] = [];
+
+    responses.forEach((response, index) => {
+      if (answerFor(response.field_values, column.key) !== null) answeredIndexes.push(index);
+    });
+
+    const answered = answeredIndexes.length;
+    const blank = responses.length - answered;
+    const base = { column, fieldType, answered, blank };
+
+    if (fieldType === "select" || fieldType === "multiselect") {
+      return { ...base, kind: "choice", tallies: tally(entity, responses, column.key) };
+    }
+
+    if (fieldType === "date") {
+      return { ...base, kind: "date", ...dateRange(responses, column.key) };
+    }
+
+    return {
+      ...base,
+      kind: "text",
+      answers: answeredIndexes.map((responseIndex) => ({
+        responseIndex,
+        // Non-null by construction: this index is in the list precisely because
+        // `answerFor` returned a string for it.
+        text: answerFor(responses[responseIndex]!.field_values, column.key)!,
+      })),
+    };
+  });
+}
+
+/**
+ * One choice question's counts, in the form's own option order.
+ *
+ * ⚠️ EVERY DECLARED OPTION GETS A ROW, INCLUDING A ZERO. "Nobody picked
+ * Contact" is a finding; a missing row is an absence somebody has to notice.
+ *
+ * ⚠️ A MULTISELECT ANSWER COUNTS ONCE PER OPTION CHOSEN, so the tallies can sum
+ * to more than `answered`. That is what the question means, and it is why the
+ * percentage the screen draws is against `answered` rather than against the sum
+ * — "60% of the people who answered chose Home" is true of a multiselect;
+ * "Home is 30% of all selections" is a different and less useful number.
+ */
+function tally(
+  entity: FormSchema["entities"][string] | undefined,
+  responses: ReadonlyArray<{ field_values: unknown }>,
+  key: string,
+): ChoiceTally[] {
+  const counts = new Map<string, number>();
+
+  for (const option of entity?.attributes.options ?? []) counts.set(option, 0);
+
+  // Answers under options nobody offers any more. Kept apart so they can be
+  // reported after the live ones and marked — see the note at the top.
+  const retired = new Map<string, number>();
+
+  for (const response of responses) {
+    const raw = rawAnswerFor(response.field_values, key);
+    const chosen = Array.isArray(raw) ? raw : [raw];
+
+    for (const value of chosen) {
+      if (typeof value !== "string" || value.trim() === "") continue;
+
+      if (counts.has(value)) counts.set(value, counts.get(value)! + 1);
+      else retired.set(value, (retired.get(value) ?? 0) + 1);
+    }
+  }
+
+  return [
+    ...[...counts].map(([option, count]) => ({ option, count, offered: true })),
+    // Sorted, so the table is stable between page loads rather than following
+    // whatever order the responses came back in.
+    ...[...retired]
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([option, count]) => ({ option, count, offered: false })),
+  ];
+}
+
+/**
+ * The span a date question's answers cover.
+ *
+ * ⚠️ COMPARED AS STRINGS, WHICH IS CORRECT FOR `YYYY-MM-DD` AND ONLY FOR IT.
+ * That is the stored shape (`dateEntity`), and it sorts lexically exactly as it
+ * sorts chronologically — so this needs no parsing, which is the point:
+ * `lib/dates.ts` exists because parsing a bare date wrong lands it on the
+ * previous day in any negative offset, and a comparison that never parses
+ * cannot make that mistake.
+ *
+ * Anything that is not that shape is ignored rather than guessed at. A blob
+ * hand-edited to hold `31/12/2026` would otherwise sort as the latest date on
+ * any form it appears on.
+ */
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+function dateRange(
+  responses: ReadonlyArray<{ field_values: unknown }>,
+  key: string,
+): { earliest: string | null; latest: string | null } {
+  let earliest: string | null = null;
+  let latest: string | null = null;
+
+  for (const response of responses) {
+    const raw = rawAnswerFor(response.field_values, key);
+    if (typeof raw !== "string" || !ISO_DATE.test(raw)) continue;
+
+    if (earliest === null || raw < earliest) earliest = raw;
+    if (latest === null || raw > latest) latest = raw;
+  }
+
+  return { earliest, latest };
 }

@@ -68,7 +68,13 @@ export function QuestionTypes({
   types: ReadonlyArray<FieldType>;
   /** The open question's type, or null when nothing is open. */
   currentType: FieldType | null;
-  /** True while the document cannot take another question — see `addReason`. */
+  /**
+   * True while a save is on the wire.
+   *
+   * Not "while somebody is typing" — that was the old dirty-lock, and autosave
+   * deleted it. A new question can be added on top of a half-typed one; the
+   * document simply waits for both.
+   */
   disabled: boolean;
   onAdd: (type: FieldType) => void;
 }) {

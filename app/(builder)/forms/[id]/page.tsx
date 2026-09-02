@@ -17,10 +17,13 @@ import {
   type FormFieldRow,
 } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
-import { resolvePage, resolvePageSize } from "@/components/pagination";
 import { FieldBuilder } from "./field-builder";
 import { FormResponses } from "./responses";
-import { BuilderTabs, resolveBuilderTab } from "./builder-tabs";
+import { BuilderTabs } from "./builder-tabs";
+// ⚠️ NOT from "./builder-tabs" — that module is `"use client"`, and calling a
+// pure export of a client module from a server component is a runtime crash
+// typecheck cannot see. See the note in ./tabs.ts.
+import { resolveBuilderTab } from "./tabs";
 import { BuilderTitle } from "./builder-title";
 import { ClientRequestsPanel } from "./client-requests-panel";
 import { SaveStatusLine, SaveStatusProvider } from "./save-status";
@@ -135,14 +138,17 @@ export default async function EditFormPage({
 }: {
   params: Promise<{ id: string }>;
   /*
-   * P7-66 Phase 4b — the Responses table below is PAGED, and the page number
-   * lives in the URL rather than in component state so Back works and a link to
-   * page 3 is a link to page 3. Nothing else on this route reads a query param.
+   * ⚠️ ONLY `?tab=` NOW. The Responses panel used to be PAGED and carried
+   * `?page=`/`?size=`; a summary cannot be paged — "7 of 12 chose Home" is a
+   * statement about every response — so the read is capped and unpaged instead.
+   * See `FormResponses`.
+   *
+   * `?tab=` survives because a link to the answers has to open on the answers.
    */
-  searchParams: Promise<{ page?: string; size?: string; tab?: string }>;
+  searchParams: Promise<{ tab?: string }>;
 }) {
   const { id } = await params;
-  const { page: rawPage, size: rawSize, tab: rawTab } = await searchParams;
+  const { tab: rawTab } = await searchParams;
   const context = await requireRole("team_leader");
   const supabase = await createClient();
 
@@ -514,11 +520,14 @@ export default async function EditFormPage({
               departmentId={form.department_id}
               isAnonymous={form.is_anonymous}
               schema={initialSchema}
-              page={resolvePage(rawPage)}
-              pageSize={resolvePageSize(rawSize)}
             />
           ) : (
-            <ClientRequestsPanel formName={form.name} submissionCount={submissionCount} />
+            <ClientRequestsPanel
+              formId={form.id}
+              formName={form.name}
+              departmentId={form.department_id}
+              submissionCount={submissionCount}
+            />
           )
         }
         settings={

@@ -4,6 +4,8 @@ import { useState } from "react";
 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
+import type { BuilderTab } from "./tabs";
+
 /**
  * P7-66 — QUESTIONS · RESPONSES · SETTINGS.
  *
@@ -25,21 +27,11 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
  * knowing anything about it — and it means switching tabs costs no round trip,
  * which a `?tab=` link would.
  *
- * ⚠️ THE INITIAL TAB COMES FROM THE URL ALL THE SAME. The Responses table pages
- * with `?page=`, and a paging link that landed back on Questions would be a
- * pagination control that navigates away from the thing it pages. So the server
- * reads `?tab=` and hands it here as the starting value; from then on the state
- * is local, because a tab click is not something Back should have to undo.
+ * ⚠️ THE INITIAL TAB COMES FROM THE URL ALL THE SAME, so a link to a form's
+ * answers opens on its answers. The server reads `?tab=` and hands it here as
+ * the starting value; from then on the state is local, because a tab click is
+ * not something Back should have to undo.
  */
-
-export const BUILDER_TABS = ["questions", "responses", "settings"] as const;
-
-export type BuilderTab = (typeof BUILDER_TABS)[number];
-
-/** Narrows a raw `?tab=` to a real one. Anything else opens on Questions. */
-export function resolveBuilderTab(raw: string | undefined): BuilderTab {
-  return BUILDER_TABS.find((tab) => tab === raw) ?? "questions";
-}
 
 export function BuilderTabs({
   initialTab,

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { FilePlus2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -141,7 +140,6 @@ export function FieldBuilder({
    */
   initialSchema: FormSchema;
 }) {
-  const router = useRouter();
   const { track, setDirty } = useSaveStatus();
 
   const builderStore = useFormBuilderStore(initialSchema);
@@ -280,9 +278,30 @@ export function FieldBuilder({
          * from.
          */
         if (message !== null) toast.success(message);
-        // The rest of the page — the submission count, the locked-keys line — is
-        // server-rendered from the rows this save just rewrote.
-        router.refresh();
+        /*
+         * ⚠️ NO `router.refresh()`, AND REMOVING IT WAS A REAL FIX RATHER THAN A
+         * TIDY-UP.
+         *
+         * It was here to update the server-rendered parts of the page after a
+         * save. Measured against what actually changes, it updated nothing: the
+         * canvas reads the builder STORE, `lockedEntityIds` comes from
+         * `savedSchema` in this component's own state, and
+         * `useFormBuilderStore` reads `initialData` exactly once — so a fresh
+         * `initialSchema` from the server would not reach the store even if it
+         * arrived.
+         *
+         * What it DID do is re-run the whole page's server render, and the
+         * Responses panel is part of that page — `keepMounted` keeps all three
+         * tabs on it. So every pause in typing re-read up to a thousand
+         * responses, re-counted them and re-ran `summariseResponses`, while the
+         * person was on the Questions tab and would not see the result. Typing
+         * one question title on an 800-answer form cost five full reads of it.
+         *
+         * The things that genuinely need a server round trip do their own:
+         * `renameForm` refreshes because the name appears in three
+         * server-rendered places, and it runs once per rename rather than once
+         * per pause.
+         */
         return { outcome: { kind: "saved" as const }, value: true };
       });
     } finally {
@@ -577,7 +596,7 @@ export function FieldBuilder({
 
           <div className="overflow-y-auto border-r pb-10 max-[1180px]:overflow-visible">
             <div className="p-4">
-              <FixedFieldsNote purpose={purpose} />
+              <FixedFieldsNote purpose={purpose} isAnonymous={isAnonymous} />
 
               {active.length === 0 && archived.length === 0 ? (
                 <EmptyCanvas purpose={purpose} />
@@ -672,7 +691,21 @@ export function FieldBuilder({
  * form having no fixed fields is a fact worth stating once — otherwise the only
  * way to learn that /respond asks for no name is to go and look at it.
  */
-function FixedFieldsNote({ purpose }: { purpose: FormPurpose }) {
+function FixedFieldsNote({
+  purpose,
+  isAnonymous,
+}: {
+  purpose: FormPurpose;
+  /**
+   * ⚠️ THE SENTENCE HERE MUST NOT CONTRADICT THE NOTICE IN THE PREVIEW PANE,
+   * WHICH IS SIX INCHES TO THE RIGHT. This said "every answer is filed under
+   * that person's name" on every staff form — while `AnonymityNotice` said "your
+   * name is not recorded" about the same form, at the same time, on the same
+   * screen. On the one setting where being wrong is a broken promise rather than
+   * a wrong label.
+   */
+  isAnonymous: boolean;
+}) {
   const isClient = purpose === "CLIENT_REQUEST";
 
   return (
@@ -683,7 +716,9 @@ function FixedFieldsNote({ purpose }: { purpose: FormPurpose }) {
       <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
         {isClient
           ? "Every client form asks these five. They are columns on the request, not questions, so they cannot be moved, renamed or removed."
-          : "No fixed fields. The session already says who is answering, so the form is only your questions."}
+          : isAnonymous
+            ? "No fixed fields, and no name. The form is only your questions, and nothing identifying the person answering is recorded with them."
+            : "No fixed fields. The session already says who is answering, so the form is only your questions, and each answer is filed under that person's name."}
       </p>
       {isClient ? (
         <p className="pt-1 text-xs text-muted-foreground">

@@ -21,6 +21,11 @@ import {
   slugFromName,
 } from "@/lib/schemas/forms";
 
+import { responsesCsvFilename, responsesToCsv } from "@/lib/form-builder/csv";
+import { formatDateTime, todayInAppZone } from "@/lib/dates";
+import { reconcileFormSchema, optionsFromRow, type FormFieldRow } from "@/lib/form-builder/schema";
+import type { FieldType } from "@/lib/schemas/forms";
+
 import { countFormSubmissions } from "./submission-count";
 
 /**
@@ -520,6 +525,216 @@ export async function renameForm(formId: string, name: unknown): Promise<ActionR
   revalidatePath("/forms");
   revalidatePath(`/forms/${formId}`);
   return { ok: true, data: undefined };
+}
+
+/**
+ * P7-66 — DOWNLOAD A STAFF FORM'S ANSWERS.
+ *
+ * ⚠️ IT RUNS AS THE CALLER, WITH NO SERVICE-ROLE CLIENT ANYWHERE. `form
+ * responses readable by the owning department` is what decides which rows come
+ * back, exactly as it does for the screen — so an export can never contain a row
+ * the person could not already read on the page they clicked from. An admin
+ * client here would be a quiet privilege escalation dressed as a convenience,
+ * and it would be invisible: the file would simply have more rows in it.
+ *
+ * ⚠️ `assertCanEditForm` AS WELL, and it is not redundant with the policy above.
+ * The policy governs the RESPONSES; this governs the FORM — a lead of another
+ * department can legitimately READ a published engagement form (the phase-4b
+ * company-wide policy), and administering it is a different question with no
+ * row-level answer. Same reasoning as `administersForm` on the builder page.
+ *
+ * ⚠️ NOT PAGED, AND DELIBERATELY NOT CAPPED THE WAY THE SCREEN IS. The screen
+ * caps at a thousand because it renders every row; a file is the one place where
+ * "all of them" is the whole point, and a truncated export is a spreadsheet
+ * somebody draws a conclusion from. If this ever needs a limit it needs a
+ * streaming response, not a silent slice.
+ *
+ * The CSV is returned as a string for the browser to save. The DTR export does
+ * the same — `downloadBase64` is for binaries, and a base64 round trip on text
+ * buys nothing but a chance to get the encoding wrong.
+ */
+/** One page of the export read. Under any plausible project `max-rows`. */
+const EXPORT_PAGE = 500;
+
+/**
+ * The point at which a CSV built in memory stops being the right answer.
+ *
+ * Not a silent truncation: past this the action REFUSES and says why, because a
+ * shortened spreadsheet is indistinguishable from a complete one.
+ */
+const EXPORT_MAX_ROWS = 20_000;
+
+export async function exportFormResponses(
+  formId: string,
+): Promise<ActionResult<{ filename: string; csv: string }>> {
+  const { supabase } = await assertCanEditForm(formId);
+
+  const { data: form, error: formError } = await supabase
+    .from("vizserve_pms_forms")
+    .select("id, name, purpose, is_anonymous, schema")
+    .eq("id", formId)
+    .maybeSingle();
+
+  if (formError) return { ok: false, error: formError.message };
+  if (!form) return { ok: false, error: "That form does not exist, or is outside your scope." };
+
+  /*
+   * ⚠️ ENGAGEMENT FORMS ONLY. A client form's submissions are
+   * `vizserve_pms_requests`, and this reads `vizserve_pms_form_responses` — so
+   * on a client form it would cheerfully produce a file with a header row and
+   * nothing under it, which reads as "no submissions" rather than "wrong table".
+   */
+  if (form.purpose !== "EMPLOYEE_ENGAGEMENT") {
+    return {
+      ok: false,
+      error: "A client form's submissions are requests. Export them from the request queue.",
+    };
+  }
+
+  /*
+   * ⚠️ THE SCHEMA IS RECONCILED AGAINST THE ROWS, exactly as the builder page
+   * does it, and for the same reason: the stored blob can be stale, and a stale
+   * blob here means a column missing from the file. `reconcileFormSchema` lets
+   * the ROWS win. See the note on the builder page's read.
+   */
+  const { data: fieldRows, error: fieldsError } = await supabase
+    .from("vizserve_pms_form_fields")
+    .select(
+      "id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order, created_at",
+    )
+    .eq("form_id", formId)
+    .order("sort_order");
+
+  if (fieldsError) return { ok: false, error: fieldsError.message };
+
+  const fields: FormFieldRow[] = [];
+
+  for (const row of fieldRows ?? []) {
+    const options = optionsFromRow(row.options);
+    // Refused rather than narrowed, as the builder does: a filtered option list
+    // is a silently different form.
+    if (options === null) {
+      return { ok: false, error: `The field "${row.field_key}" could not be read.` };
+    }
+
+    fields.push({
+      id: row.id,
+      label: row.label,
+      field_key: row.field_key,
+      field_type: row.field_type as FieldType,
+      help_text: row.help_text,
+      options,
+      is_required: row.is_required,
+      is_active: row.is_active,
+      sort_order: row.sort_order,
+      created_at: row.created_at,
+    });
+  }
+
+  const { schema } = reconcileFormSchema(form.schema, fields);
+
+  /*
+   * ⚠️⚠️ PAGED WITH `.range()`, BECAUSE "NO LIMIT" IS NOT THE SAME AS "ALL OF
+   * THEM".
+   *
+   * A query with no `.limit()` is still capped by the PROJECT's `max-rows`
+   * setting — 1000 by default on Supabase — and PostgREST truncates silently:
+   * no error, no flag, just fewer rows. So the sentence three paragraphs up
+   * ("a truncated export is a spreadsheet somebody draws a conclusion from")
+   * would have been exactly wrong about this function, in the one place where
+   * being wrong is invisible.
+   *
+   * So it reads pages until a short one comes back. `PAGE` is under any
+   * plausible `max-rows`, and the loop is bounded — a form with more answers
+   * than `EXPORT_MAX_ROWS` fails LOUDLY rather than handing over a partial file,
+   * because at that scale the honest answer is a streaming export and not a
+   * quiet slice.
+   */
+  const rows: { submitted_by: string | null; field_values: unknown; submitted_at: string }[] = [];
+
+  for (let from = 0; from < EXPORT_MAX_ROWS; from += EXPORT_PAGE) {
+    const { data: page, error: responsesError } = await supabase
+      .from("vizserve_pms_form_responses")
+      .select("submitted_by, field_values, submitted_at")
+      .eq("form_id", formId)
+      .order("submitted_at", { ascending: false })
+      .range(from, from + EXPORT_PAGE - 1);
+
+    if (responsesError) return { ok: false, error: responsesError.message };
+
+    rows.push(...(page ?? []));
+
+    // A short page is the end. An exactly-full one might not be, so it goes
+    // round again — the empty page that follows costs one round trip and is the
+    // only way to be sure.
+    if ((page?.length ?? 0) < EXPORT_PAGE) break;
+
+    if (rows.length >= EXPORT_MAX_ROWS) {
+      return {
+        ok: false,
+        error:
+          `This form has more than ${EXPORT_MAX_ROWS} answers, which is more than this export ` +
+          "can produce in one file. Tell whoever maintains the app — it needs a streaming " +
+          "export rather than a shortened one.",
+      };
+    }
+  }
+
+  /*
+   * ⚠️ THE NAME LOOKUP IS NOT MADE AT ALL ON AN ANONYMOUS FORM. There is no id
+   * to look up — every `submitted_by` is null by the INSERT policy — and a
+   * lookup running over a form that promised not to record a name is the kind of
+   * line that later grows a fallback nobody meant to write.
+   */
+  const submitterIds = form.is_anonymous
+    ? []
+    : [
+        ...new Set(
+          rows.map((row) => row.submitted_by).filter((id): id is string => id !== null),
+        ),
+      ];
+
+  const names: Record<string, string> = {};
+
+  /*
+   * Chunked for the reason the screen's lookup is: `.in()` becomes a query
+   * string on a GET, and this read is not capped at all.
+   *
+   * ⚠️ A FAILED CHUNK IS LOGGED, NOT SWALLOWED. It writes "Outside your
+   * department" into a hundred rows of a spreadsheet — a claim about PERMISSIONS
+   * that is both false and unfalsifiable from the file. It is deliberately not
+   * fatal, for the same reason it is not on the screen: withholding the answers
+   * because a name did not arrive is the more damaging of the two failures. But
+   * an untraceable one is worse than either.
+   */
+  for (let at = 0; at < submitterIds.length; at += 100) {
+    const { data: users, error: namesError } = await supabase
+      .from("vizserve_pms_users")
+      .select("id, full_name")
+      .in("id", submitterIds.slice(at, at + 100));
+
+    if (namesError) {
+      console.error("[P7-66] a name lookup failed while exporting answers", {
+        formId,
+        from: at,
+        message: namesError.message,
+      });
+    }
+
+    for (const user of users ?? []) names[user.id] = user.full_name;
+  }
+
+  return {
+    ok: true,
+    data: {
+      filename: responsesCsvFilename(form.name, todayInAppZone()),
+      csv: responsesToCsv(schema, rows, {
+        isAnonymous: form.is_anonymous,
+        names,
+        formatTimestamp: formatDateTime,
+      }),
+    },
+  };
 }
 
 export async function saveSchema(formId: string, input: unknown): Promise<ActionResult> {

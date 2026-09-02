@@ -1,10 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { schemaFromFields } from "@/lib/form-builder/schema";
-import {
-  RESPONSE_IDENTITY_COLUMN_IDS,
-  responseIdentityColumnIds,
-} from "@/lib/form-builder/responses";
+import { RESPONSE_VIEWS, responseViewsFor } from "@/lib/form-builder/responses";
 import {
   DEFAULT_SLA_MINUTES,
   formCreateSchema,
@@ -659,28 +656,29 @@ describe("submitFormResponse — the promise the screen made must still hold", (
 // 4. THE READ
 // ---------------------------------------------------------------------------
 
-describe("responseIdentityColumnIds — the Responses table's fixed columns", () => {
-  it("draws both, person first, on a named form", () => {
-    expect(responseIdentityColumnIds(false)).toEqual([...RESPONSE_IDENTITY_COLUMN_IDS]);
+describe("responseViewsFor — which readings an anonymous form offers", () => {
+  it("offers all three on a named form", () => {
+    expect(responseViewsFor(false)).toEqual([...RESPONSE_VIEWS]);
   });
 
-  it("drops the person column entirely on an anonymous form", () => {
+  it("⚠️ has no Individual view on an anonymous form", () => {
     /*
-     * Dropped, not blanked. A column full of dashes reads as "the names were
-     * lost"; the truth is that none was ever written.
+     * Not hidden for tidiness — THERE IS NO INDIVIDUAL. `submitted_by` is NULL
+     * on every row because the INSERT policy refused to let a name be written,
+     * so the view could only page through submissions labelled "somebody" while
+     * presenting them as separable people. A form with one long free-text answer
+     * each is re-identifiable by writing style; the count is what an anonymous
+     * form promises and the count is what it gives.
      */
-    const ids = responseIdentityColumnIds(true);
-
-    expect(ids).not.toContain(RESPONSE_IDENTITY_COLUMN_IDS[0]);
-    expect(ids).toEqual([RESPONSE_IDENTITY_COLUMN_IDS[1]]);
+    expect(responseViewsFor(true)).not.toContain("individual");
   });
 
-  it("keeps a first column to pin, whichever kind of form it is", () => {
-    // `DataTable` freezes whichever column declares `pin: "left"` first, and the
-    // answer columns are per-form — a dozen of them is ordinary, so this table
-    // scrolls sideways and a row with nothing frozen is a row you cannot place.
+  it("still offers a way to read the answers either way", () => {
+    // Anonymity removes attribution, not the answers. A form with no readings at
+    // all would be a page that collected data nobody can look at.
     for (const isAnonymous of [true, false]) {
-      expect(responseIdentityColumnIds(isAnonymous).length).toBeGreaterThan(0);
+      expect(responseViewsFor(isAnonymous).length).toBeGreaterThan(0);
+      expect(responseViewsFor(isAnonymous)).toContain("summary");
     }
   });
 
@@ -692,6 +690,6 @@ describe("responseIdentityColumnIds — the Responses table's fixed columns", ()
      * form anonymous and drop the attribution off answers that carry it. The
      * signature takes a boolean and no rows, which is the guarantee in the type.
      */
-    expect(responseIdentityColumnIds.length).toBe(1);
+    expect(responseViewsFor.length).toBe(1);
   });
 });
