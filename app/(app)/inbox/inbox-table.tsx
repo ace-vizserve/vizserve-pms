@@ -7,6 +7,7 @@ import { useColumnVisibility } from "@/components/data-table-columns";
 import type { VizservePmsNotificationType } from "@/lib/database.types";
 import { formatDateTime } from "@/lib/dates";
 import { NOTIFICATION_TYPE_LABELS } from "@/lib/notifications";
+import { richTextToPlainText } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
 
 /**
@@ -78,7 +79,26 @@ export function InboxTable({
                 {!item.read_at ? <span className="sr-only"> (unread)</span> : null}
               </span>
             )}
-            {item.body ? <p className="mt-0.5 text-xs text-muted-foreground">{item.body}</p> : null}
+            {/*
+              ⚠️ FLATTENED, BECAUSE THE BODY IS MARKUP NOW.
+
+              `vizserve_pms_notify` is called from SQL with the transition
+              comment (`p3_tasks_qa.sql`) or the internal request's reason
+              (`p5_05_internal_requests.sql`) as the body — and P7-56 made both
+              of those columns rich text. So a notification about a comment
+              arrived here carrying `<p>` tags and rendered them as visible
+              characters.
+
+              Flattened rather than rendered as HTML: this is a two-line summary
+              inside a table row, and a `<ul>` laid out here would blow the row
+              open. Same helper the emails use, and it fixes the rows already
+              stored — a migration could only fix the next ones.
+            */}
+            {richTextToPlainText(item.body) ? (
+              <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
+                {richTextToPlainText(item.body)}
+              </p>
+            ) : null}
           </div>
         </div>
       ),
