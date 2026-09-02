@@ -9,7 +9,14 @@
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
 
-export type VizservePmsUserRole = "member" | "team_leader" | "manager" | "admin";
+/**
+ * ⚠️ "admin" IS A DEAD RUNG, kept because the Postgres enum still declares it.
+ * P8-01 moved its meaning ("oversees everything") to `owner` and promoted every
+ * existing row; dropping an enum value would mean rebuilding the type on a live
+ * database. Order here is the LADDER — it must match the enum's declaration
+ * order and `ROLE_ORDER` in `lib/auth/roles.ts` exactly.
+ */
+export type VizservePmsUserRole = "member" | "team_leader" | "manager" | "admin" | "owner";
 
 export type VizservePmsNotificationType =
   | "pending_approval"
@@ -214,6 +221,17 @@ export type Database = {
            */
           is_hr: boolean;
           /**
+           * P8-01. Administrative capability SCOPED TO `primary_department_id`
+           * — the department this person belongs to, not one they lead.
+           * ORTHOGONAL to `role` rather than a rank on it, exactly as `is_hr`
+           * is (D33): a member may hold it and still report to their Team
+           * Leader. Never test this directly in app code —
+           * `canAdminDepartment()` in `lib/auth/authorization.ts` is the single
+           * reading, and it returns true for owners, who hold the capability
+           * over every department without carrying the flag.
+           */
+          is_dept_admin: boolean;
+          /**
            * P7-36. `HH:MM:SS` Manila wall-clock, both or neither. NULL means no
            * schedule is recorded, so nothing computes lateness for this person —
            * a supported state, not missing data. Normalise through
@@ -245,6 +263,8 @@ export type Database = {
           app_access?: string[];
           gender?: VizservePmsGender | null;
           is_hr?: boolean;
+          /** P8-01. Department-scoped admin tick. See the Row comment. */
+          is_dept_admin?: boolean;
           work_start?: string | null;
           work_end?: string | null;
           /** P8-05. NULL means inherit the company break, never zero. */
@@ -262,6 +282,8 @@ export type Database = {
           app_access?: string[];
           gender?: VizservePmsGender | null;
           is_hr?: boolean;
+          /** P8-01. Department-scoped admin tick. See the Row comment. */
+          is_dept_admin?: boolean;
           work_start?: string | null;
           work_end?: string | null;
           /** P8-05. NULL means inherit the company break, never zero. */
@@ -1870,9 +1892,10 @@ export type Database = {
         Returns: boolean;
       };
       /**
-       * P7-52. True for a user carrying `is_hr`, AND for any admin — the admin
-       * branch is why widening a policy from `is_admin()` to this is a strict
-       * widening rather than a transfer.
+       * P7-52, re-pointed by P8-01. True for a user carrying `is_hr`, AND for
+       * any OWNER — the owner branch is why widening a policy from
+       * `is_admin()` to this is a strict widening rather than a transfer. It
+       * read `role = 'admin'` until the owner rung took that meaning over.
        *
        * Nothing in `app/` should call this over RPC: `canDoHr()` in
        * `lib/auth/authorization.ts` answers the same question from the context
@@ -1881,6 +1904,18 @@ export type Database = {
        */
       vizserve_pms_is_hr: {
         Args: Record<PropertyKey, never>;
+        Returns: boolean;
+      };
+      /**
+       * P8-01. True for any owner, and for a department admin asked about their
+       * OWN department. The department-scoped sibling of `is_admin()`, which is
+       * company-wide — the names are close and the scopes are opposite.
+       *
+       * Same rule as `is_hr` above: `canAdminDepartment()` in
+       * `lib/auth/authorization.ts` is what app code calls.
+       */
+      vizserve_pms_is_dept_admin: {
+        Args: { p_department_id: string };
         Returns: boolean;
       };
       vizserve_pms_has_app_access: {

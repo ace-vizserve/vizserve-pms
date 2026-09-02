@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
 import { requireRole } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { todayInAppZone } from "@/lib/dates";
 import { currentBalanceYear } from "@/lib/schemas/leave-balances";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 
+import { QueryError } from "@/components/query-error";
 import { UsersTable } from "./users-table";
 import type { EditableUser } from "./user-editor";
 
@@ -25,7 +27,7 @@ export const metadata: Metadata = { title: "Users" };
  * an auth identity genuinely requires it.
  */
 export default async function UsersPage() {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
   const supabase = await createClient();
 
   // P7-33. Manila's year, not the server's — see `currentBalanceYear`. On
@@ -35,7 +37,7 @@ export default async function UsersPage() {
   const balanceYear = currentBalanceYear(today);
 
   const [
-    { data: users },
+    { data: users, error: usersError },
     { data: departments },
     { data: managed },
     { data: leaveTypes },
@@ -44,7 +46,7 @@ export default async function UsersPage() {
     supabase
       .from("vizserve_pms_users")
       .select(
-        "id, email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
+        "id, email, full_name, gender, role, is_hr, is_dept_admin, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
       )
       // Deactivated accounts sink to the bottom; the rest read alphabetically.
       .order("is_active", { ascending: false })
@@ -111,11 +113,21 @@ export default async function UsersPage() {
           because it is the one thing the screen cannot show: the role ladder is
           inclusive, so the column reading "Manager" is a floor, not a set. */}
       <p className="text-xs text-muted-foreground">
-        Roles are inclusive — an admin can do everything a manager can, and so
+        Roles are inclusive — an owner can do everything a manager can, and so
         on down. What a person can <em>reach</em> is decided by the departments
-        they lead, not by the role alone.
+        they lead, not by the role alone. Admin and HR are ticks rather than
+        rungs: they sit beside the ladder, not on it.
       </p>
 
+      {/* ⚠️ `.error` CHECKED, NOT `users ?? []`. This page was the last list in
+          the app still reading a failed query as an empty one — see
+          `components/query-error.tsx` for the four places that already learned
+          it. It matters more here than most: an empty STAFF list reads as
+          "nobody is provisioned", which is a plausible enough sentence to be
+          believed and acted on. */}
+      {usersError ? (
+        <QueryError what="staff" message={usersError.message} />
+      ) : (
       <UsersTable
         users={rows}
         departments={departments ?? []}
@@ -123,7 +135,16 @@ export default async function UsersPage() {
         balanceYear={balanceYear}
         today={today}
         currentUserId={context.userId}
+        /*
+          P8-01. ALWAYS TRUE TODAY — this page is `requireRole("owner")`, which
+          is the real gate. Threaded anyway rather than hard-coded, because the
+          editor uses it to disable the Owner, Admin and HR ticks, and the day
+          this screen widens to anyone below owner is the day a hard-coded
+          `true` would silently let them appoint themselves.
+        */
+        viewerIsOwner={roleAtLeast(context.role, "owner")}
       />
+      )}
     </PageShell>
   );
 }

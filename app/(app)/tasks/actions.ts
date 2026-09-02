@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { requireAuthContextOrThrow, requireRole } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
   removeStoredAttachments,
@@ -1136,8 +1137,9 @@ export async function saveList(
 
   // RLS says the same thing, but saying it here too means the user gets a
   // sentence instead of an empty result they have to interpret.
+  // P8-01: `roleAtLeast`, not `!== "admin"` — the top rung is now `owner`.
   if (
-    context.role !== "admin" &&
+    !roleAtLeast(context.role, "owner") &&
     !context.managedDepartmentIds.includes(values.department_id)
   ) {
     return { ok: false, error: "That department is outside your scope." };
@@ -1262,7 +1264,11 @@ export async function saveTaskGroup(
 
   // RLS says the same thing, but saying it here too means the user gets a
   // sentence instead of an empty result they have to interpret.
-  if (context.role !== "admin" && !context.managedDepartmentIds.includes(values.department_id)) {
+  // P8-01: `roleAtLeast`, not `!== "admin"` — the top rung is now `owner`.
+  if (
+    !roleAtLeast(context.role, "owner") &&
+    !context.managedDepartmentIds.includes(values.department_id)
+  ) {
     return { ok: false, error: "That department is outside your scope." };
   }
 

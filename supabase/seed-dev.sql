@@ -15,11 +15,20 @@
 --
 -- STEP 2: run everything below.
 
--- --- promote to admin -------------------------------------------------------
--- Admin with an empty managed-departments set = sees everything without being
+-- --- promote to owner -------------------------------------------------------
+-- Owner with an empty managed-departments set = sees everything without being
 -- anyone's Team Leader. That is the intended shape for a build account (D15).
+--
+-- ⚠️ `owner`, NOT `admin`, AND THIS FILE IS THE LOST-OWNER RECOVERY PATH.
+-- P8-01 moved "oversees everything" up to the new top rung and left `admin`
+-- behind as a DEAD RUNG that grants nothing: every predicate in the database now
+-- reads `>= owner`. Pasting `role = 'admin'` here would hand back an account
+-- that cannot open /admin/*, cannot open /hr/*, and is refused by every
+-- vizserve_pms_is_admin() policy — which is to say, it would not recover
+-- anything. If you are reading this because you are locked out, `owner` is the
+-- word that gets you back in.
 update vizserve_pms_users
-   set role = 'admin',
+   set role = 'owner',
        full_name = 'Test Admin',
        is_active = true
  where email = 'test.admin@example.com';

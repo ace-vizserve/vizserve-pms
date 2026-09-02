@@ -184,13 +184,13 @@ vi.mock("@/utils/supabase/admin", () => ({
  * make every assertion below pass for the wrong reason.
  */
 /*
- * ⚠️ P7-66 Phase 5 — THE ROLE IS NOW LOAD-BEARING, AND IT DEFAULTS TO ADMIN.
+ * ⚠️ P7-66 Phase 5 — THE ROLE IS NOW LOAD-BEARING, AND IT DEFAULTS TO OWNER.
  *
  * It used to be incidental: a team leader of the form's department could edit
  * any form, so `team_leader` simply meant "allowed". Since 20260902140000 an
- * INTERNAL form is an admin instrument end to end, and `admin` is
+ * INTERNAL form is an administrative instrument end to end, and the top rung is
  * what "allowed" means for the forms almost every case below is about. Left as
- * `team_leader`, every one of them would pass or fail on the admin refusal
+ * `team_leader`, every one of them would pass or fail on that refusal
  * before it ever reached the lock under test — green for the wrong reason, or
  * red for a reason that is not the subject.
  *
@@ -200,7 +200,13 @@ vi.mock("@/utils/supabase/admin", () => ({
  * that the refusal DOES fire — the coverage that changing this default would
  * otherwise have quietly removed.
  */
-const auth = vi.hoisted(() => ({ role: "admin" as "admin" | "team_leader" }));
+/*
+ * ⚠️ `owner`, NOT `admin`, since P8-01 finished retiring that rung. The refusal
+ * asks for `>= owner`, so a stored `admin` is refused exactly as a team leader
+ * is — which would make every case below green for being blocked rather than
+ * for the lock they are actually about.
+ */
+const auth = vi.hoisted(() => ({ role: "owner" as "owner" | "team_leader" }));
 
 vi.mock("@/lib/auth/authorization", () => ({
   requireRole: async () => ({
@@ -246,8 +252,8 @@ function stored(overrides: Partial<FakeConfig["form"]> = {}): FakeConfig["form"]
 }
 
 beforeEach(() => {
-  // See the mock above: every case here is an admin unless it says otherwise.
-  auth.role = "admin";
+  // See the mock above: every case here is an owner unless it says otherwise.
+  auth.role = "owner";
   fake = makeFakeClient({ form: stored() });
 });
 

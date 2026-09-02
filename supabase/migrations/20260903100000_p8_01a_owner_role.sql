@@ -1,0 +1,48 @@
+-- ---------------------------------------------------------------------------
+-- P8-01a — add `owner` to the role enum. NOTHING ELSE.
+--
+-- ⚠️ THIS FILE IS DELIBERATELY ALMOST EMPTY, AND SPLITTING IT OFF IS THE WHOLE
+-- POINT. Postgres refuses to *use* a new enum value in the same transaction
+-- that adds it:
+--
+--     unsafe use of new value "owner" of enum type vizserve_pms_user_role
+--     (55P04)
+--
+-- This repo has walked into that three times already — p5_05, p7_03/p7_04 and
+-- p7_07/p7_08 all had to be split for exactly this reason. So the value lands
+-- here, alone, and everything that reads or writes it lands in
+-- 20260903100100_p8_01b_admin_capability.sql, which MUST be run afterwards as
+-- its own separate transaction.
+--
+-- WHAT IS CHANGING, in one sentence: `admin` today means "oversees
+-- everything", and that meaning moves to a new top rung called `owner` so that
+-- "administrative capability" can become a TICK scoped to one department — the
+-- same shape D33 gave HR — instead of a rank that necessarily reaches the whole
+-- company.
+--
+-- `after 'admin'` and not `before` — owner outranks admin, and the enum's
+-- DECLARATION ORDER *is* the ladder: `vizserve_pms_has_role` compares roles with
+-- `>=` (p0_05:41) and `lib/auth/roles.ts` compares them with `indexOf`. Put it
+-- in the wrong place and every `>=` in the database quietly inverts.
+--
+-- ⚠️ APPLY BY HAND, in the Supabase SQL editor, and paste this file as it stands
+-- at that moment. Every P7/P8 migration landed that way and none is recorded in
+-- `supabase_migrations.schema_migrations`.
+-- ---------------------------------------------------------------------------
+
+-- `if not exists` so a re-paste of this file is a no-op rather than a duplicate
+-- value error — which matters more here than usual, because this file gets
+-- pasted separately from its partner and it is easy to lose track of which of
+-- the two has already gone in.
+alter type vizserve_pms_user_role add value if not exists 'owner' after 'admin';
+
+-- ---------------------------------------------------------------------------
+-- ⚠️ STOP HERE. Do not add the column, do not re-point the predicates, do not
+-- run the UPDATE that promotes today's admins. All of that reads 'owner' and
+-- would fail with 55P04 inside this transaction.
+--
+-- Run 20260903100100_p8_01b_admin_capability.sql next, as a separate statement
+-- batch. Between the two files the system is CONSISTENT, not broken: no row
+-- holds 'owner' yet, and every existing check still says `>= 'admin'`, which
+-- every current admin still satisfies.
+-- ---------------------------------------------------------------------------

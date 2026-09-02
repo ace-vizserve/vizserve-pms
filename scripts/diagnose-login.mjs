@@ -83,7 +83,14 @@ if (signIn?.session) {
   } else {
     console.log(`  [2] profile: role=${profile.role} is_active=${profile.is_active}`);
     if (!profile.is_active) console.log("      -> inactive profiles are treated as no session");
-    if (profile.role !== "admin") console.log("      -> not an admin; nav and scope will be limited");
+    // ⚠️ `owner`, not `admin`. P8-01 retired `admin` to a dead rung that grants
+    // nothing, so a row still holding it is NOT the wide-open account this line
+    // used to describe — it is the narrowest one there is, and saying otherwise
+    // here would send somebody debugging the wrong half of a lockout.
+    if (profile.role !== "owner") console.log("      -> not an owner; nav and scope will be limited");
+    if (profile.role === "admin") {
+      console.log("      -> role is the RETIRED `admin` rung: it grants nothing. Promote to `owner`.");
+    }
   }
 }
 

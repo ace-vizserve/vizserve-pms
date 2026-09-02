@@ -339,8 +339,9 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       (await fetchJoinedTaskIdSet(context.userId)).has(task.id),
     isQa: task.qa_assignee_id === context.userId,
     leadsDepartment:
-      context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
-    isAdmin: roleAtLeast(context.role, "admin"),
+      roleAtLeast(context.role, "owner") ||
+      context.managedDepartmentIds.includes(task.department_id),
+    isAdmin: roleAtLeast(context.role, "owner"),
   };
 
   const late = isOverdue(task.due_date) && !isTerminal(task.status);

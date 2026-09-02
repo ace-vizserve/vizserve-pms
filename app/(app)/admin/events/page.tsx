@@ -34,7 +34,7 @@ export default async function EventsPage({
 }: {
   searchParams: Promise<{ year?: string | string[] }>;
 }) {
-  await requireRole("admin");
+  await requireRole("owner");
   const supabase = await createClient();
 
   const params = await searchParams;

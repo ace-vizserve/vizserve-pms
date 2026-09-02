@@ -35,6 +35,9 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
     // NOT HR — the HR cases opt in explicitly, and the ones below that pin the
     // role ladder keep testing only the ladder.
     isHr: false,
+    // P8-01. The department-admin tick — orthogonal to `role`, exactly as
+    // `isHr` is, and false unless a test says otherwise.
+    isDeptAdmin: false,
     primaryDepartmentId: null,
     managedDepartmentIds: [],
     ...overrides,
@@ -46,12 +49,19 @@ describe("roleAtLeast — roles are inclusive (D15)", () => {
     // If these ever diverge, `role >= required` in SQL and `roleAtLeast` in TS
     // answer differently, and the difference shows up as a security bug rather
     // than a type error. Cheap assertion, expensive omission.
-    expect(ROLE_ORDER).toEqual(["member", "team_leader", "manager", "admin"]);
+    // P8-01 appended `owner` and left `admin` in place as a DEAD RUNG — the
+    // Postgres enum still declares it, because dropping an enum value means
+    // rebuilding the type on a live database. Remove it from the array alone
+    // and every index shifts against a `>=` in SQL that did not move.
+    expect(ROLE_ORDER).toEqual(["member", "team_leader", "manager", "admin", "owner"]);
   });
 
-  it("admin satisfies every floor", () => {
+  it("owner satisfies every floor", () => {
+    // Was "admin satisfies every floor" until P8-01 moved that meaning up a
+    // rung. Admin no longer does — nothing holds it, and every predicate in the
+    // database now reads `>= owner`.
     for (const required of ROLE_ORDER) {
-      expect(roleAtLeast("admin", required)).toBe(true);
+      expect(roleAtLeast("owner", required)).toBe(true);
     }
   });
 
@@ -62,11 +72,15 @@ describe("roleAtLeast — roles are inclusive (D15)", () => {
     expect(roleAtLeast("member", "admin")).toBe(false);
   });
 
-  it("is >= and not ===, so an admin still reaches a team_leader gate", () => {
-    // The real case this protects: Amier is an admin who is also a TL. An
+  it("is >= and not ===, so an owner still reaches a team_leader gate", () => {
+    // The real case this protects: Amier is an owner who is also a TL. An
     // equality check locks him out of his own approval queue.
-    expect(roleAtLeast("admin", "team_leader")).toBe(true);
+    expect(roleAtLeast("owner", "team_leader")).toBe(true);
     expect(roleAtLeast("manager", "team_leader")).toBe(true);
+    // The dead rung still ORDERS above team_leader — `roleAtLeast` is a fact
+    // about the enum and says nothing about what anything grants. What it must
+    // not do is unlock a department; `dept-admin-capability.test.ts` pins that.
+    expect(roleAtLeast("admin", "team_leader")).toBe(true);
   });
 
   it("treats a missing role as no authority rather than as a default", () => {
@@ -76,10 +90,13 @@ describe("roleAtLeast — roles are inclusive (D15)", () => {
 });
 
 describe("canAccessDepartment", () => {
-  it("lets an admin reach every department, including ones they lead none of", () => {
-    const admin = context({ role: "admin" });
-    expect(canAccessDepartment(admin, DEPT_A)).toBe(true);
-    expect(canAccessDepartment(admin, DEPT_C)).toBe(true);
+  it("lets an owner reach every department, including ones they lead none of", () => {
+    // Was `admin` until P8-01 finished. The predicate now asks for `>= owner`,
+    // which is what every policy behind it asks for too — see the dead-rung case
+    // in `dept-admin-capability.test.ts`.
+    const owner = context({ role: "owner" });
+    expect(canAccessDepartment(owner, DEPT_A)).toBe(true);
+    expect(canAccessDepartment(owner, DEPT_C)).toBe(true);
   });
 
   it("requires the department to be in the managed set, not merely the role", () => {
@@ -95,7 +112,7 @@ describe("canAccessDepartment", () => {
     expect(canAccessDepartment(member, DEPT_A)).toBe(false);
   });
 
-  it("denies a null department to everyone below admin", () => {
+  it("denies a null department to everyone below owner", () => {
     // An unrouted form has department_id null. It must not become a hole that
     // every TL can walk through.
     const tl = context({ role: "team_leader", managedDepartmentIds: [DEPT_A] });
@@ -111,13 +128,13 @@ describe("canAccessDepartment", () => {
 });
 
 describe("departmentScopeFilter", () => {
-  it("returns null for an admin — meaning no filter, see everything", () => {
-    expect(departmentScopeFilter(context({ role: "admin" }))).toBeNull();
+  it("returns null for an owner — meaning no filter, see everything", () => {
+    expect(departmentScopeFilter(context({ role: "owner" }))).toBeNull();
   });
 
   it("returns an EMPTY ARRAY for a member, which callers must read as zero rows", () => {
     // The dangerous confusion this pins down: `null` means "no filter" and `[]`
-    // means "nothing". Treating [] as null turns a member into an admin.
+    // means "nothing". Treating [] as null turns a member into an owner.
     const filter = departmentScopeFilter(context({ role: "member" }));
     expect(filter).toEqual([]);
     expect(filter).not.toBeNull();
@@ -143,8 +160,8 @@ describe("departmentPickerScope", () => {
    * `invalid input syntax for type uuid: ""` — invisible while the error was
    * discarded, a hard page failure the moment it was not.
    */
-  it("is `all` for an admin", () => {
-    expect(departmentPickerScope(context({ role: "admin" }))).toEqual({ kind: "all" });
+  it("is `all` for an owner", () => {
+    expect(departmentPickerScope(context({ role: "owner" }))).toEqual({ kind: "all" });
   });
 
   it("is `some` for a TL who leads departments", () => {

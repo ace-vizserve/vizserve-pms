@@ -318,11 +318,12 @@ export default async function TaskBoardPage({
         person.is_active &&
         person.id !== context.userId &&
         person.primary_department_id !== null &&
-        (context.role === "admin" || assignableScope.has(person.primary_department_id)),
+        (roleAtLeast(context.role, "owner") ||
+          assignableScope.has(person.primary_department_id)),
     )
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
-  const isAdmin = roleAtLeast(context.role, "admin");
+  const isAdmin = roleAtLeast(context.role, "owner");
   function seat(task: {
     id: string;
     assignee_id: string | null;
@@ -336,7 +337,9 @@ export default async function TaskBoardPage({
       isAssignee:
         task.assignee_id === context.userId || joinedTaskIdSet.has(task.id),
       isQa: task.qa_assignee_id === context.userId,
-      leadsDepartment: context.role === "admin" || context.managedDepartmentIds.includes(task.department_id),
+      leadsDepartment:
+        roleAtLeast(context.role, "owner") ||
+        context.managedDepartmentIds.includes(task.department_id),
       isAdmin,
     };
   }
@@ -360,7 +363,8 @@ export default async function TaskBoardPage({
     // The lead test inline rather than through `seat()`, which also wants a
     // `qa_assignee_id` that has nothing to do with deleting.
     const leads =
-      context.role === "admin" || context.managedDepartmentIds.includes(task.department_id);
+      roleAtLeast(context.role, "owner") ||
+      context.managedDepartmentIds.includes(task.department_id);
     return (
       leads ||
       task.created_by === context.userId ||

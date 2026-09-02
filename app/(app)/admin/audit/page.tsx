@@ -40,7 +40,7 @@ const DEFAULT_PERIOD: AuditPeriod = "30";
  * admin-only select and there was no screen behind it. An audit trail nobody
  * can open is a trail that exists only in the sense that the rows are there.
  *
- * ADMIN ONLY, and enforced three times over — `requireRole("admin")` here, the
+ * ADMIN ONLY, and enforced three times over — `requireRole("owner")` here, the
  * `vizserve_pms_is_admin()` policy under the query, and the nav floor that
  * keeps the link out of everyone else's sidebar. The nav one protects nobody
  * (hiding a link is presentation); the other two are the enforcement.
@@ -71,7 +71,7 @@ export default async function AuditPage({
     dir?: string;
   }>;
 }) {
-  await requireRole("admin");
+  await requireRole("owner");
   const params = await searchParams;
   const supabase = await createClient();
 

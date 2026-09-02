@@ -157,7 +157,9 @@ describe.skipIf(!dbTestsEnabled)("app access gate", () => {
         await revokeAccess(userId);
 
         const { error: escalation } = await client.auth.updateUser({
-          data: { app_access: ["vizserve-pms"], role: "admin" },
+          // `owner`, not the dead `admin` rung — claiming a rank that grants
+          // nothing would make this escalation attempt trivially harmless.
+          data: { app_access: ["vizserve-pms"], role: "owner" },
         });
         expect(escalation).toBeNull();
 
@@ -248,7 +250,11 @@ describe.skipIf(!dbTestsEnabled)("app access gate", () => {
 
       const roles = new Set((data ?? []).map((row) => row.role));
       for (const role of roles) {
-        expect(["member", "team_leader", "manager", "admin"]).toContain(role);
+        // ⚠️ `owner`, and `admin` DROPPED. P8-01 made `admin` a dead rung and
+        // `scripts/seed.mjs` now seeds the build account as `owner` — a seeded
+        // account still holding `admin` would be an environment with no owner in
+        // it, which is precisely the state this list should refuse.
+        expect(["member", "team_leader", "manager", "owner"]).toContain(role);
       }
     });
   });

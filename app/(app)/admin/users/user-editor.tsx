@@ -26,12 +26,20 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { TimePicker } from "@/components/ui/time-picker";
 import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
-import { ROLE_ORDER, type Role } from "@/lib/auth/roles";
+import { type Role } from "@/lib/auth/roles";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { formatDays, leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { GENDER_LABELS, type Gender, ROLE_LABELS } from "@/lib/schemas/users";
 
 import { createUser, readLeaveBalances, setLeaveAllocations, updateUser } from "./actions";
+import {
+  offeredRank,
+  rankBelow,
+  rankImplied,
+  rankLocked,
+  rankTicked,
+  RANK_LADDER,
+} from "./rank-ladder";
 
 /**
  * P0-04 — the create/edit dialog.
@@ -73,6 +81,8 @@ export type EditableUser = {
   role: Role;
   /** P7-52. The HR job, orthogonal to `role` — see D33. */
   is_hr: boolean;
+  /** P8-01. The department-admin tick, orthogonal to `role` — see D33. */
+  is_dept_admin: boolean;
   primary_department_id: string | null;
   is_active: boolean;
   /** Which HFSE applications they may enter. See the access toggle below. */
@@ -94,10 +104,6 @@ export type EditableUser = {
   leave_allocations: Record<string, number>;
 };
 
-// Most privileged first — an admin scanning this list is usually looking for
-// the exception, not the default.
-const ROLE_OPTIONS = [...ROLE_ORDER].reverse();
-
 const GENDER_OPTIONS: Gender[] = ["MALE", "FEMALE"];
 
 const NO_DEPARTMENT = "__none__";
@@ -107,6 +113,7 @@ export function UserEditor({
   leaveTypes,
   balanceYear,
   user,
+  viewerIsOwner,
   open,
   onOpenChange,
 }: {
@@ -116,6 +123,16 @@ export function UserEditor({
   balanceYear: number;
   /** Absent for create. */
   user?: EditableUser;
+  /**
+   * P8-01. Whether the person filling this form holds the top rung.
+   *
+   * ⚠️ ONLY AN OWNER MAY GRANT OWNER, ADMIN OR HR, and this is what the form
+   * reads to say so. It is NOT the enforcement — `/admin/users` is
+   * `requireRole("owner")` and the server actions re-check on every call. This
+   * exists so the UI AGREES with that gate rather than offering a control whose
+   * only possible answer is a refusal.
+   */
+  viewerIsOwner: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -136,6 +153,7 @@ export function UserEditor({
             leaveTypes={leaveTypes}
             balanceYear={balanceYear}
             user={user}
+            viewerIsOwner={viewerIsOwner}
             onDone={() => onOpenChange(false)}
           />
         ) : null}
@@ -149,12 +167,15 @@ function UserForm({
   leaveTypes,
   balanceYear,
   user,
+  viewerIsOwner,
   onDone,
 }: {
   departments: Department[];
   leaveTypes: AllocatableLeaveType[];
   balanceYear: number;
   user?: EditableUser;
+  /** P8-01. See `UserEditor`. Only an owner may grant Owner, Admin or HR. */
+  viewerIsOwner: boolean;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -169,20 +190,34 @@ function UserForm({
    * untouched record. The schema refuses null, so the admin has to choose.
    */
   const [gender, setGender] = useState<Gender | null>(user?.gender ?? null);
-  const [role, setRole] = useState<Role>(user?.role ?? "member");
+  /*
+   * ⚠️ SEEDED THROUGH `offeredRank`, SO WHAT THE FORM SHOWS IS WHAT IT SAVES.
+   *
+   * A row still holding the dead `admin` rung opens as `manager` — which is
+   * already the rank the ticks displayed, because `roleAtLeast("admin",
+   * "manager")` is true. Without this the dialog showed "Manager", saved
+   * `admin`, and could only ever be promoted: every offered rank was strictly
+   * below the stored one, so every one of them was locked. Normalising here
+   * makes the record demotable AND stops an owner who opened it to change a
+   * phone number from silently re-confirming a rank that grants nothing.
+   *
+   * A no-op for every rank the form offers — `offeredRank(x) === x` for all
+   * four of them.
+   */
+  const [role, setRole] = useState<Role>(offeredRank(user?.role ?? "member"));
 
   /*
-   * value → label maps for the two Selects below.
+   * value → label maps for the Selects below.
    *
    * ⚠️ Base UI's SelectValue renders the RAW VALUE unless the Select root is
    * given `items`. The `<SelectItem>` children populate the POPUP; this map
    * populates the TRIGGER, and supplying only the children means the closed
    * control shows "team_leader" instead of "Team leader", and a bare
    * `a1000000-…` instead of the department name.
+   *
+   * P8-01 removed the ROLE map: the role picker is no longer a Select. See the
+   * rank ladder below.
    */
-  const roleItems = Object.fromEntries(
-    ROLE_OPTIONS.map((option) => [option, ROLE_LABELS[option].label]),
-  );
   const genderItems = Object.fromEntries(
     GENDER_OPTIONS.map((option) => [option, GENDER_LABELS[option]]),
   );
@@ -218,6 +253,7 @@ function UserForm({
   );
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
   const [isHr, setIsHr] = useState(user?.is_hr ?? false);
+  const [isDeptAdmin, setIsDeptAdmin] = useState(user?.is_dept_admin ?? false);
   const [hasAppAccess, setHasAppAccess] = useState(
     user ? user.app_access.includes(APP_ACCESS_KEY) : true,
   );
@@ -306,6 +342,38 @@ function UserForm({
   // merely hidden — the values are dropped, and the server drops them again.
   const scopeApplies = role !== "member";
 
+  /**
+   * P8-01 — THE RANK LADDER, as ticks rather than a dropdown.
+   *
+   * The app has always enforced inclusion — `roleAtLeast` is `>=`, never `===`,
+   * and the Postgres enum's declaration order is the ladder — but a Select made
+   * it invisible: picking "Manager" said nothing about the fact that a manager
+   * IS a team leader and IS a member. Ticking a rank and watching every rank
+   * below it tick and lock is that same rule, shown.
+   *
+   * A rank is TICKED when the stored role is at least that rank, and LOCKED when
+   * it is strictly below it — unticking something the rank above already implies
+   * is not a decision anybody can make. Member is therefore always ticked and
+   * always locked: everyone is at least a member.
+   *
+   * The stored value is the HIGHEST ticked rank, which is what makes this a
+   * ladder rather than a set of independent flags. `owner` additionally needs
+   * `viewerIsOwner` — see the tick column in the JSX.
+   *
+   * The rules themselves live in `./rank-ladder`, which is plain TypeScript and
+   * therefore assertable. Both of the bugs they now carry warnings about — the
+   * always-enabled Member checkbox and the undemotable legacy `admin` row — were
+   * invisible in review and are one `expect` each in `tests/unit/rank-ladder`.
+   */
+  function toggleRank(rank: Role, checked: boolean) {
+    if (checked) {
+      setRole(rank);
+      return;
+    }
+
+    setRole(rankBelow(rank));
+  }
+
   function toggleDepartment(id: string, checked: boolean) {
     setManaged((current) =>
       checked
@@ -328,6 +396,10 @@ function UserForm({
       // create as well as on edit, unlike the active switch which only makes
       // sense once an account exists.
       is_hr: isHr,
+      // P8-01. In the SHARED payload for the same reason `is_hr` is: an account
+      // can be created for somebody joining to administer their department, and
+      // making an owner save twice to say so would be pointless.
+      is_dept_admin: isDeptAdmin,
       // The empty string is how a cleared time input reports itself. The schema
       // turns it into null — "no fixed schedule" — rather than a parse error.
       work_start: workStart,
@@ -611,30 +683,79 @@ function UserForm({
           )}
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="role">Role</Label>
-            <Select
-              items={roleItems}
-              value={role}
-              onValueChange={(value) => setRole(value as Role)}
-            >
-              <SelectTrigger id="role">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {ROLE_OPTIONS.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {ROLE_LABELS[option].label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              {ROLE_LABELS[role].hint}
+        {/*
+          P8-01 — THE RANK LADDER.
+
+          Was a dropdown, which hid the one thing about roles that is actually
+          confusing: they are INCLUSIVE. A manager is a team leader is a member
+          (D15), the enum's declaration order is that ladder, and every check in
+          the app and the database compares it with `>=`. A dropdown showing one
+          value said none of that. Ticking a rank and watching everything under
+          it tick and lock says all of it, in the control itself.
+
+          Senior first, so "everything below" is literally below.
+        */}
+        <div className="space-y-3 rounded-lg border p-4">
+          <div>
+            <Label>Rank</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              Ranks are inclusive — ticking one ticks everything under it, and
+              those stay ticked because they are not separate choices. What is
+              stored is the highest tick.
             </p>
           </div>
 
+          <div className="space-y-2">
+            {RANK_LADDER.map((rank) => {
+              const ticked = rankTicked(role, rank);
+              /*
+                ⚠️ ONLY AN OWNER MAY GRANT OWNER. The same rule the HR switch
+                below has carried since P7-52, and it is what stops the ladder
+                escalating itself. `/admin/users` is `requireRole("owner")` and
+                `updateUser` re-checks on every call — that is the real gate;
+                this only makes the form agree with it rather than offering a
+                control that can only be refused.
+              */
+              const ownerBlocked = rank === "owner" && !viewerIsOwner;
+              /*
+                Two different facts, deliberately not one. `rankImplied` is what
+                the "Included in …" hint asserts; `rankLocked` is what disables
+                the control, and it is WIDER — the bottom rung is locked without
+                being implied by anything above it, because everyone is at least
+                a member. Collapsing them is how the Member checkbox came to
+                render enabled and snap back when unticked.
+              */
+              const implied = rankImplied(role, rank);
+              const locked = rankLocked(role, rank) || ownerBlocked;
+
+              return (
+                <label
+                  key={rank}
+                  className="flex items-start gap-3 text-sm data-[disabled=true]:opacity-50"
+                  data-disabled={locked}>
+                  <Checkbox
+                    className="mt-0.5"
+                    checked={ticked}
+                    disabled={locked}
+                    onCheckedChange={(checked) => toggleRank(rank, checked === true)}
+                  />
+                  <span>
+                    <span className="font-medium">{ROLE_LABELS[rank].label}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {implied
+                        ? `Included in ${ROLE_LABELS[role].label}.`
+                        : ownerBlocked
+                          ? "Only an owner can grant this."
+                          : ROLE_LABELS[rank].hint}
+                    </span>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="primary_department">Belongs to</Label>
             <Select
@@ -810,27 +931,63 @@ function UserForm({
         ) : null}
 
         {/*
-          P7-52 — the HR switch.
+          P7-52 and P8-01 — THE CAPABILITY SWITCHES, which sit below the rank
+          ladder because they are a different kind of statement. The ladder says
+          where somebody sits; these say what job they hold while sitting there.
 
-          ⚠️ THIS SCREEN IS ADMIN-ONLY AND MUST STAY THAT WAY. It is the only
-          place `is_hr` can be set, which is precisely what stops the capability
-          escalating itself: an HR person can allocate leave and edit holidays,
-          and cannot appoint another HR person or make themselves one.
+          ⚠️ NEITHER IS A RUNG, and that is the whole design (D33). The role enum
+          is a total order compared with `>=` in SQL and `indexOf` in TS, so
+          every value must sit somewhere on member→owner. "HR" and "department
+          admin" sit nowhere on it — a member can hold either — and wedging one
+          in would silently grant or revoke everything above or below the slot.
+
+          ⚠️ ONLY AN OWNER MAY GRANT EITHER, and this screen is
+          `requireRole("owner")`, which is what makes that true. It is the only
+          place these can be set, and that is precisely what stops a capability
+          escalating itself: an HR person cannot appoint another HR person, and a
+          department admin cannot appoint another department admin or widen their
+          own scope. The `disabled` below only makes the form agree with the gate.
 
           Rendered for a NEW user too, unlike Active below — an account can be
-          created for somebody who is joining to do the HR job, and making them
-          save twice to say so would be pointless.
+          created for somebody joining to do one of these jobs, and making an
+          owner save twice to say so would be pointless.
         */}
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div>
+            <Label htmlFor="is_dept_admin">Admin</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {!viewerIsOwner
+                ? "Only an owner can grant this."
+                : isDeptAdmin
+                  ? "Administrative capability over their own department — the one under “Belongs to” above, not the ones they lead. Their rank is unchanged, so they still report to their Team Leader and approve nothing."
+                  : "Not a department admin. Every owner already administers every department regardless of this switch."}
+            </p>
+          </div>
+          <Switch
+            id="is_dept_admin"
+            checked={isDeptAdmin}
+            disabled={!viewerIsOwner}
+            onCheckedChange={setIsDeptAdmin}
+          />
+        </div>
+
         <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
           <div>
             <Label htmlFor="is_hr">HR</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {isHr
-                ? "Can set leave balances, edit leave types and holidays, and run the leave report for everyone. Cannot manage users."
-                : "Not an HR user. Every admin already has these abilities regardless of this switch."}
+              {!viewerIsOwner
+                ? "Only an owner can grant this."
+                : isHr
+                  ? "Can set leave balances, edit leave types and holidays, and run the leave report for everyone. Cannot manage users."
+                  : "Not an HR user. Every owner already has these abilities regardless of this switch."}
             </p>
           </div>
-          <Switch id="is_hr" checked={isHr} onCheckedChange={setIsHr} />
+          <Switch
+            id="is_hr"
+            checked={isHr}
+            disabled={!viewerIsOwner}
+            onCheckedChange={setIsHr}
+          />
         </div>
 
         {user ? (

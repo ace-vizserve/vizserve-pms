@@ -17,7 +17,7 @@ import { createClient } from "@/utils/supabase/server";
 /**
  * P0-04 — user administration.
  *
- * Admin-only, and re-established on every call: `requireRole("admin")` first,
+ * Admin-only, and re-established on every call: `requireRole("owner")` first,
  * always, before anything reads a parameter. RLS says the same thing underneath,
  * but the service-role client below bypasses RLS entirely — so here the
  * TypeScript check is not belt-and-braces, it is the belt.
@@ -48,6 +48,8 @@ type AuditableProfile = {
   gender: string | null;
   role: string;
   is_hr: boolean;
+  /** P8-01. The department-admin tick. Audited exactly as `is_hr` is. */
+  is_dept_admin: boolean;
   primary_department_id: string | null;
   is_active: boolean;
   app_access: string[];
@@ -61,7 +63,7 @@ async function readProfileForAudit(
   const { data: profile } = await admin
     .from("vizserve_pms_users")
     .select(
-      "email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
+      "email, full_name, gender, role, is_hr, is_dept_admin, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -132,7 +134,7 @@ function revalidateProfileScreens(): void {
 // ---------------------------------------------------------------------------
 
 export async function createUser(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
 
   const parsed = createUserSchema.safeParse(input);
   if (!parsed.success) {
@@ -186,6 +188,9 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
       gender: values.gender,
       role: values.role,
       is_hr: values.is_hr,
+      // P8-01. Same story as is_hr: settable only from this screen, which is
+      // owner-gated, and that is what stops the tick appointing more of itself.
+      is_dept_admin: values.is_dept_admin,
       primary_department_id: values.primary_department_id,
       is_active: true,
       app_access: [APP_ACCESS_KEY],
@@ -225,7 +230,7 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
 // ---------------------------------------------------------------------------
 
 export async function updateUser(userId: string, input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
 
   const parsed = updateUserSchema.safeParse(input);
   if (!parsed.success) {
@@ -242,11 +247,17 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
 
   if (!before) return { ok: false, error: "That user no longer exists." };
 
-  // An admin who demotes or deactivates themselves locks the last door behind
+  // An owner who demotes or deactivates themselves locks the last door behind
   // them, and the recovery is a SQL console. Cheap to prevent, tedious to undo.
+  //
+  // ⚠️ P8-01 CHANGED THE LITERAL HERE, AND IT HAD TO. This read `!== "admin"`,
+  // and the migration promotes every admin to `owner` — so left alone it would
+  // have refused an owner's own save with "You cannot change your own role"
+  // even when they had changed nothing at all, because the role they submit is
+  // now `owner` and never `admin` again. Same for the last-active check below.
   if (userId === context.userId) {
-    if (values.role !== "admin") {
-      return { ok: false, error: "You cannot change your own role. Ask another admin." };
+    if (values.role !== "owner") {
+      return { ok: false, error: "You cannot change your own role. Ask another owner." };
     }
     if (!values.is_active) {
       return { ok: false, error: "You cannot deactivate your own account." };
@@ -258,17 +269,17 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
     }
   }
 
-  if (before.role === "admin" && (values.role !== "admin" || !values.is_active)) {
+  if (before.role === "owner" && (values.role !== "owner" || !values.is_active)) {
     const { count } = await admin
       .from("vizserve_pms_users")
       .select("id", { count: "exact", head: true })
-      .eq("role", "admin")
+      .eq("role", "owner")
       .eq("is_active", true);
 
     if ((count ?? 0) <= 1) {
       return {
         ok: false,
-        error: "This is the last active admin. Promote someone else first.",
+        error: "This is the last active owner. Promote someone else first.",
       };
     }
   }
@@ -283,9 +294,13 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
       full_name: values.full_name,
       gender: values.gender,
       role: values.role,
-      // P7-52. Only reachable from this screen, which is admin-gated — that is
+      // P7-52. Only reachable from this screen, which is owner-gated — that is
       // what stops HR appointing HR.
       is_hr: values.is_hr,
+      // P8-01, and the same sentence again: a department admin cannot reach
+      // this screen, so it cannot make another department admin or promote
+      // itself out of its own department.
+      is_dept_admin: values.is_dept_admin,
       primary_department_id: values.primary_department_id,
       is_active: values.is_active,
       // Revoking this closes every table at once — vizserve_pms_current_role()
@@ -344,7 +359,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
  * screen calls it. The shared action gates on `requireHr()`, which admins pass.
  */
 export async function setLeaveAllocations(input: unknown): Promise<ActionResult> {
-  await requireRole("admin");
+  await requireRole("owner");
   return setHrLeaveAllocations(input);
 }
 
@@ -359,14 +374,14 @@ export async function setLeaveAllocations(input: unknown): Promise<ActionResult>
  * Through the ORDINARY client, not the service role. The summary function does
  * its own authority check — caller must be the subject, their lead, or an admin
  * — and letting it run rather than bypassing it means this action cannot become
- * the hole in it. `requireRole("admin")` is still first, because that is what
+ * the hole in it. `requireRole("owner")` is still first, because that is what
  * this screen is.
  */
 export async function readLeaveBalances(
   userId: string,
   year: number,
 ): Promise<ActionResult<LeaveBalanceSummaryRow[]>> {
-  await requireRole("admin");
+  await requireRole("owner");
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("vizserve_pms_leave_balance_summary", {
@@ -406,7 +421,7 @@ export async function readLeaveBalances(
  * credential between the user and GoTrue.
  */
 export async function sendPasswordReset(userId: string): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
 
   const admin = createAdminClient();
   const { data: profile } = await admin

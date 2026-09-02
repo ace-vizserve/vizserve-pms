@@ -33,6 +33,8 @@ export type NavChild = {
   minRole?: Role;
   /** See `NavItem.requiresHr`. Applied on top of `minRole`, never instead. */
   requiresHr?: boolean;
+  /** See `NavItem.requiresDeptAdmin`. Applied on top of `minRole`, never instead. */
+  requiresDeptAdmin?: boolean;
 };
 
 export type NavItem = {
@@ -47,6 +49,22 @@ export type NavItem = {
    * ladder has nothing to say about the job they hold.
    */
   requiresHr?: boolean;
+  /**
+   * P8-01. Requires the department-admin capability, which — like `requiresHr`
+   * and for the same reason (D33) — is ORTHOGONAL to `minRole` rather than a
+   * point on it, so the two are ANDed, never substituted. A department-admin
+   * row keeps `minRole: "member"`, because the holder may be a member: that is
+   * the entire shape of the capability.
+   *
+   * ⚠️ Like `requiresHr`, this does NOT inherit to children — see the note in
+   * `visibleNavItems`. A child under a parent that does not require it must say
+   * so itself, because there is nothing above it to have already cleared.
+   *
+   * NOTHING SETS THIS YET. P8-01a is the role model only; the screens a
+   * department admin reaches are a separate follow-up. It is declared now so
+   * that the follow-up adds a field to a row rather than a concept to the nav.
+   */
+  requiresDeptAdmin?: boolean;
   /** False until the phase that builds it lands. */
   enabled: boolean;
   /** Shown on the disabled state so the reason is obvious. */
@@ -191,10 +209,19 @@ export const NAV_ITEMS: NavItem[] = [
     enabled: true,
     icon: "inbox",
   },
+  // ---------------------------------------------------------------------------
+  // P8-01 — THE ADMIN GROUP IS `minRole: "owner"`, NOT `"admin"`.
+  //
+  // Every page below is `requireRole("owner")`. Leaving the floor at the dead
+  // `admin` rung would put these rows in the rail for a legacy or restored
+  // `admin` row and then throw ForbiddenError when they clicked one — a door
+  // offered to people it does not open for, which 13-implementation-status.md
+  // already records as the P7-14 failure. The nav must agree with the gate.
+  // ---------------------------------------------------------------------------
   {
     label: "Users",
     href: "/admin/users",
-    minRole: "admin",
+    minRole: "owner",
     // Re-enabled on merge. This was correctly disabled on main because the
     // route 404ed — P0-04 has since been built, so the screen it was waiting
     // for now exists.
@@ -225,7 +252,7 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Events",
     href: "/admin/events",
-    minRole: "admin",
+    minRole: "owner",
     // P7-46. Sits directly under Holidays because the two are the halves of
     // "what is on the calendar that is not leave" — and because the difference
     // between them matters: a holiday is a day off and changes leave
@@ -236,7 +263,7 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Settings",
     href: "/admin/settings",
-    minRole: "admin",
+    minRole: "owner",
     // P7-37. Company-wide rules, read by everybody and written by nobody else.
     // Sits with Holidays for the same reason: both are policy an admin sets
     // once and the whole app then obeys silently.
@@ -246,7 +273,7 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Audit trail",
     href: "/admin/audit",
-    minRole: "admin",
+    minRole: "owner",
     // P0-09. The table has been written to since Phase 0 by every server action
     // and by a dozen SQL functions; this is the first thing that reads it.
     //
@@ -352,13 +379,29 @@ export function roleAllows(role: Role, required: Role): boolean {
  * thread through in the right order.
  */
 export type NavViewer = {
-  /** `canDoHr(context)`, NOT `context.isHr` — admins hold it without the flag. */
+  /** `canDoHr(context)`, NOT `context.isHr` — owners hold it without the flag. */
   isHr?: boolean;
+  /**
+   * P8-01. `canAdminDepartment(context, context.primaryDepartmentId)`, NOT
+   * `context.isDeptAdmin` — owners hold it without the flag, and the capability
+   * is meaningless without a department to evaluate it against. The nav can
+   * only ask "does this person administer anything at all", so the caller
+   * resolves it against their OWN department and passes the answer.
+   */
+  isDeptAdmin?: boolean;
 };
 
 /** True when this row's capability requirements are met. Role is checked apart. */
-function capabilityAllows(item: { requiresHr?: boolean }, viewer: NavViewer): boolean {
-  return !item.requiresHr || viewer.isHr === true;
+function capabilityAllows(
+  item: { requiresHr?: boolean; requiresDeptAdmin?: boolean },
+  viewer: NavViewer,
+): boolean {
+  if (item.requiresHr && viewer.isHr !== true) return false;
+  // The default is DENY, exactly as it is for HR above: a caller that forgets to
+  // pass the viewer gets a nav with these rows missing, which is a visible bug.
+  // The other default would show them to everybody, which is a silent one.
+  if (item.requiresDeptAdmin && viewer.isDeptAdmin !== true) return false;
+  return true;
 }
 
 export function visibleNavItems(role: Role, viewer: NavViewer = {}): NavItem[] {
@@ -369,9 +412,9 @@ export function visibleNavItems(role: Role, viewer: NavViewer = {}): NavItem[] {
 
     // A child with no `minRole` inherits the parent's, which the filter above
     // has already cleared — so only the ones that RAISE the floor are re-checked.
-    // `requiresHr` does NOT inherit: a child under a non-HR parent that needs
-    // the capability must say so itself, because there is nothing above it to
-    // have already cleared.
+    // NEITHER `requiresHr` NOR `requiresDeptAdmin` INHERITS: a child under a
+    // parent that does not require the capability must say so itself, because
+    // there is nothing above it to have already cleared.
     const children = item.children.filter(
       (child) =>
         (!child.minRole || roleAllows(role, child.minRole)) && capabilityAllows(child, viewer),

@@ -67,6 +67,21 @@ export type AuthContext = {
    * Unlike `gender` above, this one IS an authorization input.
    */
   isHr: boolean;
+  /**
+   * P8-01. Whether this person holds administrative capability over THEIR OWN
+   * department — `primaryDepartmentId`, the team they belong to, not one they
+   * lead. ORTHOGONAL to `role` and not a rank on it, exactly as `isHr` is
+   * (D33): a member may hold it and still report to their Team Leader.
+   *
+   * Read `canAdminDepartment()` rather than this field: an owner administers
+   * every department without carrying the flag, and `vizserve_pms_is_dept_admin`
+   * says so.
+   *
+   * ⚠️ Confers NO approval rights. `vizserve_pms_manages_department` is
+   * deliberately untouched by P8-01 — see the note at the bottom of
+   * 20260903100100_p8_01b_admin_capability.sql.
+   */
+  isDeptAdmin: boolean;
   /** The department the user *belongs to*. Not the same as what they lead. */
   primaryDepartmentId: string | null;
   /** The departments they lead or oversee. Empty for a plain member. */
@@ -97,6 +112,57 @@ export class ForbiddenError extends Error {
 }
 
 /**
+ * The profile columns `resolveAuth` needs, WITHOUT `is_dept_admin`.
+ *
+ * Split out because the read below has to be able to run twice — once asking for
+ * the P8-01 column and once not. See `deptAdminColumnMissing`.
+ */
+const PROFILE_COLUMNS =
+  "id, email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access" as const;
+
+/**
+ * P8-01 — DOES THIS FAILED READ MEAN "THE COLUMN IS NOT THERE YET"?
+ *
+ * ⚠️ THIS EXISTS BECAUSE MIGRATIONS IN THIS REPO ARE APPLIED BY HAND, IN THE
+ * SUPABASE SQL EDITOR, AFTER THE CODE IS DEPLOYED (CLAUDE.md;
+ * docs/13-implementation-status.md). There is therefore a real window in which
+ * this file is live and `p8_01b` has not been pasted yet — and in that window a
+ * select naming `is_dept_admin` is rejected WHOLE. Not the column: the query.
+ * PostgREST returns no row at all, `resolveAuth` sees no profile, and every
+ * signed-in person is answered `not_provisioned`.
+ *
+ * That is a total outage rather than a dead feature, and it locks out the owner
+ * who would have pasted the migration — there is no route back in through the
+ * app. So the read DEGRADES instead of denying, on the same reasoning as
+ * `lib/settings-server.ts`: a capability nobody can hold yet is not worth a
+ * whole-app lockout.
+ *
+ * ⚠️ NARROW ON PURPOSE. It is not "the read failed"; it is "the read failed
+ * naming THIS column". A genuine no-profile row (`maybeSingle` reports no error
+ * for zero rows) and every other failure still fall through to
+ * `not_provisioned`, exactly as before. Turning every error into a successful
+ * read would be a far worse bug than the one this fixes.
+ *
+ * Matched on the CODE *and* the column name, because either alone is wrong:
+ * a bare 42703 could be about some other column in a future edit of the select,
+ * and a message match alone would catch an unrelated error that happened to
+ * mention it. Postgres raises 42703 (undefined_column); PostgREST forwards it,
+ * and answers PGRST204 when its own schema cache is the stale half.
+ *
+ * ONCE `p8_01b` IS APPLIED EVERYWHERE, this function and the fallback read below
+ * can be deleted and the select folded back into one call.
+ */
+export function deptAdminColumnMissing(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+
+  const message = error.message ?? "";
+  if (!message.includes("is_dept_admin")) return false;
+
+  const code = error.code ?? "";
+  return code === "42703" || code === "PGRST204" || /does not exist|schema cache/i.test(message);
+}
+
+/**
  * Resolves the caller once per request.
  *
  * `getUser()` rather than `getSession()` — getSession reads the cookie without
@@ -115,16 +181,45 @@ export const resolveAuth = cache(
 
     if (!user) return { context: null, denial: "no_session" };
 
-    const { data: profile } = await supabase
+    const attempt = await supabase
       .from("vizserve_pms_users")
-      .select(
-        "id, email, full_name, gender, role, is_hr, primary_department_id, is_active, app_access",
-      )
+      .select(`${PROFILE_COLUMNS}, is_dept_admin`)
       .eq("id", user.id)
       .maybeSingle();
 
+    let profile: (typeof attempt)["data"] = attempt.data;
+
+    // P8-01 — THE DEGRADE. See `deptAdminColumnMissing` above for why this is
+    // here rather than a single select: the code ships before the migration is
+    // pasted, and denying on an unknown column would lock the whole company out
+    // of a live app, owner included.
+    //
+    // ⚠️ `isDeptAdmin: false` IS THE ONLY ANSWER THIS BRANCH MAY GIVE, and it is
+    // the safe one in both directions. It matches the column's own
+    // `default false`, so nobody loses anything they actually hold — the column
+    // does not exist yet, so nobody holds it — and it cannot GRANT the
+    // capability to anyone, because `canAdminDepartment` reads the flag only in
+    // its non-owner branch. An owner still administers every department while
+    // degraded, which is exactly what the pre-migration database says too:
+    // `vizserve_pms_is_dept_admin` is not there either, so no policy consults it.
+    if (!profile && deptAdminColumnMissing(attempt.error)) {
+      const degraded = await supabase
+        .from("vizserve_pms_users")
+        .select(PROFILE_COLUMNS)
+        .eq("id", user.id)
+        .maybeSingle();
+
+      // Still `null` for a genuinely missing row — the fallback re-asks the same
+      // question without the new column, it does not invent an answer.
+      profile = degraded.data ? { ...degraded.data, is_dept_admin: false } : null;
+    }
+
     // A valid session with no profile row. Real and expected: the auth pool is
     // shared with other HFSE systems, and Entra SSO admits the whole tenant.
+    //
+    // Also where every OTHER read failure lands, unchanged by the degrade above:
+    // an RLS refusal, a network fault, a 42703 about some other column. Denying
+    // on those is the old behaviour and stays the right one.
     if (!profile) return { context: null, denial: "not_provisioned" };
 
     if (!profile.is_active) return { context: null, denial: "deactivated" };
@@ -160,6 +255,7 @@ export const resolveAuth = cache(
         gender: profile.gender,
         role: profile.role,
         isHr: profile.is_hr,
+        isDeptAdmin: profile.is_dept_admin,
         primaryDepartmentId: profile.primary_department_id,
         managedDepartmentIds: (managed ?? []).map((row) => row.department_id),
       },
@@ -206,18 +302,23 @@ export async function requireRole(required: Role): Promise<AuthContext> {
  * consults, so a second reading of "is this person HR" written inline at a call
  * site is a disagreement waiting to happen.
  *
- * ⚠️ THE ADMIN BRANCH IS LOAD-BEARING, not a courtesy. Admin *is* HR today —
+ * ⚠️ THE OWNER BRANCH IS LOAD-BEARING, not a courtesy. The top rung *is* HR —
  * `vizserve_pms_leave_balances` says so in a comment (p7_33:262) — so P7-52
  * widened every one of those checks from `is_admin()` to `is_hr()`. Drop the
- * admin branch here and the UI would start hiding screens from admins that the
+ * owner branch here and the UI would start hiding screens from owners that the
  * database still lets them use.
+ *
+ * P8-01 moved it from `"admin"` to `"owner"` on both sides at once. Leaving it
+ * at `"admin"` would have kept working by accident — owner outranks admin — but
+ * would have disagreed with `vizserve_pms_is_hr()`, which now reads
+ * `u.role >= 'owner'`, about a stray legacy `admin` row.
  *
  * The active/app-access gates the SQL also applies are already enforced upstream:
  * `resolveAuth` returns no context at all for a deactivated or access-revoked
  * user, so by the time there is an `AuthContext` to pass in, both hold.
  */
 export function canDoHr(context: AuthContext): boolean {
-  return context.isHr || roleAtLeast(context.role, "admin");
+  return context.isHr || roleAtLeast(context.role, "owner");
 }
 
 /**
@@ -235,6 +336,62 @@ export async function requireHr(): Promise<AuthContext> {
 }
 
 /**
+ * P8-01 — the department-admin capability, and the ONLY TypeScript definition
+ * of it.
+ *
+ * Mirrors `vizserve_pms_is_dept_admin(uuid)` EXACTLY, and the mirroring is the
+ * point: that function is what any policy consulting this capability will
+ * actually evaluate, so a second reading written inline at a call site is a
+ * disagreement waiting to happen. Owner, or the flag AND the department being
+ * asked about being the holder's own — nothing else, in either language.
+ *
+ * ⚠️ `primaryDepartmentId`, NOT `managedDepartmentIds`. A department admin is a
+ * member of their department BY RANK and does not lead it — they administer the
+ * team they are in, still reporting to its Team Leader. Reading the managed set
+ * here would turn the tick into a second, invisible way of being a lead.
+ *
+ * ⚠️ THIS IS NOT APPROVAL AUTHORITY. `canAccessDepartment` and
+ * `vizserve_pms_manages_department` are what decide who may approve, and P8-01
+ * deliberately left both alone. The Admin tick confers administrative
+ * capability and no approval rights whatsoever.
+ *
+ * ⚠️ THE OWNER BRANCH IS LOAD-BEARING for the same reason `canDoHr`'s is:
+ * without it, ticking somebody as a department admin would read as taking that
+ * department away from the owner.
+ *
+ * The active/app-access gates the SQL also applies are already enforced
+ * upstream: `resolveAuth` returns no context at all for a deactivated or
+ * access-revoked user, so by the time there is an `AuthContext` to pass in, both
+ * hold.
+ *
+ * A null `departmentId` — a person with no department, or a row that has not
+ * been assigned one — is false for everyone but an owner, which is the correct
+ * reading of "administers no department". It matches the SQL, where the `=`
+ * against null is null and therefore not true.
+ */
+export function canAdminDepartment(context: AuthContext, departmentId: string | null): boolean {
+  if (roleAtLeast(context.role, "owner")) return true;
+  if (!departmentId) return false;
+  return context.isDeptAdmin && context.primaryDepartmentId === departmentId;
+}
+
+/**
+ * For pages and actions the department-admin capability guards.
+ *
+ * Deliberately NOT `requireRole`-shaped, for the reason `requireHr` is not:
+ * this is not a floor on the role ladder, and expressing it as one is the
+ * mistake the whole change exists to avoid. It takes the department as an
+ * argument because, unlike HR, the capability is meaningless without one.
+ */
+export async function requireDeptAdmin(departmentId: string | null): Promise<AuthContext> {
+  const context = await requireAuthContext();
+  if (!canAdminDepartment(context, departmentId)) {
+    throw new ForbiddenError("That department is outside what you administer.");
+  }
+  return context;
+}
+
+/**
  * For server actions and route handlers, where redirecting is the wrong shape.
  * Throws rather than returning null so a forgotten check cannot read as "allow".
  */
@@ -245,13 +402,24 @@ export async function requireAuthContextOrThrow(): Promise<AuthContext> {
 }
 
 /**
- * Department scope. An admin reaches everything; everyone else must hold
+ * Department scope. An owner reaches everything; everyone else must hold
  * team_leader-or-above AND have this department in their managed set. Holding
  * the role alone is not enough — that is the whole point of the managed-set
  * table (D15).
+ *
+ * ⚠️ `"owner"`, NOT `"admin"`, AND THE DIFFERENCE IS NOT COSMETIC. P8-01 made
+ * `admin` a dead rung whose own guarantee is that holding it grants NOTHING —
+ * every predicate in the database now reads `>= owner`. Asking for `>= "admin"`
+ * here would keep every real user working by accident (owner outranks admin)
+ * while quietly handing a legacy or restored `admin` row an admin-shaped UI that
+ * every policy behind it refuses. That combination is worse than either half:
+ * the screen promises a capability the data layer denies, so the failure arrives
+ * as zero rows on a page that offered the button.
+ *
+ * Same reasoning, same rung, as `canDoHr` — see the note there.
  */
 export function canAccessDepartment(context: AuthContext, departmentId: string | null): boolean {
-  if (roleAtLeast(context.role, "admin")) return true;
+  if (roleAtLeast(context.role, "owner")) return true;
   if (!departmentId) return false;
   return (
     roleAtLeast(context.role, "team_leader") && context.managedDepartmentIds.includes(departmentId)
@@ -267,13 +435,16 @@ export function assertDepartmentAccess(context: AuthContext, departmentId: strin
 /**
  * The department filter for list queries.
  *
- * `null` means "no filter — this user sees everything" (admin). An empty array
+ * `null` means "no filter — this user sees everything" (owner). An empty array
  * means "this user leads nothing", and callers MUST treat that as zero rows
  * rather than as no filter. Getting that backwards turns a member into an
- * admin, so it is stated here rather than left to each call site.
+ * owner, so it is stated here rather than left to each call site.
+ *
+ * ⚠️ `"owner"`, NOT `"admin"` — the dead rung must not unfilter a list query.
+ * See `canAccessDepartment` above for why the accident is worse than the bug.
  */
 export function departmentScopeFilter(context: AuthContext): string[] | null {
-  if (roleAtLeast(context.role, "admin")) return null;
+  if (roleAtLeast(context.role, "owner")) return null;
   if (!roleAtLeast(context.role, "team_leader")) return [];
   return context.managedDepartmentIds;
 }

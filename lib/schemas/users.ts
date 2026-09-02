@@ -157,6 +157,17 @@ export const createUserSchema = withWorkHourRules(
      * that carries this field. That is what stops HR appointing more HR.
      */
     is_hr: z.boolean().default(false),
+    /**
+     * P8-01. Administrative capability over THIS PERSON'S OWN department —
+     * `primary_department_id` above, the team they belong to, not one they
+     * lead. A tick and NOT a role, for the reason D33 gave for HR: the role
+     * enum is a total order and "department admin" sits nowhere on it.
+     *
+     * Owner-only to set, enforced in the action rather than here — a schema
+     * cannot know who is submitting it. That is what stops the tick escalating
+     * itself.
+     */
+    is_dept_admin: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
     work_start: workClockSchema,
@@ -187,6 +198,17 @@ export const updateUserSchema = withWorkHourRules(
      * that carries this field. That is what stops HR appointing more HR.
      */
     is_hr: z.boolean().default(false),
+    /**
+     * P8-01. Administrative capability over THIS PERSON'S OWN department —
+     * `primary_department_id` above, the team they belong to, not one they
+     * lead. A tick and NOT a role, for the reason D33 gave for HR: the role
+     * enum is a total order and "department admin" sits nowhere on it.
+     *
+     * Owner-only to set, enforced in the action rather than here — a schema
+     * cannot know who is submitting it. That is what stops the tick escalating
+     * itself.
+     */
+    is_dept_admin: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
     is_active: z.boolean().default(true),
@@ -234,11 +256,26 @@ export function normaliseManagedDepartments(
   return [...new Set(managedDepartmentIds)];
 }
 
-/** How each role reads in the UI. Ordered most-privileged first for a select. */
+/**
+ * How each role reads in the UI. Ordered most-privileged first for a select.
+ *
+ * ⚠️ `admin` IS A DEAD RUNG AND THE PICKER MUST NOT OFFER IT. P8-01 moved what
+ * it meant up to `owner` and promoted every row; the value survives only
+ * because dropping it from the Postgres enum would mean rebuilding the type on
+ * a live database. It still needs a LABEL — `Record` over the whole union, and
+ * a legacy or restored row would otherwise render as a blank cell — but it is
+ * excluded from `ROLE_OPTIONS` in the editor, which is what the picker reads.
+ * Setting somebody to it would grant them nothing: every predicate now says
+ * `>= owner`.
+ */
 export const ROLE_LABELS: Record<z.infer<typeof roleSchema>, { label: string; hint: string }> = {
+  owner: {
+    label: "Owner",
+    hint: "Everything, every department. Manages users, roles and settings.",
+  },
   admin: {
-    label: "Admin",
-    hint: "Everything, every department. Manages users.",
+    label: "Admin (retired)",
+    hint: "The old name for Owner. Nobody holds it; kept so legacy records still read.",
   },
   manager: {
     label: "Manager",

@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft, ArrowRight, Globe, Users } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
+import { roleAtLeast, type Role } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import {
@@ -63,8 +64,11 @@ function parsePurpose(raw: string | string[] | undefined): FormPurpose | null {
  * a wall — which is the difference between a product that has one kind of form
  * for you and a product that appears broken.
  */
-function purposesFor(role: string): readonly FormPurpose[] {
-  return role === "admin"
+// `Role` rather than `string` since P8-01, so the comparison below can be an
+// ordering rather than an equality — the top rung is now `owner`, and
+// `=== "admin"` would offer the internal card to nobody at all.
+function purposesFor(role: Role): readonly FormPurpose[] {
+  return roleAtLeast(role, "owner")
     ? FORM_PURPOSES
     : FORM_PURPOSES.filter((purpose) => purpose !== "INTERNAL");
 }

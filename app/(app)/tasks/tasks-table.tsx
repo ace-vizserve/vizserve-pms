@@ -196,7 +196,7 @@ export function TaskGroupTable({
   /* Null outside the provider — the board and any future caller render a group
      table without the page chrome, and a missing menu must not be a crash. */
   const columnState = useContext(TaskColumnsContext);
-  const isAdmin = roleAtLeast(viewer.role, "admin");
+  const isAdmin = roleAtLeast(viewer.role, "owner");
   /**
    * P7-19 — whether to offer the trash on this row.
    *
@@ -208,7 +208,7 @@ export function TaskGroupTable({
   function canDelete(task: TaskRow) {
     if (task.request_id !== null) return false;
     const leads =
-      viewer.role === "admin" ||
+      roleAtLeast(viewer.role, "owner") ||
       viewer.managedDepartmentIds.includes(task.department_id);
     return (
       leads ||
@@ -242,7 +242,7 @@ export function TaskGroupTable({
         ),
       isQa: task.qa_assignee_id === viewer.userId,
       leadsDepartment:
-        viewer.role === "admin" ||
+        roleAtLeast(viewer.role, "owner") ||
         viewer.managedDepartmentIds.includes(task.department_id),
       isAdmin,
     };

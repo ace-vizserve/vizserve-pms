@@ -10,6 +10,7 @@ import {
 } from "./tasks-table";
 import { isTaskStatus } from "@/components/status-badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
@@ -566,7 +567,8 @@ export default async function TasksPage({
         person.is_active &&
         person.id !== context.userId &&
         person.primary_department_id !== null &&
-        (context.role === "admin" || assignableScope.has(person.primary_department_id)),
+        (roleAtLeast(context.role, "owner") ||
+          assignableScope.has(person.primary_department_id)),
     )
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 

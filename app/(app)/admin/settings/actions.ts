@@ -14,7 +14,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
  * `admin/holidays/actions.ts` does. The RLS on `vizserve_pms_app_settings` says
  * the same thing — insert and update gated on `vizserve_pms_is_admin()` — but
  * this uses the service-role client, which bypasses policies entirely, so
- * `requireRole("admin")` here is the belt rather than the braces.
+ * `requireRole("owner")` here is the belt rather than the braces.
  *
  * ⚠️ WHAT THIS CHANGES, BEYOND ONE NUMBER. The grace period is read on every
  * punch and on every row of every DTR view, for everybody with work hours set.
@@ -50,7 +50,7 @@ function flattenIssues(error: z.ZodError): Record<string, string[]> {
 }
 
 export async function updateAppSettings(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
 
   const parsed = appSettingsSchema.safeParse(input);
   if (!parsed.success) {

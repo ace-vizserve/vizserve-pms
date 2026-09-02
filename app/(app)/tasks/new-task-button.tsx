@@ -119,8 +119,7 @@ export async function NewTaskButton({
 
   // An admin sees every department; a TL should only be offered the ones they
   // actually lead, or the create call fails after they have filled in the form.
-  const allowed =
-    context.role === "admin"
+  const allowed = roleAtLeast(context.role, "owner")
       ? (departments ?? [])
       : (departments ?? []).filter((department) =>
           context.managedDepartmentIds.includes(department.id),

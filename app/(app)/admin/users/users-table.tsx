@@ -46,6 +46,7 @@ export function UsersTable({
   balanceYear,
   today,
   currentUserId,
+  viewerIsOwner,
 }: {
   users: EditableUser[];
   departments: Department[];
@@ -56,6 +57,12 @@ export function UsersTable({
   /** Manila's date, for the audit dialog's default period. Server-supplied. */
   today: string;
   currentUserId: string;
+  /**
+   * P8-01. Whether the person looking at this screen holds the top rung. Only
+   * an owner may grant Owner, Admin or HR — the rule that stops a capability
+   * tick from escalating itself. Passed straight through to the editor.
+   */
+  viewerIsOwner: boolean;
 }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<EditableUser | undefined>();
@@ -394,6 +401,7 @@ export function UsersTable({
         leaveTypes={leaveTypes}
         balanceYear={balanceYear}
         user={editing}
+        viewerIsOwner={viewerIsOwner}
         open={editorOpen}
         onOpenChange={setEditorOpen}
       />

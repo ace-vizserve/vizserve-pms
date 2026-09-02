@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import { assertDepartmentAccess, ForbiddenError, requireRole } from "@/lib/auth/authorization";
+import { roleAtLeast, type Role } from "@/lib/auth/roles";
 import type { Json } from "@/lib/database.types";
 import {
   FormSchemaError,
@@ -169,10 +170,13 @@ function anonymityPurposeRefusal(
  * Client forms are not mentioned because nothing about them changes.
  */
 function internalAdminRefusal(
-  role: string,
+  role: Role,
   purpose: string,
 ): ActionResult<never> | null {
-  if (purpose !== "INTERNAL" || role === "admin") return null;
+  // P8-01: `roleAtLeast`, not `=== "admin"`. The top rung is now `owner`, so
+  // the equality would refuse an internal form to the very people it exists
+  // to admit. Widened to `Role` from `string` so the comparison can be typed.
+  if (purpose !== "INTERNAL" || roleAtLeast(role, "owner")) return null;
 
   return {
     ok: false,

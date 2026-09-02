@@ -32,6 +32,9 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
     fullName: "Test Someone",
     gender: null,
     isHr: false,
+    // P8-01. The department-admin tick — orthogonal to `role`, exactly as
+    // `isHr` is, and false unless a test says otherwise.
+    isDeptAdmin: false,
     primaryDepartmentId: null,
     managedDepartmentIds: [],
     ...overrides,
@@ -39,7 +42,13 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
 }
 
 const lead = context({ role: "team_leader", managedDepartmentIds: [DEPT_A] });
-const admin = context({ role: "admin" });
+/*
+ * ⚠️ `owner`, NOT `admin`. P8-01 retired `admin` to a dead rung that grants
+ * nothing, and `administersForm` asks for `>= owner` on both of its wide
+ * branches. Left as `admin` every case below would assert the opposite of the
+ * rule — a rank with no capability administering everything.
+ */
+const owner = context({ role: "owner" });
 
 /**
  * A client form, which is what every case below the first block is about.
@@ -73,9 +82,9 @@ describe("administersForm — the builder's scope, not the fill-in scope", () =>
     expect(administersForm(lead, clientForm(DEPT_B, SOMEBODY_ELSE))).toBe(false);
   });
 
-  it("lets an admin administer everything, including an unrouted draft", () => {
-    expect(administersForm(admin, clientForm(DEPT_B, SOMEBODY_ELSE))).toBe(true);
-    expect(administersForm(admin, clientForm(null, SOMEBODY_ELSE))).toBe(true);
+  it("lets an owner administer everything, including an unrouted draft", () => {
+    expect(administersForm(owner, clientForm(DEPT_B, SOMEBODY_ELSE))).toBe(true);
+    expect(administersForm(owner, clientForm(null, SOMEBODY_ELSE))).toBe(true);
   });
 
   it("keeps the unrouted-author carve-out `assertCanEditForm` makes", () => {
@@ -109,10 +118,10 @@ describe("administersForm — the builder's scope, not the fill-in scope", () =>
 // P7-66 Phase 5 — AN INTERNAL FORM IS AN ADMIN INSTRUMENT.
 // ---------------------------------------------------------------------------
 
-describe("administersForm — internal forms are admin only", () => {
-  it("lets an admin administer one in any department", () => {
-    expect(administersForm(admin, internalForm(DEPT_B, SOMEBODY_ELSE))).toBe(true);
-    expect(administersForm(admin, internalForm(null, SOMEBODY_ELSE))).toBe(true);
+describe("administersForm — internal forms are owner only", () => {
+  it("lets an owner administer one in any department", () => {
+    expect(administersForm(owner, internalForm(DEPT_B, SOMEBODY_ELSE))).toBe(true);
+    expect(administersForm(owner, internalForm(null, SOMEBODY_ELSE))).toBe(true);
   });
 
   it("⚠️ refuses a lead OF THE OWNING DEPARTMENT", () => {

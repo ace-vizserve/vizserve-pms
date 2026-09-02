@@ -211,7 +211,7 @@ describe.skipIf(!dbTestsEnabled)("P0-12 scope suite", () => {
   // THE ONE THAT MATTERS MOST (D18)
   // -------------------------------------------------------------------------
   describe("user_metadata is not trusted anywhere in the authorization path", () => {
-    it("a member who rewrites their own metadata role to admin still sees only their own row", async () => {
+    it("a member who rewrites their own metadata role to owner still sees only their own row", async () => {
       // `user_metadata` is writable by the user through Supabase's own GoTrue
       // endpoint. If any policy or server check read it, this would be a silent
       // full privilege escalation with no audit trail. The whole D18 rule and
@@ -219,7 +219,9 @@ describe.skipIf(!dbTestsEnabled)("P0-12 scope suite", () => {
       const { client, userId } = await signIn("member2VizBytes");
 
       const { error: escalationError } = await client.auth.updateUser({
-        data: { role: "admin", app_access: ["vizserve-pms"] },
+        // `owner`, not the dead `admin` rung — see the note on the write test
+        // below. Claiming a rank that grants nothing proves nothing.
+        data: { role: "owner", app_access: ["vizserve-pms"] },
       });
       expect(escalationError).toBeNull();
 
@@ -228,7 +230,7 @@ describe.skipIf(!dbTestsEnabled)("P0-12 scope suite", () => {
         await client.auth.refreshSession();
 
         const { data: claimed } = await client.auth.getUser();
-        expect(claimed.user?.user_metadata?.role).toBe("admin");
+        expect(claimed.user?.user_metadata?.role).toBe("owner");
 
         const { data, error } = await client
           .from("vizserve_pms_users")
@@ -275,7 +277,10 @@ describe.skipIf(!dbTestsEnabled)("P0-12 scope suite", () => {
     it("a member cannot promote themselves in vizserve_pms_users", async () => {
       const { client, userId } = await signIn("member1VizBytes");
 
-      await client.from("vizserve_pms_users").update({ role: "admin" }).eq("id", userId);
+      // ⚠️ `owner`, not `admin`, since P8-01. Escalating to the dead rung would
+      // prove nothing — it grants nothing — so the attempt has to aim at the
+      // rung that actually opens everything, or the test passes for free.
+      await client.from("vizserve_pms_users").update({ role: "owner" }).eq("id", userId);
 
       // The update may report success having matched zero rows — RLS filters the
       // rows an UPDATE can see. What matters is the stored value, checked with

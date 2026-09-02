@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inbox } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
@@ -264,7 +265,9 @@ export default async function ApprovalsPage({
           // the same row the submit function will consult, so the form cannot
           // disagree with the rule that refuses it.
           hasDepartment={Boolean(context.primaryDepartmentId)}
-          isAdmin={context.role === "admin"}
+          // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now
+          // `owner`, and the equality would be true for nobody.
+          isAdmin={roleAtLeast(context.role, "owner")}
           prefill={{
             ...prefill,
             // Opened only when something survived narrowing. Landing on

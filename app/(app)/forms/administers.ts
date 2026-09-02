@@ -76,7 +76,8 @@ export function administersForm(context: AuthContext, form: AdministrableForm): 
    * writes the field rows directly, so a lock on the form row alone would leave
    * every question editable. This decides what a SCREEN is about.
    */
-  if (form.purpose === "INTERNAL") return context.role === "admin";
+  // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now `owner`.
+  if (form.purpose === "INTERNAL") return roleAtLeast(context.role, "owner");
 
   // The role floor FIRST, exactly as `assertCanEditForm` applies
   // `requireRole("team_leader")` before it looks at the row. Without it the

@@ -29,7 +29,7 @@ export const metadata: Metadata = { title: "Settings" };
  * feature it configures.
  */
 export default async function SettingsPage() {
-  await requireRole("admin");
+  await requireRole("owner");
 
   const settings = await loadAppSettings();
 

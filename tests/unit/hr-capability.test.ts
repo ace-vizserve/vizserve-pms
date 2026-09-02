@@ -23,6 +23,9 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
     fullName: "Test Someone",
     gender: null,
     isHr: false,
+    // P8-01. The department-admin tick — orthogonal to `role`, exactly as
+    // `isHr` is, and false unless a test says otherwise.
+    isDeptAdmin: false,
     primaryDepartmentId: null,
     managedDepartmentIds: [],
     ...overrides,
@@ -36,14 +39,20 @@ describe("canDoHr — HR is a job, not a rank (D33)", () => {
     expect(canDoHr(context({ role: "member", isHr: true }))).toBe(true);
   });
 
-  it("grants it to an admin who does NOT carry the flag", () => {
-    // ⚠️ The one that would break production silently. Admin IS HR today —
+  it("grants it to an OWNER who does NOT carry the flag", () => {
+    // ⚠️ The one that would break production silently. The top rung IS HR —
     // `vizserve_pms_leave_balances` says so at p7_33:262 — so P7-52 widened
     // every one of those checks from is_admin() to is_hr(). If this reading
-    // dropped the admin branch, granting HR to somebody would REVOKE it from
-    // every admin, and the SQL and the UI would then disagree about who can
+    // dropped the owner branch, granting HR to somebody would REVOKE it from
+    // every owner, and the SQL and the UI would then disagree about who can
     // open a screen.
-    expect(canDoHr(context({ role: "admin", isHr: false }))).toBe(true);
+    //
+    // P8-01 renamed the rung this asks about (`admin` -> `owner`) on both sides
+    // at once. Renaming it in only one place is EXACTLY the failure above.
+    expect(canDoHr(context({ role: "owner", isHr: false }))).toBe(true);
+    // And the dead rung grants nothing any more. Nobody holds it, but a row
+    // restored from a backup might, and it must not inherit HR.
+    expect(canDoHr(context({ role: "admin", isHr: false }))).toBe(false);
   });
 
   it("refuses a plain member and a plain team leader", () => {
@@ -87,7 +96,7 @@ describe("nav gating — role and capability are ANDed, never substituted", () =
     // The default is deny. A caller that forgets to pass the viewer gets a nav
     // with no HR in it, which is a visible bug; the alternative default would
     // show HR screens to everybody, which is a silent one.
-    const hrefs = visibleNavItems("admin").map((item) => item.href);
+    const hrefs = visibleNavItems("owner").map((item) => item.href);
     for (const href of hrHrefs) expect(hrefs).not.toContain(href);
   });
 
@@ -99,8 +108,8 @@ describe("nav gating — role and capability are ANDed, never substituted", () =
     expect(labels).not.toContain("Admin");
   });
 
-  it("renders both groups for an admin, HR before Admin", () => {
-    const labels = groupedNavItems("admin", { isHr: true }).map((s) => s.group.label);
+  it("renders both groups for an owner, HR before Admin", () => {
+    const labels = groupedNavItems("owner", { isHr: true }).map((s) => s.group.label);
 
     expect(labels).toContain("HR");
     expect(labels).toContain("Admin");
@@ -108,7 +117,7 @@ describe("nav gating — role and capability are ANDed, never substituted", () =
   });
 
   it("drops the HR group entirely rather than rendering it empty", () => {
-    const labels = groupedNavItems("admin", { isHr: false }).map((s) => s.group.label);
+    const labels = groupedNavItems("owner", { isHr: false }).map((s) => s.group.label);
     expect(labels).not.toContain("HR");
   });
 });

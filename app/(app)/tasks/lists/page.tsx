@@ -3,6 +3,7 @@ import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 
@@ -46,8 +47,8 @@ export default async function ListsPage() {
       .order("name"),
   ]);
 
-  const allowed =
-    context.role === "admin"
+  // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now `owner`.
+  const allowed = roleAtLeast(context.role, "owner")
       ? (departments ?? [])
       : (departments ?? []).filter((department) =>
           context.managedDepartmentIds.includes(department.id),

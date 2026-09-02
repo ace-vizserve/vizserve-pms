@@ -222,7 +222,15 @@ export function WeekStatusBar({
               {formatCellDuration(progress.minimumMinutes)} logged so far
             </span>{" "}
             — the {progress.expectedDays} {progress.expectedDays === 1 ? "day" : "days"} you are due
-            in. Submitting locks the week until your lead decides.
+            in.
+            {/* ⚠️ NOT AFTER A SEND-BACK. "Submitting locks the week" is the
+                right nudge on a week nobody has looked at, and the wrong one
+                under "Sent back: …" — that week has already been submitted and
+                already been locked, and the person reading it is being told the
+                mechanic they just experienced. The FIGURE still belongs here:
+                somebody fixing a returned week is exactly who needs to know
+                what it has to reach. */}
+            {returnedReason ? null : " Submitting locks the week until your lead decides."}
           </p>
         ) : returnedReason ? (
           /* The reason above already says what this week needs; repeating "N

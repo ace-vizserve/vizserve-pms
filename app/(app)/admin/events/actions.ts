@@ -17,7 +17,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
  * Admin-only, re-established on every call before anything reads a parameter,
  * exactly as the holidays and users actions do. The RLS on
  * `vizserve_pms_events` says the same thing, but these use the service-role
- * client — which bypasses policies entirely — so `requireRole("admin")` here is
+ * client — which bypasses policies entirely — so `requireRole("owner")` here is
  * the belt rather than the braces.
  *
  * WHY THESE ARE SAFER THAN THE HOLIDAY ONES, and it is worth saying because the
@@ -71,7 +71,7 @@ function departmentFor(values: { category: string; department_id: string | null 
 // ---------------------------------------------------------------------------
 
 export async function createEvent(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
 
   const parsed = createEventSchema.safeParse(input);
   if (!parsed.success) {
@@ -127,7 +127,7 @@ export async function createEvent(input: unknown): Promise<ActionResult> {
  * edit and should not cost the admin a delete-and-retype.
  */
 export async function updateEvent(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
 
   const parsed = updateEventSchema.safeParse(input);
   if (!parsed.success) {
@@ -185,7 +185,7 @@ export async function updateEvent(input: unknown): Promise<ActionResult> {
 // ---------------------------------------------------------------------------
 
 export async function deleteEvent(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("admin");
+  const context = await requireRole("owner");
 
   const parsed = deleteEventSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That is not a valid event." };

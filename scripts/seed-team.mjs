@@ -160,9 +160,13 @@ const ROSTER = [
   { email: `gary.cacananta@${DOMAIN}`, role: "manager", dept: null, manages: ALL_DEPARTMENTS },
   { email: "manager@vizserve.com", role: "manager", dept: null, manages: ALL_DEPARTMENTS },
 
-  // Roles are inclusive (D15), so an admin already outranks every department
+  // Roles are inclusive (D15), so an owner already outranks every department
   // check. No managed-department rows are needed to see everything.
-  { email: "admin@vizserve.com", role: "admin", dept: null, manages: [] },
+  //
+  // ⚠️ `owner`, NOT `admin` — see the note in scripts/seed.mjs. P8-01 retired
+  // `admin` to a dead rung that grants nothing, so seeding it here would build a
+  // roster with nobody able to reach /admin/*.
+  { email: "admin@vizserve.com", role: "owner", dept: null, manages: [] },
 ].map((spec) => ({ ...spec, name: NAME_OVERRIDES[spec.email] ?? nameFromEmail(spec.email) }));
 
 // --- guards ---------------------------------------------------------------

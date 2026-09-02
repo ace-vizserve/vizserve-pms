@@ -86,7 +86,14 @@ const DEPARTMENTS = {
  * which is a fixture behaving unlike the thing it stands in for.
  */
 const USERS = [
-  { email: "test.admin@example.com", name: "Test Admin", role: "admin", gender: "MALE", dept: null, manages: [] },
+  // ⚠️ `owner`, NOT `admin`. P8-01 moved "oversees everything" up to the new top
+  // rung and left `admin` behind as a DEAD RUNG that grants nothing — every
+  // predicate in the database now reads `>= owner`. Seeding this account as
+  // `admin` produced an environment with ZERO owners: nobody could open
+  // /admin/* or /hr/*, and every vizserve_pms_is_admin() policy denied
+  // everybody. The email keeps its name because a dozen scripts and db tests
+  // sign in with it; only the rank moved.
+  { email: "test.admin@example.com", name: "Test Admin", role: "owner", gender: "MALE", dept: null, manages: [] },
   { email: "test.manager@example.com", name: "Test Manager", role: "manager", gender: "FEMALE", dept: null, manages: ["VizAssists", "VizBooks"] },
   { email: "test.manager.all@example.com", name: "Test Manager (All)", role: "manager", gender: "MALE", dept: null, manages: ["VizBytes", "VizAssists", "VizBooks", "VizMedia"] },
 

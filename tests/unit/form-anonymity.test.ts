@@ -205,19 +205,23 @@ vi.mock("@/utils/supabase/admin", () => ({
  * under test is what happens to somebody who IS allowed to be here, and a stub
  * that refused would make every assertion below pass for the wrong reason.
  *
- * ⚠️ P7-66 Phase 5 — WHICH IS WHY THE ROLE IS `admin`. Anonymity is a property
- * of INTERNAL forms only, and since 20260902140000 those are an admin
+ * ⚠️ P7-66 Phase 5 — WHICH IS WHY THE ROLE IS `owner`. Anonymity is a property
+ * of INTERNAL forms only, and since 20260902140000 those are an administrative
  * instrument end to end. A `team_leader` here would be refused by
  * `internalAdminRefusal` before any anonymity rule was reached, so every case
- * in this file would be testing the wrong refusal. The admin gate itself is
- * tested in `form-purpose-lock.test.ts`, which can vary the role.
+ * in this file would be testing the wrong refusal. The gate itself is tested in
+ * `form-purpose-lock.test.ts`, which can vary the role.
+ *
+ * ⚠️ `owner`, NOT `admin`, since P8-01 finished retiring that rung: the refusal
+ * asks for `>= owner`, so `admin` here would fire the very refusal this mock
+ * exists to get past — and every case below would go green for being blocked.
  */
 vi.mock("@/lib/auth/authorization", () => {
   const context = {
     userId: "user-1",
     email: "test.lead@example.com",
     fullName: "Test Lead",
-    role: "admin" as const,
+    role: "owner" as const,
     departmentIds: ["3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"],
   };
 
