@@ -59,11 +59,22 @@ export function WeekStatusBar({
   /**
    * P8-05. Whether the week being shown has finished.
    *
-   * ⚠️ THE SHORTFALL IS MEANINGLESS UNTIL IT HAS. The minimum covers all five
-   * working days, so on the CURRENT week it is short by construction — somebody
-   * with 8h logged on Tuesday is "32h short" and would be told so every day of
-   * every week, for a week they are still in the middle of working. A warning
-   * that is always on is one nobody reads by Thursday.
+   * ⚠️ IT CHOOSES WHICH SENTENCE IS SAID, AND NEVER WHETHER ONE IS. That is the
+   * correction: this flag used to suppress the schedule line outright on the
+   * current week, on the reasoning that the minimum covers all five working days
+   * and somebody with 8h logged on Tuesday would be told they were "32h short"
+   * every day of every week. The reasoning is right and the accusation is gone.
+   * The SILENCE was wrong — `vizserve_pms_submit_timesheet_week` refuses only a
+   * FUTURE week and applies the full minimum to the current one, so submitting
+   * on Thursday with 32h logged met the database's refusal with no prior warning:
+   * exactly the surprise this bar exists to prevent. Submitting on Friday
+   * afternoon is ordinary and still works.
+   *
+   * So both weeks say something, and they say different things:
+   *
+   *   ended    → the warning. Short, why, and what to do about it.
+   *   current  → a neutral progress line. The target, and how far along it is.
+   *              Muted, not `text-warning`, and it accuses nobody of anything.
    *
    * Decided on the server, not from a clock here: this is a client component,
    * and a browser in another timezone deciding whether a Manila week is over
@@ -104,6 +115,29 @@ export function WeekStatusBar({
     weekTotalMinutes < scheduledWeek.minimumMinutes
       ? { ...scheduledWeek, minutes: scheduledWeek.minimumMinutes - weekTotalMinutes }
       : null;
+
+  /*
+   * The same figure on a week still being worked, said as progress rather than
+   * as a shortfall.
+   *
+   * ⚠️ THE DATABASE APPLIES THE FULL WEEK'S MINIMUM TO THE CURRENT WEEK. It
+   * refuses only a week in the FUTURE; the current one is checked in full, and
+   * Friday afternoon is a perfectly normal time to hand a week in. Somebody who
+   * never sees the target until they press the button meets it as a refusal.
+   *
+   * NEUTRAL, AND THAT IS THE ENTIRE DESIGN. No "short", no "cannot be handed
+   * in", no `text-warning` — a person is mid-week and has done nothing wrong.
+   * It states the target and where they are against it, and lets them draw the
+   * conclusion, which is the difference between a bar people read and a nag they
+   * learn to look past.
+   *
+   * `weekTotalMinutes > 0` mirrors the shortfall's own guard and is load-bearing
+   * for a second reason here: the submit button is DISABLED at zero, so an empty
+   * week cannot be refused and has no surprise to warn about. Its existing
+   * sentence — "nothing to hand in" — is the more useful one.
+   */
+  const progress =
+    !locked && !weekHasEnded && scheduledWeek && weekTotalMinutes > 0 ? scheduledWeek : null;
 
   // Not a status value — see above.
   const label = status ? TIMESHEET_WEEK_LABELS[status] : "Not submitted";
@@ -177,6 +211,18 @@ export function WeekStatusBar({
             {formatCellDuration(shortfall.minimumMinutes)} for the {shortfall.expectedDays}{" "}
             {shortfall.expectedDays === 1 ? "day" : "days"} you were due in. Log the missing time,
             or file leave for any day you were away — a short week cannot be handed in.
+          </p>
+        ) : progress ? (
+          /* Muted, like the plain "N logged" line it replaces — the state here is
+             "in progress", and there is no state to convey. The figure IS the
+             message: a person who can see 28h against 40h needs no adjective. */
+          <p className="text-sm text-foreground-muted">
+            <span className="font-medium text-foreground">
+              {formatCellDuration(weekTotalMinutes)} of{" "}
+              {formatCellDuration(progress.minimumMinutes)} logged so far
+            </span>{" "}
+            — the {progress.expectedDays} {progress.expectedDays === 1 ? "day" : "days"} you are due
+            in. Submitting locks the week until your lead decides.
           </p>
         ) : returnedReason ? (
           /* The reason above already says what this week needs; repeating "N
