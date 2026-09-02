@@ -46,6 +46,14 @@
 -- `options` is in the same constraint for the same reason: a section is not a
 -- choice, and `[]` is what every non-choice field already stores.
 --
+-- WARNING: `jsonb_array_length`, NOT `array_length`. `options` is JSONB, not a
+-- Postgres array — `options jsonb not null default '[]'::jsonb` in
+-- 20260729100000 — so `array_length(options, 1)` does not typecheck and the
+-- whole file fails with 42883 before anything is applied.
+-- `vizserve_pms_form_fields_options_is_array` already guarantees
+-- `jsonb_typeof(options) = 'array'`, so `jsonb_array_length` cannot be handed a
+-- scalar here and no coalesce is needed: it returns 0 for `[]`, never null.
+--
 -- ⚠️ DROPPED FIRST, BOTH TIMES. Per 20260902140000: a guard that makes a file
 -- re-runnable also protects an object that is already wrong, so this drops the
 -- constraint by name before adding it rather than using `if not exists`. Re-run
@@ -57,7 +65,7 @@
 --   select id, form_id, field_key, is_required, options
 --     from vizserve_pms_form_fields
 --    where field_type = 'section'
---      and (is_required or coalesce(array_length(options, 1), 0) > 0);
+--      and (is_required or jsonb_array_length(options) > 0);
 --
 -- POST-FLIGHT (expect one row):
 --
@@ -74,7 +82,7 @@ alter table vizserve_pms_form_fields
   add constraint vizserve_pms_form_fields_section_asks_nothing
   check (
     field_type <> 'section'
-    or (not is_required and coalesce(array_length(options, 1), 0) = 0)
+    or (not is_required and jsonb_array_length(options) = 0)
   );
 
 comment on constraint vizserve_pms_form_fields_section_asks_nothing
