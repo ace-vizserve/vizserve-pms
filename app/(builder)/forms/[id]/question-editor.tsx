@@ -67,6 +67,7 @@ export function QuestionEditor({
   busy,
   problem,
   error,
+  answerKey,
   onChangeType,
   onDuplicate,
   onRemove,
@@ -97,6 +98,18 @@ export function QuestionEditor({
   problem: string | null;
   /** A refusal that came back from the database for this question. */
   error: string | null;
+  /**
+   * P7-66 Phase 8 — the answer-key control, or `null` when there is nothing to
+   * key.
+   *
+   * PASSED IN RATHER THAN BUILT HERE, because it is the one control on this
+   * panel that does NOT go through the builder store: `correct_answer` and
+   * `points` are written by `vizserve_pms_set_field_grading`, not by the schema
+   * autosave. `FieldBuilder` owns that decision — whether the form is a quiz,
+   * whether this question is a row yet — and this component just renders what it
+   * is given, directly under the choices the key is made of.
+   */
+  answerKey: React.ReactNode;
   onChangeType: (type: FieldType) => void;
   onDuplicate: () => void;
   onRemove: () => void;
@@ -171,6 +184,12 @@ export function QuestionEditor({
           part you cannot see while deciding on it.
         */}
         <FieldBodyAttributes builderStore={builderStore} entityId={entityId} />
+
+        {/* DIRECTLY UNDER THE CHOICES, for the same reason the choices are
+            directly under the type: an answer key is a statement about the
+            options, and a key edited away from the list it refers to is a key
+            somebody sets from memory. */}
+        {answerKey}
 
         {/*
           THE STORAGE KEY, STATED RATHER THAN ASKED FOR.

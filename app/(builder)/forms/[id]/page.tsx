@@ -143,7 +143,7 @@ export default async function EditFormPage({
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_public, is_active, audience_is_all_departments, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
+      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_quiz, is_public, is_active, audience_is_all_departments, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -184,7 +184,20 @@ export default async function EditFormPage({
    */
   const { data: fieldRows, error: fieldsError } = await supabase
     .from("vizserve_pms_form_fields")
-    .select("id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order, created_at")
+    /*
+     * P7-66 Phase 8 — `correct_answer` and `points` ride along on the read the
+     * builder already does.
+     *
+     * ⚠️ THEY DO NOT GO INTO `FormFieldRow`. That type is what
+     * `schemaFromFields` projects and what the autosave writes back through
+     * `vizserve_pms_save_form_schema` — and that function names the columns it
+     * sets, neither of which is these. Putting grading in the schema would make
+     * the builder store believe it owns a value it cannot save. It is read into
+     * a separate map instead, and written by `vizserve_pms_set_field_grading`.
+     */
+    .select(
+      "id, label, field_key, field_type, help_text, options, is_required, is_active, sort_order, created_at, correct_answer, points",
+    )
     .eq("form_id", id)
     .order("sort_order");
 
@@ -357,6 +370,35 @@ export default async function EditFormPage({
     });
   }
 
+  /*
+   * P7-66 Phase 8 — THE ANSWER KEYS, KEYED BY ENTITY ID.
+   *
+   * Built from the same rows and in the same pass-shaped way as `fields`, but
+   * kept apart from them on purpose — see the note on the select. Every field
+   * gets an entry, including the ones that cannot be graded: `AnswerKey` is only
+   * rendered for a choice question on a quiz, and a missing entry would be
+   * indistinguishable from a question whose key was cleared.
+   *
+   * A non-string entry in a stored key is DROPPED rather than refused, which is
+   * the opposite of what `optionsFromRow` does with `options` — and the
+   * difference is that nothing writes this map back. `options` becomes the
+   * schema the next save projects over the row, so hiding a value there would
+   * delete it; a key is re-read from the row every load and only ever replaced
+   * wholesale by `set_field_grading`.
+   */
+  const grading: Record<string, { correctAnswer: string[]; points: number }> = {};
+
+  for (const row of fieldRows ?? []) {
+    grading[row.id] = {
+      correctAnswer: Array.isArray(row.correct_answer)
+        ? (row.correct_answer as unknown[]).filter(
+            (option): option is string => typeof option === "string",
+          )
+        : [],
+      points: row.points,
+    };
+  }
+
   if (unreadableField !== null) {
     return (
       <FormLoadFailure
@@ -494,6 +536,8 @@ export default async function EditFormPage({
             formName={form.name}
             description={form.description}
             submissionCount={submissionCount}
+            isQuiz={form.is_quiz}
+            grading={grading}
             initialSchema={initialSchema}
           />
         }
@@ -559,6 +603,10 @@ export default async function EditFormPage({
                   description: form.description,
                   department_id: form.department_id,
                   is_anonymous: form.is_anonymous,
+                  /* P7-66 Phase 8 — `initial` is a Partial, so an omitted key is
+                     not a type error: the switch would simply have started off
+                     on every quiz and turned marking off on the first save. */
+                  is_quiz: form.is_quiz,
                   is_active: form.is_active,
                   /*
                     The five the card never draws, loaded so its save resends

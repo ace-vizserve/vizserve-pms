@@ -132,6 +132,27 @@ export async function FormResponses({
   const newest = rows[0]?.submitted_at ?? null;
 
   /*
+   * P7-66 Phase 8 — the marked answers, and what they averaged.
+   *
+   * `score !== null` is the test, never `score > 0` and never `?? 0`: null means
+   * the form was not a quiz when this answer was written, and 0 means it was and
+   * the person got nothing right. See the note on `ResponseRow`.
+   *
+   * `max_score` is read off the first marked row rather than recomputed from the
+   * form's current fields — the answer key may have been edited since, and the
+   * total somebody was actually marked out of is the one stored on their row.
+   * (Answers marked against two different totals would make an average of raw
+   * scores misleading; that is a real case and is not solved here, which is why
+   * the sentence names the denominator it used.)
+   */
+  const marked = rows.filter((row) => row.score !== null);
+
+  const averageScore =
+    marked.length === 0
+      ? "0"
+      : (marked.reduce((sum, row) => sum + (row.score ?? 0), 0) / marked.length).toFixed(1);
+
+  /*
    * One entry per person, newest first — the order the rows arrived in, which is
    * `submitted_at desc`, so the list leads with whoever answered most recently.
    *
@@ -282,6 +303,33 @@ export async function FormResponses({
         </p>
 
         {/*
+          P7-66 Phase 8 — HOW THE QUIZ WENT, IN ONE LINE.
+
+          ⚠️ IT COUNTS ONLY THE ANSWERS THAT WERE ACTUALLY MARKED. A response
+          carries NULL when the form was not a quiz at the moment it was
+          answered, and treating that as a zero would drag the average down every
+          time somebody turned marking on part-way through a live form. The
+          denominator is stated for the same reason: "average 7.2 of 10 across 9
+          marked answers" cannot be misread the way a bare 7.2 can.
+
+          Rendered from the rows this page already read, so it costs no query —
+          and it is capped by the same PEOPLE_READ_CAP, which the sentence admits
+          rather than quietly averaging the most recent thousand and calling it
+          the average.
+        */}
+        {marked.length > 0 ? (
+          <p className="mt-2.5 rounded-md border border-accent-border bg-accent px-3 py-2 text-xs leading-relaxed text-accent-foreground">
+            <strong className="font-semibold">
+              Average {averageScore} of {marked[0]!.max_score ?? 0}
+            </strong>{" "}
+            across {marked.length} marked answer{marked.length === 1 ? "" : "s"}
+            {marked.length < total
+              ? `. ${total - marked.length} answer${total - marked.length === 1 ? " was" : "s were"} given before this form was marked, and stay unscored.`
+              : "."}
+          </p>
+        ) : null}
+
+        {/*
           ⚠️ THE ANSWERS ARE IN THE FILE, AND THE PAGE SAYS SO RATHER THAN
           LEAVING IT TO BE GUESSED. A tab headed "Responses" that prints no
           response reads as broken unless it says where they went.
@@ -425,8 +473,22 @@ function Answerers({
   );
 }
 
-/** One response, reduced to the two facts this tab needs. */
-type ResponseRow = { submitted_by: string | null; submitted_at: string };
+/** One response, reduced to the facts this tab needs. */
+type ResponseRow = {
+  submitted_by: string | null;
+  submitted_at: string;
+  /**
+   * P7-66 Phase 8 — what this answer scored, or NULL if the form was not a quiz
+   * WHEN IT WAS ANSWERED.
+   *
+   * ⚠️ NULL AND 0 ARE DIFFERENT AND MUST STAY DIFFERENT. Null is "never
+   * marked"; 0 is "marked, got nothing right". Averaging them together would
+   * drag a quiz's average down every time somebody turned marking on part-way
+   * through, which is exactly the case the stored score exists to keep honest.
+   */
+  score: number | null;
+  max_score: number | null;
+};
 
 type RowsRead = {
   rows: ResponseRow[];
@@ -461,7 +523,7 @@ async function readNamedRows(
 ): Promise<RowsRead> {
   const { data, count, error } = await supabase
     .from("vizserve_pms_form_responses")
-    .select("submitted_by, submitted_at", { count: "exact" })
+    .select("submitted_by, submitted_at, score, max_score", { count: "exact" })
     .eq("form_id", formId)
     .order("submitted_at", { ascending: false })
     .limit(PEOPLE_READ_CAP);
@@ -491,13 +553,21 @@ async function readAnonymousRows(
 ): Promise<RowsRead> {
   const { data, count, error } = await supabase
     .from("vizserve_pms_form_responses")
-    .select("submitted_at", { count: "exact" })
+    /* `score` and `max_score` are the form's marking, not the person's identity
+       — an anonymous quiz still has an average, and reading them here breaks no
+       promise. `submitted_by` stays out; see the note above. */
+    .select("submitted_at, score, max_score", { count: "exact" })
     .eq("form_id", formId)
     .order("submitted_at", { ascending: false })
     .limit(PEOPLE_READ_CAP);
 
   return {
-    rows: (data ?? []).map((row) => ({ submitted_by: null, submitted_at: row.submitted_at })),
+    rows: (data ?? []).map((row) => ({
+      submitted_by: null,
+      submitted_at: row.submitted_at,
+      score: row.score,
+      max_score: row.max_score,
+    })),
     count,
     error,
   };

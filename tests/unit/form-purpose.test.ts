@@ -45,6 +45,7 @@ const CLIENT_SETTINGS = {
   department_id: null,
   reference_prefix: "COL",
   is_anonymous: false,
+  is_quiz: false,
   is_active: true,
   requires_attachment: false,
   sla_minutes: DEFAULT_SLA_MINUTES,
@@ -91,6 +92,7 @@ const FORMERLY_DEFAULTED = {
    * as legal.
    */
   is_anonymous: false,
+  is_quiz: false,
   is_active: true,
   requires_attachment: true,
   default_list_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",

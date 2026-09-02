@@ -559,6 +559,27 @@ export const formSettingsSchema = z.object({
    */
   is_anonymous: z.boolean(),
   /**
+   * P7-66 Phase 8 — is this form marked?
+   *
+   * UNDEFAULTED, like every other flag on this schema and for the same reason
+   * the six before it were: `false` here is not a fallback, it is TURNING THE
+   * MARKING OFF on a form that was relying on it, sent by a payload that merely
+   * forgot to mention it. The Responses tab would quietly stop showing scores
+   * and nobody would know which save did it.
+   *
+   * ⚠️ TURNING IT OFF DOES NOT ERASE ANYTHING. Scores already written stay:
+   * they are stored on the response at INSERT, not computed on read. It stops
+   * FUTURE answers being marked, which is why it is a decision and not a view
+   * setting.
+   *
+   * `vizserve_pms_forms_quiz_is_internal` refuses it on a client form. Not a
+   * `.refine`, deliberately, for the reason stated on `is_anonymous`:
+   * `formCreateSchema` `.extend()`s this object and a refinement makes it a
+   * ZodEffects that cannot be extended. `ClientFormSettings` sends a constant
+   * `false`, exactly as it does for `purpose` and `is_anonymous`.
+   */
+  is_quiz: z.boolean(),
+  /**
    * Published or not. Undefaulted because `false` is not a safe fallback, it is
    * an UNPUBLISH — a live form taken off the air by a payload that merely
    * forgot to mention it.
@@ -682,6 +703,9 @@ export const formCreateSchema = formSettingsSchema.extend({
    * that can at least be seen and corrected before anybody answers.
    */
   is_anonymous: formSettingsSchema.shape.is_anonymous.default(false),
+  /* A new form is not a quiz until somebody says so — and on a CREATE there is
+     nothing to lose by defaulting, per the note above. */
+  is_quiz: formSettingsSchema.shape.is_quiz.default(false),
   is_active: formSettingsSchema.shape.is_active.default(false),
   requires_attachment: formSettingsSchema.shape.requires_attachment.default(false),
   default_list_id: formSettingsSchema.shape.default_list_id.default(null),
@@ -837,3 +861,35 @@ export function nextCandidate(value: string, attempt: number, separator: "-" | "
   const ceiling = separator === "" ? 8 : 60;
   return `${value.slice(0, ceiling - suffix.length)}${suffix}`;
 }
+
+/**
+ * P7-66 Phase 8 — ONE QUESTION'S ANSWER KEY, as the editor sends it.
+ *
+ * ⚠️ `correct_answer` IS ALWAYS AN ARRAY HERE, INCLUDING WHEN IT IS EMPTY, and
+ * the action turns an empty one into a NULL on the way to Postgres. Two things
+ * are being kept apart: "this question is not marked" (no key) and "this
+ * question is marked, but nothing is right" (an empty key), which the database
+ * refuses. Unticking the last option is the first of those, not the second — so
+ * the shape the browser sends is uniform and the meaning is decided in one
+ * place rather than by whether a field was omitted.
+ *
+ * A `select` sends an array of one. The column holds the same shape for both
+ * types so the marking trigger has one rule to apply, and so an answer key that
+ * accepts either of two options needs no schema change to become possible.
+ *
+ * ⚠️ NO CHECK HERE THAT THE OPTIONS EXIST. That is
+ * `vizserve_pms_set_field_grading`'s, against the question's own `options` row —
+ * a zod schema in a browser cannot see them, and a second copy of the rule in a
+ * place that cannot enforce it is worse than none.
+ */
+export const fieldGradingSchema = z.object({
+  field_id: z.uuid(),
+  correct_answer: z.array(z.string()),
+  /**
+   * At least one. A question worth nothing is not a question the quiz is asking,
+   * and `vizserve_pms_form_fields_points_positive` refuses it under this.
+   */
+  points: z.coerce.number().int().min(1, "A question must be worth at least one point.").max(100),
+});
+
+export type FieldGradingInput = z.infer<typeof fieldGradingSchema>;

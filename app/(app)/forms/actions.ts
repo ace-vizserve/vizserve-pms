@@ -14,6 +14,7 @@ import { createClient } from "@/utils/supabase/server";
 import {
   FORM_PURPOSE_LABELS,
   formCreateSchema,
+  fieldGradingSchema,
   formSettingsSchema,
   isPublicForPurpose,
   nextCandidate,
@@ -717,6 +718,71 @@ export async function renameForm(formId: string, name: unknown): Promise<ActionR
   if (error) return { ok: false, error: error.message };
 
   revalidatePath("/forms");
+  revalidatePath(`/forms/${formId}`);
+  return { ok: true, data: undefined };
+}
+
+/**
+ * P7-66 Phase 8 — SET OR CLEAR ONE QUESTION'S ANSWER KEY.
+ *
+ * ⚠️ NOT PART OF THE SCHEMA SAVE, AND THAT IS THE WHOLE DESIGN.
+ * `correct_answer` and `points` are columns on `vizserve_pms_form_fields`
+ * because `reconcileFormSchema` rebuilds the schema from those rows on every
+ * load and THE ROWS WIN — a blob-only attribute is wiped by the next open.
+ *
+ * But making them builder ATTRIBUTES would mean projecting them in
+ * `vizserve_pms_save_form_schema`, which is the only thing in the schema
+ * permitted to DELETE a field row and the one place the R5 guard speaks.
+ * Replacing 250 lines of it to carry two columns is a transcription risk taken
+ * for nothing. So this follows the `setFormAudience` precedent instead: one
+ * dedicated writer, called when the control changes.
+ *
+ * The two writers touch DISJOINT COLUMNS — `save_form_schema` lists the columns
+ * it sets by name and neither of these is among them — so a builder autosave
+ * running at the same time cannot clear a key, and this cannot revive a deleted
+ * field.
+ *
+ * ⚠️ THE RPC IS WHERE THE RULES ARE, NOT HERE. `vizserve_pms_set_field_grading`
+ * refuses a key that is not a subset of the question's OWN options, a
+ * non-choice field, a form that is not internal, and a form the caller cannot
+ * edit — reading through the caller's own policies, so it cannot be used to
+ * probe which forms exist. This action's job is to shape the arguments and
+ * translate a refusal into a sentence.
+ *
+ * ⚠️ THE STALE-KEY CASE IS THE ONE WORTH KNOWING ABOUT. Rename an option and
+ * the key still names the old string: a question every respondent gets wrong,
+ * which looks correctly configured on the screen that configures it, and whose
+ * only symptom is everybody scoring one lower than they should. The RPC refuses
+ * to WRITE such a key; it cannot stop a later rename from stranding one, which
+ * is why the editor re-derives the key from the current options every time it
+ * renders.
+ */
+export async function setFieldGrading(formId: string, input: unknown): Promise<ActionResult> {
+  await assertCanEditForm(formId);
+
+  const parsed = fieldGradingSchema.safeParse(input);
+
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "That answer key is not valid." };
+  }
+
+  const supabase = await createClient();
+
+  const { error } = await supabase.rpc("vizserve_pms_set_field_grading", {
+    p_form_id: formId,
+    p_field_id: parsed.data.field_id,
+    /*
+     * NULL CLEARS THE KEY, and an empty array is normalised to it rather than
+     * being sent. `[]` would fail the RPC's own "pick at least one" check — but
+     * unticking the last option is not an error, it is "stop marking this
+     * question", and the two must not arrive at the same place.
+     */
+    p_correct_answer: parsed.data.correct_answer.length === 0 ? null : parsed.data.correct_answer,
+    p_points: parsed.data.points,
+  });
+
+  if (error) return { ok: false, error: error.message };
+
   revalidatePath(`/forms/${formId}`);
   return { ok: true, data: undefined };
 }

@@ -110,6 +110,7 @@ const INTERNAL_SETTINGS = {
   department_id: DEPT_A,
   reference_prefix: "Q3P",
   is_anonymous: false,
+  is_quiz: false,
   is_active: true,
   requires_attachment: false,
   sla_minutes: 2400,

@@ -108,6 +108,14 @@ export function ClientFormSettings({
       // See the note above: a constant, not a control and not a pass-through.
       purpose: "CLIENT_REQUEST",
       is_anonymous: false,
+      /*
+       * P7-66 Phase 8 — A CONSTANT, NOT A CONTROL AND NOT A PASS-THROUGH.
+       * `vizserve_pms_forms_quiz_is_internal` refuses a quiz on a client form,
+       * so the only value this card can honestly send is `false` — and
+       * `formSettingsSchema` requires the key, so omitting it would fail the
+       * parse on every save from this screen rather than defaulting quietly.
+       */
+      is_quiz: false,
       name: initial?.name ?? "",
       slug: initial?.slug ?? "",
       description: initial?.description ?? "",

@@ -470,6 +470,20 @@ export type Database = {
            */
           purpose: VizservePmsFormPurpose;
           /**
+           * P7-66 Phase 8 — when true this form is a QUIZ: the question editor
+           * offers a correct answer on choice fields, and the Responses tab
+           * shows a score per answer.
+           *
+           * INTERNAL ONLY — `vizserve_pms_forms_quiz_is_internal` refuses it on
+           * a client form, whose submissions are requests and are read in
+           * /requests, which has nowhere to put a score.
+           *
+           * The respondent is told nothing, deliberately: the table is
+           * append-only, so a score on the confirmation screen is an invitation
+           * to submit a second answer.
+           */
+          is_quiz: boolean;
+          /**
            * P7-66 — when true, `vizserve_pms_form_responses.submitted_by` is
            * NULL for every answer to this form: the name is NEVER WRITTEN, not
            * merely hidden. Only legal on an INTERNAL form
@@ -528,6 +542,8 @@ export type Database = {
           department_id?: string | null;
           reference_prefix: string;
           purpose?: VizservePmsFormPurpose;
+          /** P7-66 Phase 8. Internal forms only. Defaults false. */
+          is_quiz?: boolean;
           /** P7-66. Internal forms only; locked on the first answer. */
           is_anonymous?: boolean;
           is_public?: boolean;
@@ -549,6 +565,16 @@ export type Database = {
           department_id: string | null;
           reference_prefix: string;
           purpose: VizservePmsFormPurpose;
+          /**
+           * P7-66 Phase 8. Unlike the audience, this IS a plain column and a
+           * settings save may set it: it is one fact in one place, with no
+           * second table to strand.
+           *
+           * Turning it on does not retrospectively mark anything — the score is
+           * written at INSERT and stored, so answers given before there was an
+           * answer key keep their NULL.
+           */
+          is_quiz: boolean;
           /**
            * P7-66. `vizserve_pms_forms_anonymity_lock` refuses this once the
            * form has answers, in EITHER direction — see the Row comment.
@@ -594,6 +620,27 @@ export type Database = {
           is_required: boolean;
           is_active: boolean;
           sort_order: number;
+          /**
+           * P7-66 Phase 8 — the answer key, or NULL for a question that is not
+           * marked.
+           *
+           * ALWAYS AN ARRAY of option strings, even for a `select`, where it
+           * holds exactly one. One shape, one marking rule: a select is right
+           * when its answer is IN the array, a multiselect when its set EQUALS
+           * it.
+           *
+           * ⚠️ WRITTEN ONLY BY `vizserve_pms_set_field_grading`, which is also
+           * the only thing that checks the key against this question's own
+           * `options`. A key holding an option that has since been renamed is a
+           * question everybody gets wrong, looks correctly configured, and shows
+           * up only as everybody scoring one lower than they should.
+           */
+          correct_answer: Json | null;
+          /**
+           * P7-66 Phase 8 — what a correct answer is worth. Always set (default
+           * 1), but meaningless where `correct_answer` is NULL.
+           */
+          points: number;
           created_at: string;
           updated_at: string;
         };
@@ -618,6 +665,16 @@ export type Database = {
           is_required: boolean;
           is_active: boolean;
           sort_order: number;
+          /*
+           * ⚠️ `correct_answer` AND `points` ARE DELIBERATELY ABSENT, exactly as
+           * `audience_is_all_departments` is on the forms table.
+           *
+           * `vizserve_pms_set_field_grading` is their only supported writer, and
+           * it is the only thing that checks a key is a subset of the question's
+           * own options. Reaching these columns through a plain `.update()` is
+           * how a stale answer key gets written — which nothing on any screen
+           * would show. Leaving the keys off this type is what stops it.
+           */
         }>;
         Relationships: [
           {
@@ -667,6 +724,23 @@ export type Database = {
            * declarations validates both.
            */
           field_values: Json;
+          /**
+           * P7-66 Phase 8 — what this answer scored, or NULL if the form was not
+           * a quiz WHEN IT WAS ANSWERED.
+           *
+           * ⚠️ WRITTEN ONLY BY THE `vizserve_pms_form_responses_score` TRIGGER,
+           * which is why it is absent from `Insert` below. A value sent by a
+           * client is overwritten, not rejected — but the type is what stops
+           * anybody sending one and believing it meant something.
+           *
+           * ⚠️ STORED, NOT COMPUTED ON READ, and that is the whole reason both
+           * columns exist. Editing the answer key later, or turning a live form
+           * into a quiz, must not silently re-mark answers given before there
+           * was a key to mark them against.
+           */
+          score: number | null;
+          /** P7-66 Phase 8 — the total available at the moment of answering. */
+          max_score: number | null;
           submitted_at: string;
         };
         /**
@@ -2014,6 +2088,32 @@ export type Database = {
        */
       vizserve_pms_save_form_schema: {
         Args: { p_form_id: string; p_schema: Json };
+        Returns: undefined;
+      };
+      /**
+       * P7-66 Phase 8. The ONLY supported writer of
+       * `vizserve_pms_form_fields.correct_answer` and `.points` — which is why
+       * neither key is on that table's `Update` type.
+       *
+       * It is the only thing that checks the key is a subset of the question's
+       * OWN options. Renaming an option through the builder leaves a key
+       * pointing at a string nobody can pick any more: a question every
+       * respondent gets wrong, which looks correctly configured on the screen
+       * that configures it, and whose only symptom is everybody scoring one
+       * lower than they should.
+       *
+       * `p_correct_answer` NULL clears the key and stops the question being
+       * marked. `p_points` is always required, and must be at least 1.
+       *
+       * `returns void`: success is the ABSENCE of an error.
+       */
+      vizserve_pms_set_field_grading: {
+        Args: {
+          p_form_id: string;
+          p_field_id: string;
+          p_correct_answer: Json | null;
+          p_points: number;
+        };
         Returns: undefined;
       };
       /**

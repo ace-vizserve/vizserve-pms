@@ -32,6 +32,7 @@ import type { FieldType, FormPurpose } from "@/lib/schemas/forms";
 
 import { QuestionEditor } from "./question-editor";
 import { QuestionList } from "./question-list";
+import { AnswerKey, type FieldGrading } from "./answer-key";
 import { QuestionTypes } from "./question-types";
 import { RespondentPreview } from "./respondent-preview";
 import { useSaveStatus } from "./save-status";
@@ -107,6 +108,8 @@ export function FieldBuilder({
   formName,
   description,
   submissionCount,
+  isQuiz,
+  grading,
   initialSchema,
 }: {
   formId: string;
@@ -136,6 +139,28 @@ export function FieldBuilder({
    * arrive as two props that can disagree.
    */
   submissionCount: number;
+  /**
+   * P7-66 Phase 8 — is this form marked?
+   *
+   * Only an internal form can be (`vizserve_pms_forms_quiz_is_internal`), and
+   * only `select` and `multiselect` can carry a key. When false the answer-key
+   * control is not rendered at all rather than rendered empty: a form that is
+   * not a quiz has no answer to be right.
+   */
+  isQuiz: boolean;
+  /**
+   * The answer keys, entity id to key, AS THE DATABASE HOLDS THEM.
+   *
+   * ⚠️ NOT IN THE SCHEMA, AND IT MUST NOT BE. `correct_answer` and `points` are
+   * written by `vizserve_pms_set_field_grading`; the schema is written by
+   * `vizserve_pms_save_form_schema`, which names the columns it sets and does
+   * not name those two. An attribute on the entity would be typed into the
+   * store, reported saved by the indicator, and written nowhere.
+   *
+   * Refreshed by `router.refresh()` after `AnswerKey` saves, which is what keeps
+   * this prop and the control in step.
+   */
+  grading: Record<string, FieldGrading>;
   /**
    * ⚠️ RECONCILED AGAINST THE ROWS BY THE LOADER, never the stored blob as read.
    * See `reconcileFormSchema` — a blob that Phase 1's dual-write failed to write
@@ -711,6 +736,36 @@ export function FieldBuilder({
                   // rendered under question 2 is a message about the wrong thing.
                   problem={blocked?.entityId === selected.id ? blocked.message : null}
                   error={error}
+                  answerKey={
+                    /*
+                     * ⚠️ FOUR CONDITIONS, AND EACH ONE IS A REAL STATE.
+                     *
+                     * Not a quiz: nothing to be right about. Not a choice field:
+                     * `vizserve_pms_form_fields_grading_is_a_choice` refuses the
+                     * key, and free-text marking was rejected on purpose — see
+                     * the migration. The other two are inside `AnswerKey`: no
+                     * options yet, and not a row yet.
+                     */
+                    isQuiz &&
+                    (selected.entity.type === "select" ||
+                      selected.entity.type === "multiselect") ? (
+                      <AnswerKey
+                        formId={formId}
+                        entityId={selected.id}
+                        options={selected.entity.attributes.options}
+                        multiple={selected.entity.type === "multiselect"}
+                        grading={grading[selected.id] ?? { correctAnswer: [], points: 1 }}
+                        /*
+                         * `lockedEntityIds` is "this entity is a row the database
+                         * has accepted" — derived from the SAVED schema, which is
+                         * exactly the question `set_field_grading` asks. A
+                         * question added ten seconds ago has no row to grade yet.
+                         */
+                        saved={lockedEntityIds.has(selected.id)}
+                        busy={listBusy}
+                      />
+                    ) : null
+                  }
                   onChangeType={(type) => changeType(selected.id, type)}
                   onDuplicate={() => duplicate(selected.id)}
                   onRemove={() => removeField(selected.id)}

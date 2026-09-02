@@ -111,6 +111,9 @@ export function InternalSettings({
       // P7-66 — false is the safe default and the column's own: a form is
       // ATTRIBUTED unless somebody deliberately says otherwise.
       is_anonymous: initial.is_anonymous ?? false,
+      // P7-66 Phase 8 — same shape and same reasoning: a form is not marked
+      // unless somebody said so.
+      is_quiz: initial.is_quiz ?? false,
       is_active: initial.is_active ?? false,
 
       /*
@@ -133,6 +136,7 @@ export function InternalSettings({
   });
 
   const isActive = watch("is_active");
+  const isQuiz = watch("is_quiz");
   const isAnonymous = watch("is_anonymous") ?? false;
   const departmentId = watch("department_id");
 
@@ -193,6 +197,7 @@ export function InternalSettings({
     "description",
     "department_id",
     "is_anonymous",
+    "is_quiz",
     "is_active",
     "audience",
   ]);
@@ -444,6 +449,55 @@ export function InternalSettings({
             checked={isAnonymous}
             disabled={hasSubmissions}
             onCheckedChange={(checked) => setValue("is_anonymous", checked)}
+          />
+        </div>
+
+        {/*
+          P7-66 Phase 8 — MARKING, BETWEEN ANONYMITY AND PUBLISHED.
+
+          Not locked by submissions, unlike the switch above, and the difference
+          is worth stating: anonymity is a PROMISE MADE TO THE PERSON ANSWERING
+          and cannot be revised after they have relied on it. Marking is a
+          property of how the owner reads the answers, and nobody was told
+          anything about it.
+
+          Turning it on part-way is therefore allowed and does nothing
+          retrospective: a score is written at INSERT and stored, so answers
+          given before there was an answer key keep their blank rather than
+          being marked against a key that did not exist when they were written.
+          The sentence below says so, because "some rows have a score and some
+          do not" is otherwise indistinguishable from a bug.
+        */}
+        <div className="flex items-start justify-between gap-4 border-b pb-3">
+          <div>
+            <Label htmlFor="is_quiz">Marked as a quiz</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {isQuiz
+                ? "Choose one and Choose many questions can carry a correct answer, and each answer gets a score on the Responses tab."
+                : "Answers are collected, not marked."}
+            </p>
+            {isQuiz && hasSubmissions ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Answers that came in before this was switched on stay unscored — they were never
+                marked against an answer key.
+              </p>
+            ) : null}
+            {/* Said once, here, rather than on every question: the correct
+                answer lives on the question, and this switch is what makes that
+                control appear at all. */}
+            {isQuiz ? (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Set the correct answers on the Questions tab.
+              </p>
+            ) : null}
+            {errors.is_quiz ? (
+              <p className="mt-1 text-xs text-destructive">{errors.is_quiz.message}</p>
+            ) : null}
+          </div>
+          <Switch
+            id="is_quiz"
+            checked={isQuiz}
+            onCheckedChange={(checked) => setValue("is_quiz", checked)}
           />
         </div>
 

@@ -225,6 +225,7 @@ const INTERNAL_SETTINGS = {
   department_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
   reference_prefix: "PUL",
   is_anonymous: false,
+  is_quiz: false,
   is_active: true,
   requires_attachment: false,
   sla_minutes: DEFAULT_SLA_MINUTES,
@@ -565,6 +566,7 @@ describe("⚠️ an internal form is an admin instrument", () => {
       ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST",
       is_anonymous: false,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(true);

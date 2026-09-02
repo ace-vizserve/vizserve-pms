@@ -241,6 +241,7 @@ const INTERNAL_SETTINGS = {
   department_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
   reference_prefix: "PUL",
   is_anonymous: false,
+  is_quiz: false,
   is_active: true,
   requires_attachment: false,
   sla_minutes: DEFAULT_SLA_MINUTES,
@@ -305,6 +306,7 @@ describe("updateFormSettings — anonymity is illegal on a client form", () => {
       ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST" as const,
       is_anonymous: true,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(false);
@@ -327,6 +329,7 @@ describe("updateFormSettings — anonymity is illegal on a client form", () => {
       ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST" as const,
       is_anonymous: true,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(false);
@@ -352,6 +355,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     const result = await updateFormSettings("form-1", {
       ...INTERNAL_SETTINGS,
       is_anonymous: true,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(false);
@@ -375,6 +379,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     const result = await updateFormSettings("form-1", {
       ...INTERNAL_SETTINGS,
       is_anonymous: false,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(false);
@@ -407,6 +412,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     const result = await updateFormSettings("form-1", {
       ...INTERNAL_SETTINGS,
       is_anonymous: true,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(true);
@@ -424,6 +430,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     const result = await updateFormSettings("form-1", {
       ...INTERNAL_SETTINGS,
       is_anonymous: true,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(false);
@@ -442,6 +449,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     const result = await updateFormSettings("form-1", {
       ...INTERNAL_SETTINGS,
       is_anonymous: true,
+      is_quiz: false,
       name: "Q4 Pulse Survey",
     });
 
@@ -450,6 +458,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     expect(fake.recorder.updates[0]).toMatchObject({
       name: "Q4 Pulse Survey",
       is_anonymous: true,
+      is_quiz: false,
     });
   });
 });
@@ -472,6 +481,7 @@ describe("createForm refuses the same illegal pair", () => {
       reference_prefix: "",
       department_id: null,
       is_anonymous: true,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(false);
@@ -492,6 +502,7 @@ describe("createForm refuses the same illegal pair", () => {
       reference_prefix: "",
       department_id: null,
       is_anonymous: true,
+      is_quiz: false,
     });
 
     expect(result.ok).toBe(true);
