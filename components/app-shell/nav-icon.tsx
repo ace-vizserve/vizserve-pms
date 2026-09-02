@@ -7,6 +7,7 @@ import {
   CheckSquare,
   ClipboardList,
   Clock,
+  FilePenLine,
   FileText,
   History,
   Inbox,
@@ -25,6 +26,10 @@ const ICONS = {
   clock: Clock,
   check: CheckSquare,
   form: FileText,
+  // P7-66 — ANSWERING a form, beside `form` for BUILDING one. A pen on the page
+  // rather than a second plain document, so the two rows are told apart at a
+  // glance and not only by their labels.
+  "form-fill": FilePenLine,
   "inbox-stack": ClipboardList,
   tasks: ListChecks,
   timesheet: Timer,

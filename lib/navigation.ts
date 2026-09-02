@@ -69,6 +69,7 @@ export type NavIconName =
   | "clock"
   | "check"
   | "form"
+  | "form-fill"
   | "inbox-stack"
   | "tasks"
   | "timesheet"
@@ -107,6 +108,29 @@ export const NAV_ITEMS: NavItem[] = [
     minRole: "team_leader",
     enabled: true,
     icon: "inbox-stack",
+  },
+  {
+    /*
+     * P7-66 Phase 4b — "FILL A FORM", NOT "FORMS", and the longer label is the
+     * point rather than an accident.
+     *
+     * `/forms` above is the BUILDER and it is `team_leader`. This is where a
+     * member goes to ANSWER a published employee-engagement form, and it is
+     * `member`. Two rows both called "Forms", one visible to everybody and one
+     * to leads, is the sidebar telling two different people the same word means
+     * two different screens — and the person who has both would have no way to
+     * tell them apart in the rail at all. A slightly long label is cheaper than
+     * that, and it also names the ACTION, which is what somebody arriving here
+     * is trying to do.
+     *
+     * Deliberately NOT a child of Forms: a child inherits the disclosure and
+     * the parent, and a member cannot see the parent.
+     */
+    label: "Fill a form",
+    href: "/respond",
+    minRole: "member",
+    enabled: true,
+    icon: "form-fill",
   },
   /*
    * NO "TASKS" ENTRY, and its absence is the design rather than an omission.
@@ -378,7 +402,9 @@ export const NAV_GROUPS: NavGroup[] = [
   // `/tasks` is NOT here any more. Tasks are reached through the Projects tree,
   // which is its own group rendered between the flow and the pinned sections —
   // listing the route here as well is what put two task headings in the rail.
-  { label: "Work", hrefs: ["/dashboard", "/requests", "/inbox"] },
+  // `/respond` sits between the queue a lead works and the inbox everybody
+  // reads: it is a thing on your plate, which is what this group is.
+  { label: "Work", hrefs: ["/dashboard", "/requests", "/respond", "/inbox"] },
   // `/timesheet/team` is NOT here any more — it is a child of `/timesheet` and
   // is reached through it. Listing a child href beside its parent is what put
   // them side by side in the rail in the first place.

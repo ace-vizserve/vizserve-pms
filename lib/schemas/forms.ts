@@ -218,6 +218,54 @@ export const submissionResultSchema = z.union([
 export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 
 // ---------------------------------------------------------------------------
+// P7-66 Phase 4b — a STAFF answer to an employee-engagement form.
+//
+// A different thing from a client submission and typed separately, for the
+// reason CLAUDE.md gives for keeping internal approvals and client forms apart:
+// they look mergeable and their auth models are opposites. This one has a
+// session and no reference number, no SLA, no Gate 1 and no attachments; it
+// lands in `vizserve_pms_form_responses` and nothing routes it anywhere.
+// ---------------------------------------------------------------------------
+
+/**
+ * What the browser posts to `submitFormResponse`.
+ *
+ * ⚠️ THE FORM IS NAMED BY ITS SLUG, NOT BY AN ID THE PAGE WAS HANDED. The
+ * action re-reads the form from the slug and re-checks that it is a published
+ * engagement form, so the payload cannot nominate a form the person is not
+ * looking at — including a CLIENT_REQUEST form, whose answers belong in
+ * `vizserve_pms_requests` with a reference number the client is waiting for.
+ *
+ * `field_values` is keyed by `field_key` (§1), never by entity id: the entity
+ * ids stay inside `lib/form-builder/`, and the stored shape matches
+ * `vizserve_pms_requests.field_values` exactly.
+ */
+export const formResponseSubmissionSchema = z.object({
+  slug: z.string().trim().min(1),
+  field_values: z.record(z.string(), z.unknown()),
+});
+
+export type FormResponseSubmission = z.infer<typeof formResponseSubmissionSchema>;
+
+/**
+ * What `submitFormResponse` answers with.
+ *
+ * `field_errors` is keyed by `field_key` for the same reason
+ * `submissionResultSchema`'s is — it is what `routeFieldErrors` and the
+ * interpreter store already speak, so the page needs no reshaping.
+ *
+ * There is no `response_id`: the SELECT policy is admin-or-lead, so the author
+ * cannot read their own row back and the action does not ask for it.
+ */
+export type FormResponseResult =
+  | { ok: true }
+  | {
+      ok: false;
+      error: string;
+      field_errors?: Record<string, string>;
+    };
+
+// ---------------------------------------------------------------------------
 // Staff-side: form settings (P1-04) and the builder (P1-03).
 // ---------------------------------------------------------------------------
 

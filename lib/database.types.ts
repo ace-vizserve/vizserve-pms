@@ -545,6 +545,63 @@ export type Database = {
           },
         ];
       };
+      /**
+       * P7-66 Phase 4b — one staff answer to one EMPLOYEE_ENGAGEMENT form,
+       * 20260902110000_p7_66_form_responses.sql.
+       *
+       * ⚠️ NOT ANONYMOUS. `submitted_by` is not null and is shown, by name,
+       * beside the answers to an admin and to the lead of the owning
+       * department. Nothing built on this table may describe itself as
+       * anonymous — see the migration's ANONYMITY block.
+       *
+       * ⚠️ APPEND-ONLY. There is no update policy and no delete policy, and
+       * `authenticated` is granted only `select, insert`. `Update` is therefore
+       * `never` rather than a partial of the columns: a submitted response is a
+       * record, and typing an edit that Postgres will refuse is an invitation
+       * to write one.
+       *
+       * ⚠️ AN INSERT MAY NOT `.select()`. The SELECT policy is admin-or-lead
+       * and the author is neither, so PostgREST would filter the returned row
+       * and the write would look like a failure on a row that was written. See
+       * app/(app)/respond/actions.ts.
+       */
+      vizserve_pms_form_responses: {
+        Row: {
+          id: string;
+          form_id: string;
+          /** Who answered. Never null, never anonymised. */
+          submitted_by: string;
+          /**
+           * The answers, keyed by `field_key` — the same shape as
+           * `vizserve_pms_requests.field_values`, so one set of entity
+           * declarations validates both.
+           */
+          field_values: Json;
+          submitted_at: string;
+        };
+        Insert: {
+          id?: string;
+          form_id: string;
+          submitted_by: string;
+          field_values?: Json;
+          submitted_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_form_responses_form_id_fkey";
+            columns: ["form_id"];
+            referencedRelation: "vizserve_pms_forms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_form_responses_submitted_by_fkey";
+            columns: ["submitted_by"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_requests: {
         Row: {
           id: string;
@@ -2179,6 +2236,9 @@ export type InternalRequestRow =
   Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];
 export type LeaveTypeRow = Database["public"]["Tables"]["vizserve_pms_leave_types"]["Row"];
 export type EventRow = Database["public"]["Tables"]["vizserve_pms_events"]["Row"];
+/** P7-66 Phase 4b — one staff answer to an engagement form. Attributed, append-only. */
+export type FormResponseRow =
+  Database["public"]["Tables"]["vizserve_pms_form_responses"]["Row"];
 export type LeaveBalanceRow =
   Database["public"]["Tables"]["vizserve_pms_leave_balances"]["Row"];
 /** One line of the P7-33 summary: a type, what was allocated, and what is left. */

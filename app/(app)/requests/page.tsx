@@ -78,7 +78,21 @@ export default async function RequestsPage({
 
   const { data: requests, error: requestsError } = await query;
 
-  const { data: forms } = await supabase.from("vizserve_pms_forms").select("id, name").order("name");
+  /*
+   * ⚠️ P7-66 Phase 4b — `purpose` NARROWS THIS, and it is not a department
+   * filter in disguise. A request can only come from a CLIENT_REQUEST form, so
+   * an engagement form in this picker is an option that can never match a row.
+   * It matters because `published engagement forms readable by staff`
+   * (20260902110000_p7_66_form_responses.sql) makes every published engagement
+   * form readable by every signed-in person — so without this line a lead would
+   * see other departments' survey names listed as request filters. Client forms
+   * are untouched by that policy and stay department-scoped by RLS.
+   */
+  const { data: forms } = await supabase
+    .from("vizserve_pms_forms")
+    .select("id, name")
+    .eq("purpose", "CLIENT_REQUEST")
+    .order("name");
   /* A Map cannot cross the RSC boundary; the table rebuilds nothing and just
      indexes this. */
   const formNames = Object.fromEntries((forms ?? []).map((form) => [form.id, form.name]));

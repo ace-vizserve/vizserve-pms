@@ -1,0 +1,86 @@
+import { describe, expect, it } from "vitest";
+
+import { administersForm } from "@/app/(app)/forms/administers";
+import type { AuthContext, Role } from "@/lib/auth/authorization";
+
+/**
+ * P7-66 Phase 4b — ⚠️ THE BUILDER'S SCOPE, NOW THAT RLS ALONE CANNOT STATE IT.
+ *
+ * `published engagement forms readable by staff`
+ * (20260902110000_p7_66_form_responses.sql) had to be company-wide: a member
+ * cannot answer a survey they cannot read, and it is the only policy that shows
+ * a form row to a member at all. Policies are OR'd, so it also widened the
+ * BUILDER's read — /forms listed every other department's published engagement
+ * forms, and /forms/[id] rendered their whole question schema.
+ *
+ * No policy can separate the two: the readers differ in which QUESTION they are
+ * asking, not in which rows exist. So the administrative half moved here, and
+ * these cases are what stop it drifting from `assertCanEditForm`, which is the
+ * rule the WRITE path applies. A form the builder lists must be a form the
+ * builder can save.
+ */
+
+const DEPT_A = "a1000000-0000-4000-8000-000000000001";
+const DEPT_B = "a1000000-0000-4000-8000-000000000002";
+const ME = "00000000-0000-4000-8000-000000000001";
+const SOMEBODY_ELSE = "00000000-0000-4000-8000-000000000002";
+
+function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext {
+  return {
+    userId: ME,
+    email: "test.someone@example.com",
+    fullName: "Test Someone",
+    gender: null,
+    isHr: false,
+    primaryDepartmentId: null,
+    managedDepartmentIds: [],
+    ...overrides,
+  };
+}
+
+const lead = context({ role: "team_leader", managedDepartmentIds: [DEPT_A] });
+const admin = context({ role: "admin" });
+
+describe("administersForm — the builder's scope, not the fill-in scope", () => {
+  it("lets a lead administer a form in a department they lead", () => {
+    expect(administersForm(lead, { department_id: DEPT_A, created_by: SOMEBODY_ELSE })).toBe(true);
+  });
+
+  it("⚠️ REFUSES another department's form, which the staff policy now lets them READ", () => {
+    // The finding, exactly: after the new SELECT policy the row comes back from
+    // Postgres for this person. It is still not theirs to edit, and /forms must
+    // not list it or open its question schema.
+    expect(administersForm(lead, { department_id: DEPT_B, created_by: SOMEBODY_ELSE })).toBe(false);
+  });
+
+  it("lets an admin administer everything, including an unrouted draft", () => {
+    expect(administersForm(admin, { department_id: DEPT_B, created_by: SOMEBODY_ELSE })).toBe(true);
+    expect(administersForm(admin, { department_id: null, created_by: SOMEBODY_ELSE })).toBe(true);
+  });
+
+  it("keeps the unrouted-author carve-out `assertCanEditForm` makes", () => {
+    // Without this the builder would hide a form from the person who has just
+    // created it — `canAccessDepartment(_, null)` is false for everyone but an
+    // admin, which is why this cannot simply BE `canAccessDepartment`.
+    expect(administersForm(lead, { department_id: null, created_by: ME })).toBe(true);
+  });
+
+  it("does NOT extend that carve-out to somebody else's unrouted draft", () => {
+    expect(administersForm(lead, { department_id: null, created_by: SOMEBODY_ELSE })).toBe(false);
+  });
+
+  it("refuses a member outright — holding no lead role reaches no form", () => {
+    // A member never reaches /forms (it is `requireRole("team_leader")`), but a
+    // predicate that answered `true` here would be one refactor away from
+    // mattering.
+    const member = context({ role: "member" });
+    expect(administersForm(member, { department_id: DEPT_A, created_by: SOMEBODY_ELSE })).toBe(
+      false,
+    );
+    // Not even their own unrouted draft, which they cannot create in the first
+    // place (`forms insertable by team leaders`). The role floor is checked
+    // BEFORE the author carve-out, so the exception stays "the team leader who
+    // started this draft" rather than becoming "anyone whose id is on the row".
+    expect(administersForm(member, { department_id: null, created_by: ME })).toBe(false);
+  });
+});

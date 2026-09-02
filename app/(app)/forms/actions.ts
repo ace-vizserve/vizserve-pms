@@ -21,6 +21,8 @@ import {
   slugFromName,
 } from "@/lib/schemas/forms";
 
+import { countFormSubmissions } from "./submission-count";
+
 /**
  * P1-03 / P1-04 — form builder and settings mutations.
  *
@@ -99,57 +101,6 @@ async function assertCanEditForm(formId: string) {
 
   assertDepartmentAccess(context, form.department_id);
   return { context, supabase, form };
-}
-
-/**
- * P7-66 — HOW MANY ANSWERS ARE ALREADY BEHIND THIS FORM.
- *
- * The number both locks in `updateFormSettings` turn on: the reference prefix
- * locks once a request quotes it, and the PURPOSE locks once anything has been
- * submitted at all. Read once, used twice, so the two can never disagree about
- * whether a form is live.
- *
- * The count is exact for everyone who reaches this line. The requests SELECT
- * policy is `manages_department(form.department_id)` — the identical test
- * `assertCanEditForm` just applied — so there is no viewer for whom it
- * under-reports.
- *
- * ⚠️⚠️ PHASE 4b ADDS THE SECOND COUNT HERE, IN THE SAME CHANGE THAT CREATES
- * `vizserve_pms_form_responses`. NOT AFTER IT — the window between the table
- * existing and this function knowing about it IS the vulnerability.
- *
- * `vizserve_pms_requests` is the only table a submission can land in today, so
- * it is the whole count. An EMPLOYEE_ENGAGEMENT form never produces a request:
- * its answers go to `vizserve_pms_form_responses`, which does not exist yet. So
- * the moment that table ships, a pulse survey with hundreds of staff answers
- * still counts ZERO here, the purpose lock never engages, and somebody can flip
- * it to CLIENT_REQUEST — whereupon the live CHECK
- * `is_public = (purpose = 'CLIENT_REQUEST')` sets `is_public` true and the form,
- * with every one of those answers behind it, is answerable at /request/<slug>
- * with no session.
- *
- * THE FIX IS ONE MORE COUNT, AND IT GOES IN THIS FUNCTION:
- *
- *   const { count: responses } = await supabase
- *     .from("vizserve_pms_form_responses")
- *     .select("id", { count: "exact", head: true })
- *     .eq("form_id", formId);
- *   return (requests ?? 0) + (responses ?? 0);
- *
- * Cover it with a test that a form with responses and zero requests still
- * refuses a purpose change. Everything else — both call sites, both messages —
- * already reads whatever this returns.
- */
-async function countFormSubmissions(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  formId: string,
-): Promise<number> {
-  const { count: requests } = await supabase
-    .from("vizserve_pms_requests")
-    .select("id", { count: "exact", head: true })
-    .eq("form_id", formId);
-
-  return requests ?? 0;
 }
 
 /**
@@ -304,9 +255,12 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
    * PUBLIC INTERNET, AND IT NEVER WAS. `purpose` is REQUIRED on
    * `formSettingsSchema` — no default — so a payload that omits it is rejected
    * outright rather than silently read as CLIENT_REQUEST. That is the guard
-   * that holds on an engagement form with zero requests, which is every
-   * engagement form until Phase 4b ships. See the schema, and see
-   * `countFormSubmissions` for the second count 4b owes this lock.
+   * that held on an engagement form with zero requests, which was every
+   * engagement form until Phase 4b shipped. See the schema.
+   *
+   * P7-66 Phase 4b: `countFormSubmissions` now counts staff responses as well
+   * as requests, so the lock engages on an engagement form too — and it fails
+   * closed if it cannot count.
    *
    * The count is read ONCE for both locks — see `countFormSubmissions`.
    */
@@ -314,7 +268,24 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
   const prefixChanged = parsed.data.reference_prefix !== form.reference_prefix;
 
   if (purposeChanged || prefixChanged) {
-    const submissions = await countFormSubmissions(supabase, formId);
+    const counted = await countFormSubmissions(formId);
+
+    /*
+     * ⚠️ COULD NOT COUNT ⇒ DO NOT CHANGE. The alternative — carry on with zero
+     * — is the whole hole this phase closed, reopened by a network blip. Only
+     * the two locked fields are affected: every other save on this card never
+     * reaches this branch, so a failing count cannot block ordinary editing.
+     */
+    if (!counted.ok) {
+      return {
+        ok: false,
+        error:
+          "Could not check whether this form already has submissions, so what it is for " +
+          `and its reference prefix were left alone. ${counted.message}`,
+      };
+    }
+
+    const submissions = counted.total;
 
     if (submissions > 0 && purposeChanged) {
       return {

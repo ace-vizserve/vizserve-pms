@@ -17,8 +17,12 @@ import {
   type FormFieldRow,
 } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
+import { resolvePage, resolvePageSize } from "@/components/pagination";
 import { FieldBuilder } from "./field-builder";
+import { FormResponses } from "./responses";
 import { SettingsDisclosure } from "./settings-disclosure";
+import { administersForm } from "@/app/(app)/forms/administers";
+import { countFormSubmissions } from "@/app/(app)/forms/submission-count";
 import { loadRoutableDepartments } from "@/app/(app)/forms/routable-departments";
 
 export const metadata: Metadata = { title: "Edit form" };
@@ -108,18 +112,33 @@ function FormLoadFailure({
   );
 }
 
-export default async function EditFormPage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EditFormPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  /*
+   * P7-66 Phase 4b — the Responses table below is PAGED, and the page number
+   * lives in the URL rather than in component state so Back works and a link to
+   * page 3 is a link to page 3. Nothing else on this route reads a query param.
+   */
+  searchParams: Promise<{ page?: string; size?: string }>;
+}) {
   const { id } = await params;
+  const { page: rawPage, size: rawSize } = await searchParams;
   const context = await requireRole("team_leader");
   const supabase = await createClient();
 
   // RLS decides visibility, so an out-of-scope id simply returns nothing —
   // which is a 404 to the caller rather than a "forbidden" that confirms the
   // form exists.
+  //
+  // ⚠️ P7-66 Phase 4b — RLS IS NO LONGER SUFFICIENT ON ITS OWN HERE, and
+  // `administersForm` below is why. `created_by` is selected for it.
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, reference_prefix, purpose, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
+      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -130,6 +149,25 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
   if (formError) return <FormLoadFailure what="this form" message={formError.message} />;
 
   if (!form) notFound();
+
+  /*
+   * ⚠️ P7-66 Phase 4b — THE READ THAT LET A MEMBER FILL A FORM IN ALSO LET A
+   * LEAD OPEN SOMEBODY ELSE'S.
+   *
+   * `published engagement forms readable by staff`
+   * (20260902110000_p7_66_form_responses.sql) is company-wide by necessity: a
+   * member cannot answer a survey they cannot read. Policies are OR'd, so after
+   * it the read above succeeds for a lead of ANOTHER department — and this page
+   * would render that form's entire question schema in an editor, with a Save
+   * button that Postgres then refuses.
+   *
+   * The row is legitimately readable by them; it is not theirs to ADMINISTER,
+   * and no row-level policy can express that difference. `notFound()` rather
+   * than a forbidden page, matching the line above: a caller guessing ids
+   * learns nothing about which of the two it was. The Responses table below is
+   * scoped separately and more tightly still, by its own policy.
+   */
+  if (!administersForm(context, form)) notFound();
 
   /*
    * ⚠️ `created_at` IS LOAD-BEARING, NOT PADDING, and `FormFieldRow` requires it
@@ -155,10 +193,43 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
     .order("sort_order")
     .order("name");
 
-  const { count: submissionCount, error: countError } = await supabase
-    .from("vizserve_pms_requests")
-    .select("id", { count: "exact", head: true })
-    .eq("form_id", id);
+  /*
+   * ⚠️ P7-66 Phase 4b — RESPONSES COUNT TOWARDS `hasSubmissions` TOO, and this
+   * is the SCREEN's half of the fix the purpose lock makes on the server. An
+   * engagement form never produces a request, so counting requests alone left
+   * the purpose and prefix inputs looking unlocked on a form with a thousand
+   * answers behind it — the action would refuse the save, but only after
+   * somebody had typed the change.
+   *
+   * ⚠️ AND IT IS THE SAME FUNCTION THE ACTION CALLS, deliberately, rather than
+   * a second pair of queries that agrees with it today. Which means it inherits
+   * two properties that matter more than the sharing:
+   *
+   *   IT COUNTS AS THE SERVICE ROLE. Both count policies are
+   *   `manages_department(form.department_id)`, FALSE for a team leader on an
+   *   UNROUTED form — a form `administersForm` above has just confirmed is
+   *   theirs to edit. Read as the caller, the counts came back zero AND NO
+   *   ERROR (CLAUDE.md: a failing policy returns zero rows), so the two locked
+   *   inputs rendered unlocked. Authority is settled by `requireRole` and
+   *   `administersForm`; how many answers exist is a data question.
+   *
+   *   IT FAILS CLOSED. A count that errors is not a count of zero, and the
+   *   failure joins `readFailure` below rather than unlocking the inputs.
+   *
+   * ⚠️ RESPONSES ARE ONLY COUNTED ON AN ENGAGEMENT FORM, and that is deliberate
+   * rather than an optimisation. A CLIENT_REQUEST form cannot have a response —
+   * the INSERT policy checks the purpose — so the count is known to be zero
+   * without asking. Which means 20260902110000_p7_66_form_responses.sql being
+   * unapplied cannot break the builder for the four live client forms: they
+   * never issue the query. `updateFormSettings` passes no such flag, because
+   * the lock itself must never assume which kind of form it is looking at.
+   */
+  const isEngagement = form.purpose === "EMPLOYEE_ENGAGEMENT";
+
+  const counted = await countFormSubmissions(id, { includeResponses: isEngagement });
+
+  const countError = counted.ok ? null : { message: counted.message };
+  const submissionCount = counted.ok ? counted.total : 0;
 
   /*
    * ⚠️ A TEAM LEADER WHO LEADS NOTHING IS NOT A FAILED READ.
@@ -316,6 +387,31 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
         ) : (
           <Chip tone="neutral" label="Draft" />
         )}
+        {/*
+          P7-66 Phase 4b — THE LINK GOES WHERE THE FORM ACTUALLY LIVES.
+
+          A client form's face is /request/<slug>, with no session, and the label
+          says "public" because that is the thing worth knowing before you paste
+          it into an email. An engagement form's face is /respond/<slug>, which
+          needs a session and is where colleagues fill it in — a different URL,
+          a different audience, and calling it "public" would be exactly the
+          wrong thing to tell somebody about a staff survey.
+
+          `is_public` rather than `purpose` on the client branch, because that
+          boolean is what /request/<slug> actually filters on. The CHECK ties
+          the two, so they cannot disagree; each side is written in the terms
+          its own route reads.
+        */}
+        {form.is_active && isEngagement ? (
+          <Link
+            href={`/respond/${form.slug}`}
+            target="_blank"
+            className={buttonVariants({ variant: "ghost", size: "sm" })}
+          >
+            Open the staff form
+            <ExternalLink />
+          </Link>
+        ) : null}
         {form.is_active && form.is_public ? (
           <Link
             href={`/request/${form.slug}`}
@@ -329,10 +425,28 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
       </BuilderHeader>
 
       <div className="flex flex-1 flex-col gap-4 p-5">
-        {submissionCount && submissionCount > 0 ? (
+        {/*
+          ⚠️ TWO DIFFERENT SENTENCES, BECAUSE THE GUARANTEE IS DIFFERENT.
+
+          `vizserve_pms_form_field_protect` refuses a key rename or a field
+          delete once the form has submissions — but it counts
+          `vizserve_pms_requests` and nothing else, so on an ENGAGEMENT form it
+          does not fire. Saying "field keys are locked" there would be the
+          screen promising a guarantee Postgres is not making, which is worse
+          than saying nothing: somebody renames a key, the save succeeds, and
+          every answer already given is orphaned under the old one.
+
+          Closing that gap means moving the guard onto the jsonb so it sees
+          `vizserve_pms_form_responses` as well — roadmap item 5, a migration of
+          its own. Until then the honest sentence is a warning, not a lock.
+        */}
+        {submissionCount > 0 ? (
           <p className="text-xs text-muted-foreground">
-            {submissionCount} submission{submissionCount === 1 ? "" : "s"} — field keys are
-            locked.
+            {submissionCount} {isEngagement ? "answer" : "submission"}
+            {submissionCount === 1 ? "" : "s"} —{" "}
+            {isEngagement
+              ? "renaming or removing a question orphans the answers already filed under it."
+              : "field keys are locked."}
           </p>
         ) : null}
 
@@ -347,7 +461,7 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
             departments={departments}
             lists={lists ?? []}
             formId={form.id}
-            hasSubmissions={Boolean(submissionCount && submissionCount > 0)}
+            hasSubmissions={submissionCount > 0}
             initial={{
               name: form.name,
               slug: form.slug,
@@ -366,6 +480,28 @@ export default async function EditFormPage({ params }: { params: Promise<{ id: s
             }}
           />
         </SettingsDisclosure>
+
+        {/*
+          ⚠️ ENGAGEMENT FORMS ONLY. A client form's submissions are
+          `vizserve_pms_requests` and are already read at /requests, with a
+          reference number, a status, a Gate 1 decision and an SLA clock — none
+          of which a flat answers table has anywhere to put. Rendering both
+          would be two screens for one thing, and the wrong one would be the
+          more convenient.
+
+          Below the settings rather than above them: this is what you come here
+          to READ, and the canvas is what you come here to CHANGE. Reading
+          survives a scroll; editing does not.
+        */}
+        {isEngagement ? (
+          <FormResponses
+            formId={form.id}
+            departmentId={form.department_id}
+            schema={initialSchema}
+            page={resolvePage(rawPage)}
+            pageSize={resolvePageSize(rawSize)}
+          />
+        ) : null}
       </div>
     </>
   );
