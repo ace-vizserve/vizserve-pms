@@ -46,6 +46,7 @@ import {
   fileEntity,
   multiselectEntity,
   numberEntity,
+  sectionEntity,
   selectEntity,
   textareaEntity,
   textEntity,
@@ -564,11 +565,55 @@ export const numberFieldComponent = createEntityComponent(
 );
 
 /**
+ * P7-66 Phase 7 — THE PAGE BREAK, AS THE RESPONDENT SEES IT.
+ *
+ * ⚠️ NO `FieldShell`, AND NO `controlId`. Every other component here wraps a
+ * control in a `<label>`-for-an-input shell; a section has no control, so a
+ * label pointing at nothing would be a broken association announced by every
+ * screen reader that met it. It is a heading and a paragraph.
+ *
+ * ⚠️ IT DRAWS THE TITLE EVEN THOUGH THE PAGE IS ALREADY SPLIT ON IT. The split
+ * is the host's job — `sectionsOf` in `lib/form-builder/canvas.ts` and the two
+ * paged renderers — and a heading at the top of a page is the only thing that
+ * says WHICH page you are on. The host renders one section's worth of entities
+ * and this is the first of them.
+ *
+ * `h2` because the form's name is the `h1` on both hosts.
+ */
+export const sectionFieldComponent = createEntityComponent(
+  sectionEntity,
+  ({ entity }) => {
+    const title = entity.attributes.label.trim();
+    const blurb = entity.attributes.helpText.trim();
+
+    return (
+      <div className="space-y-1 border-b pb-3">
+        {/* An untitled break is a real state on the canvas — the question is
+            added before it is named — so the preview says so rather than
+            rendering an empty heading with a rule under it. */}
+        <h2 className="text-base font-semibold tracking-tight text-pretty">
+          {title === "" ? "Untitled page" : title}
+        </h2>
+        {blurb === "" ? null : (
+          <p className="text-sm leading-relaxed text-pretty text-muted-foreground">{blurb}</p>
+        )}
+      </div>
+    );
+  },
+);
+
+/**
  * The map both hosts render through.
  *
- * Keyed by the eight `vizserve_pms_field_type` values verbatim — the same names
+ * Keyed by the `vizserve_pms_field_type` values verbatim — the same names
  * `entities.ts` declares — so the projection between rows and schema stays
  * one-to-one and no stored data is renamed.
+ *
+ * ⚠️ `section` IS IN HERE AND DRAWS A HEADING, NOT A CONTROL. Its entity is
+ * `shouldBeProcessed: () => false`, so the interpreter never asks it for a
+ * value — but the library still needs a component for every declared entity,
+ * and the respondent still needs to see where a page begins. It renders the
+ * title and its blurb, and nothing that can be typed into.
  */
 export const fieldComponents: EntitiesComponents<FormBuilder> = {
   text: textFieldComponent,
@@ -579,6 +624,7 @@ export const fieldComponents: EntitiesComponents<FormBuilder> = {
   file: fileFieldComponent,
   email: emailFieldComponent,
   number: numberFieldComponent,
+  section: sectionFieldComponent,
 };
 
 // ---------------------------------------------------------------------------
@@ -833,6 +879,11 @@ function TextBodyAttributes() {
   return <HelpTextAttribute />;
 }
 
+/** A page break's title, with no required switch beside it. See the map. */
+function SectionHeadAttributes() {
+  return <LabelAttribute />;
+}
+
 function ChoiceBodyAttributes() {
   return (
     <div className="space-y-3.5">
@@ -852,6 +903,13 @@ export const fieldHeadAttributeComponents: EntitiesAttributesComponents<FormBuil
   file: HeadAttributes,
   email: HeadAttributes,
   number: HeadAttributes,
+  /*
+   * ⚠️ NO REQUIRED SWITCH ON A PAGE BREAK. `HeadAttributes` draws the label and
+   * `RequiredAttribute` side by side, and a page break cannot be required —
+   * `vizserve_pms_form_fields_section_asks_nothing` refuses the row, so the
+   * switch would offer a state the save then rejects. The title alone.
+   */
+  section: SectionHeadAttributes,
 };
 
 /**
@@ -871,6 +929,9 @@ export const fieldBodyAttributeComponents: EntitiesAttributesComponents<FormBuil
   file: TextBodyAttributes,
   email: TextBodyAttributes,
   number: TextBodyAttributes,
+  // The blurb under the section title, which is the same control the help text
+  // under a question uses — `help_text` is the column either way.
+  section: TextBodyAttributes,
 };
 
 // ---------------------------------------------------------------------------
@@ -982,7 +1043,22 @@ export function addFieldEntity(
 ): string {
   const entity = builderStore.addEntity({
     type,
-    attributes: { key: "", label: "", helpText: "", required: true, options: [], archived: false },
+    attributes: {
+      key: "",
+      label: "",
+      helpText: "",
+      /*
+       * ⚠️ A SECTION IS NEVER REQUIRED, AND THE DATABASE REFUSES THE ROW IF IT
+       * IS. `vizserve_pms_form_fields_section_asks_nothing` — a section has no
+       * input, so `submit_request` would read its key as blank and refuse every
+       * submission with an error nothing on the page could satisfy. Defaulting
+       * to `true` here, as every question does, would make the very first save
+       * of a new page break fail on a check constraint.
+       */
+      required: type !== "section",
+      options: [],
+      archived: false,
+    },
     index,
   });
 
@@ -1046,6 +1122,9 @@ export function replaceFieldType(
     attributes: {
       ...previous.attributes,
       options: keepsOptions ? previous.attributes.options : [],
+      // Same constraint as `addFieldEntity`: turning a question into a page
+      // break drops its requiredness with it, or the save is refused.
+      required: type === "section" ? false : previous.attributes.required,
     },
     // `-1` cannot happen — the id came out of `root` — but `addEntity` would
     // read it as "insert at the end from the right", so it is normalised rather

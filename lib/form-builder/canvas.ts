@@ -34,6 +34,7 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   file: "File upload",
   email: "Email",
   number: "Number",
+  section: "Page break",
 };
 
 /** One line of "what would I use this for", for the Add question dialog. */
@@ -46,6 +47,10 @@ export const FIELD_TYPE_HINTS: Record<FieldType, string> = {
   file: "An upload the team will need",
   email: "A checked email address",
   number: "A quantity or a budget",
+  /* Named for what it DOES to the respondent, not for what it is in the table.
+     "Section" describes the thing on either side of it; "Page break" describes
+     the break, which is the thing being added. */
+  section: "Start a new page of the form",
 };
 
 /**
@@ -436,4 +441,90 @@ export function nextOptionLabel(options: ReadonlyArray<string>): string {
     const candidate = `Option ${n}`;
     if (!taken.has(candidate)) return candidate;
   }
+}
+
+/**
+ * P7-66 Phase 7 — ONE PAGE OF A FORM.
+ *
+ * `title` and `blurb` come from the `section` row that OPENED the page. The
+ * first page usually has no such row — a form does not have to begin with a page
+ * break — so both are empty strings there and the renderer draws no heading.
+ */
+export type FormPage<T> = {
+  /** The section row's label, or `""` for a page nothing opened. */
+  title: string;
+  /** The section row's help text, or `""`. */
+  blurb: string;
+  /**
+   * The page's contents IN FORM ORDER, INCLUDING the `section` row itself when
+   * there was one.
+   *
+   * ⚠️ THE SECTION IS IN THE LIST ON PURPOSE. Both hosts render a page by
+   * handing its items to the same component map they always used, and
+   * `sectionFieldComponent` draws the heading. Stripping it here and drawing the
+   * title from `title` instead would be a second renderer for the same row, and
+   * the two would drift. `title` is for the things that are NOT the page — the
+   * builder's section switcher and the "Page 2 of 4" line.
+   */
+  items: T[];
+};
+
+/**
+ * Split an ordered field list into the pages a respondent walks through.
+ *
+ * ⚠️ THE SPLIT LIVES HERE AND NOWHERE ELSE. Three screens page a form — the
+ * public request form, the internal respond form, and the builder's preview —
+ * and a form that pages differently in the preview from the way it pages for the
+ * person answering is worse than a form that does not page at all. One function,
+ * three callers.
+ *
+ * ⚠️ GENERIC OVER THE ITEM, because the three callers hold three different
+ * shapes: `PublicFormField` rows from the database, `CanvasField` entities from
+ * the builder store, and the interpreter's own entity list. They agree on
+ * exactly one thing — how to tell a page break from a question — so that is the
+ * only thing this asks for.
+ *
+ * ⚠️ ALWAYS AT LEAST ONE PAGE, INCLUDING FOR A FORM WITH NO FIELDS. A caller
+ * that has to handle "no pages" separately from "one empty page" will get it
+ * wrong on the empty form somebody has just created, which is the first thing
+ * anybody sees. `pages[0]` is always there.
+ *
+ * ⚠️ A LEADING PAGE BREAK DOES NOT MAKE AN EMPTY FIRST PAGE. A form whose very
+ * first row is a section has that section open page ONE, not page two — a blank
+ * Continue button in front of the form would be the first thing the client met.
+ * That is why the opening page is only pushed when it has something in it.
+ *
+ * ⚠️ AN ARCHIVED SECTION IS NOT A BREAK, and callers must filter archived rows
+ * out BEFORE calling this — the same filter that keeps archived questions off
+ * the form. An archived break left in would split a page in a place the form no
+ * longer says to.
+ */
+export function paginateFields<T>(
+  items: ReadonlyArray<T>,
+  /** True for the rows that start a new page. */
+  isBreak: (item: T) => boolean,
+  /** The heading a break carries. Never called for anything else. */
+  breakHeading: (item: T) => { title: string; blurb: string },
+): Array<FormPage<T>> {
+  const pages: Array<FormPage<T>> = [];
+  let current: FormPage<T> = { title: "", blurb: "", items: [] };
+
+  for (const item of items) {
+    if (!isBreak(item)) {
+      current.items.push(item);
+      continue;
+    }
+
+    // See the note above: the opening page is kept only if it collected
+    // something, so a form that STARTS with a break has no empty page in front
+    // of it.
+    if (current.items.length > 0) pages.push(current);
+
+    const { title, blurb } = breakHeading(item);
+    current = { title, blurb, items: [item] };
+  }
+
+  pages.push(current);
+
+  return pages;
 }

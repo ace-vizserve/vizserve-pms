@@ -138,6 +138,45 @@ export const numberEntity = defineFieldEntity("number", (value, { entity }) => {
     : z.union([z.literal(""), base]).optional().parse(value);
 });
 
+/**
+ * P7-66 Phase 7 — THE PAGE BREAK, AND THE ONE ENTITY THAT CAN NEVER HOLD A
+ * VALUE.
+ *
+ * ⚠️ `shouldBeProcessed: () => false`, UNCONDITIONALLY — not the archived test
+ * every other entity uses. That single line is the whole safety story:
+ *
+ *   - `validate` is never called, so the section cannot fail a submission.
+ *   - No key for it appears in the library's validated output, so
+ *     `toFieldValues` cannot write one and `field_values` never gains a key
+ *     that nothing will ever read back.
+ *
+ * A section is therefore invisible to every value path by construction rather
+ * than by a filter each path remembers to apply. `validate` below exists only
+ * because `createEntity` requires one; reaching it means `shouldBeProcessed`
+ * was bypassed, and throwing is the honest response to that.
+ *
+ * ⚠️ IT STILL NEEDS A `field_key`. The column is NOT NULL and unique per form,
+ * so the row cannot exist without one — it is derived from the title exactly as
+ * a question's is, and then never read by anything. Do not be tempted to skip
+ * deriving it because nothing consumes it; the INSERT is what consumes it.
+ *
+ * ⚠️ AND IT DECLARES ALL SIX ATTRIBUTES. The library refuses a schema that is
+ * missing one (`MissingEntityAttributes`) just as firmly as one carrying an
+ * extra, so `required` and `options` are declared here and simply never used —
+ * `vizserve_pms_form_fields_section_asks_nothing` is what keeps them at `false`
+ * and `[]` in the database.
+ */
+export const sectionEntity = createEntity({
+  name: "section",
+  attributes: fieldAttributes,
+  shouldBeProcessed: () => false,
+  validate: () => {
+    throw new Error(
+      "A section holds no value — shouldBeProcessed should have skipped it.",
+    );
+  },
+});
+
 export const fieldEntities = [
   textEntity,
   textareaEntity,
@@ -147,6 +186,7 @@ export const fieldEntities = [
   fileEntity,
   emailEntity,
   numberEntity,
+  sectionEntity,
 ] as const;
 
 export type FieldEntities = typeof fieldEntities;

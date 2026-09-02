@@ -1,0 +1,44 @@
+-- ---------------------------------------------------------------------------
+-- P7-66 Phase 7 — 'section' JOINS vizserve_pms_field_type.
+--
+-- A form splits into sections and the respondent sees one at a time, with
+-- Continue and Back and Submit only on the last. A SECTION IS A ROW IN
+-- vizserve_pms_form_fields, not a table of its own: title → label,
+-- description → help_text, position → sort_order.
+--
+-- ⚠️ WHY NOT A vizserve_pms_form_sections TABLE. Ordering would become
+-- two-level — a section's position AND a field's position within it — and every
+-- reorder in the builder goes through ONE function (`planEntityReorder`). Worse,
+-- it would force a rewrite of `vizserve_pms_save_form_schema`, the single
+-- function permitted to DELETE field rows, which projects a flat ordered list.
+-- As a row, sections cost that function nothing: it already carries label,
+-- help_text, field_type and sort_order, and it does not care what the type is.
+-- `reconcileFormSchema`, `schemaFromFields` and `planEntityReorder` are likewise
+-- untouched.
+--
+-- ⚠️ THIS FILE DOES NOTHING ELSE, AND THAT IS THE POINT.
+-- `alter type ... add value` cannot be followed, in the same transaction, by
+-- anything that USES the value it added — Postgres has not committed the new
+-- label yet and any reference to it errors with "unsafe use of new value". The
+-- constraint that depends on 'section' is therefore in the NEXT file
+-- (20260902155000), not this one. Splitting them is not tidiness; a combined
+-- file fails.
+--
+-- ⚠️ AND IT IS ONE-WAY. An enum value can never be dropped. There is no
+-- reverting this file — only a later one that stops using the label.
+--
+-- `if not exists` so the file is re-runnable. Note the hazard from
+-- 20260902130000: a guard that makes a file safe to re-run also makes it skip
+-- an object that is ALREADY WRONG. Here there is nothing to be wrong about —
+-- a label is a label — so the guard is safe.
+--
+-- POST-FLIGHT (expect one row, 'section'):
+--
+--   select e.enumlabel
+--     from pg_enum e
+--     join pg_type t on t.oid = e.enumtypid
+--    where t.typname = 'vizserve_pms_field_type'
+--      and e.enumlabel = 'section';
+-- ---------------------------------------------------------------------------
+
+alter type vizserve_pms_field_type add value if not exists 'section';

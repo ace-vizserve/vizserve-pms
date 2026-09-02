@@ -29,6 +29,28 @@ export const FIELD_TYPES = [
   "file",
   "email",
   "number",
+  /**
+   * P7-66 Phase 7 — A PAGE BREAK, NOT A QUESTION.
+   *
+   * ⚠️ IT IS IN THIS LIST BECAUSE IT IS A ROW IN `vizserve_pms_form_fields`,
+   * and everything that reads that table reads this enum. It is LAST because
+   * `ADDABLE_FIELD_TYPES` is this array and the order is the order of the
+   * builder's rail — a layout tool belongs under the eight things that collect
+   * an answer, not among them.
+   *
+   * ⚠️ EVERYTHING THAT TURNS A FIELD INTO A VALUE MUST SKIP IT. A section has
+   * no input, so it never appears in `field_values`, and anything that assumes
+   * one row means one answer will produce a phantom column, a phantom required
+   * error, or a phantom CSV heading. The three places that matter:
+   * `buildFieldSchema` (below), `sectionEntity`'s `shouldBeProcessed` in
+   * `lib/form-builder/entities.ts`, and `responseColumns` in
+   * `lib/form-builder/responses.ts`.
+   *
+   * The database says the same thing once, as
+   * `vizserve_pms_form_fields_section_asks_nothing` — which is what lets
+   * `vizserve_pms_submit_request` skip a section without a clause naming it.
+   */
+  "section",
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -128,6 +150,23 @@ export function buildFieldSchema(field: PublicFormField): z.ZodTypeAny {
     required ? schema : schema.optional();
 
   switch (field.field_type) {
+    /*
+     * ⚠️ A SECTION VALIDATES NOTHING AND ACCEPTS ANYTHING, INCLUDING ABSENCE.
+     *
+     * It has no control, so nothing ever puts its key in `field_values` — and a
+     * `z.object` shape whose key is missing from the input fails the parse
+     * unless the entry is optional. Falling through to the `text` default would
+     * therefore break every submission on every form that has a section, with
+     * "Your details is required." pointing at a heading.
+     *
+     * `buildSubmissionSchema` still gives it a key rather than omitting it,
+     * because the shape is built from the form's fields and a caller reading
+     * that shape should find every field in it. `.optional()` on `unknown` is
+     * what makes the key present and the value never demanded.
+     */
+    case "section":
+      return z.unknown().optional();
+
     case "email": {
       const base = z.email(`${field.label} must be a valid email.`);
       return required ? base : z.union([z.literal(""), base]).optional();

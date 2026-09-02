@@ -108,8 +108,23 @@ async function newOutcome(field: FormFieldRow, input: unknown): Promise<Outcome>
 /**
  * Every input each type is asked to survive: a good answer, a blank, an absent
  * one, and something of the wrong shape entirely.
+ *
+ * ⚠️ `section` IS EXCLUDED, AND ITS OWN CONTRACT IS ASSERTED BELOW INSTEAD.
+ * This table exists to prove the entity validators agree with
+ * `buildFieldSchema`. A page break has no validator to agree with: its
+ * `shouldBeProcessed` is `() => false`, so the interpreter never calls
+ * `validate` and never puts a key in its output — there is no outcome to
+ * compare. Driving it through this harness would compare "the library skipped
+ * it" against "zod accepted anything", which is two right answers to two
+ * different questions.
+ *
+ * `Exclude` rather than an optional entry, so adding a NINTH answering type
+ * still fails this file until its cases are written.
  */
-const CASES: Record<FieldType, { options: string[]; inputs: Array<[string, unknown]> }> = {
+const CASES: Record<
+  Exclude<FieldType, "section">,
+  { options: string[]; inputs: Array<[string, unknown]> }
+> = {
   text: {
     options: [],
     inputs: [
@@ -204,6 +219,8 @@ const CASES: Record<FieldType, { options: string[]; inputs: Array<[string, unkno
 
 describe("entity validators match buildFieldSchema", () => {
   for (const fieldType of FIELD_TYPES) {
+    if (fieldType === "section") continue;
+
     describe(fieldType, () => {
       for (const required of [true, false]) {
         for (const [name, input] of CASES[fieldType].inputs) {
