@@ -177,6 +177,41 @@ export const sectionEntity = createEntity({
   },
 });
 
+/**
+ * P7-66 Phase 9 — SHOWN, NOT ASKED, AND THE URL IS `options[0]`.
+ *
+ * Both are `sectionEntity` with a picture, and share its whole safety story:
+ * `shouldBeProcessed: () => false` means `validate` is never called and no key
+ * reaches the library's output, so `toFieldValues` cannot write one and neither
+ * field can fail a submission or grow a column. That is by construction rather
+ * than by a filter each path remembers to apply.
+ *
+ * ⚠️ `options` CARRIES THE URL AND `label` CARRIES THE ACCESSIBLE NAME. Neither
+ * is a repurposing that has to be remembered in two places: `options` is already
+ * "the values this field carries", and `label` is already required — which is
+ * how the alt text on an image and the title on a video end up mandatory
+ * without a rule of their own. `optionsAttribute` refuses an EMPTY option, so
+ * the URL cannot be blank either.
+ *
+ * `validate` throws because `createEntity` requires one. Reaching it means
+ * `shouldBeProcessed` was bypassed, and throwing is the honest response.
+ */
+function defineDisplayEntity<const TName extends string>(name: TName) {
+  return createEntity({
+    name,
+    attributes: fieldAttributes,
+    shouldBeProcessed: () => false,
+    validate: () => {
+      throw new Error(
+        `A ${name} field holds no value — shouldBeProcessed should have skipped it.`,
+      );
+    },
+  });
+}
+
+export const imageEntity = defineDisplayEntity("image");
+export const youtubeEntity = defineDisplayEntity("youtube");
+
 export const fieldEntities = [
   textEntity,
   textareaEntity,
@@ -187,6 +222,8 @@ export const fieldEntities = [
   emailEntity,
   numberEntity,
   sectionEntity,
+  imageEntity,
+  youtubeEntity,
 ] as const;
 
 export type FieldEntities = typeof fieldEntities;

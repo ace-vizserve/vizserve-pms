@@ -1,3 +1,4 @@
+import { isDisplayOnly } from "@/lib/form-builder/canvas";
 import type { FormSchema } from "@/lib/form-builder/builder";
 
 /**
@@ -102,25 +103,25 @@ export function responseColumns(
     const entity = schema.entities[entityId]!;
 
     /*
-     * ⚠️ P7-66 Phase 7 — A PAGE BREAK IS NOT A COLUMN.
+     * ⚠️ A THING THAT IS SHOWN IS NOT A COLUMN.
      *
-     * A section is a row in `vizserve_pms_form_fields` like any other, so it
-     * arrives here in `root` with a `key` and a `label`. It has no input, so
-     * nothing is ever filed under that key — a column for it would be a heading
-     * over an em-dash on every row of the table and every line of the CSV, for
-     * a question nobody was asked.
+     * A page break, an image and a video are rows in `vizserve_pms_form_fields`
+     * like any other, so each arrives here in `root` with a `key` and a `label`.
+     * None has an input, so nothing is ever filed under those keys — a column
+     * would be a heading over an em-dash on every row of the table and every
+     * line of the CSV, for a question nobody was asked.
      *
-     * ⚠️ AND IT MUST NOT `claimed.add` ON THE WAY PAST. A section's derived key
-     * comes from its title, so a page break called "Your details" and a question
+     * ⚠️ AND THEY MUST NOT `claimed.add` ON THE WAY PAST. The key is derived
+     * from the label, so a page break called "Your details" and a question
      * called "Your details" produce the same key. Claiming it here would
      * suppress the REAL question's column and silently drop its answers from the
      * table and the export. Skipping before the claim means the question keeps
-     * its column; the section is simply not there.
+     * its column; the display row is simply not there.
      *
      * `answeredKeysOf` needs no equivalent — it reads keys out of stored
      * answers, and no answer has ever held a section's key.
      */
-    if (entity.type === "section") continue;
+    if (isDisplayOnly(entity.type)) continue;
 
     const key = entity.attributes.key;
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { AlignLeft, Archive, Calendar, CircleDot, Hash, Mail, SeparatorHorizontal, SquareCheckBig, Type, Upload } from "lucide-react";
+import { AlignLeft, Archive, Calendar, CircleDot, Hash, Image, Mail, SeparatorHorizontal, SquareCheckBig, Type, Upload, Youtube } from "lucide-react";
 import { useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -46,6 +46,8 @@ const TYPE_ICONS: Record<FieldType, React.ComponentType<{ className?: string }>>
   email: Mail,
   number: Hash,
   section: SeparatorHorizontal,
+  image: Image,
+  youtube: Youtube,
 };
 
 export function QuestionTypes({

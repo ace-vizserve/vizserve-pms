@@ -35,7 +35,44 @@ export const FIELD_TYPE_LABELS: Record<FieldType, string> = {
   email: "Email",
   number: "Number",
   section: "Page break",
+  image: "Image",
+  youtube: "YouTube video",
 };
+
+/**
+ * P7-66 — THE TYPES THAT SHOW SOMETHING RATHER THAN ASK SOMETHING.
+ *
+ * ⚠️ ONE SET, READ EVERYWHERE, because the alternative is `type === "section"`
+ * spelled out in six files and a seventh that was forgotten. Every one of these
+ * is a row in `vizserve_pms_form_fields` that never appears in `field_values`,
+ * so everything which assumes ONE ROW MEANS ONE ANSWER has to consult this:
+ *
+ *   `responseColumns` — or the table and the CSV grow a heading over an
+ *   em-dash on every row, for a question nobody was asked.
+ *   `QuestionList`'s numbering — or the questions after one are numbered
+ *   higher than the form the respondent sees.
+ *   `buildFieldSchema` and the entity declarations — or a submission is
+ *   refused against a picture.
+ *
+ * The database says the same thing in `..._section_asks_nothing` and
+ * `..._media_asks_nothing`, which is what makes the front end's copy a
+ * convenience rather than the rule.
+ */
+export const DISPLAY_ONLY_FIELD_TYPES: ReadonlySet<string> = new Set([
+  "section",
+  "image",
+  "youtube",
+]);
+
+/** True for a row that is shown to the respondent and never answered. */
+export function isDisplayOnly(type: string): boolean {
+  return DISPLAY_ONLY_FIELD_TYPES.has(type);
+}
+
+/** The two that carry a URL in `options[0]`. */
+export function isMedia(type: string): boolean {
+  return type === "image" || type === "youtube";
+}
 
 /** One line of "what would I use this for", for the Add question dialog. */
 export const FIELD_TYPE_HINTS: Record<FieldType, string> = {
@@ -51,6 +88,8 @@ export const FIELD_TYPE_HINTS: Record<FieldType, string> = {
      "Section" describes the thing on either side of it; "Page break" describes
      the break, which is the thing being added. */
   section: "Start a new page of the form",
+  image: "A picture to show, by link",
+  youtube: "A video to watch before answering",
 };
 
 /**
@@ -392,16 +431,40 @@ export function unsavableReason(
     // question, and accepting one here would hand the save a document the
     // library refuses.
     if (entity.attributes.label.trim() === "") {
-      // A page break needs a title for the same reason a question does — the
-      // NOT NULL `field_key` is derived from it — but calling it a question is
-      // the screen describing the wrong thing.
+      /*
+       * Everything needs a label for the same reason — the NOT NULL `field_key`
+       * is derived from it — but calling a picture a question is the screen
+       * describing the wrong thing. And on the media types the label is doing a
+       * second job the sentence should name: it is the ALT TEXT and the video's
+       * accessible title, which is why "describe" rather than "name".
+       */
       return {
         entityId,
-        message:
-          entity.type === "section"
-            ? "Give this page break a title and it will save itself."
-            : "Give this question a name and it will save itself.",
+        message: UNNAMED_MESSAGES[entity.type] ?? UNNAMED_MESSAGES.default!,
       };
+    }
+
+    /*
+     * P7-66 Phase 9 — THE URL IS `options[0]`, SO ITS ABSENCE IS AN UNSAVABLE
+     * DOCUMENT, exactly as an option-less choice field is.
+     *
+     * `vizserve_pms_form_fields_media_has_a_source` refuses the row, so without
+     * this the autosave would fire, fail on a check constraint, and leave the
+     * indicator saying "Not saved" with no sentence naming which field. Said
+     * here, it is a sentence on the field itself, BEFORE the write.
+     *
+     * Checked before the choice branch because these types never reach it.
+     */
+    if (isMedia(entity.type)) {
+      if ((entity.attributes.options[0] ?? "").trim() === "") {
+        return {
+          entityId,
+          message:
+            entity.type === "youtube"
+              ? "Paste the YouTube link and it will save itself."
+              : "Paste the image link and it will save itself.",
+        };
+      }
     }
 
     if (entity.type === "select" || entity.type === "multiselect") {
@@ -428,6 +491,14 @@ export function unsavableReason(
 
   return null;
 }
+
+/** What to say about a row that has no label yet. See `unsavableReason`. */
+const UNNAMED_MESSAGES: Record<string, string> = {
+  section: "Give this page break a title and it will save itself.",
+  image: "Describe what the picture shows and it will save itself — that is its alt text.",
+  youtube: "Name the video and it will save itself — that is what a screen reader announces.",
+  default: "Give this question a name and it will save itself.",
+};
 
 /**
  * The placeholder for a newly added choice.
@@ -536,4 +607,94 @@ export function paginateFields<T>(
   pages.push(current);
 
   return pages;
+}
+
+/**
+ * P7-66 Phase 9 — A YOUTUBE LINK, AS AN EMBED URL, OR `null`.
+ *
+ * ⚠️ THE EMBED URL IS BUILT, NEVER THE PASTED ONE PUT IN AN IFRAME. What a
+ * person pastes is a watch page — `youtube.com/watch?v=…`, a `youtu.be/…`
+ * short link, a `/shorts/…`, sometimes with a playlist, a timestamp and a
+ * tracking parameter attached. Framing a watch page does not work, and passing
+ * an arbitrary pasted string into an `iframe src` is a hole: `javascript:` and
+ * `data:` URLs are both strings that look like links.
+ *
+ * So this extracts an ID and constructs the URL from a fixed prefix. The only
+ * thing that survives from the input is eleven characters matched against
+ * `[A-Za-z0-9_-]{11}`, which cannot carry a scheme, a host or a query.
+ *
+ * `null` for anything it does not recognise, which the caller renders as "this
+ * does not look like a YouTube link" rather than an empty frame. Being strict is
+ * the point: a Vimeo link silently producing a broken YouTube embed is worse
+ * than being told it is not one.
+ */
+export function youtubeEmbedUrl(raw: string): string | null {
+  const id = youtubeVideoId(raw);
+
+  return id === null ? null : `https://www.youtube-nocookie.com/embed/${id}`;
+}
+
+/** The eleven-character id, or `null`. Exported for the tests and the editor. */
+export function youtubeVideoId(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+
+  let url: URL;
+
+  try {
+    // No protocol-guessing: a bare `youtube.com/watch?v=x` is not a URL, and
+    // prefixing `https://` for the person would also prefix it for
+    // `javascript:alert(1)` typed without a scheme.
+    url = new URL(trimmed);
+  } catch {
+    return null;
+  }
+
+  // ⚠️ SCHEME FIRST. Everything below reads the host and the path, and a
+  // `javascript:` URL has both.
+  if (url.protocol !== "https:" && url.protocol !== "http:") return null;
+
+  const host = url.hostname.replace(/^www\./, "");
+  const id =
+    host === "youtu.be"
+      ? url.pathname.slice(1)
+      : host === "youtube.com" || host === "m.youtube.com" || host === "youtube-nocookie.com"
+        ? url.pathname.startsWith("/embed/")
+          ? url.pathname.slice("/embed/".length)
+          : url.pathname.startsWith("/shorts/")
+            ? url.pathname.slice("/shorts/".length)
+            : (url.searchParams.get("v") ?? "")
+        : "";
+
+  // A path can carry more after the id (`/embed/ID/something`); take the first
+  // segment only, then insist on the exact shape.
+  const first = id.split("/")[0] ?? "";
+
+  return /^[A-Za-z0-9_-]{11}$/.test(first) ? first : null;
+}
+
+/**
+ * P7-66 Phase 9 — AN IMAGE URL WE ARE WILLING TO PUT IN A `src`, OR `null`.
+ *
+ * Same reasoning as `youtubeEmbedUrl` and a smaller job: the URL is used as
+ * given, so the only question is whether it is a fetchable web address.
+ * `javascript:` and `data:` are excluded — the first executes, and the second
+ * lets a form carry an arbitrary payload inline in a row anybody can read.
+ *
+ * ⚠️ NO EXTENSION CHECK. A URL ending `.jpg` is not a promise and a URL ending
+ * `/photo` is not a disqualification — plenty of legitimate image hosts serve
+ * from extensionless paths. The `<img>` either loads or it does not, and the
+ * editor shows the same preview the respondent will see, which answers the
+ * question better than a regex.
+ */
+export function safeImageUrl(raw: string): string | null {
+  const trimmed = raw.trim();
+  if (trimmed === "") return null;
+
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.href : null;
+  } catch {
+    return null;
+  }
 }

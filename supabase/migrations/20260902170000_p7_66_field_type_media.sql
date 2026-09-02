@@ -1,0 +1,57 @@
+-- ---------------------------------------------------------------------------
+-- P7-66 Phase 9 — 'image' AND 'youtube' JOIN vizserve_pms_field_type.
+--
+-- Two DISPLAY-ONLY fields: the author gives a URL, the respondent sees a picture
+-- or a video, and neither collects an answer. "Watch this, then answer the
+-- questions below" is the case.
+--
+-- ⚠️ THEY ARE SECTIONS WITH A PICTURE, ARCHITECTURALLY. Same decision as
+-- 20260902150000 and for the same reasons: a row in vizserve_pms_form_fields,
+-- so vizserve_pms_save_form_schema, reconcileFormSchema, schemaFromFields and
+-- planEntityReorder need no changes at all — they project label / help_text /
+-- field_type / options / sort_order and do not care what the type is.
+--
+-- ⚠️ WHERE THE URL LIVES: `options[0]`. Not a new column, and this is a
+-- deliberate choice rather than a shortcut.
+--
+-- A new column would not round-trip. save_form_schema names the columns it
+-- projects, so carrying `media_url` would mean REPLACING that function — the
+-- only thing permitted to DELETE a field row and the one place the R5 guard
+-- speaks. Phase 8 avoided that by giving grading its own writer, which works
+-- because grading is an OVERLAY the author sets separately. A media URL is not
+-- an overlay: it is the field's entire content, and it has to save with the form
+-- the way a question's label does. Typing a URL into a control whose autosave
+-- says "saved" while writing it nowhere is the exact silent loss this codebase
+-- keeps warning about.
+--
+-- `options` is jsonb, already round-trips, and already means "the values this
+-- field carries". For a choice field that is the list offered; for a media field
+-- it is the one source. Extending later to `[url, alt]` costs nothing.
+--
+-- ⚠️ AND `label` IS THE ACCESSIBLE NAME, WHICH IS WHY IT STAYS REQUIRED.
+-- `labelAttribute` already refuses an empty label and `field_key` is derived
+-- from it, so every row already has one. On an image that label is the ALT TEXT;
+-- on a video it is the iframe's title. Both are required by WCAG 2.2 AA and both
+-- would otherwise be the field somebody skips — here the form cannot save
+-- without them, for a reason that has nothing to do with accessibility and
+-- delivers it anyway.
+--
+-- ⚠️ THIS FILE DOES NOTHING ELSE. `alter type ... add value` cannot be followed
+-- in the same transaction by anything that USES the value it added — Postgres
+-- has not committed the label yet. The constraint that names these types is in
+-- 20260902175000. A combined file fails.
+--
+-- ⚠️ ONE-WAY. An enum value can never be dropped.
+--
+-- POST-FLIGHT (expect two rows, 'image' and 'youtube'):
+--
+--   select e.enumlabel
+--     from pg_enum e
+--     join pg_type t on t.oid = e.enumtypid
+--    where t.typname = 'vizserve_pms_field_type'
+--      and e.enumlabel in ('image', 'youtube')
+--    order by e.enumlabel;
+-- ---------------------------------------------------------------------------
+
+alter type vizserve_pms_field_type add value if not exists 'image';
+alter type vizserve_pms_field_type add value if not exists 'youtube';

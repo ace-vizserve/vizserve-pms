@@ -51,6 +51,29 @@ export const FIELD_TYPES = [
    * `vizserve_pms_submit_request` skip a section without a clause naming it.
    */
   "section",
+  /**
+   * P7-66 Phase 9 — SHOWN, NOT ASKED.
+   *
+   * An image and a YouTube video, both DISPLAY ONLY: the author gives a URL and
+   * the respondent sees it. Neither collects an answer, so both belong with
+   * `section` in `DISPLAY_ONLY_FIELD_TYPES` and in every filter that list drives.
+   *
+   * ⚠️ THE URL IS `options[0]`, NOT A COLUMN OF ITS OWN. A new column would not
+   * round-trip: `vizserve_pms_save_form_schema` names the columns it projects,
+   * so carrying one would mean replacing the only function permitted to DELETE a
+   * field row. Phase 8 dodged that by giving grading its own writer, which works
+   * because grading is an overlay — but a media URL is the field's whole
+   * content and must save with the form, or the autosave says "saved" over a URL
+   * it wrote nowhere. `20260902170000_p7_66_field_type_media.sql` has the full
+   * reasoning.
+   *
+   * ⚠️ AND `label` IS THE ACCESSIBLE NAME. On an image it is the alt text; on a
+   * video it is the iframe title. Both are required by WCAG 2.2 AA, and both are
+   * delivered for free because `labelAttribute` already refuses an empty label
+   * and `field_key` is derived from it.
+   */
+  "image",
+  "youtube",
 ] as const;
 
 export type FieldType = (typeof FIELD_TYPES)[number];
@@ -164,7 +187,18 @@ export function buildFieldSchema(field: PublicFormField): z.ZodTypeAny {
      * that shape should find every field in it. `.optional()` on `unknown` is
      * what makes the key present and the value never demanded.
      */
+    /*
+     * ⚠️ EVERY DISPLAY-ONLY TYPE VALIDATES NOTHING AND ACCEPTS ABSENCE.
+     *
+     * None of these has a control, so nothing ever puts their key in
+     * `field_values` — and a `z.object` shape whose key is missing fails the
+     * parse unless the entry is optional. Falling through to the `text` default
+     * would break every submission on every form carrying one, with
+     * "Team photo is required." against a picture.
+     */
     case "section":
+    case "image":
+    case "youtube":
       return z.unknown().optional();
 
     case "email": {

@@ -39,18 +39,27 @@ import {
   requiredAttribute,
 } from "@/lib/form-builder/attributes";
 import { cn } from "@/lib/utils";
-import { nextOptionLabel, paginateFields, type FormPage } from "@/lib/form-builder/canvas";
+import {
+  isDisplayOnly,
+  nextOptionLabel,
+  paginateFields,
+  safeImageUrl,
+  youtubeEmbedUrl,
+  type FormPage,
+} from "@/lib/form-builder/canvas";
 import { formBuilder, type FormBuilder, type FormSchema } from "@/lib/form-builder/builder";
 import {
   dateEntity,
   emailEntity,
   fileEntity,
   multiselectEntity,
+  imageEntity,
   numberEntity,
   sectionEntity,
   selectEntity,
   textareaEntity,
   textEntity,
+  youtubeEntity,
 } from "@/lib/form-builder/entities";
 import { extractErrorMessage } from "@/lib/form-builder/values";
 import type { AttachmentRef, FieldType } from "@/lib/schemas/forms";
@@ -604,6 +613,99 @@ export const sectionFieldComponent = createEntityComponent(
 );
 
 /**
+ * P7-66 Phase 9 — A PICTURE IN THE MIDDLE OF A FORM.
+ *
+ * ⚠️ `alt` IS THE LABEL, AND IT IS NEVER EMPTY. `labelAttribute` refuses a blank
+ * one, so an image cannot reach a respondent without a description — WCAG 2.2 AA
+ * 1.1.1 delivered by a rule that exists for another reason entirely (the label
+ * is what `field_key` is derived from).
+ *
+ * ⚠️ A BAD URL SAYS SO RATHER THAN DRAWING A BROKEN IMAGE. `safeImageUrl`
+ * refuses anything that is not http(s) — `javascript:` and `data:` are both
+ * strings that look like links — and the fallback is a visible note, because a
+ * silent gap in a form reads as a fault in the form.
+ *
+ * ⚠️ PLAIN `<img>`, NOT `next/image`. The URL is arbitrary and supplied at
+ * runtime by whoever built the form; `next/image` would need every one of those
+ * hosts in `remotePatterns` at BUILD time, so the optimiser would reject exactly
+ * the links people paste. `loading="lazy"` is the part worth keeping.
+ */
+export const imageFieldComponent = createEntityComponent(imageEntity, ({ entity }) => {
+  const src = safeImageUrl(entity.attributes.options[0] ?? "");
+  const caption = entity.attributes.helpText.trim();
+
+  if (src === null) {
+    return (
+      <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+        This image has no usable link yet.
+      </p>
+    );
+  }
+
+  return (
+    <figure className="space-y-1.5">
+      {/* eslint-disable-next-line @next/next/no-img-element -- see the note above */}
+      <img
+        src={src}
+        alt={entity.attributes.label}
+        loading="lazy"
+        className="max-h-96 w-full rounded-md border object-contain"
+      />
+      {caption === "" ? null : (
+        <figcaption className="text-xs text-muted-foreground">{caption}</figcaption>
+      )}
+    </figure>
+  );
+});
+
+/**
+ * P7-66 Phase 9 — A VIDEO TO WATCH BEFORE ANSWERING.
+ *
+ * ⚠️ THE `src` IS CONSTRUCTED, NEVER THE PASTED STRING. `youtubeEmbedUrl`
+ * extracts eleven characters matching `[A-Za-z0-9_-]{11}` and builds the URL
+ * from a fixed prefix, so nothing a person pastes can carry a scheme, a host or
+ * a query into the frame. Framing a watch page does not work anyway.
+ *
+ * ⚠️ `title` IS THE LABEL, AND IT IS REQUIRED FOR THE SAME REASON `alt` IS. An
+ * iframe with no accessible name is announced as "frame" and nothing else
+ * (WCAG 2.2 AA 4.1.2).
+ *
+ * `youtube-nocookie.com` — the same video, without the tracking cookie set
+ * before anybody presses play. `allowFullScreen` and no `allow="autoplay"`: a
+ * form that starts making noise on load is a form people close.
+ */
+export const youtubeFieldComponent = createEntityComponent(youtubeEntity, ({ entity }) => {
+  const src = youtubeEmbedUrl(entity.attributes.options[0] ?? "");
+  const caption = entity.attributes.helpText.trim();
+
+  if (src === null) {
+    return (
+      <p className="rounded-md border border-dashed px-3 py-2 text-xs text-muted-foreground">
+        This does not look like a YouTube link yet.
+      </p>
+    );
+  }
+
+  return (
+    <figure className="space-y-1.5">
+      <div className="aspect-video w-full overflow-hidden rounded-md border">
+        <iframe
+          src={src}
+          title={entity.attributes.label}
+          loading="lazy"
+          allowFullScreen
+          referrerPolicy="strict-origin-when-cross-origin"
+          className="size-full"
+        />
+      </div>
+      {caption === "" ? null : (
+        <figcaption className="text-xs text-muted-foreground">{caption}</figcaption>
+      )}
+    </figure>
+  );
+});
+
+/**
  * The map both hosts render through.
  *
  * Keyed by the `vizserve_pms_field_type` values verbatim — the same names
@@ -626,6 +728,8 @@ export const fieldComponents: EntitiesComponents<FormBuilder> = {
   email: emailFieldComponent,
   number: numberFieldComponent,
   section: sectionFieldComponent,
+  image: imageFieldComponent,
+  youtube: youtubeFieldComponent,
 };
 
 // ---------------------------------------------------------------------------
@@ -648,6 +752,25 @@ export const fieldComponents: EntitiesComponents<FormBuilder> = {
 
 const attributeErrorText = (error: unknown) => fieldErrorMessage(error);
 
+/**
+ * What the label box is CALLED, per field type.
+ *
+ * ⚠️ IT IS ONE COLUMN DOING FOUR JOBS, AND THE SCREEN HAS TO SAY WHICH.
+ * `label` is the question on a question, the heading on a page break, the ALT
+ * TEXT on an image and the accessible TITLE on a video. The last two are the
+ * ones worth being explicit about: they are required by WCAG 2.2 AA, and they
+ * are delivered for free because `labelAttribute` already refuses a blank —
+ * but only if the person filling the box knows that is what they are writing.
+ * "Question / What are you asking?" over the alt text of a photograph produces
+ * alt text that reads like a question.
+ */
+const LABEL_WORDING: Record<string, { label: string; placeholder: string }> = {
+  section: { label: "Section title", placeholder: "What is this page called?" },
+  image: { label: "Image description", placeholder: "What does the picture show?" },
+  youtube: { label: "Video title", placeholder: "What is the video about?" },
+  default: { label: "Question", placeholder: "What are you asking?" },
+};
+
 const LabelAttribute = createAttributeComponent(
   labelAttribute,
   ({ attribute, entity, setValue, validateValue }) => {
@@ -661,18 +784,18 @@ const LabelAttribute = createAttributeComponent(
      * telling somebody they are doing something they are not. The heading of
      * the new section is what they are typing.
      */
-    const isSection = entity.type === "section";
+    const naming = LABEL_WORDING[entity.type] ?? LABEL_WORDING.default!;
 
     return (
       <div className="min-w-0 space-y-1.5">
         {/* "Question", not "Label". The person using this is writing a form, and
             the thing they are typing is the question. "Label" is what the
             attribute is called in the schema, which is nobody's business here. */}
-        <Label htmlFor={controlId}>{isSection ? "Section title" : "Question"}</Label>
+        <Label htmlFor={controlId}>{naming.label}</Label>
         <Input
           id={controlId}
           value={attribute.value}
-          placeholder={isSection ? "What is this page called?" : "What are you asking?"}
+          placeholder={naming.placeholder}
           aria-invalid={error ? true : undefined}
           onChange={(event) => setValue(event.target.value)}
           onBlur={() => void validateValue()}
@@ -712,17 +835,19 @@ const HelpTextAttribute = createAttributeComponent(
     const controlId = `attr-help-${entity.id}`;
     // Same column, same control, different thing being written. See
     // `LabelAttribute`.
-    const isSection = entity.type === "section";
+    // A caption under a picture, a blurb under a heading, help under a question:
+    // one column, and the word for it differs.
+    const shown = isDisplayOnly(entity.type);
 
     return (
       <div className="space-y-1.5">
         <Label htmlFor={controlId}>
-          {isSection ? "Description (optional)" : "Help text (optional)"}
+          {shown ? "Caption (optional)" : "Help text (optional)"}
         </Label>
         <Input
           id={controlId}
           value={attribute.value}
-          placeholder={isSection ? "Shown under the section title" : "Shown under the question"}
+          placeholder={shown ? "Shown underneath" : "Shown under the question"}
           onChange={(event) => setValue(event.target.value)}
         />
       </div>
@@ -783,6 +908,70 @@ const RequiredAttribute = createAttributeComponent(
  * the answer type is the way to stop having choices, which is a decision rather
  * than an accident.
  */
+/**
+ * P7-66 Phase 9 — THE MEDIA URL, WHICH IS `options[0]` DRAWN AS ONE BOX.
+ *
+ * ⚠️ IT WRITES A ONE-ENTRY ARRAY, ALWAYS. The column holds an array and
+ * `vizserve_pms_form_fields_media_has_a_source` requires a non-empty one, so a
+ * cleared box must write `[""]` rather than `[]` — the empty array is the state
+ * the database refuses, and `optionsAttribute` refuses an empty STRING, which is
+ * what makes "you have not filled this in" a per-attribute error the editor
+ * shows rather than a save that fails.
+ *
+ * ⚠️ AND IT PREVIEWS WHAT IT PARSED, NOT WHAT WAS TYPED. A YouTube link that
+ * this does not recognise produces no embed, and the sentence says so — rather
+ * than accepting the paste, saving it, and leaving an empty frame in the form
+ * for the respondent to find. `youtubeVideoId` is deliberately strict: a Vimeo
+ * link quietly becoming a broken YouTube embed is worse than being told it is
+ * not a YouTube link.
+ */
+const MediaUrlAttribute = createAttributeComponent(
+  optionsAttribute,
+  ({ attribute, entity, setValue, validateValue }) => {
+    const controlId = `attr-media-${entity.id}`;
+    const error = attributeErrorText(attribute.error);
+    const value = attribute.value[0] ?? "";
+    const video = entity.type === "youtube";
+
+    // Recognised, or not yet. Empty is neither — the field is simply unfinished,
+    // and `unsavableReason` is what says so at the document level.
+    const parsed = value.trim() === "" ? null : video ? youtubeEmbedUrl(value) : safeImageUrl(value);
+
+    return (
+      <div className="space-y-1.5">
+        <Label htmlFor={controlId}>{video ? "YouTube link" : "Image link"}</Label>
+        <Input
+          id={controlId}
+          value={value}
+          placeholder={
+            video ? "https://www.youtube.com/watch?v=…" : "https://…/picture.jpg"
+          }
+          aria-invalid={error ? true : undefined}
+          onChange={(event) => setValue([event.target.value])}
+          onBlur={() => void validateValue()}
+        />
+        {error ? (
+          <p className="text-xs text-destructive" role="alert">
+            {error}
+          </p>
+        ) : null}
+        {value.trim() !== "" && parsed === null ? (
+          <p className="text-xs text-warning">
+            {video
+              ? "That is not a YouTube link this can embed. Paste the address from the browser bar on the video's page."
+              : "That is not a web address. It needs to start with https://."}
+          </p>
+        ) : null}
+        <p className="text-xs text-muted-foreground">
+          {video
+            ? "Shown as a player. The question name above is what a screen reader announces it as."
+            : "Shown at full width. The question name above is its alt text — describe what the picture shows."}
+        </p>
+      </div>
+    );
+  },
+);
+
 const OptionsAttribute = createAttributeComponent(
   optionsAttribute,
   ({ attribute, entity, setValue, validateValue }) => {
@@ -899,6 +1088,26 @@ function SectionHeadAttributes() {
   return <LabelAttribute />;
 }
 
+/**
+ * P7-66 Phase 9 — the media URL, then the caption.
+ *
+ * ⚠️ IT IS `OptionsAttribute`'S COLUMN, DRAWN AS ONE BOX. The URL lives in
+ * `options[0]` so that it round-trips through `vizserve_pms_save_form_schema`
+ * with the rest of the field — see the note on `FIELD_TYPES`. Reusing the
+ * attribute means the autosave, the dirty tracking and the per-attribute error
+ * all work with no new machinery; what it does NOT mean is that a media field
+ * should show a list editor with an Add-choice button, which is why this is its
+ * own control.
+ */
+function MediaBodyAttributes() {
+  return (
+    <div className="space-y-3.5">
+      <MediaUrlAttribute />
+      <HelpTextAttribute />
+    </div>
+  );
+}
+
 function ChoiceBodyAttributes() {
   return (
     <div className="space-y-3.5">
@@ -925,6 +1134,11 @@ export const fieldHeadAttributeComponents: EntitiesAttributesComponents<FormBuil
    * switch would offer a state the save then rejects. The title alone.
    */
   section: SectionHeadAttributes,
+  /* Same as a page break: a title, and no required switch — a picture cannot be
+     required, and `vizserve_pms_form_fields_media_asks_nothing` refuses the row
+     if it is. What the title MEANS differs, which `LabelAttribute` says. */
+  image: SectionHeadAttributes,
+  youtube: SectionHeadAttributes,
 };
 
 /**
@@ -947,6 +1161,9 @@ export const fieldBodyAttributeComponents: EntitiesAttributesComponents<FormBuil
   // The blurb under the section title, which is the same control the help text
   // under a question uses — `help_text` is the column either way.
   section: TextBodyAttributes,
+  /* The URL, then the caption. `MediaBodyAttributes` draws both. */
+  image: MediaBodyAttributes,
+  youtube: MediaBodyAttributes,
 };
 
 // ---------------------------------------------------------------------------
@@ -1070,7 +1287,7 @@ export function addFieldEntity(
        * to `true` here, as every question does, would make the very first save
        * of a new page break fail on a check constraint.
        */
-      required: type !== "section",
+      required: !isDisplayOnly(type),
       options: [],
       archived: false,
     },
@@ -1139,7 +1356,7 @@ export function replaceFieldType(
       options: keepsOptions ? previous.attributes.options : [],
       // Same constraint as `addFieldEntity`: turning a question into a page
       // break drops its requiredness with it, or the save is refused.
-      required: type === "section" ? false : previous.attributes.required,
+      required: isDisplayOnly(type) ? false : previous.attributes.required,
     },
     // `-1` cannot happen — the id came out of `root` — but `addEntity` would
     // read it as "insert at the end from the right", so it is normalised rather

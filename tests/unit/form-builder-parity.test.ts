@@ -109,7 +109,8 @@ async function newOutcome(field: FormFieldRow, input: unknown): Promise<Outcome>
  * Every input each type is asked to survive: a good answer, a blank, an absent
  * one, and something of the wrong shape entirely.
  *
- * ⚠️ `section` IS EXCLUDED, AND ITS OWN CONTRACT IS ASSERTED BELOW INSTEAD.
+ * ⚠️ EVERY DISPLAY-ONLY TYPE IS EXCLUDED, AND THEIR CONTRACT IS ASSERTED IN
+ * form-sections.test.ts AND form-media.test.ts INSTEAD.
  * This table exists to prove the entity validators agree with
  * `buildFieldSchema`. A page break has no validator to agree with: its
  * `shouldBeProcessed` is `() => false`, so the interpreter never calls
@@ -122,7 +123,7 @@ async function newOutcome(field: FormFieldRow, input: unknown): Promise<Outcome>
  * still fails this file until its cases are written.
  */
 const CASES: Record<
-  Exclude<FieldType, "section">,
+  Exclude<FieldType, "section" | "image" | "youtube">,
   { options: string[]; inputs: Array<[string, unknown]> }
 > = {
   text: {
@@ -219,7 +220,17 @@ const CASES: Record<
 
 describe("entity validators match buildFieldSchema", () => {
   for (const fieldType of FIELD_TYPES) {
-    if (fieldType === "section") continue;
+    /*
+     * Every display-only type, for the reason above: there is no validator to
+     * agree with, so there is no outcome to compare.
+     *
+     * ⚠️ SPELLED OUT RATHER THAN `isDisplayOnly(fieldType)`. The helper returns a
+     * boolean, which does not narrow `fieldType` — so `CASES[fieldType]` below
+     * would still be indexed by the full union and fail. Listing them keeps the
+     * `Exclude` on `CASES` doing its job: adding a tenth ANSWERING type still
+     * fails this file until its cases are written.
+     */
+    if (fieldType === "section" || fieldType === "image" || fieldType === "youtube") continue;
 
     describe(fieldType, () => {
       for (const required of [true, false]) {

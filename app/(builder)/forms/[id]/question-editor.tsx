@@ -16,7 +16,7 @@ import {
   FieldHeadAttributes,
   type FormBuilderStore,
 } from "@/lib/form-builder/components";
-import { FIELD_TYPE_LABELS } from "@/lib/form-builder/canvas";
+import { FIELD_TYPE_LABELS, isDisplayOnly } from "@/lib/form-builder/canvas";
 import { suggestFieldKey, type FieldType } from "@/lib/schemas/forms";
 
 /**
@@ -133,8 +133,8 @@ export function QuestionEditor({
   const shownTypes = offerableTypes.includes(type) ? offerableTypes : [...offerableTypes, type];
 
   /*
-   * ⚠️ P7-66 Phase 7 — A SECTION IS NOT A QUESTION, AND THIS PANEL IS WRITTEN
-   * FOR QUESTIONS.
+   * ⚠️ P7-66 — A PAGE BREAK, AN IMAGE AND A VIDEO ARE NOT QUESTIONS, AND THIS
+   * PANEL IS WRITTEN FOR QUESTIONS.
    *
    * The same editor edits both — a page break is a row in the same table with a
    * label and a help text — but three of its sentences are about answers, and a
@@ -143,11 +143,11 @@ export function QuestionEditor({
    * "Page break", and "Answers will be filed under …" under a thing no answer is
    * ever filed under.
    */
-  const isSection = type === "section";
+  const shown = isDisplayOnly(type);
 
   return (
     <section
-      aria-label={isSection ? "Edit page break" : "Edit question"}
+      aria-label={shown ? "Edit what the form shows" : "Edit question"}
       className="mt-4 overflow-hidden rounded-lg border bg-card grade-raised shadow-raised-lg"
     >
       <div className="space-y-3.5 p-4">
@@ -155,7 +155,7 @@ export function QuestionEditor({
         <FieldHeadAttributes builderStore={builderStore} entityId={entityId} />
 
         <div className="space-y-1.5">
-          <Label htmlFor={typeSelectId}>{isSection ? "Type" : "Answer type"}</Label>
+          <Label htmlFor={typeSelectId}>{shown ? "Type" : "Answer type"}</Label>
           <Select
             items={typeItems}
             value={type}
@@ -210,7 +210,7 @@ export function QuestionEditor({
         */}
         <p
           className="flex items-start gap-1.5 pt-0.5 text-xs text-muted-foreground"
-          hidden={isSection}
+          hidden={shown}
         >
           {answered ? (
             <>

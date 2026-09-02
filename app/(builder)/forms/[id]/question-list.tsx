@@ -5,6 +5,7 @@ import { ChevronDown, ChevronUp, Lock, SeparatorHorizontal } from "lucide-react"
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { FIELD_TYPE_LABELS } from "@/lib/form-builder/canvas";
+import { isDisplayOnly } from "@/lib/form-builder/canvas";
 import type { CanvasField } from "@/lib/form-builder/canvas";
 import { FieldDragHandle, SortableFieldRow } from "@/lib/form-builder/dnd";
 
@@ -84,9 +85,11 @@ export function QuestionList({
              * it cannot drift out of step with the list it is numbering.
              */
             number={
-              field.entity.type === "section"
+              isDisplayOnly(field.entity.type)
                 ? null
-                : active.slice(0, index + 1).filter((f) => f.entity.type !== "section").length
+                : active
+                    .slice(0, index + 1)
+                    .filter((f) => !isDisplayOnly(f.entity.type)).length
             }
             selected={selectedId === field.id}
             answered={answeredIds.has(field.id)}
@@ -101,6 +104,13 @@ export function QuestionList({
     </ul>
   );
 }
+
+/** What an unnamed row of each kind is called on the canvas. */
+const UNTITLED: Record<string, string> = {
+  section: "Untitled page break",
+  image: "Undescribed image",
+  youtube: "Unnamed video",
+};
 
 function QuestionRow({
   field,
@@ -125,7 +135,9 @@ function QuestionRow({
   onMove: (direction: "up" | "down") => void;
 }) {
   const { attributes } = field.entity;
-  const isSection = field.entity.type === "section";
+  /* A page break, an image or a video: shown to the respondent, never answered,
+     and drawn as a seam in the list rather than another card in it. */
+  const shown = isDisplayOnly(field.entity.type);
 
   return (
     /*
@@ -151,7 +163,7 @@ function QuestionRow({
          * "Page break" in words, exactly as every other row names its type
          * (CLAUDE.md: state is never conveyed by colour alone).
          */
-        isSection
+        shown
           ? "border-dashed bg-muted"
           : "bg-card grade-raised shadow-raised",
         "hover:border-accent-border",
@@ -188,9 +200,7 @@ function QuestionRow({
           className="block max-w-full truncate text-left text-sm font-medium after:absolute after:inset-0 after:content-['']"
         >
           {attributes.label || (
-            <span className="text-muted-foreground">
-              {isSection ? "Untitled page break" : "Untitled question"}
-            </span>
+            <span className="text-muted-foreground">{UNTITLED[field.entity.type] ?? "Untitled question"}</span>
           )}
           {attributes.required ? (
             <>
