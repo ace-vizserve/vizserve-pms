@@ -12,6 +12,12 @@
 -- deliberately separate, for the same reason Internal Approvals and Client
 -- Forms are separate (CLAUDE.md): different auth models, different lifecycles.
 --
+-- ⚠️ APPLY 20260902105000_p7_66_form_anonymity.sql FIRST. This file's INSERT
+-- policy reads `vizserve_pms_forms.is_anonymous`, which that file adds — the
+-- other order fails with `column f.is_anonymous does not exist` (42703), and
+-- because the policy is inside a `do $$` guard the failure aborts the file
+-- mid-way. Both are unapplied; apply them in filename order.
+--
 -- ⚠️ APPLY BY HAND, in the Supabase SQL editor, pasting this file as it stands
 -- at that moment. THIS FILE IS UNAPPLIED AS SHIPPED. Every P7 migration landed
 -- that way and none is recorded in `supabase_migrations.schema_migrations`.
@@ -92,35 +98,57 @@
 
 
 -- ===========================================================================
--- ⚠️⚠️ ANONYMITY — DECIDED, AND THE ANSWER IS NO.
+-- ⚠️⚠️ ANONYMITY IS A PER-FORM CHOICE, AND `submitted_by` IS NULLABLE.
 --
--- `submitted_by` is NOT NULL. Every row in this table names the person who
--- wrote it, and the SELECT policy below hands that name, beside their answers,
--- to an admin and to the team leader of the owning department.
+-- Revised 2 Sep 2026, before this file was ever applied. It previously said
+-- anonymity was decided against and `submitted_by` was NOT NULL. That was
+-- wrong about the requirement: an internal form is not only a pulse survey, and
+-- a kudos nomination, an incident report or a grievance form only works if the
+-- person answering is not named. Whether a given form is anonymous is the
+-- creator's decision and lives in `vizserve_pms_forms.is_anonymous`
+-- (20260902105000_p7_66_form_anonymity.sql). This table follows it.
 --
--- WHAT THIS TABLE PROMISES:   a durable, attributable record of who answered
---                             what, and when.
--- WHAT IT DOES NOT PROMISE:   anonymity, pseudonymity, aggregation-only
---                             reading, or unlinkability of any kind.
+-- WHAT AN ANONYMOUS FORM PROMISES:   no name is written. `submitted_by` is
+--                                    NULL, and there is nothing in the row, the
+--                                    export or the index that identifies who
+--                                    wrote it.
+-- WHAT A NAMED FORM PROMISES:        a durable, attributable record of who
+--                                    answered what, and when.
+-- WHAT NEITHER PROMISES:             that the CHOICE can be revisited. It locks
+--                                    on the first answer, in the database.
 --
--- That is a real consideration for the likeliest content — a pulse survey —
--- and it is being written down rather than solved, deliberately. A pulse survey
--- people believe is anonymous, run on a table that names them, is far worse
--- than one everybody knows is attributed: the first is a broken promise and the
--- second is merely a design constraint people can answer around. So:
+-- ⚠️ NULLABLE IS NOT "OPTIONAL", AND THE POLICY IS WHAT MAKES THAT TRUE. The
+-- column being nullable does not mean an application may leave it out when it
+-- feels like it: the INSERT policy below reads the FORM'S flag and requires
+-- `submitted_by is null` on an anonymous form and `= auth.uid()` on a named
+-- one. Neither is a default the caller chooses. A named form cannot receive an
+-- unattributed answer and an anonymous form cannot receive an attributed one,
+-- and neither can be arranged by a client that lies about which it is sending.
 --
---   ⚠️ NO SCREEN, EMAIL OR FORM DESCRIPTION BUILT ON THIS TABLE MAY DESCRIBE
---   ITSELF AS ANONYMOUS. /respond says so on the page, in the person's sight,
---   before they answer.
+-- ⚠️ ANONYMOUS IS NOT UNAUTHENTICATED. The person signs in to reach
+-- /respond/<slug>; `anon` holds no privileges here and the policy is `to
+-- authenticated`. Only the RECORDING changes. That is what lets an anonymous
+-- form still be restricted to active staff.
 --
--- Anonymity is NOT a flag that can be added here later. Dropping the name means
--- either giving up "has this person already answered / been asked" entirely, or
--- keeping a separate ledger of who responded with no join back to the answers —
--- a different table, a different set of policies, and a decision about what
--- happens when an admin needs to chase the eight people who have not replied.
--- If it is ever wanted, it is its own ticket with its own threat model, and
--- this table stays as it is for the forms that want a name on the answer
--- (kudos nominations, sign-ups, anything with a follow-up).
+-- ⚠️ TWO THINGS AN ANONYMOUS FORM CANNOT DO, and they are consequences rather
+-- than omissions:
+--
+--   IT CANNOT LIMIT ANYBODY TO ONE ANSWER. Enforcing that means recording who
+--   answered, which is the thing being avoided. There is no unique constraint
+--   here and there cannot be one; a determined person can answer twenty times.
+--   A form that needs one-per-person needs to be a named form.
+--
+--   IT CANNOT SAY WHO HAS NOT REPLIED YET. Same reason. If that is ever wanted
+--   without giving up anonymity it is a SEPARATE ledger — a table recording
+--   THAT somebody answered, with no join back to WHAT they answered — and it is
+--   its own ticket with its own threat model. Nothing here forecloses it: such
+--   a table would be purely additive and would not change a single row written
+--   by this one.
+--
+-- ⚠️ NO SCREEN, EMAIL OR FORM DESCRIPTION MAY DESCRIBE A NAMED FORM AS
+-- ANONYMOUS. /respond states which kind it is, on the page, in the person's
+-- sight, BEFORE they answer — and it states it either way, because a promise
+-- that arrives after the fact is not a promise.
 -- ===========================================================================
 
 
@@ -144,7 +172,26 @@
 --  where schemaname = 'public' and tablename = 'vizserve_pms_forms'
 --    and policyname = 'published engagement forms readable by staff';
 --
--- --- 3. WHAT THE NEW FORMS POLICY WILL EXPOSE, AND TO WHOM -----------------
+-- --- 3. THE INSERT POLICY MUST NOT ALREADY EXIST IN ITS OLD SHAPE ---------
+-- The guard around it skips a policy that is already there, and an earlier
+-- paste of this file created one whose check was a flat
+-- `submitted_by = auth.uid()`. Kept, it refuses every anonymous submission
+-- while the form insists on being anonymous. Expected: 0. If it returns 1,
+-- read it, then
+--   drop policy "form responses insertable by their author" on vizserve_pms_form_responses;
+-- and apply this file.
+--
+-- select count(*) from pg_policies
+--  where schemaname = 'public' and tablename = 'vizserve_pms_form_responses'
+--    and policyname = 'form responses insertable by their author';
+--
+-- --- 4. THE ANONYMITY COLUMN MUST BE THERE ALREADY. Expected: 1.
+--
+-- select count(*) from information_schema.columns
+--  where table_schema = 'public' and table_name = 'vizserve_pms_forms'
+--    and column_name = 'is_anonymous';
+--
+-- --- 5. WHAT THE NEW FORMS POLICY WILL EXPOSE, AND TO WHOM -----------------
 -- This file widens SELECT on `vizserve_pms_forms` so that every active staff
 -- member can read PUBLISHED ENGAGEMENT FORMS — they have to, or /respond has
 -- nothing to render. It exposes no client form and no draft. Measured 2 Sep
@@ -185,12 +232,21 @@
 -- `on delete restrict` on `submitted_by`, matching every other authored row in
 -- this schema: `vizserve_pms_users` is never hard-deleted (users are
 -- deactivated), so this is a guard against a delete nobody intends rather than
--- a workflow.
+-- a workflow. It is unaffected by the column being nullable — a NULL simply
+-- references nothing, which is the whole point on an anonymous form.
+--
+-- ⚠️ `submitted_by` IS NULLABLE, AND ITS NULL MEANS ONE SPECIFIC THING: the
+-- form is anonymous and no name was ever recorded. It does not mean "unknown",
+-- "not yet filled in" or "the writer left". The INSERT policy below ties the
+-- null to the form's `is_anonymous` flag so the two can never disagree, and
+-- that flag is locked once any answer exists
+-- (20260902105000_p7_66_form_anonymity.sql). So the meaning of a NULL here is
+-- fixed for the life of the row.
 -- ---------------------------------------------------------------------------
 create table if not exists vizserve_pms_form_responses (
   id           uuid primary key default gen_random_uuid(),
   form_id      uuid not null references vizserve_pms_forms (id) on delete cascade,
-  submitted_by uuid not null references vizserve_pms_users (id) on delete restrict,
+  submitted_by uuid references vizserve_pms_users (id) on delete restrict,
   field_values jsonb not null default '{}'::jsonb
     constraint vizserve_pms_form_responses_field_values_is_object
     check (jsonb_typeof(field_values) = 'object'),
@@ -199,9 +255,13 @@ create table if not exists vizserve_pms_form_responses (
 
 comment on table vizserve_pms_form_responses is
   'P7-66 Phase 4b. One staff answer to one EMPLOYEE_ENGAGEMENT form. '
-  'NOT ANONYMOUS — submitted_by names the person and the SELECT policy shows '
-  'that name beside their answers to an admin and to the team leader of the '
-  'owning department. Nothing built on this table may call itself anonymous. '
+  'ATTRIBUTED OR ANONYMOUS PER FORM, decided by vizserve_pms_forms.is_anonymous '
+  'and enforced by the INSERT policy: on a named form submitted_by is the '
+  'author and the SELECT policy shows that name beside their answers to an '
+  'admin and to the team leader of the owning department; on an anonymous form '
+  'submitted_by is NULL and no name was ever written. The flag locks on the '
+  'first answer, so a row''s promise cannot change under it. A screen may '
+  'describe a form as anonymous ONLY when that flag is set. '
   'A client form''s submissions are vizserve_pms_requests, never this. '
   'Append-only: no update policy, no delete policy — a submitted response is a '
   'record.';
@@ -214,7 +274,11 @@ comment on column vizserve_pms_form_responses.field_values is
   'which is why the Responses table renders a column for it.';
 
 comment on column vizserve_pms_form_responses.submitted_by is
-  'Who answered. NOT NULL and never anonymised. See the table comment.';
+  'Who answered, or NULL on a form whose is_anonymous flag is set — in which '
+  'case no name was EVER written, rather than being hidden. Which of the two '
+  'applies is decided by vizserve_pms_forms.is_anonymous and enforced by the '
+  'INSERT policy, and that flag locks on the first answer. A NULL here never '
+  'means "unknown".';
 
 
 -- ---------------------------------------------------------------------------
@@ -349,14 +413,13 @@ grant insert (form_id, submitted_by, field_values)
 grant all privileges on vizserve_pms_form_responses to service_role;
 
 
--- --- INSERT: your own row, on a form that is actually taking answers -------
+-- --- INSERT: one answer, shaped by what the form promised ------------------
 --
 -- Three conditions, and each one is load-bearing:
 --
---   `submitted_by = auth.uid()`  nobody files an answer under a colleague's
---                                name. This is the whole integrity of the
---                                table — an attributed record that anyone can
---                                attribute to anyone else is not a record.
+--   the identity rule            decided by the FORM, not by the caller — see
+--                                below. This is the whole integrity of the
+--                                table.
 --   `purpose = 'EMPLOYEE_ENGAGEMENT'`  a client request has a lifecycle
 --                                (reference number, Gate 1, SLA) that this
 --                                table does not participate in. A response
@@ -366,6 +429,31 @@ grant all privileges on vizserve_pms_form_responses to service_role;
 --                                The same test /respond applies, restated
 --                                where it cannot be bypassed.
 --
+-- ⚠️⚠️ THE IDENTITY RULE READS THE FORM, WHICH IS WHY IT IS INSIDE THE
+-- EXISTS.
+--
+-- This used to be a flat `submitted_by = auth.uid()`. That single expression
+-- was doing two jobs — "nobody files an answer under a colleague's name" and
+-- "every row has an author" — and the second one is exactly what an anonymous
+-- form must not do. Making the column nullable without changing this policy
+-- would have been the worst of both: the app could write a NULL on any form,
+-- and a named form's guarantee would rest on the application remembering to
+-- send the id.
+--
+-- So the rule is a CASE over the form's own flag, evaluated in the same
+-- subquery that already reads the form:
+--
+--   is_anonymous  →  `submitted_by is null`.   A name may not be attached even
+--                    if the caller sends one. Somebody POSTing their own uuid
+--                    to an anonymous form is refused, not silently accepted.
+--   otherwise     →  `submitted_by = auth.uid()`.  Unchanged, and still the
+--                    thing that stops an answer being filed under a colleague.
+--
+-- Neither branch is a default the caller selects. THE FORM DECIDES, the
+-- database checks, and `vizserve_pms_forms.is_anonymous` is locked once any
+-- answer exists — so the shape of every row on a form is settled before its
+-- first answer and cannot be changed underneath the rows already written.
+--
 -- The EXISTS reads `vizserve_pms_forms` as the caller, so it is itself subject
 -- to that table's SELECT policies — and the staff policy at the bottom of this
 -- file is what makes the row visible to a member. The two agree by
@@ -373,9 +461,19 @@ grant all privileges on vizserve_pms_form_responses to service_role;
 -- Stated because a policy whose subquery is silently filtered by another
 -- policy is the kind of thing that reads as working and returns zero rows.
 --
+-- ⚠️ `to authenticated` EITHER WAY. Anonymous is about what is RECORDED, not
+-- about who may reach the form: the person is signed in, `anon` holds no
+-- privileges on this table at all, and an anonymous form is still restricted to
+-- active staff by the policy on `vizserve_pms_forms`.
+--
 -- Guarded so the file is re-runnable — see the header. There is no
 -- `create policy if not exists`, and a bare `create policy` on a second paste
 -- aborts at 42710 before anything below it runs.
+--
+-- ⚠️ IF THIS POLICY ALREADY EXISTS FROM AN EARLIER PASTE OF THIS FILE, THE
+-- GUARD SKIPS IT AND YOU KEEP THE OLD `submitted_by = auth.uid()` VERSION,
+-- under which every anonymous submission is refused. The pre-flight below
+-- checks for it; drop the policy and re-run if it reports one.
 do $$
 begin
   if not exists (
@@ -388,13 +486,16 @@ begin
     create policy "form responses insertable by their author"
       on vizserve_pms_form_responses for insert to authenticated
       with check (
-        submitted_by = auth.uid()
-        and exists (
+        exists (
           select 1
             from vizserve_pms_forms f
            where f.id = form_id
              and f.purpose = 'EMPLOYEE_ENGAGEMENT'
              and f.is_active
+             and case
+                   when f.is_anonymous then submitted_by is null
+                   else submitted_by = auth.uid()
+                 end
         )
       );
   end if;
@@ -413,6 +514,13 @@ $$;
 -- `.select()`, because PostgREST applies the SELECT policy to the returned row
 -- and the write would appear to fail on a row that was written. See
 -- app/(app)/respond/actions.ts, which inserts and returns nothing.
+--
+-- ⚠️ AND ON AN ANONYMOUS FORM IT IS NOT MERELY DELIBERATE, IT IS STRUCTURAL.
+-- There is no author to match against: `submitted_by` is NULL, so no policy
+-- could return "your own" rows even if one were wanted. A "my answers" screen
+-- is impossible on an anonymous form, by construction rather than by choice —
+-- which is the same fact, seen from the other side, as nobody else being able
+-- to attribute them either.
 --
 -- The alternative — a "responses readable by their author" policy — was
 -- considered and left out. Nothing on /respond needs it: the page confirms the
