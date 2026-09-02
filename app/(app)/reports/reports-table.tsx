@@ -41,6 +41,10 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
       key: "department",
       header: "Department",
       sortKey: "department",
+      sortValue: (row) => row.name,
+      /* Eight status columns plus the totals scroll sideways on any real screen;
+         the department name is what makes a row identifiable while they do. */
+      pin: "left",
       className: "font-medium",
       cell: (row) => row.name,
     },
@@ -50,6 +54,14 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
         // The human label, never the enum — a column headed
         // "COMPLETED_NO_RESPONSE" is a database value on screen.
         header: TASK_STATUS_LABELS[status],
+        /* Sortable, because "who has the most work sitting in QA" is the
+           question this report exists to answer and it was only answerable by
+           reading down a column by eye. The key is the status itself, which is
+           already unique. */
+        sortKey: status,
+        hideable: true,
+        // The count lives under `byStatus`, not on the row itself.
+        sortValue: (row) => row.byStatus[status],
         className: "hidden lg:table-cell tabular-nums text-muted-foreground",
         align: "end",
         cell: (row) =>
@@ -86,6 +98,9 @@ export function ReportsTable({ rows }: { rows: ReportRow[] }) {
       hideable: true,
       defaultHidden: true,
       sortKey: "completion",
+      // Rank by the PERCENTAGE, which is the number on screen — sorting by the
+      // raw `done` count would order the column by something it does not show.
+      sortValue: (row) => (row.total === 0 ? -1 : row.done / row.total),
       className: "tabular-nums",
       align: "end",
       /*

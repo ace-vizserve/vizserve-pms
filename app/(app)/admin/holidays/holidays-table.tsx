@@ -105,6 +105,7 @@ export function HolidaysTable({
   const columns: Column<Holiday>[] = [
     {
       key: "date",
+      sortKey: "date",
       header: "Date",
       cell: (holiday) => (
         <>
@@ -115,6 +116,7 @@ export function HolidaysTable({
     },
     {
       key: "name",
+      sortKey: "name",
       header: "Holiday",
       cell: (holiday) => holiday.name,
     },
@@ -143,6 +145,7 @@ export function HolidaysTable({
        * remembers agreeing to.
        */
       key: "added",
+      sortKey: "added",
       header: "Added",
       hideable: true,
       defaultHidden: true,

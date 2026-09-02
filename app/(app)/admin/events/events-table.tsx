@@ -27,6 +27,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { DataTable, type Column } from "@/components/data-table";
+import { DataTableColumns, useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { formatDate } from "@/lib/dates";
 import {
@@ -108,6 +109,7 @@ export function EventsTable({
   const columns: Column<EventRecord>[] = [
     {
       key: "when",
+      sortKey: "when",
       header: "When",
       cell: (event) => (
         <div className="font-medium tabular-nums whitespace-nowrap">
@@ -117,6 +119,7 @@ export function EventsTable({
     },
     {
       key: "event",
+      sortKey: "event",
       header: "Event",
       cell: (event) => (
         <>
@@ -131,6 +134,8 @@ export function EventsTable({
     },
     {
       key: "category",
+      sortKey: "category",
+      hideable: true,
       header: "Category",
       // The pill carries its own LABEL, not just the tone — state is never
       // conveyed by colour alone, and this is the swatch the calendar legend
@@ -177,6 +182,8 @@ export function EventsTable({
     },
   ];
 
+  const { visibility, onVisibilityChange } = useColumnVisibility("admin-events", columns);
+
   return (
     <>
       <div className="flex flex-wrap items-center gap-3">
@@ -210,7 +217,17 @@ export function EventsTable({
         </Button>
       </div>
 
+      <div className="flex justify-end">
+        <DataTableColumns
+          columns={columns}
+          visibility={visibility}
+          onVisibilityChange={onVisibilityChange}
+        />
+      </div>
+
       <DataTable
+        columnVisibility={visibility}
+        onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
         rows={events}
         getRowKey={(event) => event.id}

@@ -127,6 +127,20 @@ export type Column<T> = {
    * first `pin: "left"` it finds and ignores the rest.
    */
   pin?: "left";
+  /**
+   * What this column sorts BY, when the browser is doing the sorting.
+   *
+   * ⚠️ WITHOUT AN ACCESSOR A CLIENT-SORTED HEADER DOES NOTHING. `cell` returns
+   * a ReactNode, and TanStack sorts on the value an accessor yields rather than
+   * on the markup — so a column with neither would return `undefined` for every
+   * row, compare equal, and leave the order untouched while the arrow dutifully
+   * flipped. The default accessor reads the row's own field of the same name;
+   * this is for the columns where that is not the value: a count kept in a
+   * lookup, a percentage that is computed, a number nested under `byStatus`.
+   *
+   * Tables using `urlSort` ignore it — Postgres does their ordering.
+   */
+  sortValue?: (row: T) => string | number | null | undefined;
 };
 
 export type SortDirection = "asc" | "desc";
@@ -238,6 +252,15 @@ export function DataTable<T>({
     () =>
       columns.map((column) => ({
         id: column.key,
+        /*
+         * The value the browser sorts on. Falls back to the row's own field
+         * under the same name, which covers the ordinary case (`title`,
+         * `created_at`); anything derived supplies `sortValue`.
+         */
+        accessorFn: (row: T) =>
+          column.sortValue
+            ? column.sortValue(row)
+            : (row as Record<string, unknown>)[column.key],
         enableSorting: Boolean(column.sortKey),
         enableHiding: Boolean(column.hideable),
         header: () => column.header,

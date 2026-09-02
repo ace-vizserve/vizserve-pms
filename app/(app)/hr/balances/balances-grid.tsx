@@ -226,6 +226,7 @@ export function BalancesGrid({
   const columns: Column<BalancePerson>[] = [
     {
       key: "person",
+      sortKey: "person",
       header: "Employee",
       /* One column per leave type means this grid scrolls sideways on any real
          data set. Freezing the name is what keeps a row identifiable once the
@@ -251,6 +252,7 @@ export function BalancesGrid({
        * by.
        */
       key: "department",
+      sortKey: "department",
       header: "Department",
       hideable: true,
       defaultHidden: true,
@@ -264,6 +266,7 @@ export function BalancesGrid({
     },
     {
       key: "allocated",
+      sortKey: "allocated",
       header: "Total",
       hideable: true,
       defaultHidden: true,

@@ -125,6 +125,8 @@ export function FormsTable({
       key: "submissions",
       header: "Submissions",
       sortKey: "submissions",
+      // The count is in a lookup keyed by form id, not on the row.
+      sortValue: (form) => submissionCounts[form.id] ?? 0,
       hideable: true,
       defaultHidden: true,
       align: "end",
@@ -140,6 +142,7 @@ export function FormsTable({
       key: "last",
       header: "Last used",
       sortKey: "last",
+      sortValue: (form) => lastSubmission[form.id] ?? "",
       hideable: true,
       defaultHidden: true,
       className: "hidden xl:table-cell whitespace-nowrap text-muted-foreground tabular-nums",

@@ -76,7 +76,7 @@ export default async function InboxPage({
    * is narrowed to a closed union and used to PICK a literal column name. It is
    * never interpolated into `.order()`.
    */
-  const SORTS = ["when", "type"] as const;
+  const SORTS = ["when", "type", "read", "emailed"] as const;
   type Sort = (typeof SORTS)[number];
   const sort: Sort = (SORTS as readonly string[]).includes(params.sort ?? "")
     ? (params.sort as Sort)
@@ -84,6 +84,8 @@ export default async function InboxPage({
   const NOTIFICATION_ORDER: Record<Sort, string> = {
     when: "created_at",
     type: "type",
+    read: "read_at",
+    emailed: "emailed_at",
   };
   // Newest first is the inbox's whole point, so "when" defaults to descending.
   const ascending = params.dir ? params.dir !== "desc" : sort !== "when";

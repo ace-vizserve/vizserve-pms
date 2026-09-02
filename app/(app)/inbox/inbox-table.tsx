@@ -32,7 +32,6 @@ export type Notification = {
 };
 
 export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React.ReactNode }) {
-  const { visibility, onVisibilityChange } = useColumnVisibility("inbox");
 
   const columns: Column<Notification>[] = [
     {
@@ -82,6 +81,45 @@ export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React
       cell: (item) => NOTIFICATION_TYPE_LABELS[item.type] ?? item.type,
     },
     {
+      /*
+       * P7-66 — the two facts this table showed only as decoration.
+       *
+       * Unread was a coloured dot beside the title and "emailed" a suffix on
+       * the timestamp. Both were readable and neither was SORTABLE, so "show me
+       * everything still unread" meant scanning for dots. As columns they can
+       * be ordered; hidden by default because the inline forms are enough for
+       * the everyday read.
+       */
+      key: "read",
+      header: "Read",
+      sortKey: "read",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden lg:table-cell",
+      cell: (item) =>
+        item.read_at ? (
+          <span className="text-xs text-muted-foreground">Read</span>
+        ) : (
+          <span className="text-xs font-medium">Unread</span>
+        ),
+    },
+    {
+      key: "emailed",
+      header: "Emailed",
+      sortKey: "emailed",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden xl:table-cell whitespace-nowrap text-xs text-muted-foreground",
+      cell: (item) =>
+        item.emailed_at ? (
+          formatDateTime(item.emailed_at)
+        ) : (
+          // Not every notification is emailed — docs/12's inbox-vs-email policy
+          // is deliberate, so a blank here is a decision, not a failure.
+          <span className="text-foreground-faint">—</span>
+        ),
+    },
+    {
       key: "when",
       hideable: true,
       header: "When",
@@ -96,6 +134,7 @@ export function InboxTable({ rows, empty }: { rows: Notification[]; empty: React
     },
   ];
 
+  const { visibility, onVisibilityChange } = useColumnVisibility("inbox", columns);
 
   return (
     <div className="space-y-3">

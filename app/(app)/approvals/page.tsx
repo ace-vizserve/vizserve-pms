@@ -8,6 +8,7 @@ import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balanc
 import { createClient } from "@/utils/supabase/server";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
+import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
 import { QueryError } from "@/components/query-error";
 import { MyLeaveRecordButton } from "./my-leave-record";
 import { NewRequestDialog } from "./new-request-dialog";
@@ -53,6 +54,8 @@ export default async function ApprovalsPage({
     time?: string | string[];
     sort?: string | string[];
     dir?: string | string[];
+    page?: string;
+    size?: string;
   }>;
 }) {
   const context = await requireAuthContext();
@@ -94,15 +97,51 @@ export default async function ApprovalsPage({
     ? first(params.dir) !== "desc"
     : !(sort === "submitted" || sort === "decided");
 
-  const [{ data, error: requestsError }, { data: leaveTypes }, { data: balances }] = await Promise.all([
+  /*
+   * P7-66 — TWO QUERIES, BECAUSE THE PAGE IS TWO LISTS.
+   *
+   * This was one `.limit(200 + 1)` fetch split into "mine" and "pending on me"
+   * afterwards, which could not be paged: page 2 of a combined query might hold
+   * all of one list and none of the other, and the two sections would disagree
+   * about what page they were on.
+   *
+   * They are also different SHAPES of data. "My requests" grows forever and is
+   * read as history — it pages. "Pending on me" is a queue of work awaiting an
+   * action; if it ever reaches 200 the problem is not pagination. It keeps the
+   * detectable cap it had.
+   */
+  const page = resolvePage(params.page);
+  const pageSize = resolvePageSize(params.size);
+  const rangeFrom = (page - 1) * pageSize;
+
+  const SELECT =
+    "*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)";
+
+  const [
+    { data: mineData, error: requestsError, count: mineCount },
+    { data: queueData },
+    { data: leaveTypes },
+    { data: balances },
+  ] = await Promise.all([
     supabase
       .from("vizserve_pms_internal_requests")
-      .select("*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)")
+      .select(SELECT, { count: "exact" })
+      .eq("requester_id", context.userId)
       .order(ORDER_COLUMN[sort], { ascending, nullsFirst: false })
-      // One more than shown, so truncation is detectable. The list splits into
-      // "mine" and "pending on me" AFTER this, so a silent cap here does not just
-      // hide old rows — it can drop something out of somebody's approval queue
-      // with nothing on screen to say so.
+      .range(rangeFrom, rangeFrom + pageSize - 1),
+
+    /*
+     * Everything visible that is NOT mine is, by RLS, a department I lead —
+     * so this needs no department filter. Pending only: a decided request is
+     * history and lives on its requester's own list.
+     */
+    supabase
+      .from("vizserve_pms_internal_requests")
+      .select(SELECT)
+      .neq("requester_id", context.userId)
+      .eq("status", "PENDING_REVIEW")
+      .order(ORDER_COLUMN[sort], { ascending, nullsFirst: false })
+      // One more than shown, so truncation is detectable rather than silent.
       .limit(APPROVALS_PAGE_SIZE + 1),
 
     // P7-12 — the picker's options.
@@ -149,16 +188,23 @@ export default async function ApprovalsPage({
     leaveTypeApplies(type.applies_to_gender, context.gender),
   );
 
-  const fetched = (data ?? []) as unknown as Row[];
-  const truncated = fetched.length > APPROVALS_PAGE_SIZE;
-  const rows = truncated ? fetched.slice(0, APPROVALS_PAGE_SIZE) : fetched;
-  const mine = rows.filter((row) => row.requester_id === context.userId);
-  // Everything visible that is not mine is, by RLS, something I lead the
-  // department for. Pending ones are the queue; decided ones are history and
-  // live on the requester's own list.
-  const pendingOnMe = rows.filter(
-    (row) => row.requester_id !== context.userId && row.status === "PENDING_REVIEW",
-  );
+  const mine = (mineData ?? []) as unknown as Row[];
+  const queue = (queueData ?? []) as unknown as Row[];
+  const truncated = queue.length > APPROVALS_PAGE_SIZE;
+  const pendingOnMe = truncated ? queue.slice(0, APPROVALS_PAGE_SIZE) : queue;
+  const rows = [...mine, ...pendingOnMe];
+  const total = mineCount ?? 0;
+
+  /* Rebuilt from the narrowed values, so the paginator cannot drop the sort. */
+  function hrefFor(target: number) {
+    const next = new URLSearchParams();
+    if (sort !== "submitted") next.set("sort", sort);
+    if (first(params.dir) === "desc") next.set("dir", "desc");
+    if (pageSize !== PAGE_SIZES[0]) next.set("size", String(pageSize));
+    if (target > 1) next.set("page", String(target));
+    const query = next.toString();
+    return query ? `/approvals?${query}` : "/approvals";
+  }
 
   /*
    * P7-66 — names for the Decided column.
@@ -249,9 +295,19 @@ export default async function ApprovalsPage({
         }
       />
 
+      <Pagination
+        page={page}
+        pageSize={pageSize}
+        total={total}
+        hrefFor={hrefFor}
+        basePath="/approvals"
+      />
+
       {truncated ? (
         <p className="text-xs text-muted-foreground">
-          Showing the most recent {APPROVALS_PAGE_SIZE}. Older requests are not listed.
+          {/* Now about the QUEUE only — "My requests" pages properly above.
+              A queue this long is a backlog, not a paging problem. */}
+          Showing the first {APPROVALS_PAGE_SIZE} awaiting you. Clear some to see the rest.
         </p>
       ) : null}
     </PageShell>

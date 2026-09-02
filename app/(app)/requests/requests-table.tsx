@@ -77,6 +77,10 @@ export function RequestsTable({
     {
       key: "reference",
       header: "Reference",
+      /* The row's identity. With SLA, Agreed and Reviewed-by all switchable on,
+         this table can outgrow its width — and a reference number that scrolls
+         away leaves rows nobody can tell apart. */
+      pin: "left",
       className: "whitespace-nowrap",
       sortKey: "reference",
       cell: (request) => (

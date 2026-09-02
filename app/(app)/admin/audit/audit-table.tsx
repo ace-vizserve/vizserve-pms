@@ -20,7 +20,6 @@ import { AuditDetails, type AuditEntry } from "./audit-details";
  * accountability.
  */
 export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.ReactNode }) {
-  const { visibility, onVisibilityChange } = useColumnVisibility("audit");
 
   const columns: Column<AuditEntry>[] = [
     {
@@ -100,6 +99,8 @@ export function AuditTable({ rows, empty }: { rows: AuditEntry[]; empty: React.R
       cell: (entry) => <AuditDetails entry={entry} />,
     },
   ];
+
+  const { visibility, onVisibilityChange } = useColumnVisibility("audit", columns);
 
   return (
     <div className="space-y-3">

@@ -172,6 +172,9 @@ export function AttendanceTable({
       key: "rate",
       header: "Rate",
       sortKey: "rate",
+      // Unscheduled people have no rate; -1 sinks them rather than tying at 0%
+      // with somebody who genuinely attended none of their days.
+      sortValue: (row) => attendanceRate(row) ?? -1,
       hideable: true,
       defaultHidden: true,
       align: "end",
