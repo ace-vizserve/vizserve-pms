@@ -205,8 +205,36 @@ export function answerFor(fieldValues: unknown, key: string): string | null {
  */
 export const ANSWER_COLUMN_PREFIX = "answer:";
 
-/** The two fixed columns the Responses table draws before any answer. */
+/** The two fixed columns the Responses table can draw before any answer. */
 export const RESPONSE_IDENTITY_COLUMN_IDS = ["submitted_by", "submitted_at"] as const;
+
+/**
+ * P7-66 — WHICH OF THE TWO A GIVEN FORM ACTUALLY GETS, and the FORM decides.
+ *
+ * On an anonymous form `submitted_by` is NULL on every row, because the INSERT
+ * policy refused to let a name be written — so the column is not drawn at all.
+ * Not drawn empty and not drawn hidden: a column full of dashes reads as "the
+ * names were lost", and the point of the setting is that there were none.
+ *
+ * ⚠️ THE ARGUMENT IS `vizserve_pms_forms.is_anonymous`, NEVER A PROPERTY OF THE
+ * ROWS ON SCREEN. `rows.every((r) => r.submitted_by === null)` is the tempting
+ * shortcut and it is wrong in the expensive direction: an empty page, or a page
+ * whose only author is outside the reader's department, satisfies it and would
+ * declare a NAMED form anonymous — telling a lead their survey collected no
+ * names while the table is full of them.
+ *
+ * A function rather than a ternary inline in the table so the rule is pinned by
+ * a test on a machine with no DOM: `tests/unit/form-anonymity.test.ts` asserts
+ * both the column set and the pin, and the table consumes exactly this.
+ *
+ * The FIRST id is the pinned one. The answer columns are per-form and there can
+ * be a dozen, so the table scrolls sideways as a matter of course — a row whose
+ * identity has scrolled off the left edge is a row you cannot place, and on an
+ * anonymous form the timestamp is the only identity left to freeze.
+ */
+export function responseIdentityColumnIds(isAnonymous: boolean): readonly string[] {
+  return isAnonymous ? [RESPONSE_IDENTITY_COLUMN_IDS[1]] : RESPONSE_IDENTITY_COLUMN_IDS;
+}
 
 export function answerColumnId(fieldKey: string): string {
   return `${ANSWER_COLUMN_PREFIX}${fieldKey}`;

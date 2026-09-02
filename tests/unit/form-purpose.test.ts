@@ -44,6 +44,7 @@ const CLIENT_SETTINGS = {
   description: "",
   department_id: null,
   reference_prefix: "COL",
+  is_anonymous: false,
   is_active: true,
   requires_attachment: false,
   sla_minutes: DEFAULT_SLA_MINUTES,
@@ -75,6 +76,21 @@ const ENGAGEMENT_SETTINGS = {
 const FORMERLY_DEFAULTED = {
   purpose: "EMPLOYEE_ENGAGEMENT",
   description: "Runs every quarter.",
+  /*
+   * P7-66 — `is_anonymous` was NEVER defaulted on the UPDATE schema, and it is
+   * in this list so it never becomes so. It is the seventh key to obey the rule
+   * the other six were dragged into obeying, and the one where an omitted value
+   * is a broken promise rather than a lost setting: `false` on a form running as
+   * anonymous silently starts naming people.
+   *
+   * ⚠️ NOT `true` HERE. `FORMERLY_DEFAULTED` is spread over `CLIENT_SETTINGS`
+   * in the round-trip below, and `vizserve_pms_forms_anonymous_is_internal`
+   * refuses `is_anonymous` on a CLIENT_REQUEST form — the `purpose` key above
+   * flips it to EMPLOYEE_ENGAGEMENT, but the per-key `stated` fixtures do not,
+   * so a `true` here would build a payload the database would reject and pin it
+   * as legal.
+   */
+  is_anonymous: false,
   is_active: true,
   requires_attachment: true,
   default_list_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",

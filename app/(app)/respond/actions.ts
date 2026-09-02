@@ -29,8 +29,8 @@ import { createClient } from "@/utils/supabase/server";
  * function that runs as somebody else. A colleague filling this form IS signed
  * in and DOES hold `insert` on the table, so the policy
  * `form responses insertable by their author` can do the enforcement directly —
- * `submitted_by = auth.uid()`, on a form Postgres re-checks is EMPLOYEE_
- * ENGAGEMENT and active. A definer function here would only move that check
+ * `submitted_by is null` on an anonymous form and `= auth.uid()` on a named
+ * one, on a form Postgres re-checks is EMPLOYEE_ENGAGEMENT and active. A definer function here would only move that check
  * somewhere it is harder to read while widening what the caller can reach.
  *
  * ⚠️ VALIDATION IS SERVER-SIDE AND IS NOT A SECOND COPY. It is
@@ -69,9 +69,11 @@ import { createClient } from "@/utils/supabase/server";
  *      leave a known-wrong row as the only row.
  *
  * The cost is real and is carried by the READING screen rather than by this
- * one: the Responses table shows every row with its submitter and its
- * timestamp, newest first, so a duplicate is visible and the latest answer is
- * the one at the top. If a particular form ever genuinely needs one answer per
+ * one: the Responses table shows every row with its timestamp — and its
+ * submitter, on a form that records one — newest first, so a duplicate is
+ * visible and the latest answer is the one at the top. On an anonymous form a
+ * duplicate is visible but not attributable, which is the point of the setting
+ * rather than a gap in this one. If a particular form ever genuinely needs one answer per
  * person, that is a per-form setting with its own UI and its own partial unique
  * index — not a rule imposed on every form here by default.
  */
@@ -103,7 +105,9 @@ export async function submitFormResponse(input: unknown): Promise<FormResponseRe
    */
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, name, schema")
+    // `is_anonymous` is read HERE, from the form, and never from the payload —
+    // see the block above the insert.
+    .select("id, name, schema, is_anonymous")
     .eq("slug", parsed.data.slug)
     .eq("purpose", "EMPLOYEE_ENGAGEMENT")
     .eq("is_active", true)
@@ -118,6 +122,40 @@ export async function submitFormResponse(input: unknown): Promise<FormResponseRe
 
   if (!form) {
     return { ok: false, error: "This form is no longer accepting answers." };
+  }
+
+  /*
+   * ⚠️ P7-66 — THE PROMISE THE SCREEN MADE MUST STILL BE THE ONE THE FORM MAKES.
+   *
+   * `vizserve_pms_forms_anonymity_lock` settles the flag on the FIRST answer —
+   * which means that until then it can legitimately move, and /respond/<slug>
+   * states which kind of form this is at RENDER time. The race is small and
+   * exactly the shape the feature exists to prevent:
+   *
+   *   somebody opens an anonymous survey and reads "your name is not recorded";
+   *   the owner flips the switch on a form that still has no answers;
+   *   the answer arrives, and a name is written under a page that promised none.
+   *
+   * `promised_anonymous` is the sentence the page displayed, echoed back. It is
+   * compared, never obeyed — the write below still reads `form.is_anonymous`,
+   * and the INSERT policy re-checks that against the same row. So a mismatch
+   * can only ever cause a REFUSAL and never a permission, which is what makes a
+   * caller-supplied value safe to accept at all.
+   *
+   * Refused rather than silently written under the new rule: this is the one
+   * decision that is not ours to make on somebody's behalf. They are told what
+   * changed and answer again, or do not.
+   */
+  if (form.is_anonymous !== parsed.data.promised_anonymous) {
+    return {
+      ok: false,
+      error: form.is_anonymous
+        ? "This form was changed to anonymous while you were filling it in — your name would " +
+          "no longer be recorded. Reload the page and answer again if that is what you want."
+        : "This form was changed while you were filling it in and answers are no longer " +
+          "anonymous — your name would be recorded. Nothing was saved. Reload the page to see " +
+          "what it says now.",
+    };
   }
 
   let schema;
@@ -151,8 +189,21 @@ export async function submitFormResponse(input: unknown): Promise<FormResponseRe
    * returned row and hand back "no rows" — a write that succeeded, reported as
    * a failure. Nothing here needs the id: the page confirms from this result.
    *
-   * `submitted_by` is written from the SESSION, never from the payload, and
-   * `submitted_by = auth.uid()` in the policy is what makes that unbypassable.
+   * `submitted_by` is written from the SESSION, never from the payload, and the
+   * INSERT policy is what makes that unbypassable.
+   *
+   * ⚠️ P7-66 — ON AN ANONYMOUS FORM THE NAME IS NOT WRITTEN AT ALL. Not written
+   * and hidden, not written and filtered out of a query: `submitted_by` is
+   * NULL, so there is nothing in the row for a future screen, a `select *`, an
+   * export or an admin with SQL access to leak. That is the promise
+   * /respond/<slug> makes to the person's face before they type.
+   *
+   * AND THE FLAG COMES FROM THE FORM THIS ACTION JUST RE-READ, never from
+   * `input`. A caller who could send `is_anonymous` could strip their own name
+   * off a named survey — or, far worse, attach it to an anonymous one. Postgres
+   * refuses either way (`case when f.is_anonymous then submitted_by is null else
+   * submitted_by = auth.uid() end`, on the form's own row), which is what makes
+   * this line a readable statement of the rule rather than the rule itself.
    *
    * `validation.values`, not `parsed.data.field_values` — the validated output
    * is what goes in. It has been through the entity validators, so an untouched
@@ -161,7 +212,7 @@ export async function submitFormResponse(input: unknown): Promise<FormResponseRe
    */
   const { error: insertError } = await supabase.from("vizserve_pms_form_responses").insert({
     form_id: form.id,
-    submitted_by: context.userId,
+    submitted_by: form.is_anonymous ? null : context.userId,
     field_values: validation.values as Json,
   });
 

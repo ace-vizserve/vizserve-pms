@@ -85,10 +85,10 @@ async function assertCanEditForm(formId: string) {
 
   const { data: form } = await supabase
     .from("vizserve_pms_forms")
-    // `reference_prefix` and `purpose` so `updateFormSettings` can tell a
-    // change from a resubmission of the same value — the two locks below must
-    // not fire on a Save that touched something else entirely.
-    .select("id, department_id, created_by, reference_prefix, purpose")
+    // `reference_prefix`, `purpose` and `is_anonymous` so `updateFormSettings`
+    // can tell a change from a resubmission of the same value — the three locks
+    // below must not fire on a Save that touched something else entirely.
+    .select("id, department_id, created_by, reference_prefix, purpose, is_anonymous")
     .eq("id", formId)
     .maybeSingle();
 
@@ -101,6 +101,44 @@ async function assertCanEditForm(formId: string) {
 
   assertDepartmentAccess(context, form.department_id);
   return { context, supabase, form };
+}
+
+/**
+ * P7-66 — ⚠️ ANONYMITY IS MEANINGLESS ON A CLIENT FORM, AND SAYING SO IS WORSE
+ * THAN MEANINGLESS.
+ *
+ * /request/<slug> has no session at all: a client TYPES their own name and email
+ * into the form, and those are ordinary answers on the request rather than an
+ * identity the platform captured. There is nothing to withhold — a client form
+ * flagged anonymous would promise something it does not deliver, with the name
+ * sitting in `requester_name` the whole time.
+ *
+ * `vizserve_pms_forms_anonymous_is_internal` is the enforcement and refuses the
+ * row. This is the sentence in front of it, and it is SHARED BY BOTH WRITE
+ * PATHS deliberately: `updateFormSettings` had it and `createForm` did not, so
+ * the same illegal pair produced a readable field error on one screen and a raw
+ * `23514 violates check constraint` — which falls straight past
+ * `isUniqueViolation`, unanchored to any field — on the other.
+ *
+ * Returns the refusal or null, rather than throwing: both callers already
+ * return `ActionResult`, and a thrown error here would need a catch that
+ * neither has.
+ */
+function anonymityPurposeRefusal(
+  purpose: string,
+  isAnonymous: boolean,
+): ActionResult<never> | null {
+  if (!isAnonymous || purpose !== "CLIENT_REQUEST") return null;
+
+  return {
+    ok: false,
+    error: "A client form cannot be anonymous.",
+    fieldErrors: {
+      is_anonymous: [
+        "A client types their own name into the form, so there is no identity to withhold.",
+      ],
+    },
+  };
 }
 
 /**
@@ -136,6 +174,16 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   if (parsed.data.department_id) {
     assertDepartmentAccess(context, parsed.data.department_id);
   }
+
+  // P7-66 — checked here as well as on the settings card. The card clears the
+  // flag when the purpose changes and hides the switch on a client form; this is
+  // what holds when the card is bypassed, and it is the difference between a
+  // field error and a raw CHECK-constraint message.
+  const anonymityRefusal = anonymityPurposeRefusal(
+    parsed.data.purpose,
+    parsed.data.is_anonymous,
+  );
+  if (anonymityRefusal) return anonymityRefusal;
 
   const supabase = await createClient();
 
@@ -264,10 +312,46 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
    *
    * The count is read ONCE for both locks — see `countFormSubmissions`.
    */
+  /*
+   * ⚠️ P7-66 — AND SO DOES ANONYMITY, AND IT IS THE ONE WHOSE LOCK PROTECTS A
+   * PROMISE RATHER THAN DATA.
+   *
+   * The other two locks stop a reference series being orphaned and a route
+   * being taken away. This one stops a sentence being made untrue after the
+   * fact. NAMED → ANONYMOUS is the dangerous direction and the one that reads
+   * as a feature: thirty answers already carry a name, the flag hides the
+   * column, and the form then says "anonymous" over data that is not — still
+   * exported, still readable by anyone with SQL. ANONYMOUS → NAMED is the
+   * gentler half and still wrong: it changes the promise for the
+   * thirty-first person on a form the first thirty are still looking at.
+   *
+   * `vizserve_pms_forms_anonymity_lock` is the enforcement and refuses both
+   * directions. This is the readable refusal in front of it — a `restrict_
+   * violation` reaching a person as a raw Postgres sentence is a screen saying
+   * nothing they can act on.
+   */
   const purposeChanged = parsed.data.purpose !== form.purpose;
   const prefixChanged = parsed.data.reference_prefix !== form.reference_prefix;
+  const anonymityChanged = parsed.data.is_anonymous !== form.is_anonymous;
 
-  if (purposeChanged || prefixChanged) {
+  /*
+   * ⚠️ CHECKED BEFORE THE COUNT, because it is true or false on its own and a
+   * failing count must not be able to let it through — ordering it after would
+   * make an unreachable database a way past the rule.
+   *
+   * Reachable without anybody trying: the switch is hidden on a client form and
+   * react-hook-form KEEPS a hidden field's value, so setting a draft anonymous
+   * and then changing its purpose sends `{ purpose: CLIENT_REQUEST,
+   * is_anonymous: true }`. The card clears the flag when the purpose changes;
+   * this is what holds when the card is bypassed.
+   */
+  const anonymityRefusal = anonymityPurposeRefusal(
+    parsed.data.purpose,
+    parsed.data.is_anonymous,
+  );
+  if (anonymityRefusal) return anonymityRefusal;
+
+  if (purposeChanged || prefixChanged || anonymityChanged) {
     const counted = await countFormSubmissions(formId);
 
     /*
@@ -303,6 +387,20 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
           purpose: [
             `Locked as ${FORM_PURPOSE_LABELS[form.purpose].label.toLowerCase()} — ` +
               `${submissions} submission${submissions === 1 ? "" : "s"} already went through it.`,
+          ],
+        },
+      };
+    }
+
+    if (submissions > 0 && anonymityChanged) {
+      return {
+        ok: false,
+        error: "Whether a form is anonymous cannot change once it has answers.",
+        fieldErrors: {
+          is_anonymous: [
+            `Locked as ${form.is_anonymous ? "anonymous" : "named"} — ` +
+              `${submissions} ${submissions === 1 ? "answer" : "answers"} already came in under ` +
+              "that promise. Build a new form instead.",
           ],
         },
       };

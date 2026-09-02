@@ -87,6 +87,9 @@ export function FormSettings({
       description: initial?.description ?? "",
       department_id: initial?.department_id ?? null,
       reference_prefix: initial?.reference_prefix ?? "",
+      // P7-66 — false is the safe default and the column's own: a form is
+      // ATTRIBUTED unless somebody deliberately says otherwise.
+      is_anonymous: initial?.is_anonymous ?? false,
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
       sla_minutes: formatSlaDuration(initial?.sla_minutes ?? DEFAULT_SLA_MINUTES),
@@ -116,6 +119,25 @@ export function FormSettings({
    */
   const purpose = watch("purpose") ?? "CLIENT_REQUEST";
   const isClientRequest = purpose === "CLIENT_REQUEST";
+  const isAnonymous = watch("is_anonymous") ?? false;
+
+  /*
+   * ⚠️ P7-66 — CHANGING THE PURPOSE TO CLIENT MUST CLEAR THIS, and that is
+   * exactly because of the "HIDDEN, NOT UNREGISTERED" note above.
+   *
+   * react-hook-form keeps a field's value when its input unmounts, which is what
+   * makes the four hidden client-only settings saveable. The same behaviour on
+   * `is_anonymous` is a bug: mark a draft anonymous, then switch it to a client
+   * form, and the card sends `{ purpose: CLIENT_REQUEST, is_anonymous: true }`
+   * — refused by `vizserve_pms_forms_anonymous_is_internal`, on a control that
+   * is no longer on screen to explain itself. So the value is cleared with the
+   * switch that set it, and `updateFormSettings` still refuses the pair for
+   * anybody who bypasses this card.
+   */
+  const setPurpose = (value: FormPurpose) => {
+    setValue("purpose", value, { shouldValidate: true });
+    if (value === "CLIENT_REQUEST") setValue("is_anonymous", false);
+  };
 
   /*
    * P7-29 — what the server will fill in if these are left blank.
@@ -227,9 +249,7 @@ export function FormSettings({
         <Select
           items={purposeItems}
           value={purpose}
-          onValueChange={(value) =>
-            setValue("purpose", value as FormPurpose, { shouldValidate: true })
-          }
+          onValueChange={(value) => setPurpose(value as FormPurpose)}
           disabled={hasSubmissions}
         >
           <SelectTrigger id="purpose" className="w-full sm:w-1/2" aria-invalid={Boolean(errors.purpose)}>
@@ -455,6 +475,64 @@ export function FormSettings({
       ) : null}
 
       <div className="space-y-3 rounded-lg border p-4">
+        {/*
+          ⚠️ P7-66 — ENGAGEMENT FORMS ONLY, AND NOT MERELY BECAUSE IT WOULD BE
+          USELESS ON A CLIENT FORM.
+
+          /request/<slug> has no session at all: a client TYPES their own name
+          and email into the form, and those are ordinary answers on the
+          request. There is no identity the platform captured and therefore
+          nothing to withhold — an "anonymous" client form would promise
+          something it does not deliver, with the name sitting in
+          `requester_name` the whole time. `vizserve_pms_forms_anonymous_is_
+          internal` refuses that row; this is why the control is not there to
+          try it.
+
+          ⚠️ FIRST IN THIS BOX, ABOVE PUBLISHED. It is the setting that has to be
+          right BEFORE the form goes live — publishing is what makes it
+          unchangeable, and a switch found underneath the one that locked it is
+          a switch found too late.
+        */}
+        {isClientRequest ? null : (
+          <div className="flex items-start justify-between gap-4 border-b pb-3">
+            <div>
+              <Label htmlFor="is_anonymous">Anonymous answers</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {/* "Not recorded" rather than "not shown", in both branches. The
+                    difference is the entire feature: an anonymous form writes no
+                    name, so there is none to surface later through an export, a
+                    new screen or an admin with SQL access. */}
+                {isAnonymous
+                  ? "Nobody's name is recorded — not hidden, never written. You see the answers and when they came in."
+                  : "Each answer is recorded against the name of whoever wrote it."}
+              </p>
+              {hasSubmissions ? (
+                // Not just disabled — `updateFormSettings` refuses the change
+                // and `vizserve_pms_forms_anonymity_lock` refuses it under that.
+                // The reason is not "it would be awkward": named→anonymous would
+                // label answers that still carry names as anonymous.
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Locked — answers already came in under this promise. Build a new form to change
+                  it.
+                </p>
+              ) : (
+                <p className="mt-1 text-xs text-warning">
+                  Settles when the first answer arrives, and cannot change afterwards.
+                </p>
+              )}
+              {errors.is_anonymous ? (
+                <p className="mt-1 text-xs text-destructive">{errors.is_anonymous.message}</p>
+              ) : null}
+            </div>
+            <Switch
+              id="is_anonymous"
+              checked={isAnonymous}
+              disabled={hasSubmissions}
+              onCheckedChange={(checked) => setValue("is_anonymous", checked)}
+            />
+          </div>
+        )}
+
         <div className="flex items-start justify-between gap-4">
           <div>
             <Label htmlFor="requires_attachment">Require an attachment</Label>

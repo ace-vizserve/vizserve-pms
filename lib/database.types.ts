@@ -432,6 +432,16 @@ export type Database = {
            */
           purpose: VizservePmsFormPurpose;
           /**
+           * P7-66 — when true, `vizserve_pms_form_responses.submitted_by` is
+           * NULL for every answer to this form: the name is NEVER WRITTEN, not
+           * merely hidden. Only legal on an EMPLOYEE_ENGAGEMENT form
+           * (`vizserve_pms_forms_anonymous_is_internal`) and LOCKED once the
+           * form has its first answer (`vizserve_pms_forms_anonymity_lock`) —
+           * it is a promise made to the people who answered, and neither
+           * direction of the change can be honoured afterwards.
+           */
+          is_anonymous: boolean;
+          /**
            * DERIVED FROM `purpose`, never written beside it by hand:
            * `vizserve_pms_forms_purpose_matches_public` refuses any row where
            * the two disagree. Still read directly by the public lookup, the
@@ -464,6 +474,8 @@ export type Database = {
           department_id?: string | null;
           reference_prefix: string;
           purpose?: VizservePmsFormPurpose;
+          /** P7-66. Engagement forms only; locked on the first answer. */
+          is_anonymous?: boolean;
           is_public?: boolean;
           is_active?: boolean;
           requires_attachment?: boolean;
@@ -481,6 +493,11 @@ export type Database = {
           department_id: string | null;
           reference_prefix: string;
           purpose: VizservePmsFormPurpose;
+          /**
+           * P7-66. `vizserve_pms_forms_anonymity_lock` refuses this once the
+           * form has answers, in EITHER direction — see the Row comment.
+           */
+          is_anonymous: boolean;
           is_public: boolean;
           is_active: boolean;
           requires_attachment: boolean;
@@ -569,8 +586,15 @@ export type Database = {
         Row: {
           id: string;
           form_id: string;
-          /** Who answered. Never null, never anonymised. */
-          submitted_by: string;
+          /**
+           * Who answered, or NULL on a form whose `is_anonymous` flag is set —
+           * in which case NO NAME WAS EVER WRITTEN, rather than being hidden
+           * from a screen. Which of the two applies is the FORM's property, not
+           * the row's: read `vizserve_pms_forms.is_anonymous`, never `submitted_by
+           * === null` on one row, or a single unreadable submitter relabels a
+           * named form as anonymous.
+           */
+          submitted_by: string | null;
           /**
            * The answers, keyed by `field_key` — the same shape as
            * `vizserve_pms_requests.field_values`, so one set of entity
@@ -579,12 +603,26 @@ export type Database = {
           field_values: Json;
           submitted_at: string;
         };
+        /**
+         * ⚠️ `id` AND `submitted_at` ARE ABSENT ON PURPOSE, AND LEAVING THEM
+         * HERE WAS A `permission denied for table` WAITING TO HAPPEN.
+         *
+         * 20260902110000_p7_66_form_responses.sql grants INSERT by COLUMN:
+         *
+         *   grant insert (form_id, submitted_by, field_values) ...
+         *
+         * A column-level grant is exhaustive. Naming `id` or `submitted_at` in
+         * an insert — even with the value the column would have defaulted to —
+         * is a privilege check against a privilege that was never granted, and
+         * Postgres refuses the whole statement (42501) rather than ignoring the
+         * key. Both columns have defaults precisely so nobody needs to send
+         * them; the type is what stops somebody trying.
+         */
         Insert: {
-          id?: string;
           form_id: string;
-          submitted_by: string;
+          /** NULL on an anonymous form — enforced by the INSERT policy. */
+          submitted_by: string | null;
           field_values?: Json;
-          submitted_at?: string;
         };
         Update: never;
         Relationships: [

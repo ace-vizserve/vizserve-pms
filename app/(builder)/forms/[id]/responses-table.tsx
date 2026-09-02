@@ -11,6 +11,7 @@ import {
   answerColumnId,
   answerFor,
   RESPONSE_IDENTITY_COLUMN_IDS,
+  responseIdentityColumnIds,
   type ResponseColumn,
 } from "@/lib/form-builder/responses";
 
@@ -39,9 +40,11 @@ import {
 
 export type ResponseRow = {
   id: string;
-  submitted_by: string;
+  /** Null on an anonymous form — no name was ever written. */
+  submitted_by: string | null;
   /**
-   * Null when the reader cannot see that person's user row.
+   * Null on an anonymous form, and null when the reader cannot see that
+   * person's user row.
    *
    * A real state rather than a defensive nicety: the response SELECT policy is
    * "the lead of the department that owns the FORM", while the users policies
@@ -58,41 +61,86 @@ export type ResponseRow = {
 export function ResponsesTable({
   rows,
   fields,
+  isAnonymous,
 }: {
   rows: ResponseRow[];
   /** One per field, in the form's own order. See `responseColumns`. */
   fields: ResponseColumn[];
+  /**
+   * ⚠️ THE FORM'S FLAG, NOT A PROPERTY OF THESE ROWS.
+   *
+   * Deciding per row — showing a name where there is one and a dash where there
+   * is not — would put a "Submitted by" column on an anonymous form full of
+   * dashes, which reads as "we lost the names" rather than "there are none".
+   * Deciding from the rows (`every(r => r.submitted_by === null)`) is worse in
+   * the other direction: one page whose single author is unreadable would
+   * declare a NAMED form anonymous and drop the attribution off answers that
+   * carry it. The column exists, or it does not, and the FORM says which.
+   */
+  isAnonymous: boolean;
 }) {
+  /*
+   * ⚠️ ON AN ANONYMOUS FORM THE PERSON COLUMN IS NOT RENDERED AT ALL — not
+   * rendered empty, not rendered hidden. There is nothing behind it:
+   * `submitted_by` is NULL on every row because the INSERT policy refused to
+   * let a name be written. A column drawn over that is a promise that the
+   * screen is holding something back, and the point of the setting is that it
+   * is not.
+   *
+   * Derived rather than decided twice: `responseIdentityColumnIds` owns both
+   * halves of the rule — which fixed columns exist, and which of them is pinned
+   * — so this file cannot drift from the test that pins it.
+   */
+  const identityIds = responseIdentityColumnIds(isAnonymous);
+  const showsSubmitter = identityIds.includes(RESPONSE_IDENTITY_COLUMN_IDS[0]);
+  const pinnedIdentityId = identityIds[0];
+
+  /*
+   * Declared before the list rather than spread inline, so `cell` is
+   * contextually typed by `Column<ResponseRow>` — an inline conditional spread
+   * loses that and the row parameter goes implicitly `any`.
+   */
+  const submitterColumn: Column<ResponseRow> = {
+    // The two fixed ids, named once in `lib/form-builder/responses.ts` so the
+    // answer columns below can be proved disjoint from them in a test rather
+    // than by reading this file.
+    key: RESPONSE_IDENTITY_COLUMN_IDS[0],
+    header: "Submitted by",
+    /*
+     * ⚠️ PINNED WHEN IT IS THE FIRST IDENTITY COLUMN, which on a named form it
+     * is. `DataTable` freezes whichever column declares `pin: "left"` first;
+     * the answer columns are per-form and there can be a dozen of them, so this
+     * table scrolls sideways as a matter of course — and a row whose identity
+     * has scrolled off the left edge is a row you cannot attribute.
+     */
+    pin: pinnedIdentityId === RESPONSE_IDENTITY_COLUMN_IDS[0] ? "left" : undefined,
+    className: "max-w-[14rem]",
+    cell: (row) =>
+      row.submitter_name && row.submitted_by ? (
+        <span className="flex min-w-0 items-center gap-2">
+          <Monogram id={row.submitted_by} name={row.submitter_name} />
+          <span className="truncate">{row.submitter_name}</span>
+        </span>
+      ) : (
+        // Never the UUID (§6: no table name, no enum, no id in front of a
+        // person) and never a blank, which reads as "nobody".
+        <span className="text-xs text-muted-foreground">Outside your department</span>
+      ),
+  };
+
   const columns: Column<ResponseRow>[] = [
-    {
-      // The two fixed ids, named once in `lib/form-builder/responses.ts` so the
-      // answer columns below can be proved disjoint from them in a test rather
-      // than by reading this file.
-      key: RESPONSE_IDENTITY_COLUMN_IDS[0],
-      header: "Submitted by",
-      /*
-       * ⚠️ PINNED, and it is the first column so it may be. The answer columns
-       * are per-form and there can be a dozen of them, so this table scrolls
-       * sideways as a matter of course — and a row whose identity has scrolled
-       * off the left edge is a row you cannot attribute.
-       */
-      pin: "left",
-      className: "max-w-[14rem]",
-      cell: (row) =>
-        row.submitter_name ? (
-          <span className="flex min-w-0 items-center gap-2">
-            <Monogram id={row.submitted_by} name={row.submitter_name} />
-            <span className="truncate">{row.submitter_name}</span>
-          </span>
-        ) : (
-          // Never the UUID (§6: no table name, no enum, no id in front of a
-          // person) and never a blank, which reads as "nobody".
-          <span className="text-xs text-muted-foreground">Outside your department</span>
-        ),
-    },
+    ...(showsSubmitter ? [submitterColumn] : []),
     {
       key: RESPONSE_IDENTITY_COLUMN_IDS[1],
       header: "When",
+      /*
+       * ⚠️ THE PIN MOVES HERE WHEN THERE IS NO NAME COLUMN, rather than being
+       * dropped with it. On an anonymous form the timestamp is the first
+       * identity column and therefore the frozen one — so a wide answers table
+       * that scrolls sideways still leaves every row placeable by the only
+       * identity it has left.
+       */
+      pin: pinnedIdentityId === RESPONSE_IDENTITY_COLUMN_IDS[1] ? "left" : undefined,
       className: "max-w-[12rem]",
       cell: (row) => <span className="whitespace-nowrap">{formatDateTime(row.submitted_at)}</span>,
     },
@@ -161,7 +209,11 @@ export function ResponsesTable({
         <EmptyState
           icon={<Inbox />}
           title="No answers yet"
-          description="Answers appear here as soon as somebody fills the form in. Staff reach it from Fill a form in the sidebar — it has to be published first."
+          description={
+            isAnonymous
+              ? "Answers appear here as soon as somebody fills the form in, without a name against them. Staff reach it from Fill a form in the sidebar — it has to be published first."
+              : "Answers appear here as soon as somebody fills the form in. Staff reach it from Fill a form in the sidebar — it has to be published first."
+          }
         />
       }
     />

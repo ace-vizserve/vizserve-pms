@@ -60,6 +60,7 @@ type FakeConfig = {
     created_by: string | null;
     reference_prefix: string;
     purpose: "CLIENT_REQUEST" | "EMPLOYEE_ENGAGEMENT";
+    is_anonymous: boolean;
   };
   requests?: CountAnswer;
   responses?: CountAnswer;
@@ -155,6 +156,7 @@ let fake = makeFakeClient({
     created_by: "user-1",
     reference_prefix: "PUL",
     purpose: "EMPLOYEE_ENGAGEMENT",
+    is_anonymous: false,
   },
 });
 
@@ -203,6 +205,7 @@ const ENGAGEMENT_SETTINGS = {
   description: "",
   department_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
   reference_prefix: "PUL",
+  is_anonymous: false,
   is_active: true,
   requires_attachment: false,
   sla_minutes: DEFAULT_SLA_MINUTES,
@@ -217,6 +220,7 @@ function stored(overrides: Partial<FakeConfig["form"]> = {}): FakeConfig["form"]
     created_by: "user-1",
     reference_prefix: "PUL",
     purpose: "EMPLOYEE_ENGAGEMENT",
+    is_anonymous: false,
     ...overrides,
   };
 }

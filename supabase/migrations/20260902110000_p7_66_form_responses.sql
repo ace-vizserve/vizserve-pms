@@ -12,16 +12,22 @@
 -- deliberately separate, for the same reason Internal Approvals and Client
 -- Forms are separate (CLAUDE.md): different auth models, different lifecycles.
 --
--- ⚠️ APPLY 20260902105000_p7_66_form_anonymity.sql FIRST. This file's INSERT
--- policy reads `vizserve_pms_forms.is_anonymous`, which that file adds — the
--- other order fails with `column f.is_anonymous does not exist` (42703), and
--- because the policy is inside a `do $$` guard the failure aborts the file
--- mid-way. Both are unapplied; apply them in filename order.
+-- ⚠️⚠️ APPLIED TO LIVE PRODUCTION ON 2 SEP 2026, BY HAND. THIS FILE NOW
+-- DESCRIBES THE DATABASE RATHER THAN PROPOSING IT, so it is not to be edited:
+-- a change here changes the record of what was run without changing what is
+-- running. Anything further needs a NEW file, applied the same way.
 --
--- ⚠️ APPLY BY HAND, in the Supabase SQL editor, pasting this file as it stands
--- at that moment. THIS FILE IS UNAPPLIED AS SHIPPED. Every P7 migration landed
--- that way and none is recorded in `supabase_migrations.schema_migrations`.
--- RUN THE PRE-FLIGHT BLOCK BELOW FIRST.
+-- Like every P7 migration it was pasted into the Supabase SQL editor and is
+-- NOT recorded in `supabase_migrations.schema_migrations`, so the CLI still
+-- believes it is pending. The pre-flight and the re-runnability notes below are
+-- kept as they were written — they are what made the paste safe, and they are
+-- what a re-paste on a fresh environment would depend on.
+--
+-- ⚠️ 20260902105000_p7_66_form_anonymity.sql WENT FIRST, and had to. This
+-- file's INSERT policy reads `vizserve_pms_forms.is_anonymous`, which that file
+-- adds — the other order fails with `column f.is_anonymous does not exist`
+-- (42703), and because the policy is inside a `do $$` guard the failure aborts
+-- the file mid-way. Filename order is apply order.
 --
 -- Re-runnable: the table and the indexes are `if not exists`, the function at
 -- the foot is `create or replace`, and ALL THREE policies — the two on the new table and the one on `vizserve_pms_forms` —

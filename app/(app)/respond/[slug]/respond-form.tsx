@@ -72,6 +72,7 @@ export function RespondForm({
   formId,
   formSlug,
   formName,
+  isAnonymous,
   schema,
 }: {
   formId: string;
@@ -84,6 +85,21 @@ export function RespondForm({
    */
   formSlug: string;
   formName: string;
+  /**
+   * P7-66 — ⚠️ WHAT THE PAGE ABOVE THIS FORM PROMISED, AND THE ONLY REASON THIS
+   * COMPONENT KNOWS ABOUT ANONYMITY AT ALL.
+   *
+   * It decides nothing. `submitFormResponse` reads the flag off the form's own
+   * row and the INSERT policy re-checks it — this value is echoed back in the
+   * payload so the action can REFUSE if the form stopped agreeing with the
+   * sentence the person read. The flag locks on the first answer, so the window
+   * is "a form with no answers yet, open in somebody's browser, whose owner
+   * flips the switch" — small, and the promise is the whole feature.
+   *
+   * It also picks the confirmation sentence below, which used to tell everybody
+   * their answer was "saved against your name".
+   */
+  isAnonymous: boolean;
   /**
    * ⚠️ PARSED ON THE SERVER, and the brand travels because it is a phantom
    * type — `ParsedFormSchema` adds no runtime property, so what crosses the RSC
@@ -158,6 +174,9 @@ export function RespondForm({
       const result = await submitFormResponse({
         slug: formSlug,
         field_values: toFieldValues(schema, validated.data),
+        // Echoed, not chosen. See the prop's note: the action compares this and
+        // refuses on a mismatch, and never writes from it.
+        promised_anonymous: isAnonymous,
       });
 
       if (result.ok) {
@@ -232,8 +251,13 @@ export function RespondForm({
           <CheckCircle2 className="size-6" />
         </div>
         <h2 className="text-lg font-semibold tracking-[-0.014em]">Answer recorded</h2>
+        {/* The promise, kept in the past tense. Telling somebody who answered an
+            anonymous survey that it was "saved against your name" is the exact
+            sentence the setting exists to make untrue. */}
         <p className="mt-2 text-sm text-muted-foreground">
-          Thank you — your answer to {formName} has been saved against your name.
+          {isAnonymous
+            ? `Thank you — your answer to ${formName} has been saved without your name.`
+            : `Thank you — your answer to ${formName} has been saved against your name.`}
         </p>
         <p className="mt-4 text-xs text-muted-foreground">
           It cannot be edited or withdrawn. If you need to change something, fill the form in

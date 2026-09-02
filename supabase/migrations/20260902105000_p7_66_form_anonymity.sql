@@ -8,11 +8,15 @@
 -- Whether a given form is anonymous is therefore the CREATOR'S decision, per
 -- form, and this column is where it is recorded.
 --
--- ⚠️ THIS FILE MUST BE APPLIED BEFORE 20260902110000_p7_66_form_responses.sql,
--- which is why it is timestamped earlier despite being written later. That
--- file's INSERT policy reads `f.is_anonymous`, so applying them the other way
--- round fails with `column f.is_anonymous does not exist` (42703). Both are
--- unapplied as shipped; apply them in filename order.
+-- ⚠️⚠️ APPLIED TO LIVE PRODUCTION ON 2 SEP 2026, BY HAND, and therefore not to
+-- be edited: this file is now the record of what was run. Anything further
+-- needs a NEW file. It is not in `supabase_migrations.schema_migrations`, like
+-- every P7 migration, so the CLI still believes it is pending.
+--
+-- ⚠️ IT WENT BEFORE 20260902110000_p7_66_form_responses.sql, which is why it is
+-- timestamped earlier despite being written later. That file's INSERT policy
+-- reads `f.is_anonymous`, so the other order fails with `column f.is_anonymous
+-- does not exist` (42703). Filename order is apply order.
 --
 -- ⚠️ ANONYMOUS MEANS THE NAME IS NEVER WRITTEN. It does not mean the name is
 -- hidden from a screen, filtered out of a query, or omitted from an export. A

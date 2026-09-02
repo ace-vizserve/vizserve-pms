@@ -28,6 +28,7 @@ import { ResponsesTable, type ResponseRow } from "./responses-table";
 export async function FormResponses({
   formId,
   departmentId,
+  isAnonymous,
   schema,
   page,
   pageSize,
@@ -35,6 +36,19 @@ export async function FormResponses({
   formId: string;
   /** Null on an unrouted draft — see the note below. */
   departmentId: string | null;
+  /**
+   * ⚠️ THE FORM'S FLAG, AND THE ONLY THING THIS SCREEN MAY BRANCH ON.
+   *
+   * The tempting alternative — `rows.every((r) => r.submitted_by === null)` —
+   * is wrong in the direction that matters. `submitted_by` is `on delete
+   * restrict`, so it cannot go null by a user leaving; but a page of one answer
+   * whose author happens to be unreadable, or an empty page, would satisfy that
+   * predicate and relabel a NAMED form as anonymous — telling the lead their
+   * survey collected no names when the table is full of them. The flag is the
+   * form's property, it is what the INSERT policy enforced, and it is locked
+   * once the form has an answer. It is therefore the only honest source.
+   */
+  isAnonymous: boolean;
   /**
    * The form as the builder opened it — reconciled against the field rows, so
    * ARCHIVED FIELDS ARE PRESENT. That is what lets a column exist for a
@@ -59,6 +73,13 @@ export async function FormResponses({
    */
   const { data, count, error } = await supabase
     .from("vizserve_pms_form_responses")
+    /*
+     * `submitted_by` is selected on an anonymous form too, and stays every bit
+     * as null as it was written. Dropping the column from the projection would
+     * be a screen deciding not to look — the point is that there is nothing
+     * there to look at, which is a property of the INSERT policy rather than of
+     * this select.
+     */
     .select("id, submitted_by, field_values, submitted_at", { count: "exact" })
     .eq("form_id", formId)
     .order("submitted_at", { ascending: false })
@@ -85,7 +106,26 @@ export async function FormResponses({
    * answers without being able to read the names on them. `ResponsesTable` says
    * so in the cell instead of showing a blank or a UUID.
    */
-  const submitterIds = [...new Set(responses.map((response) => response.submitted_by))];
+  /*
+   * ⚠️ NOT ASKED FOR AT ALL ON AN ANONYMOUS FORM. `isAnonymous` short-circuits
+   * before the filter, so the query is not merely empty — it is not made. There
+   * is no id to look up (every `submitted_by` is null by the INSERT policy), and
+   * a name lookup running over a form that promised not to record one is the
+   * kind of line that later grows a fallback nobody meant to write.
+   *
+   * `.filter(...)` narrows `(string | null)[]` to `string[]` for `.in()`, and is
+   * a real guard rather than a cast: on a NAMED form every row has an author,
+   * but the type cannot know that and neither can this file.
+   */
+  const submitterIds = isAnonymous
+    ? []
+    : [
+        ...new Set(
+          responses
+            .map((response) => response.submitted_by)
+            .filter((id): id is string => id !== null),
+        ),
+      ];
 
   const { data: users, error: usersError } = submitterIds.length
     ? await supabase.from("vizserve_pms_users").select("id, full_name").in("id", submitterIds)
@@ -121,7 +161,8 @@ export async function FormResponses({
   const rows: ResponseRow[] = responses.map((response) => ({
     id: response.id,
     submitted_by: response.submitted_by,
-    submitter_name: names[response.submitted_by] ?? null,
+    submitter_name:
+      response.submitted_by === null ? null : (names[response.submitted_by] ?? null),
     submitted_at: response.submitted_at,
     field_values: response.field_values as Json,
   }));
@@ -138,7 +179,7 @@ export async function FormResponses({
   }
 
   return (
-    <ResponsesSection total={total}>
+    <ResponsesSection total={total} isAnonymous={isAnonymous}>
       {/*
         ⚠️ AN UNROUTED FORM'S ANSWERS ARE ADMIN-ONLY, because the policy asks
         `vizserve_pms_manages_department(department_id)` and that is true for an
@@ -154,7 +195,7 @@ export async function FormResponses({
         </p>
       ) : null}
 
-      <ResponsesTable rows={rows} fields={fields} />
+      <ResponsesTable rows={rows} fields={fields} isAnonymous={isAnonymous} />
 
       <Pagination
         page={page}
@@ -177,9 +218,11 @@ export async function FormResponses({
  */
 function ResponsesSection({
   total,
+  isAnonymous = false,
   children,
 }: {
   total?: number;
+  isAnonymous?: boolean;
   children: React.ReactNode;
 }) {
   return (
@@ -192,6 +235,14 @@ function ResponsesSection({
           <p className="text-xs text-muted-foreground">
             <span className="tabular-nums">{total}</span>{" "}
             {total === 1 ? "answer" : "answers"}, newest first
+            {/*
+              ⚠️ SAID EVEN WHEN THERE IS NOTHING TO SAY IT ABOUT. A missing
+              "Submitted by" column is not an explanation — a lead looking at an
+              anonymous form's answers should be told the names were never
+              recorded, not left to work it out from an absence. Reading it as
+              "the query lost them" is the wrong conclusion and the easy one.
+            */}
+            {isAnonymous ? " · anonymous — no names were recorded" : null}
           </p>
         )}
       </div>

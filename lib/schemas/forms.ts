@@ -243,6 +243,29 @@ export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 export const formResponseSubmissionSchema = z.object({
   slug: z.string().trim().min(1),
   field_values: z.record(z.string(), z.unknown()),
+  /**
+   * P7-66 — ⚠️ WHAT THE SCREEN PROMISED, ECHOED BACK. NOT A SETTING.
+   *
+   * This is the one field on this payload the action does NOT act on. It never
+   * decides what is written: `submitted_by` comes from
+   * `vizserve_pms_forms.is_anonymous` on the row the action re-reads, and the
+   * INSERT policy re-checks that against the same row. A caller who could
+   * choose here could strip their own name off a named survey, or attach a name
+   * to an anonymous one.
+   *
+   * It exists to catch a RACE that nothing else can see. The flag locks on the
+   * FIRST answer, so until then it can legitimately move — and /respond/<slug>
+   * states which kind of form it is at RENDER time. Someone opens an anonymous
+   * survey, reads "your name is not recorded", starts typing; the owner flips
+   * the switch on a form that still has no answers; the answer is submitted and
+   * their name is written under a page that promised it would not be. The
+   * window is small and the promise is the entire feature.
+   *
+   * So the page sends back the sentence it displayed, and the action REFUSES if
+   * the form no longer agrees with it. A mismatch can only ever cause a refusal,
+   * never a permission — which is why a value the caller controls is safe here.
+   */
+  promised_anonymous: z.boolean(),
 });
 
 export type FormResponseSubmission = z.infer<typeof formResponseSubmissionSchema>;
@@ -424,6 +447,32 @@ export const formSettingsSchema = z.object({
    * staff form on the public internet.
    */
   /**
+   * P7-66 — WHETHER AN ANSWER IS RECORDED AGAINST A NAME.
+   *
+   * UNDEFAULTED, like every other key on this schema, and here the omitted
+   * value would be a lie in whichever direction it fell. `false` on a form
+   * running as anonymous silently promises attribution to the next person who
+   * answers; `true` on a named one would claim anonymity over rows that already
+   * carry names. Neither is a state a forgetful payload should be able to reach.
+   *
+   * ⚠️ THE SCHEMA IS NOT THE ENFORCEMENT AND CANNOT BE. Two database rules stand
+   * behind this field, and both of them refuse things this schema happily
+   * parses:
+   *
+   *   `vizserve_pms_forms_anonymous_is_internal` — anonymity is meaningless on
+   *   a CLIENT_REQUEST form, where the client TYPES their own name into an
+   *   ordinary answer and there is nothing to withhold.
+   *
+   *   `vizserve_pms_forms_anonymity_lock` — the flag settles before the first
+   *   answer and never afterwards, in EITHER direction.
+   *
+   * Not a `.refine` for the first of the two, deliberately: `formCreateSchema`
+   * `.extend()`s this object, and a refinement turns it into a ZodEffects that
+   * cannot be extended. `updateFormSettings` states both rules in a sentence a
+   * person can act on, in front of Postgres saying them in a SQLSTATE.
+   */
+  is_anonymous: z.boolean(),
+  /**
    * Published or not. Undefaulted because `false` is not a safe fallback, it is
    * an UNPUBLISH — a live form taken off the air by a payload that merely
    * forgot to mention it.
@@ -516,6 +565,13 @@ export const formCreateSchema = formSettingsSchema.extend({
    */
   purpose: formSettingsSchema.shape.purpose.default("CLIENT_REQUEST"),
   description: formSettingsSchema.shape.description.default(""),
+  /*
+   * The safe default, and the same one the column carries: a form is ATTRIBUTED
+   * unless somebody deliberately says otherwise. An unintended anonymous form
+   * loses information nobody can recover; an unintended named one is a mistake
+   * that can at least be seen and corrected before anybody answers.
+   */
+  is_anonymous: formSettingsSchema.shape.is_anonymous.default(false),
   is_active: formSettingsSchema.shape.is_active.default(false),
   requires_attachment: formSettingsSchema.shape.requires_attachment.default(false),
   default_list_id: formSettingsSchema.shape.default_list_id.default(null),

@@ -138,7 +138,7 @@ export default async function EditFormPage({
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
+      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -474,6 +474,10 @@ export default async function EditFormPage({
               // `updateFormSettings` derives the boolean from it, and the
               // schema no longer carries it, so it cannot be sent at all.
               purpose: form.purpose,
+              // P7-66 — the card only OFFERS this on an engagement form; it is
+              // loaded on both so a client form's save resends the false it
+              // already holds rather than a value the schema never received.
+              is_anonymous: form.is_anonymous,
               is_active: form.is_active,
               requires_attachment: form.requires_attachment,
               sla_minutes: form.sla_minutes,
@@ -499,6 +503,7 @@ export default async function EditFormPage({
           <FormResponses
             formId={form.id}
             departmentId={form.department_id}
+            isAnonymous={form.is_anonymous}
             schema={initialSchema}
             page={resolvePage(rawPage)}
             pageSize={resolvePageSize(rawSize)}

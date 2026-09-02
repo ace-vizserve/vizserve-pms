@@ -28,6 +28,7 @@ function accepts(field: "slug" | "reference_prefix", value: string): boolean {
     description: "",
     department_id: null,
     reference_prefix: field === "reference_prefix" ? value : "AAA",
+    is_anonymous: false,
     is_active: false,
     requires_attachment: false,
     sla_minutes: 2400,
