@@ -11,7 +11,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { ClientFormSettings } from "@/app/(app)/forms/form-settings";
-import { EngagementSettings } from "@/app/(app)/forms/engagement-settings";
+import { InternalSettings } from "@/app/(app)/forms/internal-settings";
 import {
   optionsFromRow,
   reconcileFormSchema,
@@ -160,7 +160,7 @@ export default async function EditFormPage({
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_public, is_active, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
+      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_public, is_active, audience_is_all_departments, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -176,7 +176,7 @@ export default async function EditFormPage({
    * ⚠️ P7-66 Phase 4b — THE READ THAT LET A MEMBER FILL A FORM IN ALSO LET A
    * LEAD OPEN SOMEBODY ELSE'S.
    *
-   * `published engagement forms readable by staff`
+   * `published internal forms readable by their audience`
    * (20260902110000_p7_66_form_responses.sql) is company-wide by necessity: a
    * member cannot answer a survey they cannot read. Policies are OR'd, so after
    * it the read above succeeds for a lead of ANOTHER department — and this page
@@ -218,7 +218,7 @@ export default async function EditFormPage({
   /*
    * ⚠️ P7-66 Phase 4b — RESPONSES COUNT TOWARDS `hasSubmissions` TOO, and this
    * is the SCREEN's half of the fix the purpose lock makes on the server. An
-   * engagement form never produces a request, so counting requests alone left
+   * internal form never produces a request, so counting requests alone left
    * the purpose and prefix inputs looking unlocked on a form with a thousand
    * answers behind it — the action would refuse the save, but only after
    * somebody had typed the change.
@@ -238,7 +238,7 @@ export default async function EditFormPage({
    *   IT FAILS CLOSED. A count that errors is not a count of zero, and the
    *   failure joins `readFailure` below rather than unlocking the inputs.
    *
-   * ⚠️ RESPONSES ARE ONLY COUNTED ON AN ENGAGEMENT FORM, and that is deliberate
+   * ⚠️ RESPONSES ARE ONLY COUNTED ON AN INTERNAL FORM, and that is deliberate
    * rather than an optimisation. A CLIENT_REQUEST form cannot have a response —
    * the INSERT policy checks the purpose — so the count is known to be zero
    * without asking. Which means 20260902110000_p7_66_form_responses.sql being
@@ -246,9 +246,32 @@ export default async function EditFormPage({
    * never issue the query. `updateFormSettings` passes no such flag, because
    * the lock itself must never assume which kind of form it is looking at.
    */
-  const isEngagement = form.purpose === "EMPLOYEE_ENGAGEMENT";
+  const isInternal = form.purpose === "INTERNAL";
 
-  const counted = await countFormSubmissions(id, { includeResponses: isEngagement });
+  const counted = await countFormSubmissions(id, { includeResponses: isInternal });
+
+  /*
+   * P7-66 Phase 5 — WHICH DEPARTMENTS THIS FORM IS FOR.
+   *
+   * ⚠️ INTERNAL FORMS ONLY, and not as an optimisation. A client form cannot
+   * have an audience — `vizserve_pms_set_form_audience` refuses one, because a
+   * client answers from their inbox with no account and no department — so the
+   * answer is known to be empty without asking. Which also means an unapplied
+   * 20260902140000 cannot break the builder for the live client forms: they
+   * never issue the query.
+   *
+   * ⚠️ THE FLAG COMES FROM THE FORM ROW, THE ROWS FROM HERE, and the two are one
+   * fact. `audience_is_all_departments` is what decides whether these rows are
+   * read at all — see the column comment: "no rows" is deliberately NOT a
+   * synonym for "everyone", so that a half-finished narrowing resolves to
+   * nobody rather than silently widening.
+   */
+  const { data: audienceRows, error: audienceError } = isInternal
+    ? await supabase
+        .from("vizserve_pms_form_audience_departments")
+        .select("department_id")
+        .eq("form_id", id)
+    : { data: [], error: null };
 
   const countError = counted.ok ? null : { message: counted.message };
   const submissionCount = counted.ok ? counted.total : 0;
@@ -305,7 +328,19 @@ export default async function EditFormPage({
    * Every one of them turns a read failure into a WRITE, which is why none of
    * them is allowed to reach the render.
    */
-  const readFailure = fieldsError ?? countError ?? listsError ?? departmentsError;
+  /*
+   * ⚠️ P7-66 Phase 5 — THE AUDIENCE READ JOINS THE GROUP, for exactly the reason
+   * the group exists: a failed read here becomes a WRITE.
+   *
+   * The settings card saves what it shows. A dropped audience query renders
+   * "specific departments" with nothing ticked — and the person, seeing a
+   * narrowing that appears to have lost its departments, reasonably switches the
+   * form back to everyone. That is a SILENT WIDENING caused by a network blip,
+   * and it is the exact failure the column exists to prevent on the database
+   * side. It must not be reintroduced by the screen.
+   */
+  const readFailure =
+    fieldsError ?? countError ?? listsError ?? departmentsError ?? audienceError;
 
   if (readFailure) {
     return (
@@ -425,7 +460,7 @@ export default async function EditFormPage({
 
           A client form's face is /request/<slug>, with no session, and the label
           says "public" because that is the thing worth knowing before you paste
-          it into an email. An engagement form's face is /respond/<slug>, which
+          it into an email. An internal form's face is /respond/<slug>, which
           needs a session and is where colleagues fill it in — a different URL,
           a different audience, and calling it "public" would be exactly the
           wrong thing to tell somebody about a staff survey.
@@ -435,7 +470,7 @@ export default async function EditFormPage({
           the two, so they cannot disagree; each side is written in the terms
           its own route reads.
         */}
-        {form.is_active && isEngagement ? (
+        {form.is_active && isInternal ? (
           <Link
             href={`/respond/${form.slug}`}
             target="_blank"
@@ -468,7 +503,7 @@ export default async function EditFormPage({
               This used to say two different things. `vizserve_pms_form_field_protect`
               refuses a key rename or a field delete once the form has submissions,
               but it counted `vizserve_pms_requests` and nothing else — and an
-              engagement form never produces one. So on a staff survey the lock did
+              internal form never produces one. So on a staff survey the lock did
               not fire, and the honest sentence there was a WARNING that renaming a
               question orphans its answers, not a promise that it cannot happen.
 
@@ -477,14 +512,14 @@ export default async function EditFormPage({
               whichever kind of form it belongs to. The screen can make the promise
               again, in one sentence, because Postgres is now making it.
 
-              Only the NOUN still differs — an engagement form collects answers and
+              Only the NOUN still differs — an internal form collects answers and
               a client form collects submissions, and calling a colleague's survey
               answer a "submission" is the kind of small wrongness that makes a
               screen feel like it was built for something else.
             */}
             {submissionCount > 0 ? (
               <p className="text-xs text-muted-foreground">
-                {submissionCount} {isEngagement ? "answer" : "submission"}
+                {submissionCount} {isInternal ? "answer" : "submission"}
                 {submissionCount === 1 ? "" : "s"} — field keys are locked.
               </p>
             ) : null}
@@ -512,10 +547,10 @@ export default async function EditFormPage({
             convenient screen that tells you less is how a queue stops being the
             queue.
 
-            An engagement form is the opposite case — its answers have no other
+            An internal form is the opposite case — its answers have no other
             screen — so the tab on the form IS where they are read.
           */
-          isEngagement ? (
+          isInternal ? (
             <FormResponses
               formId={form.id}
               departmentId={form.department_id}
@@ -528,7 +563,7 @@ export default async function EditFormPage({
             ⚠️ P7-66 Phase 4 — TWO CARDS, NOT ONE CARD BRANCHING ON ITSELF.
 
             This was `FormSettings` with `isClientRequest` deciding which of
-            eleven controls to draw. A client form and an engagement form are
+            eleven controls to draw. A client form and an internal form are
             different products, and a screen that renders one as the other with
             six fields missing is exactly what blurred them: the ROUTING
             department and the OWNING department are the same column meaning two
@@ -541,11 +576,15 @@ export default async function EditFormPage({
             one value.
           */
           <div className="mx-auto w-full max-w-3xl p-5">
-            {isEngagement ? (
-              <EngagementSettings
+            {isInternal ? (
+              <InternalSettings
                 departments={departments}
                 formId={form.id}
                 hasSubmissions={submissionCount > 0}
+                audience={{
+                  is_all_departments: form.audience_is_all_departments,
+                  department_ids: (audienceRows ?? []).map((row) => row.department_id),
+                }}
                 initial={{
                   name: form.name,
                   description: form.description,

@@ -81,9 +81,9 @@ export default async function RequestsPage({
   /*
    * ⚠️ P7-66 Phase 4b — `purpose` NARROWS THIS, and it is not a department
    * filter in disguise. A request can only come from a CLIENT_REQUEST form, so
-   * an engagement form in this picker is an option that can never match a row.
-   * It matters because `published engagement forms readable by staff`
-   * (20260902110000_p7_66_form_responses.sql) makes every published engagement
+   * an internal form in this picker is an option that can never match a row.
+   * It matters because `published internal forms readable by their audience`
+   * (20260902110000_p7_66_form_responses.sql) makes every published internal
    * form readable by every signed-in person — so without this line a lead would
    * see other departments' survey names listed as request filters. Client forms
    * are untouched by that policy and stay department-scoped by RLS.

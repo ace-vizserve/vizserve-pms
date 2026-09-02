@@ -21,7 +21,7 @@ import { createForm } from "../actions";
  * SLA is a promise about turnaround. Every one is a decision somebody has to
  * make on purpose.
  *
- * An engagement form has none of them. No client, no reference series, no queue,
+ * An internal form has none of them. No client, no reference series, no queue,
  * no gate. So this asks for a NAME and derives or defaults the rest server-side:
  *
  *   slug             `slugFromName(name)`  — pure, and de-duplicated by retry
@@ -38,7 +38,7 @@ import { createForm } from "../actions";
  * whole point is "one box, then questions" would add back exactly what was
  * removed. It stays editable on the settings card afterwards.
  */
-export function EngagementCreate({ departmentId }: { departmentId: string | null }) {
+export function InternalCreate({ departmentId }: { departmentId: string | null }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [name, setName] = useState("");
@@ -64,7 +64,7 @@ export function EngagementCreate({ departmentId }: { departmentId: string | null
 
     startTransition(async () => {
       const result = await createForm({
-        purpose: "EMPLOYEE_ENGAGEMENT",
+        purpose: "INTERNAL",
         name: trimmed,
         // Blank means "derive it". `createForm` runs `slugFromName` and
         // `prefixFromName` and retries against the two unique indexes.
@@ -97,9 +97,9 @@ export function EngagementCreate({ departmentId }: { departmentId: string | null
           onChange={(event) => setName(event.target.value)}
           placeholder="e.g. Q3 Pulse Survey"
           aria-invalid={Boolean(error)}
-          aria-describedby="engagement-name-hint"
+          aria-describedby="internal-name-hint"
         />
-        <p id="engagement-name-hint" className="text-xs text-muted-foreground">
+        <p id="internal-name-hint" className="text-xs text-muted-foreground">
           That is all that is needed. You write the questions next, and the rest
           of the settings are on the same page whenever you want them.
         </p>

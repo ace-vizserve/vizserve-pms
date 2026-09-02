@@ -11,6 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -21,6 +22,7 @@ import {
 import {
   DEFAULT_SLA_MINUTES,
   formSettingsSchema,
+  type FormAudience,
   type FormSettingsInput,
   type FormSettingsValues,
 } from "@/lib/schemas/forms";
@@ -29,7 +31,7 @@ import { updateFormSettings } from "./actions";
 type Department = { id: string; name: string };
 
 /**
- * P7-66 Phase 4 — SETTINGS FOR AN EMPLOYEE ENGAGEMENT FORM.
+ * P7-66 Phase 4 — SETTINGS FOR AN INTERNAL FORM.
  *
  * ⚠️ A SEPARATE COMPONENT, NOT A BRANCH. This used to be `FormSettings`
  * rendering eleven controls and hiding six of them behind `isClientRequest`,
@@ -37,7 +39,7 @@ type Department = { id: string; name: string };
  * that looked like one product with some fields greyed out, when they are two
  * products that happen to share a builder.
  *
- * What an engagement form actually has is FIVE things — a name, a description,
+ * What an internal form actually has is FIVE things — a name, a description,
  * an owning department, whether answers carry a name, and whether it is live.
  * There is no slug to publish, no reference prefix to quote, no SLA to meet, no
  * list to file into and no client approval window, because there is no client
@@ -52,7 +54,7 @@ type Department = { id: string; name: string };
  *
  * ⚠️ `purpose` IS HARD-CODED RATHER THAN PASSED THROUGH. The builder page picks
  * this component by the form's purpose, so a payload from here can only ever
- * mean EMPLOYEE_ENGAGEMENT — which makes the field whose stray default once put
+ * mean INTERNAL — which makes the field whose stray default once put
  * a staff form on the public internet impossible to get wrong from this screen.
  * The same is true in reverse of `ClientFormSettings`.
  *
@@ -61,10 +63,11 @@ type Department = { id: string; name: string };
  * form with no submissions, which is a form it costs nothing to build again. The
  * choice is made once, at /forms/new, where it is the only question asked.
  */
-export function EngagementSettings({
+export function InternalSettings({
   departments,
   formId,
   initial,
+  audience,
   hasSubmissions = false,
 }: {
   departments: Department[];
@@ -74,6 +77,15 @@ export function EngagementSettings({
    * See the note above: they are resent verbatim, not re-derived.
    */
   initial: Partial<FormSettingsInput>;
+  /**
+   * P7-66 Phase 5 — WHO SHOULD ANSWER, as stored.
+   *
+   * ⚠️ SEPARATE FROM `initial` BECAUSE IT IS NOT A COLUMN ON THE FORM. It is a
+   * flag plus a row per department, and the page reads the two together — see
+   * the note on the builder page. Keeping it out of `initial` is what stops it
+   * being spread into an `.update()` that has nowhere to put it.
+   */
+  audience: FormAudience;
   hasSubmissions?: boolean;
 }) {
   const router = useRouter();
@@ -95,10 +107,10 @@ export function EngagementSettings({
     defaultValues: {
       /*
        * ⚠️ NOT `initial.purpose`. See the note above — this card exists only for
-       * engagement forms, so the value is a constant rather than something a
+       * internal forms, so the value is a constant rather than something a
        * caller could get wrong.
        */
-      purpose: "EMPLOYEE_ENGAGEMENT",
+      purpose: "INTERNAL",
       name: initial.name ?? "",
       description: initial.description ?? "",
       department_id: initial.department_id ?? null,
@@ -109,7 +121,7 @@ export function EngagementSettings({
 
       /*
        * ⚠️ THE FIVE THAT ARE NEVER RENDERED. Not dead weight — the UPDATE schema
-       * requires them, and an engagement form does hold values for them because
+       * requires them, and an internal form does hold values for them because
        * `createForm` derives a slug and a prefix from the name for every form.
        * Resending what is stored is how this card leaves them alone.
        */
@@ -119,12 +131,45 @@ export function EngagementSettings({
       sla_minutes: initial.sla_minutes ?? DEFAULT_SLA_MINUTES,
       default_list_id: initial.default_list_id ?? null,
       client_approval_days: initial.client_approval_days ?? 3,
+
+      // P7-66 Phase 5 — the one key on this payload that is not a column. It
+      // gates a separate, atomic write; see `writeFormAudience`.
+      audience,
     },
   });
 
   const isActive = watch("is_active");
   const isAnonymous = watch("is_anonymous") ?? false;
   const departmentId = watch("department_id");
+
+  /*
+   * ⚠️ WATCHED AS A WHOLE OBJECT, NOT AS TWO FIELDS. The flag and the list are
+   * one fact — "everyone" versus "these" — and reading them separately is how a
+   * screen ends up rendering a narrowed form with no departments ticked, or an
+   * open one with some.
+   */
+  const chosenAudience = watch("audience") ?? audience;
+  const targetsEveryone = chosenAudience.is_all_departments;
+  const targetedIds = chosenAudience.department_ids;
+
+  const setAudience = (next: FormAudience) =>
+    setValue("audience", next, { shouldValidate: true, shouldDirty: true });
+
+  /*
+   * ⚠️ TICKING A DEPARTMENT DOES NOT SILENTLY SWITCH THE MODE, and unticking the
+   * last one does not silently switch it back. Both would be the screen making a
+   * decision on somebody's behalf about who may answer a survey. The radio is
+   * the decision; the checkboxes only fill it in, and an empty list under
+   * "specific departments" is refused by the schema with a sentence rather than
+   * quietly reinterpreted as everyone.
+   */
+  const toggleDepartment = (departmentIdToToggle: string, checked: boolean) =>
+    setAudience({
+      is_all_departments: false,
+      department_ids: checked
+        ? [...targetedIds, departmentIdToToggle]
+        : targetedIds.filter((id) => id !== departmentIdToToggle),
+    });
 
   /*
    * ⚠️ P7-66 — THE NAME IS EDITED IN TWO PLACES, AND THIS CARD IS THE ONE THAT
@@ -156,6 +201,7 @@ export function EngagementSettings({
     "department_id",
     "is_anonymous",
     "is_active",
+    "audience",
   ]);
 
   const onSubmit = handleSubmit((values) => {
@@ -248,6 +294,124 @@ export function EngagementSettings({
           <p className="text-xs text-destructive">{errors.department_id.message}</p>
         ) : null}
       </div>
+
+      {/*
+        P7-66 Phase 5 — WHO SHOULD ANSWER.
+        ⚠️ NOT THE SAME QUESTION AS THE OWNING DEPARTMENT ABOVE, and the two are
+        deliberately adjacent so the difference is visible rather than inferred.
+        Ownership is who READS the answers; the audience is who WRITES them. A
+        VizBytes-owned survey addressed to the whole company is an ordinary
+        thing to want, and the card should not make it look like a mistake.
+      */}
+      <fieldset className="space-y-3 rounded-lg border p-4">
+        <legend className="px-1 text-sm font-medium">Who should answer</legend>
+
+        {/*
+          ⚠️ A RADIO GROUP, NOT A CHECKBOX LIST WITH "none means everyone".
+          "Everyone" and "these departments" are two different intentions, and
+          collapsing them into the emptiness of a list is exactly the encoding
+          `audience_is_all_departments` exists to avoid: it makes a list that
+          empties itself — by accident, by a deleted department — a silent
+          widening to the whole company. Stating the intent means the same
+          accident is a refusal.
+
+          Native inputs rather than a Base UI Radio: two options, no popup, and
+          `name` gives arrow-key navigation and a single tab stop for free.
+        */}
+        <div className="space-y-2.5">
+          <label className="flex items-start gap-2.5 text-sm">
+            <input
+              type="radio"
+              name="audience-mode"
+              className="mt-0.5 size-4 accent-primary"
+              checked={targetsEveryone}
+              onChange={() =>
+                /*
+                 * ⚠️ THE TICKED DEPARTMENTS ARE KEPT, not cleared. Somebody
+                 * flipping to "everyone" to see what it means and flipping back
+                 * should find their list intact — and the list is ignored while
+                 * the flag is true, both here and in
+                 * `vizserve_pms_set_form_audience`, which writes no rows at all
+                 * in that mode. Nothing stale can reach the database.
+                 */
+                setAudience({ is_all_departments: true, department_ids: targetedIds })
+              }
+            />
+            <span>
+              <span className="font-medium">Everyone</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Any signed-in colleague can open and answer it.
+              </span>
+            </span>
+          </label>
+
+          <label className="flex items-start gap-2.5 text-sm">
+            <input
+              type="radio"
+              name="audience-mode"
+              className="mt-0.5 size-4 accent-primary"
+              checked={!targetsEveryone}
+              onChange={() =>
+                setAudience({ is_all_departments: false, department_ids: targetedIds })
+              }
+            />
+            <span>
+              <span className="font-medium">Specific departments</span>
+              <span className="mt-0.5 block text-xs text-muted-foreground">
+                Nobody else sees the form, and nobody else can answer it.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        {targetsEveryone ? null : (
+          <div className="space-y-2 border-t pt-3">
+            {departments.length === 0 ? (
+              <p className="text-xs text-warning">
+                No departments to choose from. That is a read failure rather than an empty
+                company — reload the page.
+              </p>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2">
+                {departments.map((department) => (
+                  <label key={department.id} className="flex items-center gap-2.5 text-sm">
+                    <Checkbox
+                      checked={targetedIds.includes(department.id)}
+                      onCheckedChange={(checked) => toggleDepartment(department.id, checked)}
+                    />
+                    {department.name}
+                  </label>
+                ))}
+              </div>
+            )}
+
+            {/*
+              ⚠️ THE MEMBERSHIP RULE, SAID OUT LOUD. `vizserve_pms_form_targets_me`
+              matches on `primary_department_id` — where somebody WORKS, not what
+              they lead (D15) — so a team leader of VizBytes who sits in VizMedia
+              answers VizMedia's survey. That is the right rule and it is not
+              guessable from a list of tick boxes.
+            */}
+            <p className="text-xs text-muted-foreground">
+              Matched on the department a person works in, not the ones they lead.
+            </p>
+          </div>
+        )}
+
+        {/*
+          ⚠️ THE SAVED FORM IS THE ENFORCEMENT, AND THE SENTENCE SAYS SO. Two
+          policies read this — what /respond renders and what may be written —
+          because a form somebody can no longer SEE is still a form they could
+          POST to.
+        */}
+        {errors.audience ? (
+          <p className="text-xs text-destructive">
+            {errors.audience.message ??
+              (errors.audience as { department_ids?: { message?: string } }).department_ids
+                ?.message}
+          </p>
+        ) : null}
+      </fieldset>
 
       <div className="space-y-3 rounded-lg border p-4">
         {/*

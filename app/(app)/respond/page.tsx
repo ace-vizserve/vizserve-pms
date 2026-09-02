@@ -14,7 +14,7 @@ export const metadata: Metadata = { title: "Fill a form" };
  * P7-66 Phase 4b — WHAT THERE IS TO ANSWER.
  *
  * `/forms` is the BUILDER and is a team leader's screen. This is the other end
- * of the same table: the published employee-engagement forms anybody signed in
+ * of the same table: the published internal forms anybody signed in
  * may fill in, which is why the nav row is called "Fill a form" rather than a
  * second "Forms" (lib/navigation.ts).
  *
@@ -22,9 +22,9 @@ export const metadata: Metadata = { title: "Fill a form" };
  * `requireRole`. Everyone in the company answers a pulse survey.
  *
  * ⚠️ NO CLIENT FORM APPEARS HERE, and it is RLS that guarantees it rather than
- * the two `.eq()`s below. `published engagement forms readable by staff`
+ * the two `.eq()`s below. `published internal forms readable by their audience`
  * (20260902110000_p7_66_form_responses.sql) is the ONLY policy that shows a
- * form row to a member, and it is already `purpose = 'EMPLOYEE_ENGAGEMENT' and
+ * form row to a member, and it is already `purpose = 'INTERNAL' and
  * is_active`. The filters are here because a TEAM LEADER also has the
  * department-scoped policies and would otherwise see their own client forms
  * listed as things to fill in — a different question from "may they read it".
@@ -38,7 +38,7 @@ export default async function RespondPage() {
   const { data: forms, error } = await supabase
     .from("vizserve_pms_forms")
     .select("id, name, slug, description")
-    .eq("purpose", "EMPLOYEE_ENGAGEMENT")
+    .eq("purpose", "INTERNAL")
     .eq("is_active", true)
     .order("name");
 
@@ -61,7 +61,7 @@ export default async function RespondPage() {
         <EmptyState
           icon={<FilePenLine />}
           title="Nothing to fill in"
-          description="Employee engagement forms appear here once a team leader publishes one. A client request form is not one of these — it has its own public link."
+          description="Internal forms appear here once an admin publishes one. A client request form is not one of these — it has its own public link."
         />
       ) : (
         /*

@@ -12,7 +12,7 @@ import {
 } from "@/lib/schemas/forms";
 import { ClientFormSettings } from "../form-settings";
 import { loadRoutableDepartments, type RoutableDepartment } from "../routable-departments";
-import { EngagementCreate } from "./engagement-create";
+import { InternalCreate } from "./internal-create";
 
 export const metadata: Metadata = { title: "New form" };
 
@@ -33,10 +33,10 @@ function BackToForms() {
  * P7-66 — THE CHOICE IS IN THE URL, NOT IN A useState.
  *
  * `/forms/new` is the chooser, `/forms/new?purpose=CLIENT_REQUEST` is today's
- * settings card, `/forms/new?purpose=EMPLOYEE_ENGAGEMENT` is the one-box flow.
+ * settings card, `/forms/new?purpose=INTERNAL` is the one-box flow.
  * Three addressable states rather than one component switching on itself, which
  * buys the browser Back button working the way somebody who picked wrong
- * expects, a bookmarkable "new engagement form", and — the reason it is worth
+ * expects, a bookmarkable "new internal form", and — the reason it is worth
  * writing down — no client state at all on a page that is otherwise entirely
  * server-rendered.
  *
@@ -48,10 +48,31 @@ function parsePurpose(raw: string | string[] | undefined): FormPurpose | null {
   return FORM_PURPOSES.find((purpose) => purpose === value) ?? null;
 }
 
-const PURPOSE_ICON = { CLIENT_REQUEST: Globe, EMPLOYEE_ENGAGEMENT: Users } as const;
+/**
+ * P7-66 Phase 5 — ⚠️ ONLY AN ADMIN CREATES AN INTERNAL FORM.
+ *
+ * Ace, 2 Sep 2026: a team leader cannot read the members of a department they do
+ * not lead, so Phase 6's "who has not answered" roster would be half-blank on
+ * exactly the company-wide survey it is most wanted for. Widening the two people
+ * policies to fix that would have made the whole app's people data wider; an
+ * admin already reads every department, so this costs nothing.
+ *
+ * ⚠️ THIS IS THE CHOOSER, NOT THE GATE. `createForm` returns a readable refusal
+ * and `forms insertable by team leaders` refuses the row outright
+ * (20260902140000). All this does is stop offering somebody a card that leads to
+ * a wall — which is the difference between a product that has one kind of form
+ * for you and a product that appears broken.
+ */
+function purposesFor(role: string): readonly FormPurpose[] {
+  return role === "admin"
+    ? FORM_PURPOSES
+    : FORM_PURPOSES.filter((purpose) => purpose !== "INTERNAL");
+}
+
+const PURPOSE_ICON = { CLIENT_REQUEST: Globe, INTERNAL: Users } as const;
 
 /**
- * The one decision this page makes for an engagement form.
+ * The one decision this page makes for an internal form.
  *
  * ⚠️ DERIVED, NOT ASKED, AND THE JUSTIFICATION IS THE WHOLE POINT OF THE FLOW.
  * "Name it and start writing questions" survives exactly one extra required
@@ -79,7 +100,7 @@ const PURPOSE_ICON = { CLIENT_REQUEST: Globe, EMPLOYEE_ENGAGEMENT: Users } as co
  * Null is a real answer, not a failure: `forms readable by author while
  * unrouted` keeps the draft visible to its creator, and
  * `vizserve_pms_forms_active_requires_department` stops it being published
- * until somebody picks. `EngagementCreate` says so on screen rather than
+ * until somebody picks. `InternalCreate` says so on screen rather than
  * leaving it to be discovered at the Publish switch.
  */
 function defaultDepartmentId(
@@ -99,7 +120,18 @@ export default async function NewFormPage({
   searchParams: Promise<{ purpose?: string | string[] }>;
 }) {
   const context = await requireRole("team_leader");
-  const purpose = parsePurpose((await searchParams).purpose);
+  const offered = purposesFor(context.role);
+
+  const asked = parsePurpose((await searchParams).purpose);
+
+  /*
+   * ⚠️ A PURPOSE THIS PERSON CANNOT CREATE FALLS BACK TO THE CHOOSER, exactly as
+   * an unrecognised one does. A hand-typed `?purpose=INTERNAL` from a
+   * team leader is not an incident — it is a stale link or a shared URL — and
+   * answering it with the chooser shows them what they CAN make, rather than a
+   * form whose Create button the server is going to refuse.
+   */
+  const purpose = asked !== null && offered.includes(asked) ? asked : null;
 
   // The chooser needs no data at all, so it does not pay for any.
   if (purpose === null) {
@@ -113,8 +145,8 @@ export default async function NewFormPage({
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          {FORM_PURPOSES.map((value) => {
+        <div className={offered.length === 1 ? "grid gap-4" : "grid gap-4 sm:grid-cols-2"}>
+          {offered.map((value) => {
             const Icon = PURPOSE_ICON[value];
 
             return (
@@ -162,25 +194,25 @@ export default async function NewFormPage({
    * written back over a real form, and it treats the error accordingly.
    *
    * P7-66 adds one caller with a little more at stake: `defaultDepartmentId`
-   * reads this list to pre-assign an engagement form. A failed read makes it
+   * reads this list to pre-assign an internal form. A failed read makes it
    * null, which is an unrouted draft the settings card can still fix — the same
    * outcome as leading several departments, and not a write over anything.
    */
   const { departments } = await loadRoutableDepartments(supabase, context);
 
-  if (purpose === "EMPLOYEE_ENGAGEMENT") {
+  if (purpose === "INTERNAL") {
     return (
       <PageShell className="mx-auto w-full max-w-2xl">
         <div>
           <BackToForms />
           <p className="mt-2 text-xs text-muted-foreground">
-            An employee engagement form. Staff fill it in signed in, and the
+            An internal form. Colleagues fill it in signed in, and the
             answers are collected rather than approved.
           </p>
         </div>
 
         <div className="rounded-lg border bg-card grade-surface p-6 shadow-raised-lg">
-          <EngagementCreate
+          <InternalCreate
             departmentId={defaultDepartmentId(context.primaryDepartmentId, departments)}
           />
         </div>
@@ -190,7 +222,7 @@ export default async function NewFormPage({
 
   // P2-06 — a brand-new form can point at an existing list straight away. Read
   // only on the client-request branch: `default_list_id` is where an APPROVED
-  // request files, and an engagement form never has one.
+  // request files, and an internal form never has one.
   const { data: lists } = await supabase
     .from("vizserve_pms_lists")
     .select("id, name, department_id")

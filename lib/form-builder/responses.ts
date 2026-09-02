@@ -58,7 +58,7 @@ export type ResponseColumn = {
  *
  * 2. ORPHANED KEYS. `vizserve_pms_form_field_protect` refuses to delete a field
  *    that has data — but it counts `vizserve_pms_requests` only, so a field on
- *    an ENGAGEMENT form can be deleted outright while responses still hold its
+ *    an INTERNAL form can be deleted outright while responses still hold its
  *    key. (That gap is roadmap item 5: moving the guard onto the jsonb so it
  *    sees this table too.) Until then the answers outlive the field, and this
  *    is what keeps them on screen. The header is the raw key, because the label

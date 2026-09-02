@@ -539,18 +539,18 @@ export function FieldBuilder({
    * The attachment machinery is request-shaped end to end:
    * `uploadPublicAttachment` writes `vizserve_pms_pending_attachments` scoped to
    * a form, and those rows are CLAIMED by `vizserve_pms_submit_request` when it
-   * mints a request. An engagement form mints no request, so `/respond` refuses
+   * mints a request. An internal form mints no request, so `/respond` refuses
    * every upload — and a REQUIRED file question there is a form that cannot be
    * submitted by any sequence of actions.
    *
    * ⚠️ IT DOES NOT HIDE A FILE QUESTION THAT ALREADY EXISTS. A client form with
-   * an attachment question can be flipped to EMPLOYEE_ENGAGEMENT while it has no
+   * an attachment question can be flipped to INTERNAL while it has no
    * submissions, and that question is still on the form, still in the list, still
    * editable — including archiving it, which is the fix.
    */
   const offerableFieldTypes = useMemo(
     () =>
-      purpose === "EMPLOYEE_ENGAGEMENT"
+      purpose === "INTERNAL"
         ? ADDABLE_FIELD_TYPES.filter((fieldType) => fieldType !== "file")
         : ADDABLE_FIELD_TYPES,
     [purpose],

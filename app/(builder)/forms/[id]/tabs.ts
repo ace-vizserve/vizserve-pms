@@ -41,12 +41,12 @@ export type BuilderTab = (typeof BUILDER_TABS)[number];
  * how a queue quietly stops being the queue. So the tab is not built, not
  * emptied and not disabled: it is not offered.
  *
- * An EMPLOYEE_ENGAGEMENT form is the opposite case. Its answers are stored
+ * An INTERNAL form is the opposite case. Its answers are stored
  * nowhere else and have no other screen, so the tab on the form IS the place
  * they are read.
  */
 export function builderTabsFor(purpose: FormPurpose): readonly BuilderTab[] {
-  return purpose === "EMPLOYEE_ENGAGEMENT"
+  return purpose === "INTERNAL"
     ? BUILDER_TABS
     : BUILDER_TABS.filter((tab) => tab !== "responses");
 }

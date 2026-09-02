@@ -109,7 +109,7 @@ export function QuestionEditor({
 
   /*
    * ⚠️ THE TYPE THE QUESTION ACTUALLY IS, EVEN WHEN IT IS NOT OFFERED. A client
-   * form carrying a File upload question can be switched to EMPLOYEE_ENGAGEMENT
+   * form carrying a File upload question can be switched to INTERNAL
    * while it has no submissions, and that question is still on the form. Leaving
    * it out of the map would render the raw enum on the trigger — the exact thing
    * `check:select-items` exists to fail — and leaving it out of the OPTIONS would

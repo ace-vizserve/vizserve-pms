@@ -69,7 +69,7 @@ export function FormsTable({
        * P7-66 — WHAT THE FORM IS, beside what state it is in.
        *
        * Two chips in one row could read as one status split in two, which is
-       * why this one is worded as a noun ("Client", "Engagement") and Status is
+       * why this one is worded as a noun ("Client", "Internal") and Status is
        * worded as a state ("Live", "Draft"), and why the tones are drawn from
        * the two families Status never uses. The LABEL carries it either way —
        * greyscale this table and both columns still say what they say.

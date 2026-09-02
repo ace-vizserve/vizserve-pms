@@ -20,11 +20,11 @@ export const metadata: Metadata = { title: "Forms" };
  * one place (the policy) rather than being restated at every call site.
  *
  * ⚠️ P7-66 Phase 4b — WITH ONE EXCEPTION, AND IT IS NOT A RESTATEMENT OF THAT
- * POLICY. `published engagement forms readable by staff`
+ * POLICY. `published internal forms readable by their audience`
  * (20260902110000_p7_66_form_responses.sql) lets EVERY active staff member read
- * EVERY published engagement form, because a member has to read one to fill it
+ * EVERY published internal form, because a member has to read one to fill it
  * in at /respond. Policies are OR'd, so after it a lead of VizMedia can select
- * VizBytes' published engagement forms — and this is the BUILDER, where such a
+ * VizBytes' published internal forms — and this is the BUILDER, where such a
  * form would be listed as theirs to edit and would open its whole question
  * schema at /forms/[id].
  *

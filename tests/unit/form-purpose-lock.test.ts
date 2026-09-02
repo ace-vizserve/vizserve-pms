@@ -10,7 +10,7 @@ import { DEFAULT_SLA_MINUTES } from "@/lib/schemas/forms";
  *
  *   `updateFormSettings` refuses to change a form's `purpose` once the form has
  *   submissions. The count was `vizserve_pms_requests` and nothing else — and
- *   an EMPLOYEE_ENGAGEMENT form NEVER produces a request. Its answers go to
+ *   an INTERNAL form NEVER produces a request. Its answers go to
  *   `vizserve_pms_form_responses`, the table 4b creates.
  *
  *   So the moment that table existed, a pulse survey with a thousand staff
@@ -59,7 +59,7 @@ type FakeConfig = {
     department_id: string | null;
     created_by: string | null;
     reference_prefix: string;
-    purpose: "CLIENT_REQUEST" | "EMPLOYEE_ENGAGEMENT";
+    purpose: "CLIENT_REQUEST" | "INTERNAL";
     is_anonymous: boolean;
   };
   requests?: CountAnswer;
@@ -155,7 +155,7 @@ let fake = makeFakeClient({
     department_id: "dept-1",
     created_by: "user-1",
     reference_prefix: "PUL",
-    purpose: "EMPLOYEE_ENGAGEMENT",
+    purpose: "INTERNAL",
     is_anonymous: false,
   },
 });
@@ -183,12 +183,31 @@ vi.mock("@/utils/supabase/admin", () => ({
  * edit this form — a team leader of its department. A stub that refused would
  * make every assertion below pass for the wrong reason.
  */
+/*
+ * ⚠️ P7-66 Phase 5 — THE ROLE IS NOW LOAD-BEARING, AND IT DEFAULTS TO ADMIN.
+ *
+ * It used to be incidental: a team leader of the form's department could edit
+ * any form, so `team_leader` simply meant "allowed". Since 20260902140000 an
+ * INTERNAL form is an admin instrument end to end, and `admin` is
+ * what "allowed" means for the forms almost every case below is about. Left as
+ * `team_leader`, every one of them would pass or fail on the admin refusal
+ * before it ever reached the lock under test — green for the wrong reason, or
+ * red for a reason that is not the subject.
+ *
+ * `vi.hoisted` because `vi.mock` factories are hoisted above the imports: a
+ * plain `let` above would not yet be initialised when the factory runs. Mutable
+ * so the block at the foot of this file can drop to `team_leader` and assert
+ * that the refusal DOES fire — the coverage that changing this default would
+ * otherwise have quietly removed.
+ */
+const auth = vi.hoisted(() => ({ role: "admin" as "admin" | "team_leader" }));
+
 vi.mock("@/lib/auth/authorization", () => ({
   requireRole: async () => ({
     userId: "user-1",
     email: "test.lead@example.com",
     fullName: "Test Lead",
-    role: "team_leader" as const,
+    role: auth.role,
     departmentIds: ["dept-1"],
   }),
   assertDepartmentAccess: () => {},
@@ -198,8 +217,8 @@ vi.mock("@/lib/auth/authorization", () => ({
 import { updateFormSettings } from "@/app/(app)/forms/actions";
 
 /** A complete, valid settings payload. `formSettingsSchema` has no defaults. */
-const ENGAGEMENT_SETTINGS = {
-  purpose: "EMPLOYEE_ENGAGEMENT" as const,
+const INTERNAL_SETTINGS = {
+  purpose: "INTERNAL" as const,
   name: "Q3 Pulse Survey",
   slug: "q3-pulse-survey",
   description: "",
@@ -219,19 +238,21 @@ function stored(overrides: Partial<FakeConfig["form"]> = {}): FakeConfig["form"]
     department_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
     created_by: "user-1",
     reference_prefix: "PUL",
-    purpose: "EMPLOYEE_ENGAGEMENT",
+    purpose: "INTERNAL",
     is_anonymous: false,
     ...overrides,
   };
 }
 
 beforeEach(() => {
+  // See the mock above: every case here is an admin unless it says otherwise.
+  auth.role = "admin";
   fake = makeFakeClient({ form: stored() });
 });
 
 describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
   it("REFUSES a purpose change on a form with responses and ZERO requests", async () => {
-    // The exact shape of every engagement form there will ever be: no requests,
+    // The exact shape of every internal form there will ever be: no requests,
     // because it cannot produce one, and answers in the other table.
     fake = makeFakeClient({
       form: stored(),
@@ -240,7 +261,7 @@ describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST",
     });
 
@@ -261,7 +282,7 @@ describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
     // count fails here rather than in production.
     fake = makeFakeClient({ form: stored(), responses: { count: 1 } });
 
-    await updateFormSettings("form-1", { ...ENGAGEMENT_SETTINGS, purpose: "CLIENT_REQUEST" });
+    await updateFormSettings("form-1", { ...INTERNAL_SETTINGS, purpose: "CLIENT_REQUEST" });
 
     expect(fake.recorder.counted).toContain("vizserve_pms_requests");
     expect(fake.recorder.counted).toContain("vizserve_pms_form_responses");
@@ -271,7 +292,7 @@ describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
     fake = makeFakeClient({ form: stored(), responses: { count: 1 } });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST",
     });
 
@@ -289,8 +310,8 @@ describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
-      purpose: "EMPLOYEE_ENGAGEMENT",
+      ...INTERNAL_SETTINGS,
+      purpose: "INTERNAL",
       reference_prefix: "COL",
     });
 
@@ -304,7 +325,7 @@ describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
     fake = makeFakeClient({ form: stored(), requests: { count: 0 }, responses: { count: 0 } });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST",
     });
 
@@ -323,7 +344,7 @@ describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
     fake = makeFakeClient({ form: stored(), responses: { count: 1000 } });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       name: "Q4 Pulse Survey",
     });
 
@@ -331,7 +352,7 @@ describe("⚠️ the purpose lock counts vizserve_pms_form_responses", () => {
     expect(fake.recorder.counted).toEqual([]);
     expect(fake.recorder.updates[0]).toMatchObject({
       name: "Q4 Pulse Survey",
-      purpose: "EMPLOYEE_ENGAGEMENT",
+      purpose: "INTERNAL",
       is_public: false,
     });
   });
@@ -355,7 +376,7 @@ describe("⚠️ the lock fails closed when it cannot count", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST",
     });
 
@@ -374,7 +395,7 @@ describe("⚠️ the lock fails closed when it cannot count", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST",
       reference_prefix: "NEW",
     });
@@ -390,7 +411,7 @@ describe("⚠️ the lock fails closed when it cannot count", () => {
  * It is exact rather than merely conservative: a request can only be created
  * through the public form, which requires `is_public` — i.e. CLIENT_REQUEST —
  * and a response can only be inserted for a form the RLS policy has checked is
- * EMPLOYEE_ENGAGEMENT. One of the two counts is therefore always zero, so the
+ * INTERNAL. One of the two counts is therefore always zero, so the
  * sum names the number both messages claim it does.
  */
 describe("the reference-prefix lock still works off the same count", () => {
@@ -401,7 +422,7 @@ describe("the reference-prefix lock still works off the same count", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST",
       reference_prefix: "NEW",
     });
@@ -439,7 +460,7 @@ describe("⚠️ the count reads through the service role, never the caller", ()
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       department_id: null,
       purpose: "CLIENT_REQUEST",
     });
@@ -452,7 +473,7 @@ describe("⚠️ the count reads through the service role, never the caller", ()
   it("takes NO count through the caller's RLS client", async () => {
     fake = makeFakeClient({ form: stored(), responses: { count: 3 } });
 
-    await updateFormSettings("form-1", { ...ENGAGEMENT_SETTINGS, purpose: "CLIENT_REQUEST" });
+    await updateFormSettings("form-1", { ...INTERNAL_SETTINGS, purpose: "CLIENT_REQUEST" });
 
     // The assertion that pins the fix. A regression here reads as a passing
     // lock on a routed form and a silently open one on an unrouted form.
@@ -461,5 +482,91 @@ describe("⚠️ the count reads through the service role, never the caller", ()
       "vizserve_pms_requests",
       "vizserve_pms_form_responses",
     ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P7-66 Phase 5 — THE ADMIN GATE, which is the refusal every case above had to
+// be raised past.
+// ---------------------------------------------------------------------------
+
+describe("⚠️ an internal form is an admin instrument", () => {
+  it("refuses a team leader editing an INTERNAL form", async () => {
+    auth.role = "team_leader";
+
+    const result = await updateFormSettings("form-1", INTERNAL_SETTINGS);
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/only an admin/i);
+  });
+
+  it("⚠️ refuses BEFORE the count, so an unreachable database is not a way past it", async () => {
+    /*
+     * The same ordering rule the anonymity refusal follows.
+     * `countFormSubmissions` decides the purpose and prefix locks and it can
+     * fail — if the admin gate sat after it, a dropped count would answer
+     * "could not check whether this form has submissions" and a team leader
+     * would retry all afternoon, never once being told the real reason.
+     *
+     * The assertion is that NO count was taken at all: the refusal came first.
+     */
+    auth.role = "team_leader";
+
+    const result = await updateFormSettings("form-1", INTERNAL_SETTINGS);
+
+    expect(result.ok).toBe(false);
+    expect(fake.recorder.counted).toEqual([]);
+    expect(fake.recorder.updates).toEqual([]);
+  });
+
+  it("⚠️ refuses a team leader CONVERTING a client form into an internal one", async () => {
+    /*
+     * THE LOOPHOLE THIS CLOSES, and the reason the gate is asked twice — once
+     * about the STORED purpose and once about the INCOMING one.
+     *
+     * The purpose lock only bites once a form has submissions. A fresh client
+     * draft has none, so with only the stored-purpose check a team leader could
+     * take a form they legitimately manage and turn it into an internal one —
+     * reaching the admin-only product through the door left open behind it.
+     * `forms updatable in scope` tests both rows for exactly this reason.
+     */
+    auth.role = "team_leader";
+    fake = makeFakeClient({
+      form: stored({ purpose: "CLIENT_REQUEST" }),
+      requests: { count: 0 },
+      responses: { count: 0 },
+    });
+
+    const result = await updateFormSettings("form-1", {
+      ...INTERNAL_SETTINGS,
+      purpose: "INTERNAL",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error).toMatch(/only an admin/i);
+    expect(fake.recorder.updates).toEqual([]);
+  });
+
+  it("leaves a team leader's CLIENT form alone — nothing about it changed", async () => {
+    /*
+     * The gate must not become a role bump for the product that was always
+     * theirs. This is the case that catches a purpose comparison written the
+     * wrong way round, which would otherwise lock every team leader out of
+     * every form in the app and look, from the code, entirely reasonable.
+     */
+    auth.role = "team_leader";
+    fake = makeFakeClient({
+      form: stored({ purpose: "CLIENT_REQUEST" }),
+      requests: { count: 0 },
+      responses: { count: 0 },
+    });
+
+    const result = await updateFormSettings("form-1", {
+      ...INTERNAL_SETTINGS,
+      purpose: "CLIENT_REQUEST",
+      is_anonymous: false,
+    });
+
+    expect(result.ok).toBe(true);
   });
 });

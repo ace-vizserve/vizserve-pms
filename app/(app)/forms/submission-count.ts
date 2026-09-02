@@ -41,7 +41,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
  * about it WAS the vulnerability, and it never opened.
  *
  * What it was: `vizserve_pms_requests` used to be the only table a submission
- * could land in, so it was the whole count. An EMPLOYEE_ENGAGEMENT form never
+ * could land in, so it was the whole count. An INTERNAL form never
  * produces a request — its answers go to `vizserve_pms_form_responses`. So the
  * moment that table shipped, a pulse survey with hundreds of staff answers
  * would still have counted ZERO here, the purpose lock would never have
@@ -64,7 +64,7 @@ import { createAdminClient } from "@/utils/supabase/admin";
  * ⚠️ THE SUM IS EXACT FOR BOTH MESSAGES, and that is a property of the schema
  * rather than luck: a request can only be created through the public form,
  * which requires `is_public`, i.e. CLIENT_REQUEST; a response can only be
- * inserted for a form the RLS policy checks is EMPLOYEE_ENGAGEMENT. The two
+ * inserted for a form the RLS policy checks is INTERNAL. The two
  * counts are therefore mutually exclusive — one of them is always zero — so
  * "N submissions" and "N requests quote it" both name the number they mean.
  * Adding a third purpose, or letting one form carry both, breaks that and the
@@ -78,7 +78,7 @@ export async function countFormSubmissions(
    * ⚠️ `includeResponses: false` IS SOUND ONLY ON A CLIENT_REQUEST FORM, and
    * the caller carries that burden. A response can only be inserted for a form
    * `form responses insertable by their author` has checked is
-   * EMPLOYEE_ENGAGEMENT, so a client form's response count is known to be zero
+   * INTERNAL, so a client form's response count is known to be zero
    * without asking — which is what lets /forms/[id] keep loading for the four
    * live client forms while 20260902110000_p7_66_form_responses.sql is still
    * unapplied. `updateFormSettings` never passes it: the purpose lock is

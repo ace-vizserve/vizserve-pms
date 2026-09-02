@@ -13,7 +13,7 @@ import {
 import { createClient } from "@/utils/supabase/server";
 
 /**
- * P7-66 Phase 4b — A COLLEAGUE ANSWERS AN ENGAGEMENT FORM.
+ * P7-66 Phase 4b — A COLLEAGUE ANSWERS AN INTERNAL FORM.
  *
  * The whole path, and it is deliberately much shorter than the client one:
  *
@@ -30,7 +30,7 @@ import { createClient } from "@/utils/supabase/server";
  * in and DOES hold `insert` on the table, so the policy
  * `form responses insertable by their author` can do the enforcement directly —
  * `submitted_by is null` on an anonymous form and `= auth.uid()` on a named
- * one, on a form Postgres re-checks is EMPLOYEE_ENGAGEMENT and active. A definer function here would only move that check
+ * one, on a form Postgres re-checks is INTERNAL and active. A definer function here would only move that check
  * somewhere it is harder to read while widening what the caller can reach.
  *
  * ⚠️ VALIDATION IS SERVER-SIDE AND IS NOT A SECOND COPY. It is
@@ -55,7 +55,7 @@ import { createClient } from "@/utils/supabase/server";
  *
  * Three reasons, in the order they mattered:
  *
- *   1. NOT EVERY ENGAGEMENT FORM IS A SURVEY. A kudos nomination form is
+ *   1. NOT EVERY INTERNAL FORM IS A SURVEY. A kudos nomination form is
  *      answered once per colleague you want to thank; a sign-up sheet is
  *      answered once per session. "One per person" would break both outright,
  *      and they are two of the three uses the original ask named.
@@ -109,7 +109,7 @@ export async function submitFormResponse(input: unknown): Promise<FormResponseRe
     // see the block above the insert.
     .select("id, name, schema, is_anonymous")
     .eq("slug", parsed.data.slug)
-    .eq("purpose", "EMPLOYEE_ENGAGEMENT")
+    .eq("purpose", "INTERNAL")
     .eq("is_active", true)
     .maybeSingle();
 

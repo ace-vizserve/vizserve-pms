@@ -115,7 +115,7 @@ export const NAV_ITEMS: NavItem[] = [
      * point rather than an accident.
      *
      * `/forms` above is the BUILDER and it is `team_leader`. This is where a
-     * member goes to ANSWER a published employee-engagement form, and it is
+     * member goes to ANSWER a published internal form, and it is
      * `member`. Two rows both called "Forms", one visible to everybody and one
      * to leads, is the sidebar telling two different people the same word means
      * two different screens — and the person who has both would have no way to

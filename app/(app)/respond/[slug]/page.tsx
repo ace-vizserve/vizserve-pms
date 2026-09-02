@@ -17,15 +17,15 @@ import { RespondForm } from "./respond-form";
 export const metadata: Metadata = { title: "Fill a form" };
 
 /**
- * P7-66 Phase 4b — ANSWERING ONE ENGAGEMENT FORM.
+ * P7-66 Phase 4b — ANSWERING ONE INTERNAL FORM.
  *
  * ⚠️ THE SCHEMA IS READ FROM `vizserve_pms_forms.schema`, NOT FROM
  * `vizserve_pms_form_fields`, and that is a decision rather than a shortcut.
  *
  * The builder at /forms/[id] reconciles the blob against the rows and lets the
  * ROWS win, because Phase 1's dual-write could leave a stale blob behind on a
- * form that was published and then left alone. No engagement form can be in
- * that state: `purpose` shipped after Phase 2, so every engagement form there
+ * form that was published and then left alone. No internal form can be in
+ * that state: `purpose` shipped after Phase 2, so every internal form there
  * will ever be was written by `vizserve_pms_save_form_schema`, which stores the
  * blob AND projects the rows in ONE transaction. The blob is therefore current
  * by construction here.
@@ -33,8 +33,8 @@ export const metadata: Metadata = { title: "Fill a form" };
  * The security half matters more. Reading the rows would mean widening the
  * `form fields follow their form` policy — which is department-scoped — to
  * every member in the company. Reading the blob needs only the one narrow
- * policy this phase adds (`published engagement forms readable by staff`), so a
- * member gains sight of published engagement forms and of nothing else.
+ * policy this phase adds (`published internal forms readable by their audience`), so a
+ * member gains sight of published internal forms and of nothing else.
  *
  * ⚠️ NO `SECURITY DEFINER` LOOKUP either, unlike /request/[slug]. That function
  * exists because `anon` holds no table privileges at all. This caller has a
@@ -58,7 +58,7 @@ export default async function RespondToFormPage({
     // a request's worth of answers in the wrong table with no reference number.
     // `submitFormResponse` re-checks both, and so does the INSERT policy.
     .eq("slug", slug)
-    .eq("purpose", "EMPLOYEE_ENGAGEMENT")
+    .eq("purpose", "INTERNAL")
     .eq("is_active", true)
     .maybeSingle();
 
@@ -84,7 +84,7 @@ export default async function RespondToFormPage({
     if (!(cause instanceof FormSchemaError)) throw cause;
 
     // The reason CODE, never the payload — it can carry a raw thrown value.
-    console.error("[P7-66] a published engagement form did not parse", {
+    console.error("[P7-66] a published internal form did not parse", {
       slug,
       reason: cause.reason.code,
     });

@@ -78,7 +78,7 @@ export function RespondForm({
   formId: string;
   /**
    * ⚠️ PASSED, NOT READ OFF `window.location`. The action re-reads the form from
-   * this slug and re-checks that it is a published engagement form, so it is
+   * this slug and re-checks that it is a published internal form, so it is
    * part of the payload rather than a display detail — and a value derived from
    * the URL bar would go wrong on a trailing slash, a query string, or the day
    * this component is reused anywhere else.

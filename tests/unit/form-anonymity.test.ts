@@ -54,7 +54,7 @@ type FakeForm = {
   department_id: string | null;
   created_by: string | null;
   reference_prefix: string;
-  purpose: "CLIENT_REQUEST" | "EMPLOYEE_ENGAGEMENT";
+  purpose: "CLIENT_REQUEST" | "INTERNAL";
   is_anonymous: boolean;
   schema: unknown;
 };
@@ -178,7 +178,7 @@ function form(overrides: Partial<FakeForm> = {}): FakeForm {
     department_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
     created_by: "user-1",
     reference_prefix: "PUL",
-    purpose: "EMPLOYEE_ENGAGEMENT",
+    purpose: "INTERNAL",
     is_anonymous: false,
     schema: SCHEMA,
     ...overrides,
@@ -204,13 +204,20 @@ vi.mock("@/utils/supabase/admin", () => ({
  * asks `requireAuthContext()`. Both are permitted here on purpose — the thing
  * under test is what happens to somebody who IS allowed to be here, and a stub
  * that refused would make every assertion below pass for the wrong reason.
+ *
+ * ⚠️ P7-66 Phase 5 — WHICH IS WHY THE ROLE IS `admin`. Anonymity is a property
+ * of INTERNAL forms only, and since 20260902140000 those are an admin
+ * instrument end to end. A `team_leader` here would be refused by
+ * `internalAdminRefusal` before any anonymity rule was reached, so every case
+ * in this file would be testing the wrong refusal. The admin gate itself is
+ * tested in `form-purpose-lock.test.ts`, which can vary the role.
  */
 vi.mock("@/lib/auth/authorization", () => {
   const context = {
     userId: "user-1",
     email: "test.lead@example.com",
     fullName: "Test Lead",
-    role: "team_leader" as const,
+    role: "admin" as const,
     departmentIds: ["3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"],
   };
 
@@ -226,8 +233,8 @@ import { createForm, updateFormSettings } from "@/app/(app)/forms/actions";
 import { submitFormResponse } from "@/app/(app)/respond/actions";
 
 /** A complete, valid settings payload. `formSettingsSchema` has no defaults. */
-const ENGAGEMENT_SETTINGS = {
-  purpose: "EMPLOYEE_ENGAGEMENT" as const,
+const INTERNAL_SETTINGS = {
+  purpose: "INTERNAL" as const,
   name: "Q3 Pulse Survey",
   slug: "q3-pulse-survey",
   description: "",
@@ -254,7 +261,7 @@ describe("is_anonymous obeys the no-defaults rule on the UPDATE schema", () => {
     // The omitted value is a broken promise in whichever direction it falls:
     // `false` on an anonymous form starts naming people, `true` on a named one
     // claims anonymity over rows that already carry names.
-    const { is_anonymous: _omitted, ...without } = ENGAGEMENT_SETTINGS;
+    const { is_anonymous: _omitted, ...without } = INTERNAL_SETTINGS;
     void _omitted;
 
     expect(formSettingsSchema.safeParse(without).success).toBe(false);
@@ -262,7 +269,7 @@ describe("is_anonymous obeys the no-defaults rule on the UPDATE schema", () => {
 
   it("carries both values through an UPDATE unchanged", () => {
     for (const value of [true, false]) {
-      const parsed = formSettingsSchema.parse({ ...ENGAGEMENT_SETTINGS, is_anonymous: value });
+      const parsed = formSettingsSchema.parse({ ...INTERNAL_SETTINGS, is_anonymous: value });
       expect(parsed.is_anonymous).toBe(value);
     }
   });
@@ -271,7 +278,7 @@ describe("is_anonymous obeys the no-defaults rule on the UPDATE schema", () => {
     // The safe default, and the column's own. An unintended anonymous form loses
     // information nobody can recover; an unintended named one is a mistake that
     // can still be seen and corrected before anybody answers.
-    const { is_anonymous: _omitted, ...without } = ENGAGEMENT_SETTINGS;
+    const { is_anonymous: _omitted, ...without } = INTERNAL_SETTINGS;
     void _omitted;
 
     const parsed = formCreateSchema.parse(without);
@@ -295,7 +302,7 @@ describe("updateFormSettings — anonymity is illegal on a client form", () => {
     fake = makeFakeClient({ form: form({ purpose: "CLIENT_REQUEST", is_anonymous: false }) });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST" as const,
       is_anonymous: true,
     });
@@ -317,7 +324,7 @@ describe("updateFormSettings — anonymity is illegal on a client form", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       purpose: "CLIENT_REQUEST" as const,
       is_anonymous: true,
     });
@@ -343,7 +350,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       is_anonymous: true,
     });
 
@@ -366,7 +373,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       is_anonymous: false,
     });
 
@@ -376,7 +383,7 @@ describe("updateFormSettings — the anonymity lock", () => {
   });
 
   it("counts the RESPONSES table, not just requests", async () => {
-    // An engagement form never produces a request, so a lock that counted only
+    // An internal form never produces a request, so a lock that counted only
     // those would never engage on the one kind of form this setting exists for.
     fake = makeFakeClient({
       form: form({ is_anonymous: false }),
@@ -384,7 +391,7 @@ describe("updateFormSettings — the anonymity lock", () => {
       responses: { count: 1 },
     });
 
-    await updateFormSettings("form-1", { ...ENGAGEMENT_SETTINGS, is_anonymous: true });
+    await updateFormSettings("form-1", { ...INTERNAL_SETTINGS, is_anonymous: true });
 
     expect(fake.recorder.counted).toContain("vizserve_pms_form_responses");
     expect(fake.recorder.countedViaCaller).toEqual([]);
@@ -398,7 +405,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       is_anonymous: true,
     });
 
@@ -415,7 +422,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       is_anonymous: true,
     });
 
@@ -433,7 +440,7 @@ describe("updateFormSettings — the anonymity lock", () => {
     fake = makeFakeClient({ form: form({ is_anonymous: true }) });
 
     const result = await updateFormSettings("form-1", {
-      ...ENGAGEMENT_SETTINGS,
+      ...INTERNAL_SETTINGS,
       is_anonymous: true,
       name: "Q4 Pulse Survey",
     });
@@ -475,11 +482,11 @@ describe("createForm refuses the same illegal pair", () => {
     expect(fake.recorder.inserts).toEqual([]);
   });
 
-  it("creates an anonymous ENGAGEMENT form without complaint", async () => {
+  it("creates an anonymous INTERNAL form without complaint", async () => {
     fake = makeFakeClient({ form: form() });
 
     const result = await createForm({
-      purpose: "EMPLOYEE_ENGAGEMENT",
+      purpose: "INTERNAL",
       name: "Q3 Pulse Survey",
       slug: "",
       reference_prefix: "",

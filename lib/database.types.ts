@@ -83,7 +83,7 @@ export type VizservePmsEventCategory = "COMPANY" | "MANAGEMENT" | "DEPARTMENT";
  * `vizserve_pms_forms_purpose_matches_public`, so never write them separately.
  * `lib/schemas/forms.ts` holds the labels and `isPublicForPurpose`.
  */
-export type VizservePmsFormPurpose = "CLIENT_REQUEST" | "EMPLOYEE_ENGAGEMENT";
+export type VizservePmsFormPurpose = "CLIENT_REQUEST" | "INTERNAL";
 
 /**
  * P7-38 added the last two. NO_TIME_* means there is no punch to read;
@@ -295,6 +295,44 @@ export type Database = {
           },
         ];
       };
+      /**
+       * P7-66 Phase 5 — which departments an INTERNAL form is for.
+       *
+       * Read only when `vizserve_pms_forms.audience_is_all_departments` is
+       * false. Shaped after `vizserve_pms_user_managed_departments` above, which
+       * is the one other many-to-many between a thing and a set of departments.
+       *
+       * ⚠️ NO `Update`. Both meaningful columns are the primary key, so there is
+       * no such thing as editing one of these rows — only deleting it and
+       * inserting another. The table has no `update` privilege either.
+       */
+      vizserve_pms_form_audience_departments: {
+        Row: {
+          form_id: string;
+          department_id: string;
+          created_at: string;
+        };
+        Insert: {
+          form_id: string;
+          department_id: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_form_audience_departments_form_id_fkey";
+            columns: ["form_id"];
+            referencedRelation: "vizserve_pms_forms";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_form_audience_departments_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_audit_logs: {
         Row: {
           id: string;
@@ -434,7 +472,7 @@ export type Database = {
           /**
            * P7-66 — when true, `vizserve_pms_form_responses.submitted_by` is
            * NULL for every answer to this form: the name is NEVER WRITTEN, not
-           * merely hidden. Only legal on an EMPLOYEE_ENGAGEMENT form
+           * merely hidden. Only legal on an INTERNAL form
            * (`vizserve_pms_forms_anonymous_is_internal`) and LOCKED once the
            * form has its first answer (`vizserve_pms_forms_anonymity_lock`) —
            * it is a promise made to the people who answered, and neither
@@ -450,6 +488,22 @@ export type Database = {
            */
           is_public: boolean;
           is_active: boolean;
+          /**
+           * P7-66 Phase 5 — INTERNAL only. True: any active staff
+           * member may answer. False: only the departments listed in
+           * `vizserve_pms_form_audience_departments`.
+           *
+           * ⚠️ A COLUMN RATHER THAN "no rows means everyone". The write is
+           * delete-then-insert; if the halves ever come apart, "no rows" as a
+           * synonym for the whole company turns a half-finished NARROWING into
+           * a silent WIDENING. With the flag the same accident resolves to
+           * NOBODY, which is the direction that cannot leak.
+           *
+           * ⚠️ WRITTEN ONLY BY `vizserve_pms_set_form_audience`, which sets it
+           * and the rows in one transaction. It is absent from `Update` below
+           * for that reason.
+           */
+          audience_is_all_departments: boolean;
           requires_attachment: boolean;
           sla_minutes: number;
           /** Business days the client gets at Gate 3 before auto-completion. */
@@ -474,10 +528,12 @@ export type Database = {
           department_id?: string | null;
           reference_prefix: string;
           purpose?: VizservePmsFormPurpose;
-          /** P7-66. Engagement forms only; locked on the first answer. */
+          /** P7-66. Internal forms only; locked on the first answer. */
           is_anonymous?: boolean;
           is_public?: boolean;
           is_active?: boolean;
+          /** P7-66. Defaults true — a new form is open to everyone until narrowed. */
+          audience_is_all_departments?: boolean;
           requires_attachment?: boolean;
           sla_minutes?: number;
           client_approval_days?: number;
@@ -506,6 +562,16 @@ export type Database = {
           default_list_id: string | null;
           /** P7-66 — written by the Phase 1 dual-write, and by nothing else. */
           schema: Json;
+          /*
+           * ⚠️ `audience_is_all_departments` IS DELIBERATELY ABSENT HERE.
+           *
+           * It is half of a two-part fact — the flag on this row and the rows in
+           * `vizserve_pms_form_audience_departments` — and setting one without
+           * the other changes who may answer a form. Both are written together,
+           * in one transaction, by `vizserve_pms_set_form_audience`. Leaving the
+           * key off this type is what stops a settings save from reaching it by
+           * hand and stranding the pair.
+           */
         }>;
         Relationships: [
           {
@@ -563,7 +629,7 @@ export type Database = {
         ];
       };
       /**
-       * P7-66 Phase 4b — one staff answer to one EMPLOYEE_ENGAGEMENT form,
+       * P7-66 Phase 4b — one staff answer to one INTERNAL form,
        * 20260902110000_p7_66_form_responses.sql.
        *
        * ⚠️ NOT ANONYMOUS. `submitted_by` is not null and is shown, by name,
@@ -1950,6 +2016,33 @@ export type Database = {
         Args: { p_form_id: string; p_schema: Json };
         Returns: undefined;
       };
+      /**
+       * P7-66 Phase 5. Replaces a form audience in ONE transaction — the flag on
+       * `vizserve_pms_forms` and the rows in
+       * `vizserve_pms_form_audience_departments` together.
+       *
+       * ⚠️ THE ONLY SUPPORTED WRITER. Delete-then-insert over two PostgREST
+       * calls is not atomic, and a failure between them changes who may answer.
+       *
+       * Raises rather than returning a result: success is the absence of an
+       * error. Refuses a client form, and refuses "specific departments: none".
+       */
+      vizserve_pms_set_form_audience: {
+        Args: { p_form_id: string; p_all: boolean; p_department_ids: string[] };
+        Returns: undefined;
+      };
+      /**
+       * P7-66 Phase 5. Is the CALLER in this form audience? True when the form
+       * is open to all departments, or when their `primary_department_id` is one
+       * of the targeted ones.
+       *
+       * Says nothing about purpose, publication or anonymity — the policies that
+       * call it AND those in themselves.
+       */
+      vizserve_pms_form_targets_me: {
+        Args: { p_form_id: string };
+        Returns: boolean;
+      };
       vizserve_pms_next_reference_no: {
         Args: { p_form_id: string };
         Returns: string;
@@ -2274,7 +2367,7 @@ export type InternalRequestRow =
   Database["public"]["Tables"]["vizserve_pms_internal_requests"]["Row"];
 export type LeaveTypeRow = Database["public"]["Tables"]["vizserve_pms_leave_types"]["Row"];
 export type EventRow = Database["public"]["Tables"]["vizserve_pms_events"]["Row"];
-/** P7-66 Phase 4b — one staff answer to an engagement form. Attributed, append-only. */
+/** P7-66 Phase 4b — one staff answer to an internal form. Attributed, append-only. */
 export type FormResponseRow =
   Database["public"]["Tables"]["vizserve_pms_form_responses"]["Row"];
 export type LeaveBalanceRow =

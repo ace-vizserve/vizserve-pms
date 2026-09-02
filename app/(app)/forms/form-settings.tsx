@@ -41,7 +41,7 @@ const NO_LIST = "__none__";
  * ⚠️ CLIENT FORMS ONLY. This card used to serve both purposes and hide half of
  * itself behind `isClientRequest`, which is how the two kinds of form got
  * blurred: one screen that looked like one product with some fields absent, when
- * they are two products that happen to share a builder. `EngagementSettings` is
+ * they are two products that happen to share a builder. `InternalSettings` is
  * the other half, and it is a different five questions rather than a subset of
  * these.
  *
@@ -61,7 +61,7 @@ const NO_LIST = "__none__";
  * stray `.default("CLIENT_REQUEST")` once flipped a published STAFF form and let
  * the CHECK `is_public = (purpose = 'CLIENT_REQUEST')` put it on the open
  * internet. A payload from this card can now only ever mean CLIENT_REQUEST, and
- * one from `EngagementSettings` can only ever mean EMPLOYEE_ENGAGEMENT, because
+ * one from `InternalSettings` can only ever mean INTERNAL, because
  * the page picks the component by the form's own purpose.
  *
  * ⚠️ SO IS `is_anonymous`, AT FALSE. `vizserve_pms_forms_anonymous_is_internal`
@@ -310,7 +310,7 @@ export function ClientFormSettings({
           </Select>
           {/*
             ⚠️ ROUTING, NOT OWNERSHIP. The same column means something different
-            on an engagement form, where nothing is routed and it decides who
+            on an internal form, where nothing is routed and it decides who
             READS the answers. Here it decides whose Gate 1 queue a submission
             lands in, which is the first thing that happens to a client request
             and the one nobody can undo from the outside.

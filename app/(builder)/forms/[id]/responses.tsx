@@ -8,7 +8,7 @@ import { createClient } from "@/utils/supabase/server";
 import { ExportAnswers } from "./export-answers";
 
 /**
- * P7-66 Phase 4 — THE RESPONSES TAB OF AN ENGAGEMENT FORM.
+ * P7-66 Phase 4 — THE RESPONSES TAB OF AN INTERNAL FORM.
  *
  * Ace's ask, verbatim: "an internal form if youre an admin you can just gonna
  * click the form and have the view of submissions basically like google forms."
@@ -38,7 +38,7 @@ import { ExportAnswers } from "./export-answers";
  * answered is Phase 6 — it needs the audience Phase 5 adds, because without a
  * roster "not answered" has no denominator.
  *
- * ⚠️ ENGAGEMENT FORMS ONLY, and the caller decides that by not rendering the tab
+ * ⚠️ INTERNAL FORMS ONLY, and the caller decides that by not rendering the tab
  * at all otherwise. A CLIENT_REQUEST form's submissions are
  * `vizserve_pms_requests` and are read at /requests, which is the one place
  * requests are read. See `builderTabsFor`.
@@ -140,10 +140,9 @@ export async function FormResponses({
   /*
    * ⚠️ CHUNKED. `.in("id", ids)` becomes a query STRING on a PostgREST GET, and
    * it is bounded here only by the thousand-row cap — so a company-wide survey
-   * with a few hundred distinct authors builds a URL past the gateway's limit,
-   * the lookup fails WHOLESALE, and every name on the page becomes a claim about
-   * PERMISSIONS: that none of the people who answered is in your department.
-   * False, and unfalsifiable from the screen.
+   * with a few hundred distinct authors builds a URL past the gateway's limit
+   * and the lookup fails WHOLESALE. Every name on the page would then read
+   * "Name unavailable", on a page whose entire subject is who answered.
    */
   const { data: users, error: usersError } = await readSubmitterNames(supabase, [
     ...byPerson.keys(),
@@ -162,13 +161,20 @@ export async function FormResponses({
   const names = Object.fromEntries((users ?? []).map((user) => [user.id, user.full_name]));
 
   /*
-   * ⚠️ SOME NAMES WILL BE MISSING ON A NAMED FORM, AND THAT IS CORRECT RATHER
-   * THAN AN ERROR. The response policy scopes by the FORM's department; the
-   * `vizserve_pms_users` policies scope by the READER's own. A company-wide
-   * survey owned by one department collects answers from another, and its lead
-   * may read those answers without being able to read the names on them.
+   * ⚠️ A MISSING NAME IS NOW A LOOKUP FAILURE, NOT A PERMISSIONS FACT — P7-66
+   * Phase 5 CHANGED WHAT THIS MEANS, and the sentence on screen changed with it.
    *
-   * They are counted and shown as unnamed rather than dropped: a person missing
+   * It used to be routine: the response policy scoped by the FORM's department
+   * and the `vizserve_pms_users` policies by the READER's own, so a lead reading
+   * a company-wide survey legitimately could not resolve half the authors.
+   * `form responses readable by admins` (20260902140000) ended that — only an
+   * admin reaches this page, and an admin reads every department's people. So a
+   * gap here means a chunk of the lookup failed, which is worth saying plainly
+   * rather than blaming on a department boundary that no longer applies.
+   *
+   * The branch STAYS, because the failure it now describes is real: see
+   * `readSubmitterNames`, where one chunk can fail while the others succeed.
+   * They are counted and shown as unnamed rather than dropped — a person missing
    * from the list would make the people count disagree with the list under it.
    */
   const answerers: Answerer[] = [...byPerson.entries()].map(([id, tally]) => ({
@@ -227,8 +233,7 @@ export async function FormResponses({
           ) : (
             <span>
               <strong className="font-semibold">Not anonymous.</strong> Every answer names the
-              person who wrote it. Only an admin and the lead of the owning department can read
-              this page.
+              person who wrote it. Only an admin can read this page.
             </span>
           )}
         </p>
@@ -247,14 +252,22 @@ export async function FormResponses({
           ⚠️ AN UNROUTED FORM'S ANSWERS ARE ADMIN-ONLY, because the policy asks
           `vizserve_pms_manages_department(department_id)` — true for an admin
           whatever it is passed, false for a lead on a null. Nothing stops a team
-          leader publishing an engagement form before choosing its department, so
+          leader publishing an internal form before choosing its department, so
           the screen says why the page is empty rather than letting them conclude
           nobody has answered.
         */}
+        {/*
+          ⚠️ NOT ABOUT READING THE ANSWERS ANY MORE — P7-66 Phase 5 made that
+          admin-only whatever the department is, so the old sentence ("only an
+          admin can read its answers") became true of every form and stopped
+          being news. What an unrouted form still cannot do is PUBLISH
+          (`vizserve_pms_forms_active_requires_department`), which is the reason
+          the page is empty on a draft nobody can reach.
+        */}
         {departmentId === null ? (
           <p className="mt-2.5 rounded-md border border-warning-border bg-warning-subtle px-3 py-2 text-xs leading-relaxed text-warning">
-            This form has no department yet, so only an admin can read its answers. Choose one
-            under Settings and they will appear here.
+            This form has no department yet, so it cannot be published and nobody can answer it.
+            Choose one under Settings.
           </p>
         ) : null}
       </div>
@@ -270,7 +283,7 @@ export async function FormResponses({
  * Who answered.
  *
  * ⚠️ NOT WHO HAS NOT. That list is Phase 6 and it needs the audience Phase 5
- * adds: today a published engagement form is answerable by every signed-in
+ * adds: today a published internal form is answerable by every signed-in
  * colleague, so "not answered" would be the whole company minus this list — a
  * roster nobody asked for and a number that means nothing.
  */
@@ -330,9 +343,9 @@ function Answerers({
               }
             >
               {/* Never a UUID and never a blank. See the note on `names`: this
-                  is a fact about the READER's permissions, not about whether the
-                  answer exists. */}
-              {person.name ?? "Outside your department"}
+                  is a failed lookup, not a statement about the answer, which is
+                  counted either way. */}
+              {person.name ?? "Name unavailable"}
             </span>
             {person.count > 1 ? (
               <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
@@ -350,9 +363,10 @@ function Answerers({
       </ul>
 
       {unnamed > 0 ? (
-        <p className="border-t px-5 py-2.5 text-xs leading-relaxed text-muted-foreground">
-          <span className="tabular-nums">{unnamed}</span> of these answered from outside the
-          departments you lead, so the name is not yours to read. The answer still counts.
+        <p className="border-t px-5 py-2.5 text-xs leading-relaxed text-warning">
+          <span className="tabular-nums">{unnamed}</span>{" "}
+          {unnamed === 1 ? "name" : "names"} could not be looked up. The answers are counted and
+          are in the export; only the lookup failed, so a reload may well fix it.
         </p>
       ) : null}
     </section>
@@ -441,11 +455,10 @@ async function readAnonymousRows(
  * The submitters' names, read in chunks.
  *
  * ⚠️ ONE FAILING CHUNK IS NOT A FAILED LOOKUP. The chunks are independent, so a
- * partial answer is a page where most rows carry a name and a few say "outside
- * your department" — which is the state a named form is ALREADY in whenever the
- * reader's own department does not cover every author. Failing the whole lookup
- * because one chunk timed out would turn a hundred correct names into a hundred
- * false claims.
+ * partial answer is a page where most rows carry a name and a few do not.
+ * Failing the whole lookup because one chunk timed out would blank a hundred
+ * names that arrived perfectly well, and the page would then have to describe
+ * every one of them as unavailable.
  *
  * The error is still returned, so the caller logs it. It is deliberately not
  * fatal: hiding the count because a name did not arrive is the more damaging of

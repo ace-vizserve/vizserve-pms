@@ -78,7 +78,7 @@ describe("responseColumns — form order, and nothing dropped", () => {
 
   it("⚠️ KEEPS A KEY WHOSE FIELD IS GONE ENTIRELY, as an orphan column", () => {
     // `vizserve_pms_form_field_protect` counts requests only, so a field on an
-    // engagement form can be deleted while responses still hold its key.
+    // internal form can be deleted while responses still hold its key.
     const schema = schemaOf([["a", entity("text", "still_here", "Still here")]]);
 
     const columns = responseColumns(schema, ["still_here", "deleted_field"]);

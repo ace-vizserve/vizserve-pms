@@ -16,13 +16,13 @@ import { canAccessDepartment, roleAtLeast, type AuthContext } from "@/lib/auth/a
  *                  department yet. That is what the four P1 policies say and
  *                  what `assertCanEditForm` enforces on every write.
  *   FILLING IN     /respond and /respond/[slug]. ANY active staff member, on a
- *                  published EMPLOYEE_ENGAGEMENT form. That is
- *                  `published engagement forms readable by staff`
+ *                  published INTERNAL form. That is
+ *                  `published internal forms readable by their audience`
  *                  (20260902110000_p7_66_form_responses.sql), and a member has
  *                  to hold it or /respond renders nothing.
  *
  * Policies are OR'd, so the second one widens the first: after it, a team
- * leader of VizMedia can SELECT VizBytes' published engagement forms. Correct
+ * leader of VizMedia can SELECT VizBytes' published internal forms. Correct
  * for /respond — they may answer that survey — and wrong for /forms, which
  * would list somebody else's forms as theirs to edit and render the whole
  * question schema at /forms/[id].
@@ -46,9 +46,38 @@ import { canAccessDepartment, roleAtLeast, type AuthContext } from "@/lib/auth/a
 export type AdministrableForm = {
   department_id: string | null;
   created_by: string | null;
+  /**
+   * P7-66 Phase 5 — REQUIRED, so a caller cannot forget to select it and get the
+   * old, wider answer by omission. See the admin clause below.
+   */
+  purpose: string;
 };
 
 export function administersForm(context: AuthContext, form: AdministrableForm): boolean {
+  /*
+   * ⚠️ P7-66 Phase 5 — AN INTERNAL FORM IS AN ADMIN INSTRUMENT, AND THIS IS THE
+   * SCREEN'S HALF OF THAT.
+   *
+   * Ace, 2 Sep 2026: a team leader cannot read the members of a department they
+   * do not lead, so Phase 6's "who has not answered" roster would be half-blank
+   * on exactly the company-wide survey it is most wanted for. Widening the two
+   * people policies to fix that would have made the whole app's people data
+   * wider; an admin already reads every department, so this costs nothing.
+   *
+   * FIRST, before the author carve-out below. A team leader who CREATED an
+   * internal form before this rule existed must not keep the builder on it
+   * through `created_by` — the policies took the write away
+   * (20260902140000), so the screen would offer them an editor whose every save
+   * Postgres refuses.
+   *
+   * ⚠️ AND IT IS NOT THE ENFORCEMENT. `forms updatable in scope` and `form
+   * fields follow their form` both carry the same rule, and the second is the
+   * one that matters: `vizserve_pms_save_form_schema` is SECURITY INVOKER and
+   * writes the field rows directly, so a lock on the form row alone would leave
+   * every question editable. This decides what a SCREEN is about.
+   */
+  if (form.purpose === "INTERNAL") return context.role === "admin";
+
   // The role floor FIRST, exactly as `assertCanEditForm` applies
   // `requireRole("team_leader")` before it looks at the row. Without it the
   // author carve-out below would answer `true` for a member — a state the

@@ -218,7 +218,7 @@ export const submissionResultSchema = z.union([
 export type SubmissionResult = z.infer<typeof submissionResultSchema>;
 
 // ---------------------------------------------------------------------------
-// P7-66 Phase 4b — a STAFF answer to an employee-engagement form.
+// P7-66 Phase 4b — a STAFF answer to an internal form.
 //
 // A different thing from a client submission and typed separately, for the
 // reason CLAUDE.md gives for keeping internal approvals and client forms apart:
@@ -232,7 +232,7 @@ export type SubmissionResult = z.infer<typeof submissionResultSchema>;
  *
  * ⚠️ THE FORM IS NAMED BY ITS SLUG, NOT BY AN ID THE PAGE WAS HANDED. The
  * action re-reads the form from the slug and re-checks that it is a published
- * engagement form, so the payload cannot nominate a form the person is not
+ * internal form, so the payload cannot nominate a form the person is not
  * looking at — including a CLIENT_REQUEST form, whose answers belong in
  * `vizserve_pms_requests` with a reference number the client is waiting for.
  *
@@ -297,7 +297,7 @@ export type FormResponseResult =
  *
  * Two lifecycles behind one builder. A client request is public, mints a
  * reference number, carries an SLA and a client approval window, and routes
- * through Gate 1 to a task. An engagement form is filled in by signed-in staff
+ * through Gate 1 to a task. An internal form is filled in by signed-in staff
  * and its answers are collected — there is no client, nothing to approve, and
  * four of the settings on the card are meaningless on it.
  *
@@ -308,7 +308,7 @@ export type FormResponseResult =
  * `is_public` is absent from both schemas below — a client that cannot send it
  * cannot send a contradiction for the constraint to reject.
  */
-export const FORM_PURPOSES = ["CLIENT_REQUEST", "EMPLOYEE_ENGAGEMENT"] as const;
+export const FORM_PURPOSES = ["CLIENT_REQUEST", "INTERNAL"] as const;
 
 export type FormPurpose = (typeof FORM_PURPOSES)[number];
 
@@ -320,7 +320,7 @@ export type FormPurpose = (typeof FORM_PURPOSES)[number];
  * has to say that in the picker, not in a doc.
  *
  * `short` is here rather than inline in the forms table because a chip cannot
- * hold "Employee engagement" without breaking the row rhythm, and a label
+ * hold "Internal form" without breaking the row rhythm, and a label
  * written at the call site is the second copy of a map that then drifts — which
  * has happened five times in this repo already. One map, three registers.
  */
@@ -333,10 +333,17 @@ export const FORM_PURPOSE_LABELS: Record<
     short: "Client",
     hint: "Public link, no login. Goes to a Team Leader for approval.",
   },
-  EMPLOYEE_ENGAGEMENT: {
-    label: "Employee engagement",
-    short: "Engagement",
-    hint: "Staff fill it in signed in. Answers are collected, not approved.",
+  INTERNAL: {
+    /*
+     * ⚠️ "INTERNAL FORM", NOT "EMPLOYEE ENGAGEMENT" — renamed with the enum
+     * value on 2 Sep 2026 (20260902135000). The old label named a TOPIC while
+     * its sibling names an AUDIENCE, and an internal form is not always about
+     * engagement: an IT request, a facilities booking, a training feedback form
+     * and an HR intake are all this kind of form.
+     */
+    label: "Internal form",
+    short: "Internal",
+    hint: "Colleagues fill it in signed in. Answers are collected, not approved.",
   },
 };
 
@@ -394,6 +401,46 @@ const slaMinutesField = z.union([z.string(), z.number()]).transform((raw, ctx) =
 });
 
 /**
+ * P7-66 Phase 5 — WHICH COLLEAGUES AN INTERNAL FORM IS FOR.
+ *
+ * ⚠️ TWO FIELDS FOR ONE FACT, AND THE BOOLEAN IS NOT REDUNDANT. "Everyone" could
+ * be encoded as an empty list, and that is exactly the encoding this avoids: the
+ * stored form is delete-then-insert, so an empty list as a synonym for the whole
+ * company turns any half-finished NARROWING into a silent WIDENING. Carrying the
+ * intent explicitly means a list that arrives empty by accident is a refusal
+ * rather than a company-wide survey nobody meant to send.
+ *
+ * The same shape as the column and the table underneath it — see
+ * `vizserve_pms_forms.audience_is_all_departments`.
+ *
+ * ⚠️ THE DEPARTMENT IDS ARE NOT CHECKED FOR EXISTENCE HERE, and must not be
+ * mistaken for having been. This is a shape check; the foreign key on
+ * `vizserve_pms_form_audience_departments` is what refuses an id that names no
+ * department, and the audience policy is what refuses a caller who may not set
+ * one at all.
+ */
+export const formAudienceSchema = z
+  .object({
+    /** True: every active staff member. False: `department_ids`, and only those. */
+    is_all_departments: z.boolean(),
+    department_ids: z.array(z.uuid("Choose real departments.")),
+  })
+  .refine((value) => value.is_all_departments || value.department_ids.length > 0, {
+    /*
+     * ⚠️ "SPECIFIC DEPARTMENTS: NONE" IS A PUBLISHED FORM NOBODY CAN ANSWER.
+     * Reachable by accident — a department deleted out from under the rows
+     * cascades away — and the read side treats that state correctly as nobody.
+     * It must not be reachable by REQUEST, because nothing on the screen would
+     * explain why a live survey rejects every colleague who opens it.
+     */
+    message: "Choose at least one department, or open the form to everyone.",
+    path: ["department_ids"],
+  });
+
+/** The audience as the settings card holds it. */
+export type FormAudience = z.infer<typeof formAudienceSchema>;
+
+/**
  * ⚠️ P7-66 — THIS SCHEMA HAS NO DEFAULTS, AND THAT IS THE WHOLE POINT.
  *
  * It validates an UPDATE to a form that already exists and already holds a
@@ -404,11 +451,11 @@ const slaMinutesField = z.union([z.string(), z.number()]).transform((raw, ctx) =
  *
  * The one that made it a security bug rather than an annoyance was `purpose`.
  * It was `.default("CLIENT_REQUEST")`, so an `updateFormSettings` payload that
- * simply omitted it flipped an EMPLOYEE_ENGAGEMENT form to CLIENT_REQUEST; the
+ * simply omitted it flipped an INTERNAL form to CLIENT_REQUEST; the
  * live CHECK `is_public = (purpose = 'CLIENT_REQUEST')` then set `is_public`
  * true, and a published STAFF form became answerable at /request/<slug> with no
  * session. The purpose lock could not stop it — it counts
- * `vizserve_pms_requests`, and an engagement form never produces one.
+ * `vizserve_pms_requests`, and an internal form never produces one.
  *
  * A SECURITY-RELEVANT FIELD MUST NEVER DEFAULT TO THE MORE PUBLIC VALUE ON AN
  * UPDATE. The other five defaults that were here did not widen access, but each
@@ -495,6 +542,30 @@ export const formSettingsSchema = z.object({
     .int()
     .min(1, "At least one working day.")
     .max(30),
+  /**
+   * P7-66 Phase 5 — WHO SHOULD ANSWER. Internal forms only.
+   *
+   * ⚠️ THE ONE OPTIONAL KEY ON A SCHEMA WHOSE WHOLE POINT IS THAT NOTHING IS
+   * OPTIONAL, so the exemption has to earn itself.
+   *
+   * The no-defaults rule exists because every key that parses is handed
+   * STRAIGHT TO `.update()` — an omitted `is_active` defaulting to false is an
+   * unpublish, an omitted `purpose` was a staff form on the public internet.
+   * That argument does not reach here, because THIS KEY IS NOT A COLUMN. It
+   * gates a separate, atomic write (`vizserve_pms_set_form_audience`), and
+   * absent means the audience write is not made at all — the stored audience
+   * stands untouched. There is no value to overwrite it with.
+   *
+   * Which is also why it is not `.nullable()`: null would be a VALUE, and a
+   * caller would immediately have to decide whether it meant "everyone" or
+   * "leave it". Absent means leave it, and that is the only reading available.
+   *
+   * `ClientFormSettings` never sends it. `updateFormSettings` refuses it beside
+   * a CLIENT_REQUEST purpose, and `vizserve_pms_set_form_audience` refuses it
+   * again — a client is answering from an inbox, with no account and no
+   * department for an audience to name.
+   */
+  audience: formAudienceSchema.optional(),
 });
 
 export type FormSettingsInput = z.infer<typeof formSettingsSchema>;
@@ -518,13 +589,13 @@ export type FormSettingsValues = z.input<typeof formSettingsSchema>;
  * accidentally accept the blank an INSERT is allowed to.
  *
  * P7-66 WIDENS THAT ARGUMENT TO THE SETTINGS NOBODY SHOULD BE ASKED FOR.
- * An engagement form has no reference number, no turnaround standard and no
+ * An internal form has no reference number, no turnaround standard and no
  * queue to file into, so /forms/new asks it for a NAME and nothing else — which
  * only works if this schema can accept `{ name, purpose }` and fill the rest
  * in:
  *
  *   - `sla_minutes` falls to the column's own five working days. Meaningless on
- *     an engagement form, and the value the settings card has always started a
+ *     an internal form, and the value the settings card has always started a
  *     client form on.
  *   - `department_id` falls to null — an UNROUTED DRAFT, which the RLS policy
  *     "forms readable by author while unrouted" exists to keep visible to the

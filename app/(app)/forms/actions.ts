@@ -19,6 +19,7 @@ import {
   nextCandidate,
   prefixFromName,
   slugFromName,
+  type FormAudience,
 } from "@/lib/schemas/forms";
 
 import { responsesCsvFilename, responsesToCsv } from "@/lib/form-builder/csv";
@@ -147,6 +148,84 @@ function anonymityPurposeRefusal(
 }
 
 /**
+ * P7-66 Phase 5 — ⚠️ AN INTERNAL FORM IS AN ADMIN INSTRUMENT, END TO END.
+ *
+ * Ace, 2 Sep 2026, on why: a team leader cannot read the members of a department
+ * they do not lead, so Phase 6’s "who has not answered" roster would be
+ * half-blank on exactly the company-wide survey it is most wanted for. Widening
+ * `users read managed departments` to fix that would have made the WHOLE APP’s
+ * people data wider; restricting internal forms to admins costs nothing, because
+ * an admin already reads every department.
+ *
+ * ⚠️ THIS IS THE READABLE REFUSAL, NOT THE ENFORCEMENT. `forms insertable by
+ * team leaders`, `forms updatable in scope` and `form fields follow their form`
+ * all carry the same rule as of 20260902140000, and the last of those is the one
+ * that matters most: `vizserve_pms_save_form_schema` is SECURITY INVOKER and
+ * writes the field rows directly, so a lock on the form row alone would leave
+ * every question on it still editable. The front end will be bypassed; the
+ * policies will not.
+ *
+ * Client forms are not mentioned because nothing about them changes.
+ */
+function internalAdminRefusal(
+  role: string,
+  purpose: string,
+): ActionResult<never> | null {
+  if (purpose !== "INTERNAL" || role === "admin") return null;
+
+  return {
+    ok: false,
+    error: "Only an admin can create or change an internal form.",
+    fieldErrors: {
+      purpose: [
+        "Internal forms are managed by admins, because their answers are read across departments. Ask an admin to set this one up.",
+      ],
+    },
+  };
+}
+
+/**
+ * P7-66 Phase 5 — THE AUDIENCE WRITE, WHICH IS ITS OWN TRANSACTION.
+ *
+ * ⚠️ NOT PART OF THE `.update()` ABOVE IT, AND THAT IS NOT AN OVERSIGHT. The
+ * audience is two facts in two tables — a flag on the form and a row per
+ * department — and setting one without the other CHANGES WHO MAY ANSWER. Two
+ * PostgREST calls are two transactions, so the pair is written by
+ * `vizserve_pms_set_form_audience`, which does both or neither.
+ *
+ * ⚠️ IT RUNS AFTER THE SETTINGS UPDATE, ON PURPOSE. If this fails, the settings
+ * are saved and the audience is exactly what it was — a partial save the person
+ * is told about, with the stored audience still valid. The other order would
+ * leave a new audience attached to a form whose settings did not land.
+ */
+async function writeFormAudience(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  formId: string,
+  audience: FormAudience,
+): Promise<ActionResult<never> | null> {
+  const { error } = await supabase.rpc("vizserve_pms_set_form_audience", {
+    p_form_id: formId,
+    p_all: audience.is_all_departments,
+    p_department_ids: audience.department_ids,
+  });
+
+  if (!error) return null;
+
+  /*
+   * ⚠️ THE MESSAGE SAYS WHAT DID LAND. This is the one path here that saves
+   * something and still fails, and "could not save" over a form whose name has
+   * just changed is the kind of sentence that gets a change made twice.
+   */
+  return {
+    ok: false,
+    error:
+      "The settings were saved, but who should answer this form was not changed — " +
+      `it is still whatever it was before. Try that part again. ${error.message}`,
+    fieldErrors: { audience: [error.message] },
+  };
+}
+
+/**
  * P7-29 — the slug and the reference prefix are DERIVED when left blank.
  *
  * Both are globally unique and both were empty boxes somebody had to invent a
@@ -190,7 +269,53 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   );
   if (anonymityRefusal) return anonymityRefusal;
 
+  /*
+   * P7-66 Phase 5 — and only an admin may create the internal kind. Checked on
+   * both write paths for the same reason anonymity is: `forms insertable by
+   * team leaders` refuses the row either way, but as a raw
+   * `new row violates row-level security policy`, which is anchored to no field
+   * and actionable by nobody.
+   */
+  const adminRefusal = internalAdminRefusal(context.role, parsed.data.purpose);
+  if (adminRefusal) return adminRefusal;
+
   const supabase = await createClient();
+
+  /*
+   * ⚠️ `audience` IS NOT A COLUMN, so it is lifted off before the row is built.
+   * It is a flag plus a row per department in another table, written by
+   * `vizserve_pms_set_form_audience` — see `writeFormAudience`. Destructured
+   * rather than deleted so the type system keeps checking that nothing else
+   * strays into the insert.
+   */
+  const { audience, ...formRow } = parsed.data;
+
+  /*
+   * ⚠️ REFUSED ON CREATE RATHER THAN SILENTLY DROPPED, and the difference
+   * matters more here than the feature does.
+   *
+   * The create card has no audience control: `/forms/new` asks an internal form
+   * for a name and nothing else, by design, and the audience is chosen in
+   * Settings once there is a form to narrow. So this is unreachable through the
+   * UI — but a caller who sent one and got `{ ok: true }` back would have been
+   * told their narrowing was saved when the form is open to the whole company.
+   * A discarded audience is the one kind of discard that cannot be allowed to
+   * look like success.
+   *
+   * It could not be honoured even if it were wanted: the form has no id until
+   * the insert below returns, so the audience write could not share its
+   * transaction — which is the entire reason
+   * `vizserve_pms_set_form_audience` exists.
+   */
+  if (audience) {
+    return {
+      ok: false,
+      error: "Create the form first, then choose who should answer it.",
+      fieldErrors: {
+        audience: ["Set on the Settings tab, once the form exists."],
+      },
+    };
+  }
 
   // Blank means "derive it". Remembered as a fact about the REQUEST, because it
   // is what decides whether a clash may be resolved silently or has to be
@@ -217,14 +342,14 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
     const { data, error } = await supabase
       .from("vizserve_pms_forms")
       .insert({
-        ...parsed.data,
+        ...formRow,
         slug,
         reference_prefix,
         /*
          * ⚠️ P7-66 — DERIVED HERE, NEVER SENT. `is_public` is off both zod
          * schemas precisely so this line is the only thing that decides it, and
          * `vizserve_pms_forms_purpose_matches_public` refuses the row if it is
-         * ever wrong. Getting it wrong the other way — an engagement form
+         * ever wrong. Getting it wrong the other way — an internal form
          * inserted with `is_public = true` — would put a staff form on the open
          * internet at /request/<slug>, because the public lookup filters on
          * `is_public and is_active` and has never heard of `purpose`.
@@ -297,7 +422,7 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
   /*
    * ⚠️ P7-66 — AND SO DOES THE PURPOSE, FOR THE SAME REASON ONE LEVEL UP.
    *
-   * Turning a client form into an engagement form would flip `is_public` to
+   * Turning a client form into an internal form would flip `is_public` to
    * false under a URL clients hold, take away the Gate 1 route that every one
    * of its live requests is sitting on, and orphan the reference series the
    * prefix lock exists to protect. The reverse is worse: a form built for staff
@@ -308,11 +433,11 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
    * PUBLIC INTERNET, AND IT NEVER WAS. `purpose` is REQUIRED on
    * `formSettingsSchema` — no default — so a payload that omits it is rejected
    * outright rather than silently read as CLIENT_REQUEST. That is the guard
-   * that held on an engagement form with zero requests, which was every
-   * engagement form until Phase 4b shipped. See the schema.
+   * that held on an internal form with zero requests, which was every
+   * internal form until Phase 4b shipped. See the schema.
    *
    * P7-66 Phase 4b: `countFormSubmissions` now counts staff responses as well
-   * as requests, so the lock engages on an engagement form too — and it fails
+   * as requests, so the lock engages on an internal form too — and it fails
    * closed if it cannot count.
    *
    * The count is read ONCE for both locks — see `countFormSubmissions`.
@@ -355,6 +480,45 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
     parsed.data.is_anonymous,
   );
   if (anonymityRefusal) return anonymityRefusal;
+
+  /*
+   * P7-66 Phase 5 — ⚠️ BOTH THE OLD PURPOSE AND THE NEW ONE, which is why this
+   * is two calls and not one.
+   *
+   * `form.purpose` stops a non-admin editing a form that IS internal.
+   * `parsed.data.purpose` stops them turning a client form they legitimately
+   * manage INTO an internal one — a conversion the purpose lock below only
+   * refuses once the form has submissions, and which is therefore wide open on
+   * a fresh client draft. The policy tests both for the same reason.
+   *
+   * Before the count, like the anonymity refusal above and for the same reason:
+   * it is true or false on its own, and an unreachable database must not become
+   * a way past it.
+   */
+  const adminRefusal =
+    internalAdminRefusal(context.role, form.purpose) ??
+    internalAdminRefusal(context.role, parsed.data.purpose);
+  if (adminRefusal) return adminRefusal;
+
+  /*
+   * ⚠️ AN AUDIENCE ON A CLIENT FORM IS NOT A PERMISSIONS QUESTION, IT IS A
+   * MEANINGLESS ONE. A client answers from their inbox with no account and no
+   * department, so there is no set of departments that could describe them.
+   * `vizserve_pms_set_form_audience` refuses it too; this is the sentence in
+   * front of that, and it fires before anything is written rather than after the
+   * settings have already landed.
+   */
+  if (parsed.data.audience && parsed.data.purpose !== "INTERNAL") {
+    return {
+      ok: false,
+      error: "A client form has no audience.",
+      fieldErrors: {
+        audience: [
+          "A client answers from their inbox, with no account and no department to belong to.",
+        ],
+      },
+    };
+  }
 
   if (purposeChanged || prefixChanged || anonymityChanged) {
     const counted = await countFormSubmissions(formId);
@@ -424,10 +588,19 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
     }
   }
 
+  /*
+   * ⚠️ `audience` IS LIFTED OFF, BECAUSE IT IS NOT A COLUMN. It is a flag plus a
+   * set of rows in another table, and it is written below by
+   * `vizserve_pms_set_form_audience` in one transaction of its own. Destructured
+   * rather than deleted so the type system goes on checking that nothing else
+   * strays into `.update()` — which is how this was caught in the first place.
+   */
+  const { audience, ...formRow } = parsed.data;
+
   const { error } = await supabase
     .from("vizserve_pms_forms")
     // `is_public` derived, exactly as on the insert — see the note there.
-    .update({ ...parsed.data, is_public: isPublicForPurpose(parsed.data.purpose) })
+    .update({ ...formRow, is_public: isPublicForPurpose(parsed.data.purpose) })
     .eq("id", formId);
 
   if (error) {
@@ -436,6 +609,27 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
       return { ok: false, error: clash.error, fieldErrors: { [clash.field]: [clash.message] } };
     }
     return { ok: false, error: error.message };
+  }
+
+  /*
+   * ABSENT MEANS LEAVE IT ALONE — see the note on the schema key. A client form
+   * never sends one, and a staff form that sends one has already been checked
+   * against its purpose above.
+   */
+  if (audience) {
+    const audienceFailure = await writeFormAudience(supabase, formId, audience);
+
+    /*
+     * ⚠️ REVALIDATED EVEN ON THE FAILURE PATH, because the settings above DID
+     * land. Returning without it would leave the screen showing the old name
+     * beside an error about the audience, and the person would reasonably
+     * conclude nothing saved and do it all again.
+     */
+    if (audienceFailure) {
+      revalidatePath("/forms");
+      revalidatePath(`/forms/${formId}`);
+      return audienceFailure;
+    }
   }
 
   revalidatePath("/forms");
@@ -539,7 +733,7 @@ export async function renameForm(formId: string, name: unknown): Promise<ActionR
  *
  * ⚠️ `assertCanEditForm` AS WELL, and it is not redundant with the policy above.
  * The policy governs the RESPONSES; this governs the FORM — a lead of another
- * department can legitimately READ a published engagement form (the phase-4b
+ * department can legitimately READ a published internal form (the phase-4b
  * company-wide policy), and administering it is a different question with no
  * row-level answer. Same reasoning as `administersForm` on the builder page.
  *
@@ -579,12 +773,12 @@ export async function exportFormResponses(
   if (!form) return { ok: false, error: "That form does not exist, or is outside your scope." };
 
   /*
-   * ⚠️ ENGAGEMENT FORMS ONLY. A client form's submissions are
+   * ⚠️ INTERNAL FORMS ONLY. A client form's submissions are
    * `vizserve_pms_requests`, and this reads `vizserve_pms_form_responses` — so
    * on a client form it would cheerfully produce a file with a header row and
    * nothing under it, which reads as "no submissions" rather than "wrong table".
    */
-  if (form.purpose !== "EMPLOYEE_ENGAGEMENT") {
+  if (form.purpose !== "INTERNAL") {
     return {
       ok: false,
       error: "A client form's submissions are requests. Export them from the request queue.",
