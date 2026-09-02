@@ -244,9 +244,13 @@ export function RequestsTable({
         getRowKey={(request) => request.id}
       toolbar={toolbar}
       count={count}
-        /* Capped at 200 rows on the server, so the browser must not pretend to
-         sort the whole queue. */
+        /* Paged on the server, so the browser holds one page and must not
+           pretend to sort the whole queue. */
         urlSort
+        /* What the server orders by when the URL says nothing. Display only —
+           it puts the arrow on the right column instead of leaving every header
+           neutral, and it is the same pair `page.tsx` builds its query from. */
+        defaultSort={{ key: "submitted", dir: "desc" }}
         empty={
           errorMessage ? (
             <QueryError what="requests" message={errorMessage} />

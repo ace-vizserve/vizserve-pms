@@ -178,6 +178,7 @@ export function DataTable<T>({
   appendRow,
   className,
   urlSort = false,
+  defaultSort,
   toolbar,
   count,
   getSubRows,
@@ -231,6 +232,22 @@ export function DataTable<T>({
    */
   urlSort?: boolean;
   /**
+   * The order the SERVER already applies when the URL names none.
+   *
+   * ⚠️ IT DESCRIBES THE ROWS, IT NEVER ASKS FOR THEM. Nothing here reaches the
+   * query string, so a first paint still carries no `?sort=`. What it fixes is
+   * a header that was lying: `/requests` arrives ordered newest-first, the URL
+   * said nothing, so every column drew the neutral two-way glyph — and the
+   * first click on that column then asked for the order the rows were ALREADY
+   * in, which is why "Submitted at" could not be sorted ascending at all.
+   *
+   * `key` is a `sortKey` value — what `?sort=` speaks — not a column `key`, the
+   * same namespace `Column.sortKey` uses. The server page holds this default
+   * too, because it has to build the query; the two are one fact stated on
+   * either side of the wire, and they have to be changed together.
+   */
+  defaultSort?: { key: string; dir: SortDirection };
+  /**
    * The search box and filter controls, rendered in the table's own header
    * strip.
    *
@@ -269,6 +286,24 @@ export function DataTable<T>({
   const dir: SortDirection = params.get("dir") === "desc" ? "desc" : "asc";
 
   /*
+   * What the header draws and what TanStack is told it is showing. The URL wins
+   * wherever it speaks; `defaultSort` fills in its silence and nothing else.
+   *
+   * Seeding it is also what makes the first click on a defaulted column
+   * REVERSE the order rather than re-request it — the toggle starts from the
+   * direction on screen, so it can only move away from it.
+   *
+   * ⚠️ ONLY WHERE THE SERVER SORTS. The prop describes an order Postgres
+   * already applied, so on a browser-sorted table it describes nothing — and
+   * `getSortedRowModel` IS installed there, so seeding the state would really
+   * reorder the rows and then pin them, because `onSortingChange` throws away
+   * every click on those tables.
+   */
+  const fallbackSort = urlSort ? defaultSort : undefined;
+  const activeSort = sort ?? fallbackSort?.key;
+  const activeDir: SortDirection = sort ? dir : (fallbackSort?.dir ?? dir);
+
+  /*
    * Our `Column<T>` mapped onto TanStack's shape rather than replaced by it.
    * The call sites keep the API they had — `key`, `header`, `cell` — and this
    * is the one place that knows about `ColumnDef`, so swapping the engine again
@@ -305,8 +340,11 @@ export function DataTable<T>({
   );
 
   const sorting = useMemo<SortingState>(
-    () => (sort ? [{ id: keyOf(columns, sort), desc: dir === "desc" }] : []),
-    [columns, sort, dir],
+    () =>
+      activeSort
+        ? [{ id: keyOf(columns, activeSort), desc: activeDir === "desc" }]
+        : [],
+    [columns, activeSort, activeDir],
   );
 
   const table = useReactTable({
@@ -322,6 +360,15 @@ export function DataTable<T>({
     // would fight the server.
     ...(manual ? {} : { getSortedRowModel: getSortedRowModel() }),
     manualSorting: manual,
+    /* ⚠️ THE THIRD CLICK HAS NOWHERE TO GO WHEN THE SERVER SORTS. TanStack's
+       default cycle is asc → desc → unsorted, and `onSortingChange` below has
+       no way to express "unsorted" — there is no `?sort=` that means "however
+       Postgres felt", so it bails and the click does nothing. Two directions
+       only here. The removal step can only matter where sorting is handled
+       here at all, and browser-side sorting is inert today — `onSortingChange`
+       early-returns for every non-`urlSort` table and discards the click — so
+       this flag is in practice about the URL-sorted path. */
+    enableSortingRemoval: !manual,
     onExpandedChange: setExpanded,
     state: {
       sorting,
@@ -392,7 +439,7 @@ export function DataTable<T>({
               header.column.columnDef.meta as { column: Column<T> }
             ).column;
             const sortable = Boolean(column.sortKey);
-            const active = sortable && sort === column.sortKey;
+            const active = sortable && activeSort === column.sortKey;
 
             return (
               <TableHead
@@ -403,7 +450,7 @@ export function DataTable<T>({
                 // the arrow beside it is decoration it never hears about.
                 aria-sort={
                   active
-                    ? dir === "asc"
+                    ? activeDir === "asc"
                       ? "ascending"
                       : "descending"
                     : undefined
@@ -436,7 +483,7 @@ export function DataTable<T>({
                       before anyone clicks it. Greyscale loses nothing.
                     */}
                     {active ? (
-                      dir === "asc" ? (
+                      activeDir === "asc" ? (
                         <ArrowUp aria-hidden className="size-3.5 shrink-0" />
                       ) : (
                         <ArrowDown aria-hidden className="size-3.5 shrink-0" />
@@ -449,7 +496,7 @@ export function DataTable<T>({
                     )}
                     <span className="sr-only">
                       {active
-                        ? `Sorted ${dir === "asc" ? "ascending" : "descending"}. Click to reverse.`
+                        ? `Sorted ${activeDir === "asc" ? "ascending" : "descending"}. Click to reverse.`
                         : "Click to sort by this column."}
                     </span>
                   </button>

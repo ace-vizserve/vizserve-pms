@@ -19,8 +19,9 @@ export const metadata: Metadata = { title: "Requests" };
  * Phase 1 exit criterion — "a request appears in the correct TL's queue and
  * nowhere else" — assertable at the API layer rather than by clicking around.
  *
- * Sorted by target date ascending: a queue is a to-do list, so the thing due
- * soonest leads, not the thing submitted most recently.
+ * Sorted newest first: this is an inbox, and the request somebody is chasing is
+ * almost always the one that just landed. `?sort=` overrides it, and the table
+ * is handed the same default so its header agrees with the rows it is drawing.
  *
  * No <h1>. The shell breadcrumb is the page label.
  */
@@ -54,11 +55,27 @@ export default async function RequestsPage({
    */
   const SORTS = ["submitted", "reference", "title", "requester", "target", "agreed", "status"] as const;
   type Sort = (typeof SORTS)[number];
-  const sort: Sort = (SORTS as readonly string[]).includes(params.sort ?? "")
+  /*
+   * The order applied when the URL asks for none. `requests-table.tsx` passes
+   * the same pair to `DataTable` as `defaultSort`, which is the only reason its
+   * header can draw an arrow for an order nobody put in the query string —
+   * change one and change the other or it goes back to lying about it.
+   */
+  const DEFAULT_SORT = { sort: "submitted", ascending: false } as const;
+
+  /* `undefined` when the URL named no sort we recognise, and that distinction is
+     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
+     collapsed into `sort` below. */
+  const requested: Sort | undefined = (SORTS as readonly string[]).includes(params.sort ?? "")
     ? (params.sort as Sort)
-    : "submitted";
-  // Submitted-at leads newest-first; everything else reads naturally ascending.
-  const ascending = params.dir ? params.dir !== "desc" : sort !== "submitted";
+    : undefined;
+  const sort: Sort = requested ?? DEFAULT_SORT.sort;
+  /* ONE SOURCE FOR THE DIRECTION. An explicit sort obeys `?dir=` — ascending
+     unless it says otherwise, which is why the table leaves `asc` out of the URL
+     — and no explicit sort takes the default's. Reading a column name back out
+     of the URL to decide the direction, as this did, meant the arrow and the
+     rows could disagree and one column could never be reversed. */
+  const ascending = requested ? params.dir !== "desc" : DEFAULT_SORT.ascending;
 
   const ORDER_COLUMN: Record<Sort, string> = {
     submitted: "submitted_at",
@@ -162,8 +179,11 @@ export default async function RequestsPage({
     if (params.form) next.set("form", params.form);
     if (params.from) next.set("from", params.from);
     if (params.to) next.set("to", params.to);
-    if (sort !== "submitted") next.set("sort", sort);
-    if (params.dir === "desc") next.set("dir", "desc");
+    /* Only what the URL actually named. Emitting the default back would be a
+       link claiming a choice nobody made, and `dir` without a `sort` beside it
+       now means nothing at all. */
+    if (requested) next.set("sort", requested);
+    if (requested && params.dir === "desc") next.set("dir", "desc");
     if (pageSize !== PAGE_SIZES[0]) next.set("size", String(pageSize));
     if (target > 1) next.set("page", String(target));
     const query = next.toString();
