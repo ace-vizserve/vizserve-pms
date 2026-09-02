@@ -9,7 +9,7 @@ import { QueryError } from "@/components/query-error";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { requireRole } from "@/lib/auth/authorization";
+import { requireDepartmentShape } from "@/lib/auth/authorization";
 import { optionsFromRow, reconcileFormSchema, type FormFieldRow } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
 import { createClient } from "@/utils/supabase/server";
@@ -131,7 +131,10 @@ export default async function EditFormPage({
 }) {
   const { id } = await params;
   const { tab: rawTab } = await searchParams;
-  const context = await requireRole("team_leader");
+  // P8-01c. Was `requireRole("team_leader")`. `administersForm` below is what
+  // decides whether THIS form is theirs; this gate only refuses somebody who
+  // shapes no department at all.
+  const context = await requireDepartmentShape();
   const supabase = await createClient();
 
   // RLS decides visibility, so an out-of-scope id simply returns nothing —
@@ -226,7 +229,7 @@ export default async function EditFormPage({
    *   UNROUTED form — a form `administersForm` above has just confirmed is
    *   theirs to edit. Read as the caller, the counts came back zero AND NO
    *   ERROR (CLAUDE.md: a failing policy returns zero rows), so the two locked
-   *   inputs rendered unlocked. Authority is settled by `requireRole` and
+   *   inputs rendered unlocked. Authority is settled by `requireDepartmentShape` and
    *   `administersForm`; how many answers exist is a data question.
    *
    *   IT FAILS CLOSED. A count that errors is not a count of zero, and the

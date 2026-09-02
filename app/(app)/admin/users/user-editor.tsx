@@ -958,15 +958,24 @@ function UserForm({
             <p className="mt-0.5 text-xs text-muted-foreground">
               {!viewerIsOwner
                 ? "Only an owner can grant this."
-                : isDeptAdmin
-                  ? "Administrative capability over their own department — the one under “Belongs to” above, not the ones they lead. Their rank is unchanged, so they still report to their Team Leader and approve nothing."
-                  : "Not a department admin. Every owner already administers every department regardless of this switch."}
+                : /* ⚠️ THE TICK IS SCOPED TO A DEPARTMENT, SO IT NEEDS ONE.
+                     `vizserve_pms_is_dept_admin` compares its argument with the
+                     holder's `primary_department_id`; with none set the tick
+                     saves and grants nothing, and this copy would be claiming a
+                     capability nobody has. The schema refuses the combination
+                     too — that half is the enforcement, this half is the
+                     explanation. */
+                  !primaryDepartmentId
+                  ? "Choose the department this person belongs to first — this tick only covers their own department."
+                  : isDeptAdmin
+                    ? "Administrative capability over their own department — the one under “Belongs to” above, not the ones they lead. Their rank is unchanged, so they still report to their Team Leader and approve nothing."
+                    : "Not a department admin. Every owner already administers every department regardless of this switch."}
             </p>
           </div>
           <Switch
             id="is_dept_admin"
-            checked={isDeptAdmin}
-            disabled={!viewerIsOwner}
+            checked={isDeptAdmin && Boolean(primaryDepartmentId)}
+            disabled={!viewerIsOwner || !primaryDepartmentId}
             onCheckedChange={setIsDeptAdmin}
           />
         </div>

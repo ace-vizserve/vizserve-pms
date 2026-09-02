@@ -117,6 +117,22 @@ export type Viewer = {
   userId: string;
   role: VizservePmsUserRole;
   managedDepartmentIds: string[];
+  /**
+   * P8-01c — the ONE department this person administers through the Admin tick,
+   * or null.
+   *
+   * ⚠️ A SINGLE ID AND NOT A LIST, because the tick applies to exactly one
+   * department: `vizserve_pms_is_dept_admin` compares against
+   * `primary_department_id`, the team the holder BELONGS to. A list would invite
+   * a second, invisible way of being a lead — which is what
+   * `canAdminDepartment` warns against in as many words.
+   *
+   * ⚠️ AN OWNER IS NOT REPRESENTED HERE. They administer every department, and
+   * the `roleAtLeast(role, "owner")` branch in `canDelete` already answers for
+   * them — resolved on the server by `canAdminDepartment`, which this field is
+   * the serialisable half of.
+   */
+  deptAdminOf: string | null;
 };
 
 export type TaskLookups = {
@@ -201,7 +217,8 @@ export function TaskGroupTable({
    * P7-19 — whether to offer the trash on this row.
    *
    * Mirrors `vizserve_pms_can_delete_task`: internal work only, and only for a
-   * lead of the department, whoever created it, or the owner of a personal task.
+   * lead of the department, A DEPARTMENT ADMIN OF IT (P8-01c), whoever created
+   * it, or the owner of a personal task.
    * The database is still the authority — this only decides whether to ask, so
    * nobody is offered a control that can only answer no.
    */
@@ -212,6 +229,12 @@ export function TaskGroupTable({
       viewer.managedDepartmentIds.includes(task.department_id);
     return (
       leads ||
+      // P8-01c — the Admin tick. Beside the lead test, never folded into it:
+      // leading a department carries approval authority and the tick carries
+      // none. `lib/auth/authorization.ts` is `server-only`, so this is the same
+      // mirror-across-the-wire the lead test above already is; the server
+      // resolved it with `canAdminDepartment` before handing over `deptAdminOf`.
+      task.department_id === viewer.deptAdminOf ||
       task.created_by === viewer.userId ||
       (task.is_personal && task.assignee_id === viewer.userId)
     );

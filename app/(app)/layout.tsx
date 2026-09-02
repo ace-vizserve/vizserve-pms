@@ -1,8 +1,8 @@
 import {
   canAdminDepartment,
   canDoHr,
+  canShapeAnyDepartment,
   requireAuthContext,
-  roleAtLeast,
 } from "@/lib/auth/authorization";
 import { groupedNavItems } from "@/lib/navigation";
 import { formatNavBadge } from "@/lib/navigation";
@@ -39,10 +39,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   //
   // P8-01 adds `isDeptAdmin` on the same principle, resolved against the
   // person's OWN department because that is the only one the tick can apply to
-  // and the nav can only ask "do they administer anything at all". No nav row
-  // sets `requiresDeptAdmin` yet — the screens are a follow-up — so this
-  // changes nothing today and is here so that follow-up adds a field to a row
-  // rather than plumbing to the layout.
+  // and the nav can only ask "do they administer anything at all".
+  //
+  // P8-01c is what finally reads it: the Forms row carries `alsoDeptAdmin`, so
+  // a MEMBER holding the tick now sees the builder in the rail.
   const sections = groupedNavItems(context.role, {
     isHr: canDoHr(context),
     isDeptAdmin: canAdminDepartment(context, context.primaryDepartmentId),
@@ -244,7 +244,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               ),
             }}
             spaces={spaces}
-            canManageLists={roleAtLeast(context.role, "team_leader")}
+            canManageLists={canShapeAnyDepartment(context)}
             user={{
               fullName: context.fullName,
               email: context.email,

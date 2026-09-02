@@ -16,7 +16,7 @@ import { requireAuthContext } from "@/lib/auth/authorization";
  *
  * ⚠️ AUTH IS ENFORCED HERE, because `app/(app)/layout.tsx` is what did it
  * before and this route no longer passes through it. `proxy.ts` still gates the
- * route at the edge, and the page itself still calls `requireRole("team_leader")`
+ * route at the edge, and the page itself still calls `requireDepartmentShape()`
  * — this is the layer that was lost in the move, restated where it belongs.
  * `app/page.tsx` is the precedent: a page outside the shell carrying its own
  * auth and its own header.

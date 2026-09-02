@@ -139,6 +139,30 @@ function withWorkHourRules<T extends z.ZodObject<z.ZodRawShape>>(schema: T) {
         message: "The end of the day has to be after the start. Overnight schedules are not supported yet.",
         path: ["work_end"],
       },
+    )
+    /*
+     * P8-01c — ⚠️ THE ADMIN TICK IS SCOPED TO A DEPARTMENT, SO IT NEEDS ONE.
+     *
+     * `vizserve_pms_is_dept_admin(p_department_id)` compares that argument with
+     * the holder's `primary_department_id`, and `canAdminDepartment` returns
+     * false the moment either side is null. So ticking this on somebody with no
+     * primary department SAVES, GRANTS NOTHING, and leaves a switch on screen
+     * claiming they administer a department they are not in — a lie the owner
+     * who set it has no way to notice.
+     *
+     * Refused here rather than only disabled in the editor: the editor explains
+     * it, this enforces it, and the schema is the half a crafted request cannot
+     * skip.
+     */
+    .refine(
+      (value) =>
+        !(value as { is_dept_admin?: boolean }).is_dept_admin ||
+        Boolean((value as { primary_department_id?: string | null }).primary_department_id),
+      {
+        message:
+          "Choose the department this person belongs to first — the admin tick only covers their own department.",
+        path: ["is_dept_admin"],
+      },
     );
 }
 

@@ -15,7 +15,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { requireAuthContext } from "@/lib/auth/authorization";
+import { canAdminDepartment, requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { RichText } from "@/components/ui/rich-text";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
@@ -342,6 +342,15 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       roleAtLeast(context.role, "owner") ||
       context.managedDepartmentIds.includes(task.department_id),
     isAdmin: roleAtLeast(context.role, "owner"),
+    /*
+     * P8-01c — the Admin tick on THIS task's department, which is what
+     * `vizserve_pms_force_task_status` now also accepts.
+     *
+     * Beside `leadsDepartment` rather than inside it: that flag is this page's
+     * approval-shaped permission and gates renaming, editing, uploading and
+     * reassigning. The tick confers none of those — only the force-status link.
+     */
+    administersDepartment: canAdminDepartment(context, task.department_id),
   };
 
   const late = isOverdue(task.due_date) && !isTerminal(task.status);

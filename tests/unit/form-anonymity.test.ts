@@ -225,10 +225,16 @@ vi.mock("@/lib/auth/authorization", () => {
     departmentIds: ["3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f"],
   };
 
+  // ⚠️ `requireDepartmentShape` / `assertDepartmentShape` since P8-01c — the
+  // forms actions moved onto the pair that also admits a department admin.
   return {
-    requireRole: async () => context,
+    requireDepartmentShape: async () => context,
     requireAuthContext: async () => context,
-    assertDepartmentAccess: () => {},
+    assertDepartmentShape: () => {},
+    /* P8-01c — `assertCanEditForm` reads this to refuse an INTERNAL form to the
+       department-admin route, which no forms policy admits. The mocked context
+       is an owner, so true is the honest answer here. */
+    canAccessDepartment: () => true,
     ForbiddenError: class ForbiddenError extends Error {},
   };
 });

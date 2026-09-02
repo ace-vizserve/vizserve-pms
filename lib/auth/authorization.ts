@@ -137,6 +137,19 @@ const PROFILE_COLUMNS =
  * `lib/settings-server.ts`: a capability nobody can hold yet is not worth a
  * whole-app lockout.
  *
+ * ⚠️ IT RESTORES THE SESSION, NOT THE RANK, AND THE DIFFERENCE IS THE WHOLE
+ * DEPLOY PLAN. Between `p8_01a` and `p8_01b` every account still holds the
+ * retired `admin` rung, so `requireRole("owner")` matches NOBODY: /admin/* and
+ * /hr/* throw, and `departmentScopeFilter` narrows to what each person leads.
+ * People can sign in and work; the admin screens are shut. That is recoverable
+ * only from the SQL editor, which is exactly why the two files must be pasted
+ * in the same sitting as the deploy rather than at leisure.
+ *
+ * There is deliberately NO shim treating `admin` as `owner` to close that gap.
+ * It would hand owner powers to any legacy or restored `admin` row — the thing
+ * `tests/unit/dept-admin-capability.test.ts` asserts cannot happen — and it
+ * would outlive the window it was written for.
+ *
  * ⚠️ NARROW ON PURPOSE. It is not "the read failed"; it is "the read failed
  * naming THIS column". A genuine no-profile row (`maybeSingle` reports no error
  * for zero rows) and every other failure still fall through to
@@ -491,4 +504,127 @@ export function departmentPickerScope(context: AuthContext): DepartmentPickerSco
   if (filter.length === 0) return { kind: "none" };
 
   return { kind: "some", ids: filter };
+}
+
+/**
+ * P8-01c — "MAY THIS PERSON SHAPE THIS DEPARTMENT'S STRUCTURE?"
+ *
+ * Folders, lists and forms: the containers a department's work lives in. Two
+ * kinds of person may reshape them and they arrive by different routes:
+ *
+ *   A LEAD, through `canAccessDepartment` — team_leader-or-above with the
+ *   department in their managed set. Unchanged, and still the only route that
+ *   also carries approval authority.
+ *
+ *   A DEPARTMENT ADMIN, through `canAdminDepartment` — the P8-01 tick, on their
+ *   own `primaryDepartmentId`, AT ANY RANK. A member holding it reshapes the
+ *   team they belong to and approves nothing.
+ *
+ * ⚠️ AN `||`, AND THE TWO HALVES MUST STAY SEPARATE PREDICATES. The tempting
+ * shortcut is to widen `canAccessDepartment` itself, which would be one edit
+ * instead of this file plus a dozen call sites — and would be the exact mistake
+ * `20260903100100_p8_01b_admin_capability.sql` §7 forbids on the SQL side:
+ * `canAccessDepartment` mirrors `vizserve_pms_manages_department`, which is what
+ * /approvals, the leave policies and the timesheet queues consult to decide WHO
+ * MAY DECIDE. Widening it would hand every department admin the power to approve
+ * their own leave. This is a THIRD predicate that reads both, so structure and
+ * approval can never be confused again by an edit to either.
+ *
+ * ⚠️ THE SQL SIDE IS TWO POLICIES, NOT ONE OR-ED EXPRESSION. P8-01c adds
+ * permissive policies BESIDE the existing lead policies rather than rewriting
+ * them (they are OR-ed, so nobody's access narrows and no policy is ever
+ * briefly absent). This function is the single TypeScript reading of the union
+ * those two policies produce.
+ */
+export function canShapeDepartment(context: AuthContext, departmentId: string | null): boolean {
+  return canAccessDepartment(context, departmentId) || canAdminDepartment(context, departmentId);
+}
+
+/**
+ * Does this person shape ANY department at all?
+ *
+ * The question a page gate and the sidebar can ask, where no particular
+ * department is in hand yet — /tasks/lists and /forms both open on a list of
+ * everything the caller may touch, and a caller who may touch nothing should be
+ * refused before the queries run.
+ *
+ * ⚠️ `primaryDepartmentId` IS THE ONLY DEPARTMENT THE TICK CAN APPLY TO, so
+ * asking about it is asking about the whole capability — there is no second
+ * department a department admin might administer. That is the same resolution
+ * `app/(app)/layout.tsx` performs for the nav.
+ *
+ * A `team_leader` who leads nothing yet answers TRUE here, deliberately: that is
+ * the pre-P8-01 behaviour of `requireRole("team_leader")`, the state a newly
+ * promoted lead is in before somebody maps them to a department, and narrowing
+ * it would be this change taking something away.
+ */
+export function canShapeAnyDepartment(context: AuthContext): boolean {
+  return (
+    roleAtLeast(context.role, "team_leader") ||
+    canAdminDepartment(context, context.primaryDepartmentId)
+  );
+}
+
+/**
+ * For the pages and actions that shape department structure.
+ *
+ * ⚠️ THIS REPLACES `requireRole("team_leader")` ON EVERY STRUCTURE SCREEN, and
+ * the replacement is the point of P8-01c rather than a tidy-up. A department
+ * admin may be a MEMBER by rank — that is the entire shape of the capability
+ * (D33) — and a member fails `requireRole("team_leader")`. Leaving those gates
+ * as they were would have landed the migration and left the layer that reaches
+ * it behind, which docs/13-implementation-status.md records four times in two
+ * days as this repo's single most repeated failure.
+ *
+ * Deliberately NOT `requireRole`-shaped, for the reason `requireHr` is not:
+ * "shapes a department" is not a floor on the role ladder. It takes no argument
+ * because it answers "anything at all" — the per-department decision is
+ * `canShapeDepartment`, and every screen behind this gate still makes it.
+ */
+export async function requireDepartmentShape(): Promise<AuthContext> {
+  const context = await requireAuthContext();
+  if (!canShapeAnyDepartment(context)) {
+    throw new ForbiddenError("This area is for team leaders and department admins.");
+  }
+  return context;
+}
+
+export function assertDepartmentShape(context: AuthContext, departmentId: string | null): void {
+  if (!canShapeDepartment(context, departmentId)) {
+    throw new ForbiddenError("That department is outside what you administer.");
+  }
+}
+
+/**
+ * P8-01c — `departmentPickerScope`, plus the department the tick administers.
+ *
+ * ⚠️ A SEPARATE FUNCTION RATHER THAN A WIDER `departmentPickerScope`, because
+ * the two answer different questions and only one of them may move.
+ * `departmentPickerScope` is derived from `departmentScopeFilter`, which is the
+ * APPROVAL/visibility scope used by list queries — widening it would put a
+ * department admin's team into queues the tick confers no rights over. This one
+ * is for the pickers on the STRUCTURE screens: which departments may I file a
+ * new folder, list or form under.
+ *
+ * ⚠️ `none` STILL MEANS DO NOT RUN THE QUERY. The sentinel trap
+ * `departmentPickerScope` was written for is unchanged and just as live here:
+ * `.in("id", [""])` raises `invalid input syntax for type uuid: ""` (22P02), so
+ * "this person shapes nothing" must never become a filter.
+ *
+ * A `some` list is de-duplicated: a team leader who ALSO holds the tick on a
+ * department they lead would otherwise get it twice, and the picker would draw
+ * two identical options.
+ */
+export function departmentShapeScope(context: AuthContext): DepartmentPickerScope {
+  const base = departmentPickerScope(context);
+
+  // An owner already reaches everything; there is nothing to add, and adding it
+  // would turn `all` into a finite list.
+  if (base.kind === "all") return base;
+
+  const own = context.primaryDepartmentId;
+  if (!own || !canAdminDepartment(context, own)) return base;
+
+  const ids = base.kind === "some" ? base.ids : [];
+  return { kind: "some", ids: ids.includes(own) ? ids : [...ids, own] };
 }

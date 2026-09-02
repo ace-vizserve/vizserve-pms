@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, Globe, Users } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { requireDepartmentShape } from "@/lib/auth/authorization";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
@@ -123,7 +123,11 @@ export default async function NewFormPage({
 }: {
   searchParams: Promise<{ purpose?: string | string[] }>;
 }) {
-  const context = await requireRole("team_leader");
+  // P8-01c. Was `requireRole("team_leader")` — a department admin creates their
+  // own department's client forms at any rank. `purposesFor` below still offers
+  // them the client card only: INTERNAL stays owner-only, and `createForm`
+  // refuses it again with a sentence.
+  const context = await requireDepartmentShape();
   const offered = purposesFor(context.role);
 
   const asked = parsePurpose((await searchParams).purpose);

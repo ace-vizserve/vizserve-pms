@@ -102,8 +102,14 @@ export function NavProjects({
 }: {
   spaces: ProjectSpace[];
   /**
-   * `/tasks/lists` calls `requireRole("team_leader")` and renders the forbidden
+   * `/tasks/lists` calls `requireDepartmentShape()` and renders the forbidden
    * page for anybody else.
+   *
+   * ⚠️ P8-01c CHANGED WHAT "ANYBODY ELSE" MEANS. That gate was
+   * `requireRole("team_leader")`; it now also admits a DEPARTMENT ADMIN of any
+   * rank, so the caller passes `canShapeAnyDepartment(context)` rather than a
+   * rank test. Leaving a rank test here would have hidden "Create a list" from
+   * exactly the person the Admin tick was built for.
    *
    * ⚠️ THIS ROW WAS SHIPPED UNGATED and sent every member to that error — the
    * feature was meant to make lists discoverable and instead made a dead end

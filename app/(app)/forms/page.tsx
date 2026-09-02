@@ -4,7 +4,7 @@ import Link from "next/link";
 
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
-import { requireRole } from "@/lib/auth/authorization";
+import { canAccessDepartment, requireDepartmentShape } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { administersForm } from "./administers";
 import { FormsTable, type FormRow } from "./forms-table";
@@ -37,7 +37,11 @@ export const metadata: Metadata = { title: "Forms" };
  * No <h1>. The shell breadcrumb is the page label.
  */
 export default async function FormsPage() {
-  const context = await requireRole("team_leader");
+  // P8-01c. Was `requireRole("team_leader")`. A department admin builds their
+  // own department's client forms, and may be a MEMBER by rank — the list below
+  // is still narrowed per row by `administersForm`, which is what decides whose
+  // forms these are.
+  const context = await requireDepartmentShape();
   const supabase = await createClient();
 
   const { data: forms } = await supabase
@@ -94,6 +98,20 @@ export default async function FormsPage() {
    */
   const rows = (forms ?? []).filter((form) => administersForm(context, form)) as FormRow[];
 
+  /*
+   * ⚠️ WHOSE SUBMISSIONS THIS VIEWER CAN ACTUALLY READ — see the column comment
+   * in `forms-table.tsx`.
+   *
+   * `canAccessDepartment`, the mirror of `vizserve_pms_manages_department`,
+   * because that is the policy on `vizserve_pms_requests` and the P8-01c tick
+   * does not widen it. Deriving this from the counts instead ("zero must mean
+   * refused") is the trap: a genuinely unused form and an unreadable one are
+   * both zero, and the two must not print the same word.
+   */
+  const submissionsReadable: Record<string, boolean> = Object.fromEntries(
+    rows.map((form) => [form.id, canAccessDepartment(context, form.department_id)]),
+  );
+
   return (
     <PageShell>
       <div className="flex items-center justify-end">
@@ -107,6 +125,7 @@ export default async function FormsPage() {
         rows={rows}
         departmentNames={departmentNames}
         submissionCounts={submissionCounts}
+        submissionsReadable={submissionsReadable}
         lastSubmission={lastSubmission}
       />
     </PageShell>

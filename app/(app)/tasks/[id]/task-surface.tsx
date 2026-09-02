@@ -230,6 +230,15 @@ export function TaskSurface({
     isQa: boolean;
     leadsDepartment: boolean;
     isAdmin: boolean;
+    /**
+     * P8-01c — holds the Admin tick on THIS task's department.
+     *
+     * ⚠️ A FIELD OF ITS OWN AND NOT A WIDENING OF `leadsDepartment`, which would
+     * have been one character and four powers. That flag also gates `canEdit`
+     * (rename, every field, uploads, subtasks) and `canReassign` — none of which
+     * Amier confirmed for the tick. Only the force-status link below reads this.
+     */
+    administersDepartment: boolean;
   };
   /*
    * SLOTS, all rendered by the page and passed in finished.
@@ -301,6 +310,15 @@ export function TaskSurface({
   const qaItems = { [NONE]: "No QA reviewer", ...peopleItems };
 
   const canEdit = viewer.isAssignee || viewer.isQa || viewer.leadsDepartment;
+
+  /**
+   * Q5's override, widened by P8-01c.
+   *
+   * Kept apart from `canEdit` above deliberately: forcing a status is data
+   * hygiene on the department's board, and editing the task is work on it. The
+   * tick confers the first and not the second.
+   */
+  const canForce = viewer.leadsDepartment || viewer.administersDepartment;
   const savingResolution = autosave.stateOf("resolution") === "saving";
   const overEstimate = estimateMinutes !== null && trackedMinutes > estimateMinutes;
   const reassignUnchanged = pic === (assigneeId ?? NONE) && qa === (qaAssigneeId ?? NONE);
@@ -686,10 +704,13 @@ export function TaskSurface({
           {/* ============================================================== */}
           {/* THE ACTIONS, in one list, in one treatment. See ACTION_LINK.    */}
           {/* ============================================================== */}
-          {actions || viewer.leadsDepartment ? (
+          {/* P8-01c — `canForce`, not `leadsDepartment`. A department admin may
+              unstick their own department's board (`vizserve_pms_force_task_status`
+              now says so) and may do NOTHING ELSE this flag used to imply. */}
+          {actions || canForce ? (
             <div className="flex flex-col items-start gap-2 border-t pt-3">
               {actions}
-              {viewer.leadsDepartment && !overrideOpen ? (
+              {canForce && !overrideOpen ? (
                 <button type="button" onClick={() => setOverrideOpen(true)} className={ACTION_LINK}>
                   <AlertTriangle className="size-3.5" aria-hidden />
                   Force a different status

@@ -2,8 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
+import { departmentShapeScope, requireDepartmentShape } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 
@@ -22,9 +21,17 @@ export const metadata: Metadata = { title: "Lists" };
  *
  * Team-leader and above: a list is how a department organises its own work
  * (Amier ~33:00), so the people who lead it own the shape of it.
+ *
+ * ⚠️ P8-01c — AND SO DOES A DEPARTMENT ADMIN, AT ANY RANK. The gate moved from
+ * `requireRole("team_leader")` to `requireDepartmentShape()`, which admits both
+ * routes. A member holding the Admin tick has to genuinely reach this screen or
+ * the tick grants nothing: `p8_01c` widened the folder and list write policies
+ * to `vizserve_pms_is_dept_admin`, and a migration whose screen still refuses
+ * the caller is the failure docs/13-implementation-status.md records four times
+ * in two days.
  */
 export default async function ListsPage() {
-  const context = await requireRole("team_leader");
+  const context = await requireDepartmentShape();
   const supabase = await createClient();
 
   // Both are RLS-scoped: a TL sees the departments they lead and those
@@ -47,12 +54,27 @@ export default async function ListsPage() {
       .order("name"),
   ]);
 
-  // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now `owner`.
-  const allowed = roleAtLeast(context.role, "owner")
+  /*
+   * Which departments the pickers on this screen may file a folder or list
+   * under.
+   *
+   * P8-01c: `departmentShapeScope`, not `managedDepartmentIds`. The managed set
+   * is what somebody LEADS, and a department admin leads nothing — they
+   * administer the team they belong to. Filtering on the managed set alone gave
+   * a member holding the tick an empty department picker on a screen they can
+   * now open, which is a dead end rather than a refusal.
+   *
+   * ⚠️ NOT `departmentPickerScope`. That one is derived from the approval and
+   * visibility scope, which P8-01 deliberately left alone — see the note on
+   * `departmentShapeScope`.
+   */
+  const scope = departmentShapeScope(context);
+  const allowed =
+    scope.kind === "all"
       ? (departments ?? [])
-      : (departments ?? []).filter((department) =>
-          context.managedDepartmentIds.includes(department.id),
-        );
+      : scope.kind === "none"
+        ? []
+        : (departments ?? []).filter((department) => scope.ids.includes(department.id));
 
   // How many tasks each list holds, so nobody archives a list that is carrying
   // live work without knowing.

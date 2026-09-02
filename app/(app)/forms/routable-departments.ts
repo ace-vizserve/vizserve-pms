@@ -1,6 +1,6 @@
 import "server-only";
 
-import { departmentPickerScope } from "@/lib/auth/authorization";
+import { departmentShapeScope } from "@/lib/auth/authorization";
 import type { AuthContext } from "@/lib/auth/authorization";
 import type { createClient } from "@/utils/supabase/server";
 
@@ -38,7 +38,17 @@ export async function loadRoutableDepartments(
   supabase: Awaited<ReturnType<typeof createClient>>,
   context: AuthContext,
 ): Promise<RoutableDepartments> {
-  const scope = departmentPickerScope(context);
+  /*
+   * P8-01c: `departmentShapeScope`, not `departmentPickerScope`.
+   *
+   * The picker scope is derived from `departmentScopeFilter` — the APPROVAL and
+   * visibility scope, which P8-01 deliberately left alone — so it answers `none`
+   * for a member holding the Admin tick. That is a routing selector with nothing
+   * in it on a builder they can now open, and the form would be unsaveable for
+   * want of a department. The shape scope adds the one department the tick
+   * administers and nothing else.
+   */
+  const scope = departmentShapeScope(context);
 
   if (scope.kind === "none") return { departments: [], error: null };
 
@@ -47,8 +57,9 @@ export async function loadRoutableDepartments(
     .select("id, name")
     .eq("is_active", true);
 
-  // An admin routes anywhere; everyone else is limited to what they lead, so
-  // the selector cannot be used to hand work to a queue they do not own.
+  // An owner routes anywhere; everyone else is limited to what they lead or
+  // administer, so the selector cannot be used to hand work to a queue they do
+  // not own.
   if (scope.kind === "some") query.in("id", scope.ids);
 
   const { data, error } = await query.order("name");

@@ -35,6 +35,8 @@ export type NavChild = {
   requiresHr?: boolean;
   /** See `NavItem.requiresDeptAdmin`. Applied on top of `minRole`, never instead. */
   requiresDeptAdmin?: boolean;
+  /** See `NavItem.alsoDeptAdmin`. OR-ed with `minRole`, never ANDed. */
+  alsoDeptAdmin?: boolean;
 };
 
 export type NavItem = {
@@ -60,11 +62,32 @@ export type NavItem = {
    * `visibleNavItems`. A child under a parent that does not require it must say
    * so itself, because there is nothing above it to have already cleared.
    *
-   * NOTHING SETS THIS YET. P8-01a is the role model only; the screens a
-   * department admin reaches are a separate follow-up. It is declared now so
-   * that the follow-up adds a field to a row rather than a concept to the nav.
+   * NOTHING SETS THIS YET, and P8-01c did not change that — see `alsoDeptAdmin`
+   * below, which is the OPPOSITE operator and is what the structure screens
+   * actually needed. This one stays for a row that is FOR department admins
+   * alone; there is not one yet.
    */
   requiresDeptAdmin?: boolean;
+  /**
+   * P8-01c. Reachable at `minRole`, OR by a department admin of any rank.
+   *
+   * ⚠️ AN OR, WHERE `requiresDeptAdmin` ABOVE IS AN AND, and the two are not
+   * interchangeable — reaching for the wrong one is a silent narrowing. Forms
+   * is `minRole: "team_leader"` and P8-01c let a department admin who is a
+   * MEMBER build their department's client forms. Expressing that as
+   * `minRole: "member", requiresDeptAdmin: true` would have read as the same
+   * change and would have HIDDEN Forms from every team leader who does not hold
+   * the tick, which is most of them.
+   *
+   * Same orthogonality argument as `requiresHr` (D33): the tick is not a point
+   * on the member→owner ladder, so it cannot be spelled as a floor. What differs
+   * is that HR rows are HR-only screens, and these are shared ones with a second
+   * way in.
+   *
+   * ⚠️ Does NOT inherit to children, exactly as the two capability flags do not
+   * — see the note in `visibleNavItems`.
+   */
+  alsoDeptAdmin?: boolean;
   /** False until the phase that builds it lands. */
   enabled: boolean;
   /** Shown on the disabled state so the reason is obvious. */
@@ -117,6 +140,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Forms",
     href: "/forms",
     minRole: "team_leader",
+    // P8-01c. The builder is one of the three structure screens the department
+    // admin tick reaches, so a MEMBER holding it gets this row. `/forms` itself
+    // is `requireDepartmentShape()` and the list is narrowed by
+    // `administersForm`, so the row and the gate agree — which is the rule the
+    // Admin group's comment below states for the other direction.
+    alsoDeptAdmin: true,
     enabled: true,
     icon: "form",
   },
@@ -404,21 +433,42 @@ function capabilityAllows(
   return true;
 }
 
+/**
+ * P8-01c — the whole visibility decision for one row, rank and capabilities
+ * together, so the OR below cannot be applied in one place and forgotten in the
+ * other. `minRole` is optional because a child inherits its parent's, which the
+ * parent's own pass has already cleared.
+ *
+ * ⚠️ `alsoDeptAdmin` SHORT-CIRCUITS BEFORE THE RANK TEST, which is exactly what
+ * it is for: the tick is not a rung, so a member holding it must reach the row
+ * without satisfying a floor it will never satisfy. It short-circuits
+ * `capabilityAllows` too — no row sets `alsoDeptAdmin` beside `requiresHr`, and
+ * a row that did would be asking for "HR and a lead, or a department admin",
+ * which is not a rule anybody has.
+ */
+function navAllows(
+  item: { minRole?: Role; requiresHr?: boolean; requiresDeptAdmin?: boolean; alsoDeptAdmin?: boolean },
+  role: Role,
+  viewer: NavViewer,
+): boolean {
+  if (item.alsoDeptAdmin && viewer.isDeptAdmin === true) return true;
+  if (item.minRole && !roleAllows(role, item.minRole)) return false;
+  return capabilityAllows(item, viewer);
+}
+
 export function visibleNavItems(role: Role, viewer: NavViewer = {}): NavItem[] {
-  return NAV_ITEMS.filter(
-    (item) => roleAllows(role, item.minRole) && capabilityAllows(item, viewer),
-  ).map((item) => {
+  return NAV_ITEMS.filter((item) => navAllows(item, role, viewer)).map((item) => {
     if (!item.children) return item;
 
     // A child with no `minRole` inherits the parent's, which the filter above
     // has already cleared — so only the ones that RAISE the floor are re-checked.
-    // NEITHER `requiresHr` NOR `requiresDeptAdmin` INHERITS: a child under a
-    // parent that does not require the capability must say so itself, because
-    // there is nothing above it to have already cleared.
-    const children = item.children.filter(
-      (child) =>
-        (!child.minRole || roleAllows(role, child.minRole)) && capabilityAllows(child, viewer),
-    );
+    // NEITHER `requiresHr` NOR `requiresDeptAdmin` NOR `alsoDeptAdmin` INHERITS:
+    // a child under a parent that does not carry the flag must say so itself,
+    // because there is nothing above it to have already cleared. That cuts both
+    // ways for `alsoDeptAdmin` — a child under a row a department admin reached
+    // through the tick still has to name the tick, or the floor it raises applies
+    // to them as it does to everybody.
+    const children = item.children.filter((child) => navAllows(child, role, viewer));
 
     // One child left means the sub-menu is the parent restated. Collapse it back
     // to a plain row rather than drawing a disclosure that reveals a single

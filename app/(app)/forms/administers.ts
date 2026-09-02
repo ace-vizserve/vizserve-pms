@@ -1,4 +1,9 @@
-import { canAccessDepartment, roleAtLeast, type AuthContext } from "@/lib/auth/authorization";
+import {
+  canAdminDepartment,
+  canShapeDepartment,
+  roleAtLeast,
+  type AuthContext,
+} from "@/lib/auth/authorization";
 
 /**
  * P7-66 Phase 4b — ⚠️ "MAY I ADMINISTER THIS FORM?", asked in the query layer
@@ -79,17 +84,44 @@ export function administersForm(context: AuthContext, form: AdministrableForm): 
   // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now `owner`.
   if (form.purpose === "INTERNAL") return roleAtLeast(context.role, "owner");
 
-  // The role floor FIRST, exactly as `assertCanEditForm` applies
-  // `requireRole("team_leader")` before it looks at the row. Without it the
-  // author carve-out below would answer `true` for a member — a state the
-  // policies make unreachable (`forms insertable by team leaders`) and which a
-  // predicate should still refuse rather than rely on.
-  if (!roleAtLeast(context.role, "team_leader")) return false;
+  /*
+   * ⚠️ P8-01c — THE ROLE FLOOR IS NO LONGER THE WHOLE OF THE FLOOR.
+   *
+   * It used to be `roleAtLeast(context.role, "team_leader")` alone, applied
+   * first, "exactly as `assertCanEditForm` applies `requireRole('team_leader')`
+   * before it looks at the row". That gate is now `requireDepartmentShape()`,
+   * which also admits a DEPARTMENT ADMIN of any rank — so a bare rank test here
+   * would list nothing for the member the tick was built for, on a screen they
+   * can now open. The migration would have landed and the layer that reaches it
+   * would not.
+   *
+   * The floor still exists and still comes FIRST, for its original reason: the
+   * author carve-out below would otherwise answer `true` for a plain member who
+   * happens to have created a draft.
+   */
+  if (!roleAtLeast(context.role, "team_leader") && !canAdminDepartment(context, context.primaryDepartmentId)) {
+    return false;
+  }
 
   // An unrouted draft belongs to its author until a department is chosen — the
   // same carve-out `assertCanEditForm` makes, and the reason this cannot simply
-  // BE `canAccessDepartment`, which is false on a null for anyone but an admin.
+  // BE `canShapeDepartment`, which is false on a null for anyone but an owner.
+  //
+  // ⚠️ A DEPARTMENT ADMIN NEVER REACHES THIS BRANCH IN PRACTICE, and that is by
+  // construction rather than luck: `forms creatable by department admin`
+  // requires a department on the row, so the tick cannot produce a
+  // department-less draft in the first place. It stays a shared line because a
+  // team leader still can.
   if (form.department_id === null && form.created_by === context.userId) return true;
 
-  return canAccessDepartment(context, form.department_id);
+  /*
+   * P8-01c: `canShapeDepartment` — "leads it OR holds the Admin tick on it" —
+   * where this read `canAccessDepartment`.
+   *
+   * ⚠️ AND `canAccessDepartment` MUST NOT ITSELF BE WIDENED to make this work.
+   * It mirrors `vizserve_pms_manages_department`, which is what decides who may
+   * APPROVE; the tick confers no approval rights at all. Two predicates, so the
+   * two questions can never be answered by one edit.
+   */
+  return canShapeDepartment(context, form.department_id);
 }

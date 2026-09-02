@@ -3,7 +3,12 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { assertDepartmentAccess, ForbiddenError, requireRole } from "@/lib/auth/authorization";
+import {
+  assertDepartmentShape,
+  canAccessDepartment,
+  ForbiddenError,
+  requireDepartmentShape,
+} from "@/lib/auth/authorization";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
 import type { Json } from "@/lib/database.types";
 import {
@@ -88,7 +93,10 @@ function uniqueFieldError(error: { message?: string; details?: string } | null):
 }
 
 async function assertCanEditForm(formId: string) {
-  const context = await requireRole("team_leader");
+  // P8-01c. Was `requireRole("team_leader")`. A department admin edits their own
+  // department's client forms at any rank; `assertDepartmentShape` below still
+  // decides whether THIS form's department is one of theirs.
+  const context = await requireDepartmentShape();
   const supabase = await createClient();
 
   const { data: form } = await supabase
@@ -107,7 +115,42 @@ async function assertCanEditForm(formId: string) {
     return { context, supabase, form };
   }
 
-  assertDepartmentAccess(context, form.department_id);
+  /*
+   * P8-01c: `assertDepartmentShape`, not `assertDepartmentAccess`.
+   *
+   * ⚠️ AND `canAccessDepartment` IS NOT WIDENED TO SUIT. It mirrors
+   * `vizserve_pms_manages_department`, the predicate that decides who may
+   * APPROVE — widening it would hand every department admin the Gate 1 queue.
+   * `forms editable by department admin` is the policy underneath this, and it
+   * refuses an INTERNAL form outright — restated immediately below, because a
+   * belt that stops one notch short of the policy is not a belt.
+   */
+  assertDepartmentShape(context, form.department_id);
+
+  /*
+   * ⚠️ AN INTERNAL FORM IS NOT REACHABLE THROUGH THE DEPARTMENT-ADMIN TICK, AND
+   * SAYING SO HERE IS WHAT MAKES THE REFUSAL VISIBLE.
+   *
+   * All four of `p8_01c`'s forms policies carry `purpose <> 'INTERNAL'`, so the
+   * tick never admitted these rows in the database. The app gate did, and the
+   * gap did not surface as an error: a policy-refused UPDATE returns SUCCESS
+   * WITH ZERO ROWS through PostgREST, so `renameForm` and `setFormPublished`
+   * both answered `ok: true` over a write that changed nothing. A green toast
+   * on a no-op is worse than a refusal, because the person walks away believing
+   * it saved.
+   *
+   * `canAccessDepartment`, deliberately — it is the mirror of
+   * `vizserve_pms_manages_department` and true for an owner or a lead of this
+   * department, which is EXACTLY the set that could reach internal forms before
+   * P8-01c. So this narrows the new route and takes nothing from anybody who
+   * already had it.
+   */
+  if (form.purpose === "INTERNAL" && !canAccessDepartment(context, form.department_id)) {
+    throw new ForbiddenError(
+      "Internal forms are managed by admins, because their answers are read across departments.",
+    );
+  }
+
   return { context, supabase, form };
 }
 
@@ -249,7 +292,8 @@ async function writeFormAudience(
  * about to paste into an email.
  */
 export async function createForm(input: unknown): Promise<ActionResult<{ id: string }>> {
-  const context = await requireRole("team_leader");
+  // P8-01c. Was `requireRole("team_leader")` — see `assertCanEditForm` above.
+  const context = await requireDepartmentShape();
   const parsed = formCreateSchema.safeParse(input);
 
   if (!parsed.success) {
@@ -261,7 +305,36 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   }
 
   if (parsed.data.department_id) {
-    assertDepartmentAccess(context, parsed.data.department_id);
+    assertDepartmentShape(context, parsed.data.department_id);
+  } else if (!roleAtLeast(context.role, "team_leader")) {
+    /*
+     * ⚠️ P8-01c — A DEPARTMENT-LESS DRAFT IS A TEAM LEADER'S PRIVILEGE, NOT THE
+     * TICK'S, and this is the sentence in front of that.
+     *
+     * `forms insertable by team leaders` allows `department_id is null` for a
+     * lead — an unrouted draft they own until they choose where it routes.
+     * `forms creatable by department admin` cannot: the tick is defined by a
+     * department (`vizserve_pms_is_dept_admin` compares against
+     * `primary_department_id`), and `vizserve_pms_is_dept_admin(null)` is false
+     * for everybody but an owner. Without this branch the insert would be
+     * refused by RLS as a raw `new row violates row-level security policy`,
+     * anchored to no field and actionable by nobody — which is exactly the
+     * failure `internalAdminRefusal` was written to avoid one policy over.
+     *
+     * ⚠️ A RANK TEST HERE, AND ONLY HERE, AND IT IS NOT A REGRESSION TO P8-01's
+     * "the tick is not a rung". `requireDepartmentShape()` above has already
+     * passed, so anybody below `team_leader` standing on this line is a
+     * department admin by definition — the ONE case that must be refused. Asking
+     * `canShapeDepartment(context, null)` instead would have been tidier and
+     * WRONG: it is false for a team leader too (a null department is nobody's),
+     * so it would have taken the unrouted draft away from every lead who has
+     * always had it.
+     */
+    return {
+      ok: false,
+      error: "Choose the department this form routes to.",
+      fieldErrors: { department_id: ["Required."] },
+    };
   }
 
   // P7-66 — checked here as well as on the settings card. The card clears the
@@ -408,10 +481,11 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
     };
   }
 
-  // Moving a form into a department you do not lead would hand your queue to
-  // someone else, so the destination is checked as well as the origin.
+  // Moving a form into a department you neither lead nor administer would hand
+  // your queue to someone else, so the destination is checked as well as the
+  // origin. P8-01c: `assertDepartmentShape`, matching `assertCanEditForm`.
   if (parsed.data.department_id) {
-    assertDepartmentAccess(context, parsed.data.department_id);
+    assertDepartmentShape(context, parsed.data.department_id);
   }
 
   /*

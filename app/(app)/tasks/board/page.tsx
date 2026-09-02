@@ -12,7 +12,7 @@ import {
   taskCategoryEdge,
   taskStatusSurface,
 } from "@/components/status-badge";
-import { requireAuthContext } from "@/lib/auth/authorization";
+import { canAdminDepartment, requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
@@ -349,8 +349,10 @@ export default async function TaskBoardPage({
    * P7-19 — whether to offer the trash on this row.
    *
    * Mirrors `vizserve_pms_can_delete_task` exactly: internal work only, and only
-   * for a lead of the department, whoever created it, or the owner of a personal
-   * task. The database is still the authority — this only decides whether to ask.
+   * for a lead of the department, A DEPARTMENT ADMIN OF IT (P8-01c), whoever
+   * created it, or the owner of a personal task. The database is still the
+   * authority — this only decides whether to ask, so nobody is offered a control
+   * that can only answer no.
    */
   function canDelete(task: {
     request_id: string | null;
@@ -367,6 +369,9 @@ export default async function TaskBoardPage({
       context.managedDepartmentIds.includes(task.department_id);
     return (
       leads ||
+      // P8-01c. Beside the lead test, never folded into it: leading a department
+      // carries approval authority and the tick carries none.
+      canAdminDepartment(context, task.department_id) ||
       task.created_by === context.userId ||
       (task.is_personal && task.assignee_id === context.userId)
     );

@@ -42,6 +42,7 @@ export function FormsTable({
   departmentNames,
   submissionCounts,
   lastSubmission,
+  submissionsReadable,
 }: {
   rows: FormRow[];
   departmentNames: Record<string, string>;
@@ -49,6 +50,18 @@ export function FormsTable({
   submissionCounts: Record<string, number>;
   /** Form id → the newest submission's timestamp. */
   lastSubmission: Record<string, string>;
+  /**
+   * Per form: may this viewer read its submissions at all?
+   *
+   * ⚠️ "NOT PERMITTED" IS NOT "NONE", and on this column the difference is the
+   * whole point. `vizserve_pms_requests` is still scoped by
+   * `manages_department`, which the P8-01c department-admin tick deliberately
+   * does NOT grant — client submissions carry requester names, emails and free
+   * text, and reading them is not one of the powers the tick confers. So a
+   * department admin's query returns zero rows for a form with real traffic,
+   * and printing "None" would report a busy intake as an unused one.
+   */
+  submissionsReadable: Record<string, boolean>;
 }) {
 
   const columns: Column<FormRow>[] = [
@@ -140,12 +153,22 @@ export function FormsTable({
       header: "Submissions",
       sortKey: "submissions",
       // The count is in a lookup keyed by form id, not on the row.
-      sortValue: (form) => submissionCounts[form.id] ?? 0,
+      // Unreadable sorts below every real count rather than beside the zeroes:
+      // it is not a quantity, and pretending it is one puts "not permitted" in
+      // the middle of the ordering.
+      sortValue: (form) => (submissionsReadable[form.id] ? (submissionCounts[form.id] ?? 0) : -1),
       hideable: true,
       defaultHidden: true,
       align: "end",
       className: "hidden lg:table-cell tabular-nums",
       cell: (form) => {
+        if (!submissionsReadable[form.id]) {
+          return (
+            <span className="text-foreground-faint" title="You do not have access to this form's submissions.">
+              Not shown
+            </span>
+          );
+        }
         const count = submissionCounts[form.id] ?? 0;
         // A live form with no submissions is a real signal — say "None", not a
         // zero somebody reads past.
@@ -156,12 +179,16 @@ export function FormsTable({
       key: "last",
       header: "Last used",
       sortKey: "last",
-      sortValue: (form) => lastSubmission[form.id] ?? "",
+      sortValue: (form) => (submissionsReadable[form.id] ? (lastSubmission[form.id] ?? "") : ""),
       hideable: true,
       defaultHidden: true,
       className: "hidden xl:table-cell whitespace-nowrap text-muted-foreground tabular-nums",
       cell: (form) =>
-        lastSubmission[form.id] ? (
+        !submissionsReadable[form.id] ? (
+          <span className="text-foreground-faint" title="You do not have access to this form's submissions.">
+            Not shown
+          </span>
+        ) : lastSubmission[form.id] ? (
           formatDate(lastSubmission[form.id])
         ) : (
           <span className="text-foreground-faint">—</span>

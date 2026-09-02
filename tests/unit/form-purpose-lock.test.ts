@@ -208,15 +208,28 @@ vi.mock("@/utils/supabase/admin", () => ({
  */
 const auth = vi.hoisted(() => ({ role: "owner" as "owner" | "team_leader" }));
 
+/*
+ * ⚠️ `requireDepartmentShape` / `assertDepartmentShape`, NOT `requireRole` /
+ * `assertDepartmentAccess`, since P8-01c. The actions moved onto the pair that
+ * also admits a department admin; a mock naming the old pair leaves the real,
+ * `server-only` module to answer and every case below dies on `cookies()`
+ * outside a request.
+ */
 vi.mock("@/lib/auth/authorization", () => ({
-  requireRole: async () => ({
+  requireDepartmentShape: async () => ({
     userId: "user-1",
     email: "test.lead@example.com",
     fullName: "Test Lead",
     role: auth.role,
     departmentIds: ["dept-1"],
   }),
-  assertDepartmentAccess: () => {},
+  assertDepartmentShape: () => {},
+  /* P8-01c — `assertCanEditForm` reads this to refuse an INTERNAL form to the
+     department-admin route. True here for every role these cases use: they all
+     LEAD the department, so the owner-only rule for internal forms is still
+     `internalAdminRefusal`'s to enforce, which is what the team-leader case
+     below asserts. */
+  canAccessDepartment: () => true,
   ForbiddenError: class ForbiddenError extends Error {},
 }));
 

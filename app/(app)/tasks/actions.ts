@@ -3,8 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
-import { requireAuthContextOrThrow, requireRole } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
+import {
+  canShapeDepartment,
+  requireAuthContextOrThrow,
+  requireDepartmentShape,
+} from "@/lib/auth/authorization";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
   removeStoredAttachments,
@@ -141,7 +144,22 @@ export async function overrideTaskStatus(
   taskId: string,
   input: unknown,
 ): Promise<ActionResult<{ status: string }>> {
-  await requireRole("team_leader");
+  /*
+   * P8-01c — WAS `requireRole("team_leader")`, AND A DEPARTMENT ADMIN MAY BE A
+   * MEMBER. `p8_01c` widened `vizserve_pms_force_task_status`'s own guard to
+   * `or vizserve_pms_is_dept_admin(department_id)`; leaving the rank floor here
+   * would have refused the caller before the widened function was ever reached.
+   *
+   * ⚠️ THIS IS THE BELT AND IT ASKS THE WEAKER QUESTION, deliberately. The
+   * task's department is not in hand yet — the id is all this action is given —
+   * so the only honest thing to ask here is "does this person shape ANY
+   * department". `vizserve_pms_force_task_status` is SECURITY DEFINER and asks
+   * the real, per-department question about THIS task, and its refusal is a
+   * sentence written for a person. Fetching the row here to re-ask it would be a
+   * second copy of a rule that is already enforced, which is what this codebase
+   * says not to do.
+   */
+  await requireDepartmentShape();
 
   const parsed = overridePayloadSchema.safeParse(input);
   if (!parsed.success) {
@@ -1126,7 +1144,9 @@ export async function saveList(
   listId: string | null,
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
-  const context = await requireRole("team_leader");
+  // P8-01c. Was `requireRole("team_leader")` — see `/tasks/lists` for why a
+  // rank floor cannot express who shapes a department any more.
+  const context = await requireDepartmentShape();
 
   const parsed = listSchema.safeParse(input);
   if (!parsed.success) {
@@ -1137,12 +1157,14 @@ export async function saveList(
 
   // RLS says the same thing, but saying it here too means the user gets a
   // sentence instead of an empty result they have to interpret.
-  // P8-01: `roleAtLeast`, not `!== "admin"` — the top rung is now `owner`.
-  if (
-    !roleAtLeast(context.role, "owner") &&
-    !context.managedDepartmentIds.includes(values.department_id)
-  ) {
-    return { ok: false, error: "That department is outside your scope." };
+  //
+  // P8-01c: `canShapeDepartment`, which is "leads it OR holds the Admin tick on
+  // it". The hand-rolled `roleAtLeast(owner) || managedDepartmentIds.includes()`
+  // this replaces was `canAccessDepartment` written out, and that predicate must
+  // NOT be the one asked here — it mirrors `vizserve_pms_manages_department`,
+  // which grants approval authority and is deliberately never widened.
+  if (!canShapeDepartment(context, values.department_id)) {
+    return { ok: false, error: "That department is outside what you administer." };
   }
 
   const supabase = await createClient();
@@ -1249,7 +1271,9 @@ export async function saveTaskGroup(
   groupId: string | null,
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
-  const context = await requireRole("team_leader");
+  // P8-01c, mirroring `saveList` exactly — two sibling levels that gate
+  // differently for no reason is how people learn to trust neither.
+  const context = await requireDepartmentShape();
 
   const parsed = taskGroupSchema.safeParse(input);
   if (!parsed.success) {
@@ -1264,12 +1288,14 @@ export async function saveTaskGroup(
 
   // RLS says the same thing, but saying it here too means the user gets a
   // sentence instead of an empty result they have to interpret.
-  // P8-01: `roleAtLeast`, not `!== "admin"` — the top rung is now `owner`.
-  if (
-    !roleAtLeast(context.role, "owner") &&
-    !context.managedDepartmentIds.includes(values.department_id)
-  ) {
-    return { ok: false, error: "That department is outside your scope." };
+  //
+  // P8-01c: `canShapeDepartment`, which is "leads it OR holds the Admin tick on
+  // it". The hand-rolled `roleAtLeast(owner) || managedDepartmentIds.includes()`
+  // this replaces was `canAccessDepartment` written out, and that predicate must
+  // NOT be the one asked here — it mirrors `vizserve_pms_manages_department`,
+  // which grants approval authority and is deliberately never widened.
+  if (!canShapeDepartment(context, values.department_id)) {
+    return { ok: false, error: "That department is outside what you administer." };
   }
 
   const supabase = await createClient();

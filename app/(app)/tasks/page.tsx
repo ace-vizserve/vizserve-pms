@@ -9,7 +9,7 @@ import {
   type TaskRow,
 } from "./tasks-table";
 import { isTaskStatus } from "@/components/status-badge";
-import { requireAuthContext } from "@/lib/auth/authorization";
+import { canAdminDepartment, requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { sanitizeRichText } from "@/lib/rich-text-server";
@@ -599,6 +599,20 @@ export default async function TasksPage({
     userId: context.userId,
     role: context.role,
     managedDepartmentIds: context.managedDepartmentIds,
+    /*
+     * P8-01c — the Admin tick, resolved HERE rather than shipped as the raw
+     * `is_dept_admin` column.
+     *
+     * `canAdminDepartment` is the single TypeScript reading of
+     * `vizserve_pms_is_dept_admin`, and it lives in a `server-only` module, so
+     * the boolean has to be answered on this side of the wire. Sending the flag
+     * instead would put a second reading of the capability in a client
+     * component — which is the "scattered `if (role === 'admin')`" CLAUDE.md
+     * exists to forbid, one capability later.
+     */
+    deptAdminOf: canAdminDepartment(context, context.primaryDepartmentId)
+      ? context.primaryDepartmentId
+      : null,
   };
 
   const lookups = {
