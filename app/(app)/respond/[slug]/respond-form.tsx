@@ -49,10 +49,19 @@ import { submitFormResponse } from "../actions";
  * `previewUpload`'s "This is a preview." — that is a lie on a live form, and a
  * person who is told they are looking at a preview will keep trying.
  *
- * The form still renders and every other field still works. If the file field
- * is REQUIRED the form cannot be submitted, which is correct: storing a
- * response with a missing required answer would be worse than refusing it. The
- * banner above the form is what stops that being a mystery.
+ * An OPTIONAL file question is survivable: the form renders, every other field
+ * works, and the note above it says where the file should go instead.
+ *
+ * ⚠️ A REQUIRED ONE IS NOT, AND THIS USED TO BE A TRAP. `fileEntity` demands
+ * at least one attachment reference, the picker above can never produce one,
+ * so `validateEntitiesValues` refuses forever — the person fills in nine
+ * questions, presses Send answer, and is told to attach a file by a control
+ * that refuses to attach files. A note reading "send it to whoever asked for
+ * it instead" made that worse by implying the rest could still go through.
+ *
+ * So the form is not rendered at all in that case. Saying "you cannot answer
+ * this yet" before somebody types is the only honest option; the alternative is
+ * a form that takes ten minutes and cannot be sent.
  */
 const unsupportedUpload: UploadFn = async () => ({
   ok: false,
@@ -103,19 +112,31 @@ export function RespondForm({
     [formId],
   );
 
-  // Root order, so the banner reflects the form as it is drawn. Archived
-  // entities render nothing (the library skips an unprocessable entity), so
-  // they cannot raise a warning about a control nobody can see.
-  const hasFileField = useMemo(
+  /*
+   * The file questions this form actually draws, in root order. Archived
+   * entities render nothing (the library skips an unprocessable entity), so
+   * they cannot raise a warning — or block a submission — over a control
+   * nobody can see.
+   *
+   * {W} REQUIRED AND OPTIONAL ARE DIFFERENT OUTCOMES, not different wording.
+   * An optional file question is a note; a required one means this form cannot
+   * be submitted at all, and it is named so the person has something concrete
+   * to report.
+   */
+  const fileFields = useMemo(
     () =>
-      schema.root.some((entityId) => {
+      schema.root.flatMap((entityId) => {
         const entity = Object.hasOwn(schema.entities, entityId)
           ? schema.entities[entityId]
           : undefined;
-        return entity?.type === "file" && entity.attributes.archived !== true;
+
+        return entity?.type === "file" && entity.attributes.archived !== true ? [entity] : [];
       }),
     [schema],
   );
+
+  const blockingFileField = fileFields.find((entity) => entity.attributes.required);
+  const hasFileField = fileFields.length > 0;
 
   async function onSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -165,6 +186,37 @@ export function RespondForm({
       }
 
       setFormError(result.error);
+    } catch (cause) {
+      /*
+       * ⚠️ A THROW MUST NOT BE SILENCE. `try/finally` with no `catch` stopped
+       * the spinner and left the page exactly as it was: no error, no
+       * confirmation, nothing said at all. A server action does not only return
+       * `{ ok: false }` — it can REJECT, on a transport failure, a redeploy
+       * mid-request, or anything uncaught inside the action itself.
+       *
+       * ⚠️ AND IT MUST NOT CLAIM NOTHING WAS SAVED, WHICH IS THE TEMPTING
+       * SENTENCE AND IS NOT KNOWABLE HERE. A rejected promise covers both "the
+       * request never arrived" and "the row was written and the reply was lost
+       * on the way back" — the browser cannot tell those apart. It matters
+       * because `vizserve_pms_form_responses` is APPEND-ONLY: there is no
+       * update and no delete policy, so a second attempt that turns out to be a
+       * duplicate stands as a second answer forever, and the author cannot even
+       * read their own row back to check (the SELECT policy is admin-or-lead).
+       *
+       * So the message says what is true — we do not know — names the one
+       * consequence of trying again, and leaves the choice with the person.
+       * `/respond`'s success panel already tells them a duplicate is visible
+       * rather than silently merged, so this is the same promise kept under
+       * failure.
+       *
+       * The detail is logged rather than shown: it is a stack or a network
+       * error, which tells the person nothing and the console everything.
+       */
+      console.error("[P7-66] submitting a form response threw —", cause);
+      setFormError(
+        "Your answer may not have been sent — the connection dropped before we heard back. " +
+          "Sending it again is safe, but if both arrive the team will see two answers.",
+      );
     } finally {
       setPending(false);
     }
@@ -191,6 +243,44 @@ export function RespondForm({
     );
   }
 
+  /*
+   * ⚠️ REFUSED BEFORE IT IS FILLED IN, not after. See the note on
+   * `unsupportedUpload`: a required file question cannot be satisfied on this
+   * page by any sequence of actions, so rendering the form would be an
+   * invitation to waste ten minutes.
+   *
+   * It names the question, because "a question on this form" is not something
+   * anybody can report usefully, and it points at the person who can fix it —
+   * the fix is the form's owner making that question optional or removing it,
+   * neither of which the person reading this can do.
+   */
+  if (blockingFileField) {
+    return (
+      <div className="rounded-lg border border-warning-border bg-warning-subtle p-6 grade-surface shadow-raised-lg">
+        <div className="flex gap-3">
+          <Info aria-hidden className="mt-0.5 size-5 shrink-0 text-warning" />
+          <div className="min-w-0 space-y-2">
+            <h2 className="text-sm font-semibold text-warning">
+              This form cannot be answered yet
+            </h2>
+            <p className="text-sm leading-relaxed text-warning">
+              {formName} requires a file for
+              {" “"}
+              {blockingFileField.attributes.label}
+              {"”"}, and attachments are not collected on staff forms yet — so there is no
+              way to send it.
+            </p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              Nothing you type here could be saved, so the questions are not shown. Tell whoever
+              asked you to fill this in: the form needs that question made optional or removed
+              before anybody can answer.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <FieldRuntimeProvider runtime={runtime}>
       <form
@@ -200,6 +290,10 @@ export function RespondForm({
       >
         {hasFileField ? (
           /*
+           * Only ever reached for an OPTIONAL file question — a required one
+           * returned above — so the sentence can honestly say the rest of the
+           * form still goes through.
+           *
            * `role="note"` rather than `alert`: this is static page content that
            * is true before anybody does anything, and announcing it as an alert
            * on every render interrupts a screen reader mid-task.
@@ -211,7 +305,8 @@ export function RespondForm({
             <Info aria-hidden className="mt-0.5 size-4 shrink-0" />
             <span>
               This form asks for a file. Attachments are not collected on staff forms yet — send
-              the file to whoever asked for it instead.
+              the file to whoever asked for it instead. The rest of your answers still go
+              through.
             </span>
           </p>
         ) : null}

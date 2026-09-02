@@ -17,8 +17,8 @@
 -- that way and none is recorded in `supabase_migrations.schema_migrations`.
 -- RUN THE PRE-FLIGHT BLOCK BELOW FIRST.
 --
--- Re-runnable: the table and the indexes are `if not exists`, and ALL THREE
--- policies — the two on the new table and the one on `vizserve_pms_forms` —
+-- Re-runnable: the table and the indexes are `if not exists`, the function at
+-- the foot is `create or replace`, and ALL THREE policies — the two on the new table and the one on `vizserve_pms_forms` —
 -- are wrapped in a `pg_policies` guard. There is no `create policy if not
 -- exists`, so a bare `create policy` aborts the whole file at 42710 on a
 -- second paste; two of these were bare, which meant a re-run stopped BEFORE
@@ -42,12 +42,16 @@
 -- 42P01 is a MISSING RELATION and never a grant or an RLS problem, whatever
 -- the message looks like at 5pm.
 --
--- Back-out:
---   drop policy "published engagement forms readable by staff" on vizserve_pms_forms;
---   drop table vizserve_pms_form_responses;
--- in that order is not required — they are independent — but the forms policy
--- is the one that widens access, so drop it first if you are backing out under
--- pressure.
+-- Back-out, AND THE ORDER MATTERS NOW:
+--   1. re-run the body of `vizserve_pms_form_field_protect` from
+--      20260729100000_p1_01_forms.sql:111 — the version at the foot of this
+--      file reads `vizserve_pms_form_responses`, so dropping that table while
+--      it stands leaves every field delete and rename failing at 42P01;
+--   2. drop policy "published engagement forms readable by staff" on vizserve_pms_forms;
+--   3. drop table vizserve_pms_form_responses;
+-- Steps 2 and 3 are independent of each other, but the forms policy is the one
+-- that widens access, so drop it first if you are backing out under pressure.
+-- Step 1 is not optional and is not last.
 -- ---------------------------------------------------------------------------
 
 
@@ -220,17 +224,61 @@ comment on column vizserve_pms_form_responses.submitted_by is
 -- form, newest first, paged. It also serves `count(*) where form_id = ?`,
 -- which is the purpose lock's second count.
 --
--- `gin (field_values)` is for the answer searching this screen does not do yet.
--- Added now rather than later because it is cheap on an empty table and
--- because the roadmap's item 5 — moving the field_key immutability guard onto
--- the jsonb — has to ask "does any response hold this key?", which is exactly
--- what a GIN index on jsonb answers.
+-- `gin (field_values jsonb_path_ops)` is for the answer searching this screen
+-- does not do yet. Added now rather than later because it is cheap on an empty
+-- table.
+--
+-- ⚠️ THE OPCLASS IS NOT A DETAIL, AND THE DEFAULT ONE LOSES ANSWERS.
+-- `jsonb_ops` indexes every key AND EVERY VALUE as its own index entry, and a
+-- GIN entry cannot exceed roughly 2700 bytes. One textarea answer longer than
+-- that fails the INSERT outright with "index row size ... exceeds maximum" and
+-- THE WHOLE RESPONSE IS LOST — somebody's survey answer, refused for being
+-- long, with a message about an index. Nothing in `lib/form-builder/entities.ts`
+-- caps a textarea, so this is reached by typing rather than by attack.
+--
+-- `jsonb_path_ops` stores a HASH of each path/value pair instead, so every
+-- entry is fixed-size and no answer is too long to index. It is also smaller
+-- and faster for the containment queries a search would actually run.
+--
+-- ⚠️ WHAT IT COSTS, stated because it is the only argument the other way:
+-- `jsonb_path_ops` serves containment (`@>`) ONLY. It does not serve
+-- key-existence (`?`), which is what the R5 guard below asks. So that guard
+-- scans instead — and that is fine, because it always asks about ONE form and
+-- `vizserve_pms_form_responses_form_submitted_idx` narrows to that form first.
+-- An index that can refuse a write is not worth a planner improvement.
 -- ---------------------------------------------------------------------------
 create index if not exists vizserve_pms_form_responses_form_submitted_idx
   on vizserve_pms_form_responses (form_id, submitted_at desc);
 
+-- ⚠️ `create index if not exists` IS SILENT ABOUT AN INDEX THAT ALREADY
+-- EXISTS WITH THE WRONG OPCLASS, which in a file documented as re-runnable is
+-- the one way the fix above can appear to apply and not have. An earlier copy
+-- of this file created this index with the default `jsonb_ops`; a paste of the
+-- new copy over it would leave `jsonb_ops` in place and the long-answer INSERT
+-- failure exactly where it was, with the migration reporting success.
+--
+-- So the wrong one is dropped first, and ONLY the wrong one — the guard reads
+-- the opclass rather than dropping unconditionally, so a re-run of the correct
+-- file does not churn an index it is happy with.
+do $$
+begin
+  if exists (
+    select 1
+      from pg_index ix
+      join pg_class i on i.oid = ix.indexrelid
+      join pg_opclass oc on oc.oid = ix.indclass[0]
+      join pg_namespace n on n.oid = i.relnamespace
+     where n.nspname = 'public'
+       and i.relname = 'vizserve_pms_form_responses_values_idx'
+       and oc.opcname <> 'jsonb_path_ops'
+  ) then
+    drop index public.vizserve_pms_form_responses_values_idx;
+  end if;
+end
+$$;
+
 create index if not exists vizserve_pms_form_responses_values_idx
-  on vizserve_pms_form_responses using gin (field_values);
+  on vizserve_pms_form_responses using gin (field_values jsonb_path_ops);
 
 
 -- ---------------------------------------------------------------------------
@@ -249,19 +297,55 @@ create index if not exists vizserve_pms_form_responses_values_idx
 -- history (CLAUDE.md: a failing POLICY returns zero rows; a missing GRANT
 -- returns permission denied — never confuse the two). So it is stated.
 --
--- ⚠️ ONLY `select, insert`. Update and delete are withheld at the PRIVILEGE
--- level as well as by having no policy, so append-only holds even if somebody
--- later adds a permissive `for all` policy by reflex. Two locks, because the
--- cheap one costs a line.
+-- ⚠️ A POSITIVE GRANT WITHHOLDS NOTHING, AND THIS BLOCK USED TO PRETEND IT
+-- DID. It read `grant select, insert ... to authenticated` and claimed two
+-- locks on append-only. It had one — the missing policy. A GRANT is additive:
+-- naming two privileges does not take the other two away, and the other two
+-- are exactly what `20260729110000_p0_06_grants.sql`'s ALTER DEFAULT
+-- PRIVILEGES hands `authenticated` on every table created afterwards
+-- (`select, insert, update, delete`). Which is the SAME case the written-out
+-- grant exists to survive: if the defaults applied, this table shipped
+-- updatable and deletable by every signed-in user, one permissive `for all`
+-- policy away from being both. Only a REVOKE subtracts.
+--
+-- So the privileges are reset to nothing and then stated. `revoke all` is
+-- right whether the defaults reached this table or not, it is idempotent, and
+-- it is the only line here that does not depend on knowing which role pasted
+-- the file.
+--
+-- ⚠️ INSERT IS COLUMN-LEVEL, AND THAT IS A SECOND FIX, NOT TIDINESS. A
+-- table-wide insert privilege lets the caller name EVERY column, and the
+-- policy's `with check` below constrains only `submitted_by` and the form — so
+-- any staff member could POST their own `submitted_at` and pin their row to
+-- the top of the `submitted_at desc` Responses table, or choose their own
+-- `id`. No policy can say "this column was not supplied"; a privilege can, and
+-- privileges are checked BEFORE policies. The three columns named are exactly
+-- the three `app/(app)/respond/actions.ts` inserts. `id` and `submitted_at`
+-- are left to their defaults because when a row was written is the database's
+-- statement about it, not the client's.
+--
+-- ⚠️ AND A COLUMN GRANT IS NOT A RESTRICTION ON A TABLE GRANT. Where both
+-- exist the table-level one wins outright, so the `revoke all` above is what
+-- makes the column list mean anything at all. The two lines are one fix.
+--
+-- Update and delete are now withheld at the PRIVILEGE level as well as by
+-- having no policy — the two locks the file originally claimed. A submitted
+-- response is a record.
 --
 -- `service_role` needs nothing here: it holds `all privileges on all tables`
--- from the same file and bypasses policies (but not privileges).
+-- from the same file and bypasses policies (but not privileges). Stated
+-- anyway, for the same reason `authenticated` is — and it must come after the
+-- revokes, which name `authenticated` only and leave it untouched.
 -- ---------------------------------------------------------------------------
 alter table vizserve_pms_form_responses enable row level security;
 
 revoke all on vizserve_pms_form_responses from anon;
+revoke all on vizserve_pms_form_responses from authenticated;
 
-grant select, insert on vizserve_pms_form_responses to authenticated;
+grant select on vizserve_pms_form_responses to authenticated;
+grant insert (form_id, submitted_by, field_values)
+  on vizserve_pms_form_responses to authenticated;
+
 grant all privileges on vizserve_pms_form_responses to service_role;
 
 
@@ -461,3 +545,132 @@ begin
   end if;
 end
 $$;
+
+
+-- ---------------------------------------------------------------------------
+-- ⚠️⚠️ R5 NOW COVERS ENGAGEMENT FORMS, AND UNTIL THIS BLOCK IT DID NOT.
+--
+-- `vizserve_pms_form_field_protect` (20260729100000_p1_01_forms.sql:111) is the
+-- guard that makes `field_key` immutable and a field undeletable once somebody
+-- has answered it. It counts `vizserve_pms_requests` AND NOTHING ELSE.
+--
+-- An engagement form never produces a request. So the moment the table above
+-- exists, a pulse survey with two hundred answers behind it has a guard that
+-- finds NO DATA TO PROTECT: renaming a question's key succeeds, deleting the
+-- question succeeds, and every answer already given survives in
+-- `field_values` under a key no field claims any more. Unlabelled orphan
+-- columns in the Responses table, and no way back — nothing records what the
+-- key used to be. This is the same failure D20/R5 exists to prevent, arriving
+-- through the door the new table opened.
+--
+-- The fix is one more EXISTS. It is the whole of roadmap item 5's REQUESTS-
+-- side twin applied to responses, and it belongs in this file rather than a
+-- later one because the hole opens when the table does.
+--
+-- ⚠️ SHIPS WITH THE TABLE OR NOT AT ALL, for the same reason the purpose lock
+-- does: the window between the table existing and the guard knowing about it
+-- IS the vulnerability.
+--
+-- ⚠️⚠️ AND IT IS NOW `security definer`, WHICH IS THE OTHER HALF OF THE FIX.
+--
+-- The guard was `security invoker`, so its two EXISTS ran under the CALLER's
+-- RLS. Both relevant policies are `vizserve_pms_manages_department(
+-- f.department_id)`, and that is FALSE for a team leader when
+-- `department_id is null`. A failing policy returns ZERO ROWS AND NO ERROR
+-- (CLAUDE.md) — so on an unrouted form the guard finds no answers, concludes
+-- there is nothing to protect, and permits the rename or the delete.
+--
+-- The applied file (20260901150000_p7_66_form_schema.sql:293-304) argued this
+-- was unreachable: an unrouted form cannot be ACTIVE
+-- (`vizserve_pms_forms_active_requires_department`), so nobody can have
+-- submitted to it. That argument does not survive the form being unrouted
+-- AFTERWARDS. `updateFormSettings` locks `purpose` and `reference_prefix` once
+-- a form has submissions and NOTHING ELSE — so a lead may unpublish a survey
+-- with two hundred answers behind it, clear its department, and keep editing
+-- it through the unrouted-author carve-out
+-- (`forms readable by author while unrouted`). At that point the guard is
+-- blind and every key is renameable.
+--
+-- ⚠️ DEFINER GRANTS THIS FUNCTION NOTHING IT COULD ABUSE. It is a trigger
+-- that reads two tables and either raises or returns; it exposes no row to any
+-- caller, takes no argument but the row being written, and has a pinned
+-- `search_path`. Its whole effect is to REFUSE more often. That is the
+-- difference between it and `vizserve_pms_save_form_schema`, which is invoker
+-- precisely because definer there would replace RLS with a hand-copied
+-- department check — there is nothing to hand-copy here.
+--
+-- A SECURITY CHECK MUST NOT READ THROUGH A POLICY THAT CAN LEGITIMATELY
+-- EXCLUDE THE READER. That is the same sentence the SECURITY NOTE at the top
+-- of this file makes about `countFormSubmissions`, which was moved to the
+-- service role for the identical reason on the identical policy. The count was
+-- fixed and the trigger was not; now both are.
+--
+-- ⚠️ THE DELETE MESSAGE CHANGED, because it named the wrong thing. "has data
+-- on existing requests" is a sentence about a table the person editing a staff
+-- survey has never heard of. Both branches now say `submissions`, which is the
+-- word the builder screen uses for both kinds.
+--
+-- `create or replace` on a function an APPLIED migration created: the trigger
+-- in 20260729100100_p1_02_requests.sql:77 binds the NAME, so it picks this up
+-- with no trigger change. 20260729100000_p1_01_forms.sql is not edited — it
+-- describes the database as it was.
+--
+-- Back-out: re-run the function body from 20260729100000_p1_01_forms.sql:111.
+-- ---------------------------------------------------------------------------
+create or replace function vizserve_pms_form_field_protect()
+returns trigger
+language plpgsql
+security definer
+set search_path = public, extensions
+as $$
+declare
+  v_has_data boolean;
+begin
+  -- Either table. A client form only ever has the first, an engagement form
+  -- only ever the second, and the guard does not need to know which it is
+  -- looking at — which is the point: it cannot be wrong about the purpose.
+  select
+    exists (
+      select 1
+        from vizserve_pms_requests r
+       where r.form_id = coalesce(old.form_id, new.form_id)
+         and r.field_values ? coalesce(old.field_key, new.field_key)
+    )
+    or exists (
+      select 1
+        from vizserve_pms_form_responses fr
+       where fr.form_id = coalesce(old.form_id, new.form_id)
+         and fr.field_values ? coalesce(old.field_key, new.field_key)
+    )
+  into v_has_data;
+
+  if tg_op = 'DELETE' then
+    if v_has_data then
+      raise exception
+        'Field "%" has answers on existing submissions and cannot be deleted. Set is_active = false instead.',
+        old.field_key
+        using errcode = 'restrict_violation';
+    end if;
+    return old;
+  end if;
+
+  if tg_op = 'UPDATE' and new.field_key is distinct from old.field_key and v_has_data then
+    raise exception
+      'field_key "%" is immutable once the form has submissions. Change the label instead.',
+      old.field_key
+      using errcode = 'restrict_violation';
+  end if;
+
+  return new;
+end;
+$$;
+
+comment on function vizserve_pms_form_field_protect() is
+  'R5. Refuses a field_key rename and a field delete once an answer exists '
+  'under that key — in vizserve_pms_requests (client forms) OR '
+  'vizserve_pms_form_responses (engagement forms). Both, since P7-66 Phase 4b: '
+  'counting requests alone left every engagement form unguarded. '
+  'SECURITY DEFINER so the check cannot be blinded by the caller''s own RLS on '
+  'an unrouted form, where manages_department(null) is false for a lead and a '
+  'failing policy returns zero rows rather than an error. It refuses; it never '
+  'returns a row to anybody.';

@@ -148,7 +148,29 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
      * The reason is logged, never returned: the requester is unauthenticated.
      */
     console.error(`[submit] ${parsed.data.slug}: form could not be read — ${form.reason}`);
-    return { ok: false, error: "validation_failed" };
+
+    /*
+     * ⚠️ AND THE LIMITER SEES IT, FOR THE SAME REASON THE FIELD-ERROR BRANCH
+     * BELOW DOES. This used to `return` straight out, which is the exact hole
+     * `lib/public-submission-limit.ts` was written to close: the RPC is the
+     * only thing that writes `vizserve_pms_public_submission_log`, so a refusal
+     * that never reaches it is a POST that costs the sender nothing and leaves
+     * no trace. P1-15 then counts zero however many arrive.
+     *
+     * It is REACHABLE ON A LIVE FORM, which is what makes it worth the four
+     * lines: `loadPublicFormSchema` returns `unavailable` when
+     * `vizserve_pms_get_public_form` errors or its payload stops parsing — a
+     * new `vizserve_pms_field_type` enum value the app does not know yet, an
+     * attachment rule with a null column — for a form that is published and
+     * whose URL is in a client's inbox. Before P7-66 read the schema here, that
+     * same request reached the RPC and WAS logged; this restores it.
+     *
+     * `formError` rather than field errors: there is no field to point at, and
+     * the sentence the browser shows is unchanged.
+     */
+    return rejectSubmission({ fieldErrors: {}, formError: form.reason }, () =>
+      recordRejectedSubmission(parsed.data.slug, clientIp(headerList), parsed.data.payload),
+    );
   }
 
   const schema = form.schema;

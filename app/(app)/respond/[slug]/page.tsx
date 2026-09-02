@@ -8,6 +8,7 @@ import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { buttonVariants } from "@/components/ui/button";
 import { requireAuthContext } from "@/lib/auth/authorization";
+import { splitCanvasFields } from "@/lib/form-builder/canvas";
 import { FormSchemaError, parseFormSchema } from "@/lib/form-builder/schema";
 import { createClient } from "@/utils/supabase/server";
 
@@ -98,6 +99,13 @@ export default async function RespondToFormPage({
     );
   }
 
+  /*
+   * The questions this form actually asks. `splitCanvasFields` is the builder's
+   * own reader of the same distinction, used here rather than restated so the
+   * two cannot disagree about what "archived" means.
+   */
+  const activeQuestionCount = splitCanvasFields(schema).active.length;
+
   return (
     // A reading measure, unlike the list pages: this is a form to fill in top
     // to bottom, and a question that runs the width of an ultrawide monitor is
@@ -132,7 +140,20 @@ export default async function RespondToFormPage({
         </p>
       </div>
 
-      {schema.root.length === 0 ? (
+      {/*
+        ⚠️ COUNTED WITHOUT THE ARCHIVED ONES, and `root.length` is not that
+        number. `root` keeps every field a form has EVER had — that is what
+        `archivedAttribute` is for, so historical answers keep something to be
+        filed under — so a form whose questions have all been archived has a
+        non-empty `root` and no questions.
+
+        Read as `root.length` it skipped this branch and rendered `RespondForm`,
+        which drew nothing at all (the library skips an unprocessable entity)
+        under a live Send answer button: one press, and a
+        `vizserve_pms_form_responses` row with `field_values: {}` that nobody
+        can delete, because the table is append-only by design.
+      */}
+      {activeQuestionCount === 0 ? (
         <EmptyState
           icon={<FilePenLine />}
           title="This form has no questions yet"

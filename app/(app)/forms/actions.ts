@@ -277,11 +277,19 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
      * reaches this branch, so a failing count cannot block ordinary editing.
      */
     if (!counted.ok) {
+      /*
+       * ⚠️ NOTHING SAVED, AND THE MESSAGE HAS TO SAY SO. This used to read
+       * "what it is for and its reference prefix were left alone", which
+       * describes a partial save that does not exist — this is a `return`, so
+       * the name, the description, the routing and everything else typed on
+       * the card went nowhere either. Being told two fields were skipped is
+       * being told the other eight landed.
+       */
       return {
         ok: false,
         error:
-          "Could not check whether this form already has submissions, so what it is for " +
-          `and its reference prefix were left alone. ${counted.message}`,
+          "Could not check whether this form already has submissions, so nothing was " +
+          `saved. Your changes are still on screen — try again. ${counted.message}`,
       };
     }
 
