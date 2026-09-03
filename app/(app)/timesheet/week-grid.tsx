@@ -1,6 +1,17 @@
 "use client";
 
-import { CalendarDays, Check, ChevronRight, Clock, FolderInput, MoreHorizontal, Plus, Trash2, X } from "lucide-react";
+import {
+  CalendarDays,
+  Check,
+  ChevronRight,
+  Clock,
+  Filter,
+  FolderInput,
+  MoreHorizontal,
+  Plus,
+  Trash2,
+  X,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
@@ -10,6 +21,7 @@ import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
 import { TaskStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -20,7 +32,10 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Segmented, SegmentedItem } from "@/components/ui/segmented";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
@@ -31,17 +46,19 @@ import {
   type OvertimeApproval,
   cellCommit,
   clockAt,
-  parseCellDuration,
   daySummary,
   draftToEntry,
   formatCellDuration,
   overtimeGranted,
+  parseCellDuration,
   spanFrom,
   withDuration,
   withEnd,
   withStart,
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
+
+import { searchLoggableTasks } from "./actions";
 
 import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
 import { CellDetail } from "./cell-detail";
@@ -52,6 +69,7 @@ export type PickableTask = {
   id: string;
   title: string;
   status: VizservePmsTaskStatus;
+  /** "Department / List", already resolved. Empty when neither is readable. */
   where: string;
 };
 
@@ -160,6 +178,7 @@ export function WeekGrid({
   today,
   rows,
   tasks,
+  taskLists,
   locked,
   overtimeApprovals = {},
 }: {
@@ -167,7 +186,10 @@ export function WeekGrid({
   days: string[];
   today: string;
   rows: TaskRow[];
+  /** The picker's first page — the 20 most recently created, from the server. */
   tasks: PickableTask[];
+  /** The List filter's options: lists this person actually has work in. */
+  taskLists: { id: string; name: string }[];
   /**
    * P7-05 — the week has been handed in and the database will refuse every
    * write against it (`vizserve_pms_timesheet_week_locked`, called by all three
@@ -367,10 +389,7 @@ export function WeekGrid({
   // is no weekly standard in this repo to be over BY, so this is the only
   // honest weekly figure — the sum of the daily overages, not a week total
   // measured against a 40 nobody has defined.
-  const weekOverMinutes = days.reduce(
-    (total, day) => total + daySummary(dayTotal(day), grantedOn(day)).overMinutes,
-    0,
-  );
+  const weekOverMinutes = days.reduce((total, day) => total + daySummary(dayTotal(day), grantedOn(day)).overMinutes, 0);
 
   return (
     <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
@@ -620,6 +639,11 @@ export function WeekGrid({
                 <th scope="row" className="sticky left-0 z-10 bg-card px-3 py-1.5 text-left">
                   <AddTaskRow
                     tasks={pickable}
+                    taskLists={taskLists}
+                    // Search results come from the server and know nothing about
+                    // this week, so the exclusion has to travel with them.
+                    excludeIds={[...logged, ...extraTaskIds]}
+                    today={today}
                     onAdd={(taskId) => remember([...extraTaskIds, taskId])}
                     hasRows={allRows.length > 0}
                   />
@@ -1390,17 +1414,187 @@ function TimeCell({
   );
 }
 
-/** The "+ Add task" row. The picker is the scope boundary, so it is never free text. */
+/** The created-date presets, in the order they read. */
+const PRESETS = [
+  { value: "all", label: "Any time" },
+  { value: "this", label: "This week" },
+  { value: "last", label: "Last week" },
+  { value: "custom", label: "Custom" },
+] as const;
+
+type Preset = (typeof PRESETS)[number]["value"];
+
+/**
+ * The sentinel for "no list chosen".
+ *
+ * A `Select` cannot hold `null` — Base UI needs a string — so the absence has
+ * to be spelled. Prefixed and bracketed so it can never collide with a uuid.
+ */
+const ALL_LISTS = "__all__";
+
+/**
+ * The "+ Add task" row.
+ *
+ * SERVER-BACKED SINCE THE PICKER STOPPED LOADING EVERYTHING. The page hands it
+ * the twenty most recently created tasks this person is on; typing a name, or
+ * setting a date range or a list, asks the DATABASE instead. So a task from
+ * three months ago is one search away rather than absent, and opening the
+ * popover does not cost every task somebody has ever been on.
+ *
+ * ⚠️ IT IS STILL THE SCOPE BOUNDARY AND STILL NEVER FREE TEXT. Whatever comes
+ * back — initial list or search result — went through `loadLoggableTasks`,
+ * which is `vizserve_pms_is_on_task`: the accountable name, the QA reviewer, or
+ * a row in `vizserve_pms_task_assignees`, all equal. No status filter and no
+ * date filter unless somebody asks for one, because `vizserve_pms_may_log_time`
+ * has no opinion on either and the picker must not be stricter than the insert.
+ */
 function AddTaskRow({
   tasks,
+  taskLists,
+  excludeIds,
+  today,
   onAdd,
   hasRows,
 }: {
+  /** The initial twenty. Shown whenever nothing is filtered. */
   tasks: PickableTask[];
+  taskLists: { id: string; name: string }[];
+  /** Already on this week — filtered out of both the initial list and results. */
+  excludeIds: string[];
+  /** `YYYY-MM-DD` in app time, from the server. The week presets are built off it. */
+  today: string;
   onAdd: (taskId: string) => void;
   hasRows: boolean;
 }) {
   const [open, setOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+
+  const [query, setQuery] = useState("");
+  const [preset, setPreset] = useState<Preset>("all");
+  const [listId, setListId] = useState<string | null>(null);
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+
+  const [results, setResults] = useState<PickableTask[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [failed, setFailed] = useState(false);
+
+  /** How many FILTERS are on. The search box is not one — it is visible already. */
+  const activeFilters = (preset !== "all" ? 1 : 0) + (listId ? 1 : 0);
+  const filtered = Boolean(query.trim() || listId || from || to);
+
+  /*
+   * DEBOUNCED, AND THE LAST REPLY WINS.
+   *
+   * `token` is compared on the way back so a slow answer to "de" cannot
+   * overwrite a fast answer to "design" — the classic out-of-order search bug,
+   * and the one that makes a picker feel haunted.
+   */
+  const token = useRef(0);
+
+  useEffect(() => {
+    // Nothing asked for: the twenty the server already sent are the answer, so
+    // there is nothing to fetch and nothing to reset — `filtered` gates every
+    // read of `results`, `searching` and `failed` below, which is why this can
+    // leave them alone rather than clearing them from inside an effect.
+    if (!open || !filtered) return;
+
+    const mine = ++token.current;
+
+    // `setSearching` lives INSIDE the timer, not beside it: a synchronous
+    // setState in an effect body is a second render on every keystroke, for a
+    // spinner nobody sees during a 250ms debounce. The first search's gap is
+    // covered by `results === null` in the render instead.
+    const timer = window.setTimeout(() => {
+      setSearching(true);
+
+      void searchLoggableTasks({
+        query: query.trim() || null,
+        listId,
+        from: from || null,
+        to: to || null,
+      }).then((result) => {
+        if (token.current !== mine) return;
+
+        setSearching(false);
+
+        if (!result.ok) {
+          // Said, not swallowed. An empty popover after a search reads as "you
+          // are on nothing", which is a confident false statement about
+          // somebody's own work — the exact failure this picker already had.
+          setFailed(true);
+          setResults([]);
+          return;
+        }
+
+        setFailed(false);
+        // The status is a `string` on the wire — the column is an enum, but
+        // `loadLoggableTasks` is shared with a caller that does not care, so the
+        // narrowing happens at the one place that renders a badge from it.
+        setResults(
+          result.data.tasks.map((task) => ({
+            ...task,
+            status: task.status as VizservePmsTaskStatus,
+          })),
+        );
+      });
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [open, filtered, query, listId, from, to]);
+
+  /**
+   * Monday of the week `offsetWeeks` from today, and the Sunday after it.
+   *
+   * Built off the server's `today` and read at MIDDAY UTC, the same trick
+   * `lib/dates.ts` uses for bare dates: midnight lands on the previous day in
+   * any negative offset, and the viewer's own clock is not the business's.
+   */
+  function weekRange(offsetWeeks: number): { from: string; to: string } {
+    const base = new Date(`${today}T12:00:00Z`);
+    // Sunday is 0; shift so Monday starts the week, matching the timesheet.
+    const shift = (base.getUTCDay() + 6) % 7;
+    const monday = new Date(base);
+    monday.setUTCDate(base.getUTCDate() - shift + offsetWeeks * 7);
+    const sunday = new Date(monday);
+    sunday.setUTCDate(monday.getUTCDate() + 6);
+    return { from: monday.toISOString().slice(0, 10), to: sunday.toISOString().slice(0, 10) };
+  }
+
+  function applyPreset(next: Preset) {
+    setPreset(next);
+
+    if (next === "this" || next === "last") {
+      const range = weekRange(next === "this" ? 0 : -1);
+      setFrom(range.from);
+      setTo(range.to);
+      return;
+    }
+
+    // "all" clears, and so does "custom" — arriving on Custom carrying last
+    // week's dates would silently keep a filter the segment no longer names.
+    setFrom("");
+    setTo("");
+  }
+
+  function clearFilters() {
+    setPreset("all");
+    setListId(null);
+    setFrom("");
+    setTo("");
+  }
+
+  const listItems: Record<string, string> = {
+    [ALL_LISTS]: "All lists",
+    ...Object.fromEntries(taskLists.map((list) => [list.id, list.name])),
+  };
+
+  /*
+   * Filtered: whatever the server last returned, and nothing until it does —
+   * showing the unfiltered twenty while a search is in flight would answer a
+   * question nobody asked. Unfiltered: the twenty, always.
+   */
+  const shown = (filtered ? (results ?? []) : tasks).filter((task) => !excludeIds.includes(task.id));
 
   // Two ways to be empty, two different next steps — a dead end that only says
   // "nothing here" is the thing the design system calls out.
@@ -1417,8 +1611,14 @@ function AddTaskRow({
           </>
         ) : (
           <>
-            You are not the PIC or the QA reviewer on any task, so there is nothing to log against yet. Ask your team
-            leader to assign you, or{" "}
+            {/* ⚠️ "PIC OR QA REVIEWER" WAS WRONG AND WAS THE BUG PEOPLE
+                REPORTED. P7-13 made every assignee equal — a join-table row
+                confers the same right to log time as being the accountable
+                name. This sentence still described the pre-P7-13 rule, so
+                somebody who WAS an assignee and found an empty picker was told,
+                confidently and falsely, that they had to be made PIC. */}
+            You are not on any task yet, so there is nothing to log against. Being an assignee is enough — you do not
+            have to be the person it is filed under. Ask your team leader to add you, or{" "}
             <Link href="/tasks" className="font-medium text-primary hover:underline">
               see what is on your queue
             </Link>
@@ -1429,17 +1629,6 @@ function AddTaskRow({
     );
   }
 
-  /*
-   * A SEARCH BOX, NOT A LIST OF EVERYTHING.
-   *
-   * This was a `Select`, which meant every task a person may log against — the
-   * open ones, the finished ones, every department they touch — in one scroll,
-   * ordered by nothing anybody could see. Fine at six tasks. It is not six.
-   *
-   * The filter runs over the title AND the breadcrumb, so "SIS" narrows to a
-   * project and "meeting" narrows to a kind of work, which are the two ways
-   * anybody actually looks for one of these.
-   */
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
@@ -1452,33 +1641,213 @@ function AddTaskRow({
       />
 
       <PopoverContent align="start" className="w-112 gap-0 p-0">
-        <Command>
-          <CommandInput placeholder="Search tasks by name or project" />
+        {/*
+          `shouldFilter={false}` — cmdk's own fuzzy match is switched OFF, and
+          that is the whole change on this screen. Filtering in the browser can
+          only ever narrow the twenty rows already here; the search asks the
+          database now, so a task outside those twenty is findable at all.
+        */}
+        <Command shouldFilter={false}>
+          {/* Search and filters share a row: the search is the common case and
+              stays in the open, the filters are occasional and fold away behind
+              their own icon rather than putting four controls above a list of
+              five. */}
+          <div className="flex items-start gap-1 pr-1">
+            <div className="min-w-0 flex-1">
+              <CommandInput placeholder="Search tasks by name" value={query} onValueChange={setQuery} />
+            </div>
 
-          {/* `p-1`, because these items are not in a `CommandGroup` and that
-              is where the primitive keeps its padding — without it every row
-              runs flush into the popover's edge and the rounded highlight has
-              nothing to sit inside. */}
+            <Popover open={filtersOpen} onOpenChange={setFiltersOpen}>
+              <PopoverTrigger
+                render={
+                  <Button
+                    variant={activeFilters > 0 ? "outline" : "ghost"}
+                    size="icon-sm"
+                    // `relative` because the count badge below is absolutely
+                    // positioned and the button base is not a positioning
+                    // context — without it the badge anchors to the popover.
+                    // `size-8` and `mt-1` line it up with CommandInput, which
+                    // is `h-8` inside a `p-1` wrapper.
+                    className="relative mt-1 size-8 shrink-0"
+                    // The count is in the NAME, not only in the badge — an
+                    // icon-only control has to say what it is and what state
+                    // it is in without being looked at.
+                    aria-label={activeFilters > 0 ? `Filters, ${activeFilters} applied` : "Filters"}
+                  />
+                }>
+                <Filter />
+                {/* State is never colour alone: the number is the carrier and
+                    the tint is the reinforcement. */}
+                {activeFilters > 0 ? (
+                  <span
+                    aria-hidden
+                    className="absolute -top-1 -right-1 flex size-4 items-center justify-center rounded-sm border border-accent-border bg-accent grade-chip text-2xs font-semibold tabular-nums text-accent-foreground">
+                    {activeFilters}
+                  </span>
+                ) : null}
+              </PopoverTrigger>
+
+              {/* -----------------------------------------------------------
+                  ⚠️ NO BARE `<input>` OR `<select>` — both were here, and both
+                  are prohibited (§2). The primitives carry the token wiring,
+                  the focus ring, the dark-mode variants and the Base UI
+                  keyboard behaviour a native control has none of.
+
+                  A SEGMENTED CONTROL RATHER THAN TOGGLE BUTTONS, because
+                  exactly one of these is always in force. That is what a radio
+                  group means and what a screen reader announces — and it makes
+                  "Any time" a visible off switch, where the buttons needed an
+                  undocumented second press to clear.
+                  ----------------------------------------------------------- */}
+              <PopoverContent align="start" className="w-96 gap-3 p-3">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-xs font-semibold">Filters</span>
+                  {activeFilters > 0 ? (
+                    <Button variant="ghost" size="xs" onClick={clearFilters}>
+                      <X />
+                      Clear
+                    </Button>
+                  ) : null}
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-2xs tracking-wide text-muted-foreground uppercase">Created</Label>
+                  <Segmented
+                    aria-label="Filter by when the task was created"
+                    value={preset}
+                    onValueChange={(value) => applyPreset(value as Preset)}
+                    className="w-full">
+                    {PRESETS.map((option) => (
+                      <SegmentedItem key={option.value} value={option.value} className="flex-1 px-2 py-1">
+                        {option.label}
+                      </SegmentedItem>
+                    ))}
+                  </Segmented>
+                </div>
+
+                {/* Only under Custom. Shown always, they are two empty controls
+                    contradicting the segment above them. */}
+                {preset === "custom" ? (
+                  <div className="grid grid-cols-2 gap-2">
+                    {/*
+                      ⚠️ `[&::-webkit-calendar-picker-indicator]:hidden` IS THE
+                      POINT OF THESE TWO CLASSES, not decoration. A bare
+                      `type="date"` renders the browser's own calendar button
+                      inside our field — a control we do not style, do not theme
+                      and cannot make dark-mode aware, sitting next to ones we
+                      do. Hiding it leaves the field as a field; the date is
+                      still typed, and the picker still opens on click in every
+                      browser that has one.
+
+                      `DatePicker` is the app's proper date control and is NOT
+                      usable here: it opens its own Popover and this is already
+                      two deep. `app/(app)/tasks/inline.tsx:InlineDate` hit the
+                      same wall and answers it with a bare `Calendar`, which
+                      inside a task picker is a month of chrome for one filter.
+                    */}
+                    <div className="space-y-1.5">
+                      <Label htmlFor="task-created-from" className="px-1 text-2xs text-muted-foreground">
+                        From
+                      </Label>
+                      <Input
+                        type="date"
+                        id="task-created-from"
+                        value={from}
+                        // Bounded by each other, so a range that runs backwards
+                        // cannot be entered at all. `dueReminder`'s sibling
+                        // problem: an inverted range matches nothing, and
+                        // "nothing" is what an empty result looks like.
+                        max={to || undefined}
+                        onChange={(event) => setFrom(event.target.value)}
+                        className="h-9 w-full appearance-none bg-background text-xs [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label htmlFor="task-created-to" className="px-1 text-2xs text-muted-foreground">
+                        To
+                      </Label>
+                      <Input
+                        type="date"
+                        id="task-created-to"
+                        value={to}
+                        min={from || undefined}
+                        onChange={(event) => setTo(event.target.value)}
+                        className="h-9 w-full appearance-none bg-background text-xs [&::-webkit-calendar-picker-indicator]:hidden [&::-webkit-calendar-picker-indicator]:appearance-none"
+                      />
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Only the lists this person has work in — see
+                    `loadLoggableTaskLists`. A filter whose options mostly
+                    return nothing reads as broken, not as an empty list.
+
+                    `items` AND the children: Base UI renders the RAW VALUE in
+                    `SelectValue` without the map, which would put the literal
+                    sentinel on screen. Same fix `tasks/filters.tsx` carries. */}
+                {taskLists.length > 0 ? (
+                  <div className="space-y-1.5">
+                    <Label htmlFor="task-list" className="text-2xs tracking-wide text-muted-foreground uppercase">
+                      List
+                    </Label>
+                    <Select
+                      items={listItems}
+                      value={listId ?? ALL_LISTS}
+                      onValueChange={(value) => setListId(value === ALL_LISTS ? null : value)}>
+                      <SelectTrigger id="task-list" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent className="h-48">
+                        <SelectItem value={ALL_LISTS}>All lists</SelectItem>
+                        {taskLists.map((list) => (
+                          <SelectItem key={list.id} value={list.id}>
+                            {list.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                ) : null}
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          {/* What is in force, under the search rather than inside the popover
+              that set it — a filter you cannot see from the list it is
+              narrowing is a filter people forget they applied. */}
+          {activeFilters > 0 ? (
+            <p className="px-2 pt-2 text-2xs text-muted-foreground">
+              {preset !== "all"
+                ? `Created ${PRESETS.find((option) => option.value === preset)?.label.toLowerCase()}`
+                : null}
+              {preset !== "all" && listId ? " · " : null}
+              {listId ? listItems[listId] : null}
+            </p>
+          ) : null}
+
           <CommandList className="p-1">
-            {/* Says why, and what to do next — a bare "no results" is the dead
-                end the design system calls out. */}
-            <CommandEmpty>
-              No task matches that. Try the project name, or clear the search to see all {tasks.length} you can log
-              against.
-            </CommandEmpty>
+            {filtered && (searching || results === null) ? (
+              <p className="px-2 py-3 text-xs text-muted-foreground">Searching…</p>
+            ) : filtered && failed ? (
+              <p className="px-2 py-3 text-xs text-foreground">
+                That search did not go through. Try again, or clear the filters to see your latest tasks.
+              </p>
+            ) : shown.length === 0 ? (
+              <CommandEmpty>
+                {filtered
+                  ? "No task you are on matches those filters. Widen the dates, or clear them to see your latest tasks."
+                  : "Every task you can log against is already on this week."}
+              </CommandEmpty>
+            ) : null}
 
-            {/* Two lines per option, as in the picker the team already uses: the
-                task, then its state and where it lives. Several open tasks can
-                share a name across departments, and the title alone is not
-                enough to pick between them.
-
-                `value` is what cmdk matches against, so the breadcrumb is in it
-                — and the id on the end, which keeps two identically-named tasks
-                in the same project from collapsing into one row. */}
-            {tasks.map((task) => (
+            {/* Two lines per option: the task, then its state and where it
+                lives. Several open tasks can share a name across departments,
+                and the title alone is not enough to pick between them. */}
+            {shown.map((task) => (
               <CommandItem
                 key={task.id}
-                value={`${task.title} ${task.where ?? ""} ${task.id}`}
+                value={task.id}
                 onSelect={() => {
                   onAdd(task.id);
                   setOpen(false);
@@ -1492,6 +1861,15 @@ function AddTaskRow({
                 </span>
               </CommandItem>
             ))}
+
+            {/* Said once the initial cap is reached rather than silently
+                truncating — a list that stops at twenty with no explanation is
+                a list people believe is complete. */}
+            {!filtered && shown.length >= 20 ? (
+              <p className="px-2 py-2 text-2xs text-muted-foreground">
+                Your 20 most recent tasks. Search or filter to reach older ones.
+              </p>
+            ) : null}
           </CommandList>
         </Command>
       </PopoverContent>

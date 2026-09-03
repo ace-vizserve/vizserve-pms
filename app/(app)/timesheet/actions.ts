@@ -10,6 +10,11 @@ import {
   timesheetEntryUpdateSchema,
   timesheetWeekDecisionSchema,
 } from "@/lib/schemas/timesheet";
+import {
+  loadLoggableTasks,
+  LOGGABLE_SEARCH_LIMIT,
+  type LoggableTask,
+} from "@/lib/timesheet-tasks-server";
 import { createClient } from "@/utils/supabase/server";
 
 /**
@@ -229,4 +234,54 @@ export async function decideTimesheetWeek(
   revalidatePath("/timesheet/team");
   revalidatePath("/inbox");
   return { ok: true, data: undefined };
+}
+
+// ---------------------------------------------------------------------------
+// The picker's search
+// ---------------------------------------------------------------------------
+
+/**
+ * Search the tasks you may log against.
+ *
+ * The picker loads the 20 most recently created and then asks the DATABASE for
+ * anything else — so a task from three months ago is one search away rather
+ * than absent, and the initial render does not carry every task somebody has
+ * ever been on.
+ *
+ * ⚠️ NO `userId` PARAMETER, and there must not be one. The subject is the
+ * caller, resolved here; a parameter would be one missing check away from
+ * listing somebody else's work. `loadLoggableTasks` is the same scoping the
+ * page uses and the same rule `vizserve_pms_may_log_time` enforces on write, so
+ * the search cannot offer a task the insert would refuse.
+ */
+const taskSearchSchema = z.object({
+  query: z.string().max(200).optional().nullable(),
+  // `YYYY-MM-DD`, inclusive, against the task's CREATED date.
+  from: z.iso.date().optional().nullable(),
+  to: z.iso.date().optional().nullable(),
+  // A uuid, never a name — the options come from `loadLoggableTaskLists`, and
+  // a list the caller is not on simply matches nothing rather than being an
+  // error worth explaining.
+  listId: z.uuid().optional().nullable(),
+});
+
+export async function searchLoggableTasks(
+  input: unknown,
+): Promise<ActionResult<{ tasks: LoggableTask[] }>> {
+  const context = await requireAuthContextOrThrow();
+
+  const parsed = taskSearchSchema.safeParse(input ?? {});
+  // A malformed filter is not worth a sentence in a popover — it can only come
+  // from a control that produced it, and the honest response is the unfiltered
+  // list rather than an error where a list should be.
+  const filters = parsed.success ? parsed.data : {};
+
+  const { tasks, error } = await loadLoggableTasks(context.userId, {
+    ...filters,
+    limit: LOGGABLE_SEARCH_LIMIT,
+  });
+
+  if (error) return { ok: false, error };
+
+  return { ok: true, data: { tasks } };
 }

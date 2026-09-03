@@ -25,17 +25,6 @@ export type PunchState = {
   graceMinutes: number;
   /** P7-04. Overtime already approved for TODAY, which extends the day's end. */
   approvedOvertimeMinutes: number;
-  /**
-   * P8-12. Is today a day this person is expected to work — a weekday, not a
-   * proclaimed holiday, and not covered by their own approved leave?
-   *
-   * READ ONLY BY THE CLOCK REMINDER, never by this panel. The buttons stay
-   * exactly as available on a Sunday as on a Tuesday: somebody who comes in on
-   * a weekend must be able to record it, and the DTR has always let them. This
-   * decides whether to NAG about a punch, which is a different question from
-   * whether to accept one.
-   */
-  isWorkingDay: boolean;
 };
 
 /**

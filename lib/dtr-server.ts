@@ -22,13 +22,11 @@ import { createClient } from "@/utils/supabase/server";
  * to decide whether to offer the overnight time-out, so a second query for a
  * value that is null on almost every load is not worth the latency.
  *
- * ⚠️ `cache()`d SINCE P8-12, and that is a change of cost rather than of
- * behaviour. The app shell now reads this too, to drive the clock reminder — so
- * on `/`, `/dashboard` and `/dtr`, which each already called it for the punch
- * panel, an uncached reader would have doubled six queries on the three busiest
- * pages in the product. Same reasoning as `loadAppSettings`: one read per
- * request, shared. The argument is part of the key, so a lead's page reading
- * their own state does not collide with anything.
+ * `cache()`d since P8-12: the clock reminder reads it too, through
+ * `app/(app)/reminder-actions.ts`, so one request that renders the panel and
+ * answers the reminder pays for these reads once. Same reasoning as
+ * `loadAppSettings`. The argument is part of the key, so a lead's page reading
+ * their own state cannot collide with anything.
  */
 export const loadPunchState = cache(async (userId: string): Promise<PunchState> => {
   const today = todayInAppZone();
@@ -36,9 +34,9 @@ export const loadPunchState = cache(async (userId: string): Promise<PunchState> 
 
   const supabase = await createClient();
 
-  // Six reads, no dependencies between them. The settings read is `cache()`d,
+  // Four reads, no dependencies between them. The settings read is `cache()`d,
   // so a page rendering the panel AND the DTR table pays for it once.
-  const [entries, profile, overtime, settings, workingDay, leaveToday] = await Promise.all([
+  const [entries, profile, overtime, settings] = await Promise.all([
     supabase
       .from("vizserve_pms_dtr_entries")
       .select("work_date, time_in, time_out")
@@ -66,50 +64,6 @@ export const loadPunchState = cache(async (userId: string): Promise<PunchState> 
       .eq("status", "APPROVED")
       .eq("work_date", today),
     loadAppSettings(),
-
-    /*
-     * P8-12 — IS TODAY A DAY THIS PERSON IS EXPECTED TO WORK AT ALL?
-     *
-     * Two reads, because the answer has two independent halves and neither is
-     * knowable in the browser: `vizserve_pms_is_working_day` covers the weekend
-     * and the proclaimed holiday list (P7-33), and the leave query below covers
-     * this person's own approved absence.
-     *
-     * The RPC rather than `isBusinessDay` from lib/dates, which carries a
-     * seeded 2026 list and says so — a holiday an admin added this year would
-     * be missing from it. This is the same function the leave arithmetic and
-     * the timesheet's weekly target consult, so all three agree by
-     * construction about whether Good Friday is a working day.
-     *
-     * Only the reminder reads this. Nothing about a punch depends on it: the
-     * DTR happily records a Saturday shift, and this is solely about whether to
-     * NAG somebody about one.
-     */
-    supabase.rpc("vizserve_pms_is_working_day", { p_date: today }),
-
-    /*
-     * Approved leave covering today. The same overlap test the DTR page uses,
-     * `start_date <= today <= end_date`.
-     *
-     * ⚠️ A HALF DAY SILENCES IT TOO, and the halves are deliberately not read.
-     * Morning leave means arriving at midday, so the 09:00 reminder would be
-     * wrong; afternoon leave means leaving at midday, so the 18:00 one would
-     * be. The schedule this reminder is built on describes an ordinary day, and
-     * a day with approved leave on it is not one — the DTR takes the same line,
-     * refusing to compute a deviation on any day somebody was approved to be
-     * away rather than trying to shift the times.
-     *
-     * `head: true` with an exact count. Nothing here needs the rows; the
-     * question is only whether there are any.
-     */
-    supabase
-      .from("vizserve_pms_internal_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("requester_id", userId)
-      .eq("request_type", "LEAVE")
-      .eq("status", "APPROVED")
-      .lte("start_date", today)
-      .gte("end_date", today),
   ]);
 
   const rows = entries.data ?? [];
@@ -137,14 +91,70 @@ export const loadPunchState = cache(async (userId: string): Promise<PunchState> 
     schedule: scheduleFor(profile.data ?? {}),
     graceMinutes: settings.graceMinutes,
     approvedOvertimeMinutes,
-    /*
-     * P8-12. FALSE ON ANY DOUBT, which is the opposite of how most flags in
-     * this file are read and is the right way round for this one. The only
-     * consumer is a reminder, so a failed RPC — the function missing, an RLS
-     * refusal, a network fault — should produce silence rather than a nudge on
-     * a public holiday. `data === true` rather than a truthiness test, because
-     * the RPC returns `null` on error and `null` is not "yes".
-     */
-    isWorkingDay: workingDay.data === true && (leaveToday.count ?? 0) === 0,
   };
+});
+
+/**
+ * P8-12 — is today a day this person is expected to work at all?
+ *
+ * ⚠️ SEPARATE FROM `loadPunchState`, AND THAT SEPARATION IS THE POINT. These
+ * two reads were briefly folded into it, which put them on `/`, `/dashboard`
+ * and `/dtr` — three pages that call it for the punch panel and have no use for
+ * the answer. The panel never reads this: the DTR records a Saturday shift
+ * perfectly happily, and whether to NAG somebody about a punch is a different
+ * question from whether to accept one.
+ *
+ * The only caller is the clock reminder, which runs in the browser after paint.
+ *
+ * Two reads because the answer has two independent halves, and neither is
+ * knowable in the browser: `vizserve_pms_is_working_day` covers the weekend and
+ * the proclaimed holiday list (P7-33), and the second covers this person's own
+ * approved absence.
+ *
+ * FALSE ON ANY DOUBT, which is the opposite of how most flags in this file are
+ * read and the right way round for this one. A failed RPC — the function
+ * missing, an RLS refusal, a network fault — should produce silence rather than
+ * a nudge on a public holiday.
+ */
+export const loadWorkingDay = cache(async (userId: string): Promise<boolean> => {
+  const today = todayInAppZone();
+  const supabase = await createClient();
+
+  const [workingDay, leaveToday] = await Promise.all([
+    /*
+     * The RPC rather than `isBusinessDay` from lib/dates, which carries a
+     * seeded 2026 list and says so — a holiday an admin added this year would
+     * be missing from it. This is the same function the leave arithmetic and
+     * the timesheet's weekly target consult, so all three agree by construction
+     * about whether Good Friday is a working day.
+     */
+    supabase.rpc("vizserve_pms_is_working_day", { p_date: today }),
+
+    /*
+     * Approved leave covering today. The same overlap test the DTR page uses,
+     * `start_date <= today <= end_date`.
+     *
+     * ⚠️ A HALF DAY SILENCES IT TOO, and the halves are deliberately not read.
+     * Morning leave means arriving at midday, so the 09:00 reminder would be
+     * wrong; afternoon leave means leaving at midday, so the 18:00 one would
+     * be. The schedule this reminder is built on describes an ordinary day, and
+     * a day with approved leave on it is not one — the DTR takes the same line,
+     * refusing to compute a deviation on any day somebody was approved to be
+     * away rather than trying to shift the times.
+     *
+     * `head: true` with an exact count: nothing here needs the rows.
+     */
+    supabase
+      .from("vizserve_pms_internal_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("requester_id", userId)
+      .eq("request_type", "LEAVE")
+      .eq("status", "APPROVED")
+      .lte("start_date", today)
+      .gte("end_date", today),
+  ]);
+
+  // `data === true` rather than a truthiness test: the RPC returns `null` on
+  // error, and `null` is not "yes".
+  return workingDay.data === true && (leaveToday.count ?? 0) === 0;
 });

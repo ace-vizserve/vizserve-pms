@@ -617,9 +617,25 @@ export default async function DtrPage({
           // The card fills the row and the rows scroll inside it, so five
           // hundred days of DTR never make the page itself longer.
           //
-          // `[&>div]` is DataTableShell's inner scroller — it already handles
-          // the horizontal axis, so it is the right place to add the vertical
-          // one rather than nesting a second scroll container inside it.
+          // ⚠️ `[&>div:last-child]`, NOT `[&>div]`, AND THAT ONE WORD IS THE
+          // WHOLE BUG THIS COMMENT USED TO DESCRIBE WRONGLY.
+          //
+          // It said "`[&>div]` is DataTableShell's inner scroller". The shell
+          // has TWO direct div children whenever there is a controls strip:
+          // the strip itself, and the `overflow-x-auto` scroller holding the
+          // table. `[&>div]` matched both — so the TOOLBAR got `h-full` and
+          // filled the card, and the table was pushed out of a container that
+          // is `overflow-hidden`. The result was a DTR showing its Columns
+          // button and nothing else, at `lg` and up, with the rows present in
+          // the DOM and no error anywhere to explain it.
+          //
+          // `:last-child` is the scroller in both cases — the strip is
+          // conditional (`hasStrip`), so when it is absent the scroller is
+          // still the last child and still the only one.
+          //
+          // The scroller already handles the horizontal axis, which is why the
+          // vertical one belongs on it rather than in a second scroll
+          // container nested inside.
           //
           // The header sticks to the top of that scroller. `bg-background` and
           // the inset shadow rather than a border: a sticky `th` keeps its own
@@ -630,7 +646,7 @@ export default async function DtrPage({
           // card so the empty state centres in it. Left on with rows present it
           // would stretch the ROWS instead, and a three-row range would render
           // as three 200px-tall bands.
-          className={`[&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 lg:h-full lg:min-h-0 lg:[&>div]:h-full lg:[&>div]:overflow-y-auto lg:[&_thead_th]:sticky lg:[&_thead_th]:top-0 lg:[&_thead_th]:z-10 lg:[&_thead_th]:bg-background lg:[&_thead_th]:shadow-[inset_0_-1px_0_var(--border)] ${
+          className={`[&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 lg:h-full lg:min-h-0 lg:[&>div:last-child]:h-full lg:[&>div:last-child]:overflow-y-auto lg:[&_thead_th]:sticky lg:[&_thead_th]:top-0 lg:[&_thead_th]:z-10 lg:[&_thead_th]:bg-background lg:[&_thead_th]:shadow-[inset_0_-1px_0_var(--border)] ${
             entries.length === 0 ? "lg:[&_table]:h-full" : ""
           }`}
           rows={entries}

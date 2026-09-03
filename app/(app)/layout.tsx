@@ -4,10 +4,8 @@ import {
   canShapeAnyDepartment,
   requireAuthContext,
 } from "@/lib/auth/authorization";
-import { loadPunchState } from "@/lib/dtr-server";
 import { groupedNavItems } from "@/lib/navigation";
 import { formatNavBadge } from "@/lib/navigation";
-import { loadUserPreferences, signSoundUrl } from "@/lib/preferences-server";
 import { createClient } from "@/utils/supabase/server";
 import { AppSidebar } from "@/components/app-shell/app-sidebar";
 import {
@@ -116,8 +114,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { data: groups },
     { data: openTasks },
     { data: pendingRequests },
-    punchState,
-    preferences,
   ] = await Promise.all([
       supabase
         .from("vizserve_pms_departments")
@@ -164,30 +160,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         .select("vizserve_pms_forms!inner(default_list_id)")
         .eq("status", "PENDING_REVIEW"),
 
-      /*
-       * P8-12 — what the clock reminder needs, folded into the shell's existing
-       * round trip rather than awaited ahead of it.
-       *
-       * Both are `cache()`d: `loadPunchState` is shared with the punch panel on
-       * `/`, `/dashboard` and `/dtr`, and `loadUserPreferences` with /settings.
-       * On every one of those pages this costs nothing at all — the promise
-       * resolves from the same request's cache.
-       */
-      loadPunchState(context.userId),
-      loadUserPreferences(context.userId),
     ]);
-
-  /*
-   * Signed only when there is something to sign — `signSoundUrl` returns null
-   * for the shipped chime, which is served from `public/` and needs no signature
-   * and no expiry. So the overwhelming majority of page loads make no storage
-   * call at all, and the ones that do are for a person who deliberately
-   * uploaded a ringtone.
-   *
-   * Sequential rather than in the block above because it takes the preferences
-   * as its input; there is nothing to overlap it with.
-   */
-  const soundUrl = await signSoundUrl(preferences);
 
   const countByList = new Map<string, number>();
   for (const task of openTasks ?? []) {
@@ -287,25 +260,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           looking at their own time record is a reminder for the one person who
           does not need it.
 
-          ⚠️ ITS FACTS ARE COMPUTED HERE, ON THE SERVER, and the component makes
-          no decisions of its own. `loadPunchState` is `cache()`d as of P8-12
-          precisely so this costs nothing on `/`, `/dashboard` and `/dtr`, which
-          all read it already for the punch panel.
+          ⚠️ IT TAKES NO PROPS AND THIS LAYOUT READS NOTHING FOR IT — a
+          correction, not the original design. It was first fed from here, which
+          put `loadPunchState`'s six queries plus a preferences read on the
+          critical path of EVERY authenticated page. `/timesheet` and `/dtr`
+          issue large batches of their own, and the combined burst started
+          failing with `TypeError: fetch failed`. The component fetches its own
+          state after mount now; see `app/(app)/reminder-actions.ts`.
         */}
-        <ShiftReminder
-          userId={context.userId}
-          workDate={punchState.today?.work_date ?? ""}
-          schedule={punchState.schedule}
-          timeIn={punchState.today?.time_in ?? null}
-          timeOut={punchState.today?.time_out ?? null}
-          approvedOvertimeMinutes={punchState.approvedOvertimeMinutes}
-          isWorkingDay={punchState.isWorkingDay}
-          leadMinutes={preferences.leadMinutes}
-          clockInReminder={preferences.clockInReminder}
-          clockOutReminder={preferences.clockOutReminder}
-          soundUrl={soundUrl}
-          soundVolume={preferences.soundVolume}
-        />
+        <ShiftReminder />
 
         <SidebarProvider>
           <AppSidebar

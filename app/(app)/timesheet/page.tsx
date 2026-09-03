@@ -16,6 +16,7 @@ import { loadScheduledWeek } from "@/lib/timesheet-schedule-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
+import { loadLoggableTaskLists, loadLoggableTasks } from "@/lib/timesheet-tasks-server";
 import { buttonVariants } from "@/components/ui/button";
 import { WeekGrid, type TaskRow } from "./week-grid";
 import { WeekStatusBar, type WeekState } from "./week-status-bar";
@@ -57,37 +58,10 @@ export default async function TimesheetPage({
   const days = weekDates(monday);
   const sunday = days[6];
 
-  /**
-   * P7-13 — the tasks this person is on WITHOUT being the accountable name.
-   *
-   * THE PICKER USED TO ASK FOR PIC-OR-QA AND NOTHING ELSE, which was stricter
-   * than the rule it exists to mirror. `vizserve_pms_may_log_time` is
-   * `vizserve_pms_is_on_task`, and that is PIC **or** QA **or** a row in
-   * `vizserve_pms_task_assignees`. So a second assignee could be handed work,
-   * be fully able to move it, comment on it and edit it — and then find the
-   * timesheet picker empty, because this one query disagreed with the database
-   * about who is on a task. Their hours had nowhere to go.
-   *
-   * P7-13's own header warned about the mirror image of this ("a second assignee
-   * is offered the task in the picker and refused by the INSERT policy") and
-   * fixed `may_log_time` accordingly. The picker was never widened to match.
-   *
-   * Fetched BEFORE the batch below rather than inside it: PostgREST has no way
-   * to say "or exists in that other table", so the ids have to be in hand to
-   * build the filter. One extra round trip, and it is the honest shape — the
-   * alternative is an embed that turns the picker into an inner join and drops
-   * the PIC's own tasks.
-   */
-  const { data: alsoOnRows } = await supabase
-    .from("vizserve_pms_task_assignees")
-    .select("task_id")
-    .eq("user_id", context.userId);
-
-  const alsoOnTaskIds = (alsoOnRows ?? []).map((row) => row.task_id);
-
   const [
     entriesResult,
-    tasksResult,
+    loggable,
+    loggableListIds,
     weekResult,
     overtimeResult,
     departmentsResult,
@@ -120,28 +94,24 @@ export default async function TimesheetPage({
       .order("work_date")
       .order("created_at"),
 
-    // The picker. Every task this person is ON — as the accountable name, as the
-    // QA reviewer, or as one of several assignees. This is the same test
-    // `vizserve_pms_may_log_time` applies on write, so the list neither offers
-    // something the insert would refuse nor hides something it would accept.
-    //
-    // The three clauses ARE `vizserve_pms_is_on_task`, spelled out because a
-    // policy function cannot be called from a PostgREST filter. If that function
-    // ever gains a fourth way to be on a task, this is the line that has to
-    // learn about it — there is no way to make the two share one definition.
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id, title, status, list_id, department_id")
-      .or(
-        [
-          `assignee_id.eq.${context.userId}`,
-          `qa_assignee_id.eq.${context.userId}`,
-          // Omitted entirely when empty: `id.in.()` is a syntax error, not an
-          // empty set.
-          ...(alsoOnTaskIds.length > 0 ? [`id.in.(${alsoOnTaskIds.join(",")})`] : []),
-        ].join(","),
-      )
-      .order("due_date", { ascending: true, nullsFirst: false }),
+    /*
+     * The picker's FIRST PAGE — the 20 most recently created tasks this person
+     * is on, whoever the PIC is and whatever the status.
+     *
+     * Twenty rather than everything, because the picker searches the DATABASE
+     * now (`searchLoggableTasks`): the list is a starting point, not the set to
+     * choose from, so loading every task somebody has ever been on to fill a
+     * popover they are about to type into is work thrown away.
+     *
+     * Scoping lives in `loadLoggableTasks` and is shared with that action, so
+     * the list cannot go back to disagreeing with `vizserve_pms_may_log_time`
+     * about who is on a task.
+     */
+    loadLoggableTasks(context.userId),
+
+    // The List filter's options: the lists this person actually has work in.
+    // Inside the same batch, so it costs no extra round trip on the wire.
+    loadLoggableTaskLists(context.userId),
 
     // P7-05 — this week, if it has been handed in.
     //
@@ -245,6 +215,19 @@ export default async function TimesheetPage({
     (departmentsResult.data ?? []).map((row) => [row.id, row.name]),
   );
   const listName = new Map((listsResult.data ?? []).map((row) => [row.id, row.name]));
+
+  /*
+   * The List filter's options, named and sorted.
+   *
+   * A list whose name did not come back is DROPPED rather than shown as its
+   * uuid: `listsResult` is scoped by the lists policy, so an id with no name is
+   * one this person cannot see, and an unreadable option is worse than a
+   * missing one.
+   */
+  const listOptions = loggableListIds
+    .map((id) => ({ id, name: listName.get(id) ?? null }))
+    .filter((option): option is { id: string; name: string } => option.name !== null)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   type Entry = {
     id: string;
@@ -375,8 +358,8 @@ export default async function TimesheetPage({
    * Everything this person may log against — INCLUDING finished tasks.
    *
    * This used to drop terminal tasks from the picker. That was stricter than the
-   * rule it was supposed to mirror: `vizserve_pms_may_log_time` tests PIC-or-QA
-   * and says nothing about status, so the database accepts an entry against a
+   * rule it was supposed to mirror: `vizserve_pms_may_log_time` says nothing
+   * about status either way, so the database accepts an entry against a
    * completed task and the picker was refusing to offer one.
    *
    * The scenario is ordinary and the old behaviour made it impossible: finish a
@@ -387,18 +370,15 @@ export default async function TimesheetPage({
    * The picker shows each task's status, so a finished one is visibly finished
    * rather than silently offered.
    */
-  const loggableTasks = (tasksResult.data ?? [])
-    .map((task) => ({
-      id: task.id,
-      title: task.title,
-      status: task.status as TaskRow["status"] & string,
-      where: [
-        task.department_id ? departmentName.get(task.department_id) : null,
-        task.list_id ? listName.get(task.list_id) : null,
-      ]
-        .filter(Boolean)
-        .join(" / "),
-    }));
+  const loggableTasks = loggable.tasks.map((task) => ({
+    id: task.id,
+    title: task.title,
+    status: task.status as TaskRow["status"] & string,
+    // Already "Department / List" — resolved in `loadLoggableTasks` so the
+    // picker's search results, which never pass through this file, carry the
+    // same shape.
+    where: task.where,
+  }));
 
   const previousWeek = addDays(monday, -7);
   const nextWeek = addDays(monday, 7);
@@ -484,6 +464,29 @@ export default async function TimesheetPage({
         </p>
       ) : null}
 
+      {/*
+        P7-13 — THE PICKER IS NARROWER THAN THE DATABASE RIGHT NOW.
+
+        Said out loud rather than swallowed. A failed read of either the join
+        table or the task list leaves the picker offering PIC-or-QA tasks only,
+        or nothing at all — and the empty state underneath cannot tell that from
+        "you are genuinely on no tasks", so it would state the second while the
+        first is true. Somebody would go and ask their lead to assign them work
+        they already have.
+
+        Advisory, not fatal: whatever the picker did manage to load is still
+        offered, and hours already logged are unaffected.
+      */}
+      {loggable.error ? (
+        <p
+          role="status"
+          className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
+        >
+          The list of tasks you can log against could not be loaded, so Add task has nothing to
+          offer. Anything already on this week is unaffected — try reloading. ({loggable.error})
+        </p>
+      ) : null}
+
       {/* A failed query used to render as an empty week — indistinguishable
           from a week nobody worked, on the screen where that distinction
           matters most. */}
@@ -496,6 +499,7 @@ export default async function TimesheetPage({
           today={today}
           rows={taskRows}
           tasks={loggableTasks}
+          taskLists={listOptions}
           // One source for the lock, shared with the bar above: `isWeekLocked`
           // is the TypeScript mirror of the status list inside
           // `vizserve_pms_timesheet_week_locked`, and RETURNED is absent from

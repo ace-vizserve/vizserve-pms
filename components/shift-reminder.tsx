@@ -1,10 +1,11 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 
+import { loadReminderState, type ReminderState } from "@/app/(app)/reminder-actions";
 import { formatAppTime } from "@/lib/dates";
-import { effectiveEnd, type WorkSchedule } from "@/lib/dtr-schedule";
+import { effectiveEnd } from "@/lib/dtr-schedule";
 import { describeReminder, dueReminder, reminderSeenKey } from "@/lib/reminders";
 import { playReminderSound, reminderSoundSrc } from "@/lib/sound";
 
@@ -18,69 +19,96 @@ import { playReminderSound, reminderSoundSrc } from "@/lib/sound";
  * you are already looking at your time record is a reminder for the one person
  * who does not need it.
  *
- * ⚠️ EVERY DECISION IS MADE ON THE SERVER'S FACTS, and this component makes
- * none of its own. The schedule, the punches, the preferences and whether today
- * is a working day all arrive as props, computed by `loadPunchState` and
- * `loadUserPreferences`. What happens here is a clock tick and a comparison —
- * `dueReminder` is pure and unit-tested without a browser, which is why a
- * reminder due at 08:45 is testable without waiting until 08:45.
+ * ⚠️ IT FETCHES ITS OWN DATA, AFTER MOUNT, AND THAT IS A CORRECTION.
  *
- * ⚠️ AND IT WRITES NOTHING. No notification row, no audit row, no "dismissed"
+ * The first version took everything as props from the layout, which put
+ * `loadPunchState`'s six reads plus a preferences read on the critical path of
+ * EVERY authenticated page. `/timesheet` and `/dtr` issue large batches of
+ * their own, and the combined burst started failing with
+ * `TypeError: fetch failed` — first the timesheet's task picker, then the DTR's
+ * table. A background nudge had been made a precondition for rendering the
+ * screens it was meant to sit quietly behind.
+ *
+ * Nothing here is needed to draw anything and the first reminder cannot fire
+ * for minutes, so it is fetched after paint and refreshed slowly. That costs
+ * the render nothing, and it picks up a punch made in another tab without
+ * needing a navigation — which the props version could not do.
+ *
+ * ⚠️ IT STILL WRITES NOTHING. No notification row, no audit row, no "dismissed"
  * flag. See the header of `lib/reminders.ts`: this is a nudge in a tab that is
  * already open, not a notification, and the only trace it leaves is the
  * `localStorage` key that stops it firing twice.
  */
 
-/** How often to check. Half a minute, so the worst case is 30s late. */
+/** How often to check whether a reminder is due. Worst case is 30s late. */
 const TICK_MS = 30_000;
 
-export type ShiftReminderProps = {
-  userId: string;
-  /** Today's work date in app time — the key the "already fired" flag uses. */
-  workDate: string;
-  schedule: WorkSchedule;
-  timeIn: string | null;
-  timeOut: string | null;
-  approvedOvertimeMinutes: number;
-  isWorkingDay: boolean;
-  leadMinutes: number;
-  clockInReminder: boolean;
-  clockOutReminder: boolean;
-  /** A signed URL when they uploaded a sound; null for the shipped default. */
-  soundUrl: string | null;
-  soundVolume: number;
-};
+/**
+ * How often to re-read the punch state.
+ *
+ * Five minutes, not thirty seconds. The facts move rarely — a punch, an
+ * overtime approval — and the cost of being a few minutes stale is a reminder
+ * that fires for somebody who has just clocked in elsewhere. The punch panel
+ * calls `router.refresh()` on a captured punch, which re-mounts nothing here,
+ * so this interval is what eventually notices.
+ */
+const REFRESH_MS = 5 * 60_000;
 
-export function ShiftReminder(props: ShiftReminderProps) {
-  /*
-   * ⚠️ THE PROPS GO IN A REF, AND THE EFFECT DEPENDS ON NOTHING.
-   *
-   * The alternative — listing the props as dependencies — tears down and
-   * recreates the interval on every navigation, because this is mounted in the
-   * shell and the shell re-renders on every page change. A 30-second timer
-   * restarted every 20 seconds never fires, which would be a reminder that
-   * silently only worked for people who sit still.
-   *
-   * The ref is updated on every render, so the tick always reads current facts
-   * while the interval itself outlives them.
-   */
-  const latest = useRef(props);
+export function ShiftReminder() {
+  const [state, setState] = useState<ReminderState | null>(null);
 
-  /*
-   * ⚠️ IN AN EFFECT, NOT DURING RENDER, and it has to be DECLARED BEFORE the
-   * interval below. Effects run in declaration order, so this one has already
-   * refreshed the ref by the time the mount effect calls `check()` for the
-   * first time — writing the ref in the render body instead would be the same
-   * behaviour with a lint error and a real hazard under concurrent rendering,
-   * where a render can be thrown away after the write.
-   */
   useEffect(() => {
-    latest.current = props;
+    let alive = true;
+
+    function refresh() {
+      /*
+       * `.then`, and never awaited into the effect body: a synchronous setState
+       * during an effect is a second render, and this one has no reason to
+       * block paint at all. `alive` guards the unmount case — a reply arriving
+       * after the shell has gone would set state on a dead component.
+       *
+       * Failures are SWALLOWED. This is the one place in this feature where
+       * that is right: a reminder that could not load its own schedule has
+       * nothing to say, and there is no screen here to put an error on. The
+       * next refresh tries again.
+       */
+      void loadReminderState()
+        .then((next) => {
+          if (alive) setState(next);
+        })
+        .catch(() => {});
+    }
+
+    refresh();
+    const timer = window.setInterval(refresh, REFRESH_MS);
+
+    return () => {
+      alive = false;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  /*
+   * ⚠️ THE STATE GOES IN A REF AND THE TICK DEPENDS ON NOTHING.
+   *
+   * Listing `state` as a dependency would tear down and recreate the 30-second
+   * interval every time the five-minute refresh landed — survivable here, but
+   * the same mistake with a faster refresh is a timer that never fires. The ref
+   * is updated in its own effect, DECLARED FIRST so it has already run by the
+   * time the tick below reads it.
+   */
+  const latest = useRef(state);
+
+  useEffect(() => {
+    latest.current = state;
   });
 
   useEffect(() => {
     function check() {
       const current = latest.current;
+      // Nothing loaded yet, or nothing to watch — no schedule, or both
+      // reminders switched off. `loadReminderState` returns null for all three.
+      if (!current) return;
 
       /*
        * THE ONE LINE THAT MUST GO THROUGH `formatAppTime`. The business runs in
@@ -170,11 +198,6 @@ export function ShiftReminder(props: ShiftReminderProps) {
         action: { label: "Open DTR", onClick: () => window.open("/dtr", "_self") },
       });
     }
-
-    // Once immediately: somebody who opens the app at 08:50 is already inside
-    // the window, and waiting up to thirty seconds to say so is thirty seconds
-    // of a fifteen-minute warning spent.
-    check();
 
     const timer = window.setInterval(check, TICK_MS);
     return () => window.clearInterval(timer);
