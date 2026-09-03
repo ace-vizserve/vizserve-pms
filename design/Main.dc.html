@@ -1,0 +1,259 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;450;500;550;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: Figtree, ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.005em; }
+    a { color: #4359a5; } a:hover { color: #2f4180; }
+  </style>
+</helmet>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0; width: 848px; box-sizing: border-box;">
+
+  <!-- ─────────────────────────── LIGHT ─────────────────────────── -->
+  <div style="background: #f5f7fa; padding: 32px 28px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px;">
+
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #656f82;">Direction B · Panel</div>
+      <div style="font-size: 18px; font-weight: 600; color: #0f1626;">Light</div>
+    </div>
+
+    <!-- collapsed capsule -->
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #818b9c;">Collapsed</div>
+      <div style="display: flex; align-items: center; gap: 9px; width: 208px; height: 40px; padding: 0 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13);">
+        <span style="display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 9999px; background: #e8f3ee; border: 1px solid #bfdcce; flex-shrink: 0;">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#1c7a52" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </span>
+        <span style="font-size: 13px; font-weight: 550; color: #0f1626; white-space: nowrap;">Saved</span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #818b9c;">Expanded</div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+
+        <!-- neutral -->
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13), 0 30px 50px -18px rgb(15 22 38 / 0.22);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #edf0f8; border: 1px solid #c6d0e9; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4359a5" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M22 8c0-2.3-.8-4.3-2-6"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #0f1626; line-height: 1.35;">You have a new notification</div>
+          </div>
+        </div>
+
+        <!-- success -->
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13), 0 30px 50px -18px rgb(15 22 38 / 0.22);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #e8f3ee; border: 1px solid #bfdcce; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1c7a52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #0f1626; line-height: 1.35;">Timed in at 09:02</div>
+            <div style="font-size: 13px; color: #656f82; line-height: 1.45;">Six minutes inside your grace period.</div>
+          </div>
+        </div>
+
+        <!-- error -->
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13), 0 30px 50px -18px rgb(15 22 38 / 0.22);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #fbecea; border: 1px solid #efcbc7; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#b3352c" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #0f1626; line-height: 1.35;">That is not your current password</div>
+          </div>
+        </div>
+
+        <!-- warning -->
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13), 0 30px 50px -18px rgb(15 22 38 / 0.22);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #fbf2e0; border: 1px solid #e8d6ac; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8a6206" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #0f1626; line-height: 1.35;">This week is 2h short of your schedule</div>
+            <div style="font-size: 13px; color: #656f82; line-height: 1.45;">It cannot be handed in until it reaches 40h.</div>
+          </div>
+        </div>
+
+        <!-- info -->
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13), 0 30px 50px -18px rgb(15 22 38 / 0.22);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #e7f2f6; border: 1px solid #bddae4; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#277590" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #0f1626; line-height: 1.35;">Reset link sent</div>
+          </div>
+        </div>
+
+        <!-- with action -->
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13), 0 30px 50px -18px rgb(15 22 38 / 0.22);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #edf0f8; border: 1px solid #c6d0e9; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4359a5" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; flex-grow: 1;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <div style="font-size: 14px; font-weight: 600; color: #0f1626; line-height: 1.35;">Clock in at 09:00 — 15 minutes</div>
+              <div style="font-size: 13px; color: #656f82; line-height: 1.45;">Time in from the DTR or the dashboard.</div>
+            </div>
+            <div style="display: flex;">
+              <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; border: 1px solid #3a4e91; background: linear-gradient(180deg, #4c63b0 0%, #4359a5 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18), 0 1px 1px rgb(15 22 38 / 0.06), 0 2px 4px -1px rgb(15 22 38 / 0.10); font-size: 12px; font-weight: 600; color: #ffffff;">Open DTR</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 9px; padding-top: 4px; border-top: 1px solid #e3e7ee;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #818b9c; padding-top: 12px;">Action button follows the variant</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #4359a5; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #ffffff;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #818b9c;">Neutral</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #1c7a52; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #ffffff;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #818b9c;">Success</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #8a6206; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #ffffff;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #818b9c;">Warning</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #b3352c; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #ffffff;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #818b9c;">Error</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #277590; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #ffffff;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #818b9c;">Info</span>
+          </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ─────────────────────────── DARK ─────────────────────────── -->
+  <div style="background: #12151c; padding: 32px 28px 36px; box-sizing: border-box; display: flex; flex-direction: column; gap: 18px;">
+
+    <div style="display: flex; flex-direction: column; gap: 4px;">
+      <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #8e98aa;">Direction B · Panel</div>
+      <div style="font-size: 18px; font-weight: 600; color: #edf0f5;">Dark</div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #6e7889;">Collapsed</div>
+      <div style="display: flex; align-items: center; gap: 9px; width: 208px; height: 40px; padding: 0 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #262c37; background: linear-gradient(180deg, #252b37 0%, #1c212b 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55);">
+        <span style="display: flex; align-items: center; justify-content: center; width: 18px; height: 18px; border-radius: 9999px; background: #152720; border: 1px solid #264334; flex-shrink: 0;">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#4cb483" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </span>
+        <span style="font-size: 13px; font-weight: 550; color: #edf0f5; white-space: nowrap;">Saved</span>
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 7px;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #6e7889;">Expanded</div>
+
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #262c37; background: linear-gradient(180deg, #1d222c 0%, #171b23 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55), 0 30px 50px -18px rgb(0 0 0 / 0.7);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #1e2537; border: 1px solid #37405c; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8098de" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.268 21a2 2 0 0 0 3.464 0"></path><path d="M22 8c0-2.3-.8-4.3-2-6"></path><path d="M3.262 15.326A1 1 0 0 0 4 17h16a1 1 0 0 0 .74-1.673C19.41 13.956 18 12.499 18 8A6 6 0 0 0 6 8c0 4.499-1.411 5.956-2.738 7.326"></path></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #edf0f5; line-height: 1.35;">You have a new notification</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #262c37; background: linear-gradient(180deg, #1d222c 0%, #171b23 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55), 0 30px 50px -18px rgb(0 0 0 / 0.7);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #152720; border: 1px solid #264334; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#4cb483" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #edf0f5; line-height: 1.35;">Timed in at 09:02</div>
+            <div style="font-size: 13px; color: #8e98aa; line-height: 1.45;">Six minutes inside your grace period.</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #262c37; background: linear-gradient(180deg, #1d222c 0%, #171b23 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55), 0 30px 50px -18px rgb(0 0 0 / 0.7);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #2b1a18; border: 1px solid #4a2c29; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#e0736a" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #edf0f5; line-height: 1.35;">That is not your current password</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #262c37; background: linear-gradient(180deg, #1d222c 0%, #171b23 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55), 0 30px 50px -18px rgb(0 0 0 / 0.7);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #2a2213; border: 1px solid #463a1f; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#d8a94a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #edf0f5; line-height: 1.35;">This week is 2h short of your schedule</div>
+            <div style="font-size: 13px; color: #8e98aa; line-height: 1.45;">It cannot be handed in until it reaches 40h.</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #262c37; background: linear-gradient(180deg, #1d222c 0%, #171b23 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55), 0 30px 50px -18px rgb(0 0 0 / 0.7);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #182931; border: 1px solid #2c4653; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#5fb6d2" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+            <div style="font-size: 14px; font-weight: 600; color: #edf0f5; line-height: 1.35;">Reset link sent</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #262c37; background: linear-gradient(180deg, #1d222c 0%, #171b23 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.07), 0 2px 4px rgb(0 0 0 / 0.4), 0 12px 22px -6px rgb(0 0 0 / 0.55), 0 30px 50px -18px rgb(0 0 0 / 0.7);">
+          <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #1e2537; border: 1px solid #37405c; flex-shrink: 0; margin-top: 1px;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#8098de" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+          </span>
+          <div style="display: flex; flex-direction: column; gap: 8px; min-width: 0; flex-grow: 1;">
+            <div style="display: flex; flex-direction: column; gap: 2px;">
+              <div style="font-size: 14px; font-weight: 600; color: #edf0f5; line-height: 1.35;">Clock in at 09:00 — 15 minutes</div>
+              <div style="font-size: 13px; color: #8e98aa; line-height: 1.45;">Time in from the DTR or the dashboard.</div>
+            </div>
+            <div style="display: flex;">
+              <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; border: 1px solid #6f88d4; background: linear-gradient(180deg, #8ba2e3 0%, #8098de 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.22), 0 1px 1px rgb(0 0 0 / 0.3); font-size: 12px; font-weight: 600; color: #151c2e;">Open DTR</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div style="display: flex; flex-direction: column; gap: 9px; padding-top: 4px; border-top: 1px solid #262c37;">
+      <div style="font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; color: #6e7889; padding-top: 12px;">Action button follows the variant</div>
+      <div style="display: flex; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #8098de; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #151c2e;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6e7889;">Neutral</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #4cb483; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #151c2e;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6e7889;">Success</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #d8a94a; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #151c2e;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6e7889;">Warning</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #e0736a; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #151c2e;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6e7889;">Error</span>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 5px;">
+            <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 11px; border-radius: 6px; background: #5fb6d2; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.18); font-size: 12px; font-weight: 600; color: #151c2e;">Open DTR</span>
+            <span style="font-size: 10px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6e7889;">Info</span>
+          </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

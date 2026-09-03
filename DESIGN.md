@@ -64,6 +64,25 @@ Where a legible teal *is* wanted, that is `--info` (`#277590`), which is a separ
 - Contrast constraints required
 - State is never conveyed by colour alone
 
+### Measured — the toast action button (P8-15)
+
+A filled action button takes the toast variant's own solid. White cannot serve
+both themes: it fails outright on every dark-theme solid, so the ink flips, and
+the flip is `--primary-foreground` doing what it already does for one colour
+applied to five.
+
+| Variant solid | Light — white on it | Dark — `#151c2e` on it |
+|---|---|---|
+| success `#1c7a52` / `#4cb483` | **5.31** ✅ | **6.60** ✅ |
+| warning `#8a6206` / `#d8a94a` | **5.48** ✅ | **7.83** ✅ |
+| info `#277590` / `#5fb6d2` | **5.21** ✅ | **7.36** ✅ |
+| destructive `#b3352c` / `#e0736a` | **6.07** ✅ | **5.52** ✅ |
+| primary `#4359a5` / `#8098de` | **6.54** ✅ | **6.03** ✅ |
+
+For the record, the pairing that was rejected: **white on the DARK solids
+measures 2.17–3.07** — below 3:1, so it fails as large text and UI boundary as
+well as body.
+
 ## Writing Tone
 
 Concise, confident, implementation-focused.

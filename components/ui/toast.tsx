@@ -97,6 +97,42 @@ export const toast = Object.assign(
 const POSITION: SileoPosition = "top-center";
 
 /**
+ * ⚠️ THE SURFACE IS A GRADIENT, NOT A FLAT FILL, AND THAT IS THE ONE PLACE
+ * THIS COULD NOT BE A STRAIGHT TOKEN SWAP.
+ *
+ * §1.5: a raised object carries `--hl`, a 1px inset highlight along its top
+ * edge. sileo paints its own surface, so an inset box-shadow of ours would sit
+ * under it — the lit edge has to arrive as part of the fill instead. These two
+ * gradients are `--gradient-raised` from `app/globals.css`, restated here
+ * because `fill` is a colour prop rather than a class and cannot read a token.
+ *
+ * ⚠️ IF THE RAISED GRADIENT CHANGES, THIS CHANGES. It is the only duplicated
+ * colour in this file and the only one a redesign could leave behind.
+ */
+const SURFACE_LIGHT = "linear-gradient(180deg, #ffffff 0%, #fafbfd 100%)";
+const SURFACE_DARK = "linear-gradient(180deg, #1d222c 0%, #171b23 100%)";
+
+/**
+ * `--radius-xl`. A toast is an overlay, so it takes the overlay radius rather
+ * than sileo's stock capsule — the collapsed pill was the one shape in the
+ * product that belonged to no other component.
+ */
+const ROUNDNESS = 14;
+
+/**
+ * The text parts, as classNames.
+ *
+ * Tailwind rather than inline values, so these read as the same declarations
+ * every other surface in the app uses and move with the tokens.
+ */
+const STYLES = {
+  title: "text-sm font-semibold text-foreground",
+  description: "text-[13px] leading-relaxed text-muted-foreground",
+  button: "h-7 rounded-md px-2.5 text-xs font-semibold",
+  badge: "size-5",
+} as const;
+
+/**
  * Mounted once, in the root layout, INSIDE `ThemeProvider`.
  *
  * ⚠️ THE THEME IS PASSED EXPLICITLY RATHER THAN LEFT ON "system". This app
@@ -107,14 +143,23 @@ const POSITION: SileoPosition = "top-center";
  * `resolvedTheme` is undefined until after hydration, which is why it falls
  * back to "system" rather than to "light": on the first paint the OS guess is
  * right far more often than a coin flip, and it is corrected within a frame.
+ * The FILL has no such fallback available — it is one value, not a media query
+ * — so it follows `resolvedTheme` directly and is simply light until the theme
+ * resolves. A toast cannot fire that early.
  */
 export function Toaster() {
   const { resolvedTheme } = useTheme();
+  const dark = resolvedTheme === "dark";
 
   return (
     <SileoToaster
       position={POSITION}
-      theme={resolvedTheme === "dark" ? "dark" : resolvedTheme === "light" ? "light" : "system"}
+      theme={dark ? "dark" : resolvedTheme === "light" ? "light" : "system"}
+      options={{
+        fill: dark ? SURFACE_DARK : SURFACE_LIGHT,
+        roundness: ROUNDNESS,
+        styles: { ...STYLES },
+      }}
     />
   );
 }

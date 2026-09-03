@@ -826,3 +826,67 @@
     font-weight: 650;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   Toasts — sileo, retargeted at this system's tokens.
+   ---------------------------------------------------------------------------
+
+   ⚠️ SPECIFICITY IS LOAD-BEARING HERE, not fussiness. sileo INJECTS its
+   stylesheet from JavaScript (`createElement('style')`), so its rules land in
+   <head> AFTER this file and win every tie. `:root` in front of each selector
+   lifts these to (0,3,0) against its (0,2,0), so they win on weight rather
+   than on order — which is the only way to be sure, because the order depends
+   on when the component first mounts.
+
+   Everything below maps a sileo variable onto a token that already exists.
+   Nothing here invents a colour, and every pair was measured before it was
+   written down (see DESIGN.md).
+   -------------------------------------------------------------------------- */
+
+:root {
+  /* The five states, onto the semantic scale. `--sileo-state-loading` is
+     deliberately the muted foreground rather than a colour: a spinner is not
+     a status, and giving it one would be the sixth tone in a five-tone system. */
+  --sileo-state-success: var(--success);
+  --sileo-state-error: var(--destructive);
+  --sileo-state-warning: var(--warning);
+  --sileo-state-info: var(--info);
+  --sileo-state-action: var(--primary);
+  --sileo-state-loading: var(--muted-foreground);
+
+  /* 360, not the stock 350. This app's base type is 16px where sileo assumes
+     14, so a stock-width toast wraps "This week is 2h short of your schedule"
+     onto three lines. */
+  --sileo-width: 360px;
+}
+
+/* ---------------------------------------------------------------------------
+   The action button: FILLED WITH THE VARIANT'S OWN COLOUR.
+
+   sileo ships it as `color-mix(in oklch, var(--_c) 15%, transparent)` — a
+   tint. Amier asked for the solid, and the solid is also the only version with
+   enough weight to read as the one thing to press.
+
+   ⚠️ `var(--sileo-tone)` RATHER THAN `var(--_c)`. Both resolve to the current
+   state's colour, and `--_c` is the one the tint is built from — but the
+   underscore says private, and this is a 0.1.x library. `--sileo-tone` is the
+   public spelling of the same value.
+
+   ⚠️ AND THE INK FLIPS WITH THE THEME, which is not a preference. Measured
+   against every state solid:
+
+     white on the LIGHT solids   5.21 – 6.54:1   ✅
+     white on the DARK solids    2.17 – 3.07:1   ❌ fails outright
+     #151c2e on the DARK solids  5.52 – 7.83:1   ✅
+
+   So a single ink cannot serve both themes. This is the same flip
+   `--primary-foreground` already performs, applied to five colours instead of
+   one — which is why it is written as that token rather than as two literals.
+   -------------------------------------------------------------------------- */
+:root [data-sileo-button][data-state] {
+  --sileo-btn-bg: var(--sileo-tone);
+  /* Darkened toward the ink rather than lightened toward the page, so hover
+     reads as pressure in both themes. */
+  --sileo-btn-bg-hover: color-mix(in oklch, var(--sileo-tone) 86%, var(--foreground));
+  --sileo-btn-color: var(--primary-foreground);
+}

@@ -1,0 +1,103 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;450;500;550;600;700&display=swap">
+  <style>
+    body { margin: 0; font-family: Figtree, ui-sans-serif, system-ui, sans-serif; letter-spacing: -0.005em; }
+    a { color: #4359a5; } a:hover { color: #2f4180; }
+  </style>
+</helmet>
+
+<div style="width: 1000px; box-sizing: border-box; background: #f5f7fa; padding: 30px 30px 34px; display: flex; flex-direction: column; gap: 16px;">
+
+  <div style="display: flex; flex-direction: column; gap: 4px;">
+    <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #656f82;">Placement</div>
+    <div style="font-size: 18px; font-weight: 600; color: #0f1626;">Top centre, clear of the chrome</div>
+  </div>
+
+  <!-- app shell -->
+  <div style="position: relative; height: 470px; border-radius: 10px; border: 1px solid #e3e7ee; overflow: hidden; background: #f5f7fa; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 4px 8px -2px rgb(15 22 38 / 0.07);">
+
+    <div style="display: flex; height: 100%;">
+
+      <!-- sidebar -->
+      <div style="width: 190px; flex-shrink: 0; border-right: 1px solid #e3e7ee; background: rgb(255 255 255 / 0.82); padding: 12px; box-sizing: border-box; display: flex; flex-direction: column; gap: 14px;">
+        <div style="height: 44px; border-radius: 8px; border: 1px solid #e3e7ee; background: #ffffff; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 1px rgb(15 22 38 / 0.04); display: flex; align-items: center; padding: 0 10px; gap: 8px;">
+          <span style="width: 22px; height: 22px; border-radius: 5px; background: #4359a5; flex-shrink: 0;"></span>
+          <span style="font-size: 12px; font-weight: 600; color: #0f1626;">VizServe</span>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div style="height: 9px; width: 46px; border-radius: 3px; background: #e7ebf1;"></div>
+          <div style="height: 28px; border-radius: 6px; background: #edf0f8; border: 1px solid #c6d0e9;"></div>
+          <div style="height: 28px; border-radius: 6px; background: transparent;"></div>
+          <div style="height: 28px; border-radius: 6px; background: transparent;"></div>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 5px;">
+          <div style="height: 9px; width: 36px; border-radius: 3px; background: #e7ebf1;"></div>
+          <div style="height: 28px; border-radius: 6px; background: transparent;"></div>
+          <div style="height: 28px; border-radius: 6px; background: transparent;"></div>
+        </div>
+      </div>
+
+      <!-- main -->
+      <div style="flex-grow: 1; display: flex; flex-direction: column; min-width: 0;">
+
+        <!-- top bar -->
+        <div style="height: 56px; flex-shrink: 0; border-bottom: 1px solid #e3e7ee; background: rgb(255 255 255 / 0.82); display: flex; align-items: center; padding: 0 18px; gap: 10px;">
+          <span style="width: 18px; height: 18px; border-radius: 4px; border: 1px solid #d2d8e2;"></span>
+          <span style="width: 1px; height: 16px; background: #e3e7ee;"></span>
+          <span style="font-size: 13px; color: #656f82;">Timesheet</span>
+          <span style="flex-grow: 1;"></span>
+          <!-- the two controls top-right would have covered -->
+          <span style="width: 32px; height: 32px; border-radius: 8px; border: 1px solid #d2d8e2; background: #ffffff; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 1px rgb(15 22 38 / 0.04); display: flex; align-items: center; justify-content: center;">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#656f82" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2"></path><path d="M12 20v2"></path><path d="m4.93 4.93 1.41 1.41"></path><path d="m17.66 17.66 1.41 1.41"></path><path d="M2 12h2"></path><path d="M20 12h2"></path><path d="m6.34 17.66-1.41 1.41"></path><path d="m19.07 4.93-1.41 1.41"></path></svg>
+          </span>
+        </div>
+
+        <!-- page body -->
+        <div style="flex-grow: 1; padding: 18px; display: flex; flex-direction: column; gap: 12px;">
+          <div style="height: 10px; width: 180px; border-radius: 3px; background: #e7ebf1;"></div>
+          <div style="flex-grow: 1; border-radius: 10px; border: 1px solid #e3e7ee; background: #ffffff; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 4px 8px -2px rgb(15 22 38 / 0.07); display: flex; flex-direction: column;">
+            <div style="height: 40px; border-bottom: 1px solid #e3e7ee; display: flex; align-items: center; padding: 0 14px; gap: 10px;">
+              <div style="height: 8px; width: 70px; border-radius: 3px; background: #e7ebf1;"></div>
+              <div style="height: 8px; width: 44px; border-radius: 3px; background: #eef1f5;"></div>
+            </div>
+            <div style="padding: 14px; display: flex; flex-direction: column; gap: 12px;">
+              <div style="height: 8px; width: 62%; border-radius: 3px; background: #eef1f5;"></div>
+              <div style="height: 8px; width: 48%; border-radius: 3px; background: #eef1f5;"></div>
+              <div style="height: 8px; width: 55%; border-radius: 3px; background: #eef1f5;"></div>
+              <div style="height: 8px; width: 40%; border-radius: 3px; background: #eef1f5;"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- the toast, top-centre over the whole shell -->
+    <div style="position: absolute; top: 16px; left: 0; right: 0; display: flex; justify-content: center; pointer-events: none;">
+      <div style="display: flex; align-items: flex-start; gap: 11px; width: 360px; padding: 12px 14px; box-sizing: border-box; border-radius: 14px; border: 1px solid #e3e7ee; background: linear-gradient(180deg, #ffffff 0%, #fafbfd 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 2px 4px rgb(15 22 38 / 0.06), 0 12px 22px -6px rgb(15 22 38 / 0.13), 0 30px 50px -18px rgb(15 22 38 / 0.22);">
+        <span style="display: flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 9999px; background: #e8f3ee; border: 1px solid #bfdcce; flex-shrink: 0; margin-top: 1px;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#1c7a52" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </span>
+        <div style="display: flex; flex-direction: column; gap: 2px; min-width: 0;">
+          <div style="font-size: 14px; font-weight: 600; color: #0f1626; line-height: 1.35;">Saved</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div style="display: flex; gap: 11px; padding: 13px 15px; border-radius: 10px; border: 1px solid #e3e7ee; background: #ffffff; box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 1px rgb(15 22 38 / 0.04);">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#277590" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="16" x2="12" y2="12"></line><line x1="12" y1="8" x2="12.01" y2="8"></line></svg>
+    <div style="font-size: 13px; color: #556074; line-height: 1.5;">16px below the top edge, so it clears the 56px bar but reads as belonging to the page rather than to the chrome. Top-right sat directly over the theme toggle — the control on the right of that bar — which is one of the two things a person is reaching for when a toast lands.</div>
+  </div>
+
+</div>
+</x-dc>
+</body>
+</html>

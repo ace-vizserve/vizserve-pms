@@ -1,0 +1,53 @@
+{
+  "artboards": [
+    {
+      "file": "Main.dc.html",
+      "x": 0,
+      "y": 0,
+      "w": 848,
+      "h": 1010,
+      "title": "Direction B — Panel"
+    },
+    {
+      "file": "Capsule.dc.html",
+      "x": 948,
+      "y": 0,
+      "w": 848,
+      "h": 1010,
+      "title": "Direction A — Capsule"
+    },
+    {
+      "file": "Anatomy.dc.html",
+      "x": 0,
+      "y": 1140,
+      "w": 720,
+      "h": 640
+    },
+    {
+      "file": "Placement.dc.html",
+      "x": 820,
+      "y": 1140,
+      "w": 1000,
+      "h": 640
+    }
+  ],
+  "annotations": [
+    {
+      "id": "brief",
+      "x": 0,
+      "y": -190,
+      "w": 420,
+      "text": "Toasts — sileo restyled to the VizServe design system.\n\nEvery value here is lifted from app/globals.css: Figtree, --radius-xl (14px), the status triples, --elev-2/--elev-3, --hl.\n\nDirection B (Panel) is chosen. The action button is filled with the variant's solid — white ink in light (5.2–6.5:1), near-black in dark (5.5–7.8:1), because white on the dark solids measures 2.2–3.1 and fails."
+    },
+    {
+      "id": "axis",
+      "x": 948,
+      "y": -190,
+      "w": 420,
+      "text": "The axis: does a toast read as a PANEL (our overlay language — popover fill, hairline border, lit top edge, status only in the badge) or as a CAPSULE (sileo's own identity — tinted surface, coloured text, pill)?\n\nA is louder and less like the rest of the app. B is quieter and matches every other overlay."
+    }
+  ],
+  "launch": {
+    "view": "canvas"
+  }
+}
