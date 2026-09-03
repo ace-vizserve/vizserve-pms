@@ -761,9 +761,20 @@ function UserForm({
             <Select
               items={departmentItems}
               value={primaryDepartmentId ?? NO_DEPARTMENT}
-              onValueChange={(value) =>
-                setPrimaryDepartmentId(value === NO_DEPARTMENT ? null : value)
-              }
+              onValueChange={(value) => {
+                const next = value === NO_DEPARTMENT ? null : value;
+                setPrimaryDepartmentId(next);
+                /* ⚠️ CLEAR THE ADMIN TICK WITH IT, or the two diverge and the
+                   record cannot be saved OR corrected. The switch below draws
+                   from `isDeptAdmin && primaryDepartmentId` and is DISABLED
+                   without a department, so leaving the raw state set gives an
+                   owner a control that already looks off, cannot be toggled,
+                   and still submits `true` — which the schema then refuses,
+                   with the explanation landing in a `fieldErrors` key this
+                   block does not render. Resetting here is what keeps what is
+                   on screen and what gets sent the same value. */
+                if (!next) setIsDeptAdmin(false);
+              }}
             >
               <SelectTrigger id="primary_department">
                 <SelectValue />
@@ -974,7 +985,10 @@ function UserForm({
           </div>
           <Switch
             id="is_dept_admin"
-            checked={isDeptAdmin && Boolean(primaryDepartmentId)}
+            /* `isDeptAdmin` alone: the reset above guarantees it is already
+               false whenever there is no department, so a second guard here
+               would only hide a divergence rather than prevent one. */
+            checked={isDeptAdmin}
             disabled={!viewerIsOwner || !primaryDepartmentId}
             onCheckedChange={setIsDeptAdmin}
           />

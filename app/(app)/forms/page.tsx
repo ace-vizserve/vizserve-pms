@@ -96,7 +96,10 @@ export default async function FormsPage() {
    * request type), this page is capped by nothing else, and `administersForm`
    * is the same rule the write path applies.
    */
-  const rows = (forms ?? []).filter((form) => administersForm(context, form)) as FormRow[];
+  /* Kept before the cast: `FormRow` is the table's shape and omits `created_by`,
+     which the author carve-out below needs. */
+  const administered = (forms ?? []).filter((form) => administersForm(context, form));
+  const rows = administered as FormRow[];
 
   /*
    * ⚠️ WHOSE SUBMISSIONS THIS VIEWER CAN ACTUALLY READ — see the column comment
@@ -109,7 +112,20 @@ export default async function FormsPage() {
    * both zero, and the two must not print the same word.
    */
   const submissionsReadable: Record<string, boolean> = Object.fromEntries(
-    rows.map((form) => [form.id, canAccessDepartment(context, form.department_id)]),
+    administered.map((form) => [
+      form.id,
+      /* ⚠️ AN UNROUTED DRAFT IS READABLE BECAUSE ITS COUNT IS PROVABLY ZERO.
+         `canAccessDepartment(ctx, null)` is false for anyone below owner, so
+         without this a team leader's own draft printed "Not shown" — claiming a
+         permission problem where none exists, which is the exact confusion this
+         flag was added to prevent, just inverted. A form with no department
+         cannot be published (`vizserve_pms_forms_active_requires_department`),
+         so nobody can have submitted to it and "None" is the true answer.
+         `administersForm`'s author carve-out is what put the row here at all. */
+      form.department_id === null
+        ? form.created_by === context.userId
+        : canAccessDepartment(context, form.department_id),
+    ]),
   );
 
   return (

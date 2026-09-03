@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { toast } from "sonner";
 
+import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
 import { TaskStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
@@ -27,12 +28,14 @@ import {
   type CellCommit,
   type DayState,
   type EntryDraft,
+  type OvertimeApproval,
   cellCommit,
   clockAt,
   parseCellDuration,
   daySummary,
   draftToEntry,
   formatCellDuration,
+  overtimeGranted,
   spanFrom,
   withDuration,
   withEnd,
@@ -158,7 +161,7 @@ export function WeekGrid({
   rows,
   tasks,
   locked,
-  approvedOvertime = {},
+  overtimeApprovals = {},
 }: {
   monday: string;
   days: string[];
@@ -179,16 +182,23 @@ export function WeekGrid({
    */
   locked: boolean;
   /**
-   * P7-04 / slice D — `YYYY-MM-DD` → approved overtime minutes for that day.
+   * P7-04 / slice D — `YYYY-MM-DD` → the approved OVERTIME requests for that day.
    *
-   * Raises the eight-hour threshold rather than removing it: a day with two
-   * hours approved is fine at ten and still over at eleven. A day with no entry
-   * here keeps the plain 480.
+   * Their minutes raise the eight-hour threshold rather than removing it: a day
+   * with two hours approved is fine at ten and still over at eleven. A day with
+   * no entry here keeps the plain 480.
+   *
+   * ⚠️ THE REQUESTS, NOT JUST THEIR TOTAL, and the ids are why. A day marked
+   * "OT" is this grid asserting that somebody signed off on those hours, and
+   * until the ids arrived there was no way to go and read that signature — see
+   * `OvertimeApproval`. The total is derived at the point of use through
+   * `overtimeGranted`, so the threshold and the links cannot be built from
+   * different rows.
    *
    * Advisory only. The enforced rule is the 1440-minute day trigger, and
    * approved overtime is capped at 960 so `480 + approved` can never exceed it.
    */
-  approvedOvertime?: Record<string, number>;
+  overtimeApprovals?: Record<string, OvertimeApproval[]>;
 }) {
   // The week is in the key, so navigating to another week reads that week's
   // rows rather than carrying this week's across.
@@ -258,8 +268,16 @@ export function WeekGrid({
    * extracted precisely so a member's week and a lead's team week cannot
    * disagree about what counts as a long day. Advisory, never enforcement.
    */
+  /**
+   * How much overtime was signed off for this day.
+   *
+   * Derived from the same list the links below read, so the threshold and the
+   * approvals a reader can open are always the same set of requests.
+   */
+  const grantedOn = (day: string) => overtimeGranted(overtimeApprovals[day]);
+
   function dayBar(day: string) {
-    const summary = daySummary(dayTotal(day), approvedOvertime[day] ?? 0);
+    const summary = daySummary(dayTotal(day), grantedOn(day));
     const { state } = summary;
 
     return {
@@ -282,7 +300,7 @@ export function WeekGrid({
    * decoration at all.
    */
   function dayNote(day: string): { state: DayState; mark: string; spoken: string } | null {
-    const granted = approvedOvertime[day] ?? 0;
+    const granted = grantedOn(day);
     const { state, capacityMinutes, trackedMinutes, overMinutes } = daySummary(dayTotal(day), granted);
 
     if (state === "overtime") {
@@ -350,7 +368,7 @@ export function WeekGrid({
   // honest weekly figure — the sum of the daily overages, not a week total
   // measured against a 40 nobody has defined.
   const weekOverMinutes = days.reduce(
-    (total, day) => total + daySummary(dayTotal(day), approvedOvertime[day] ?? 0).overMinutes,
+    (total, day) => total + daySummary(dayTotal(day), grantedOn(day)).overMinutes,
     0,
   );
 
@@ -656,6 +674,13 @@ export function WeekGrid({
                     {/* The same fact as a sentence, for a screen reader. "OT"
                         on its own is not readable out loud. */}
                     {note ? <span className="sr-only">{note.spoken}</span> : null}
+
+                    {/* P8-08 — the approvals behind the marker, each openable.
+                        Only on a day the grid has actually flagged: an approved
+                        day nobody worked past eight hours needs no explanation,
+                        and decorating every ordinary day with a link is how the
+                        marker stops meaning anything. */}
+                    {note ? <OvertimeApprovalLinks approvals={overtimeApprovals[day]} /> : null}
                   </td>
                 );
               })}

@@ -12,7 +12,11 @@ import {
   weekDates,
   workedMinutes,
 } from "@/lib/dates";
-import { breakAdjustedPunches, type TimesheetWeekStatus } from "@/lib/schemas/timesheet";
+import {
+  breakAdjustedPunches,
+  type OvertimeApproval,
+  type TimesheetWeekStatus,
+} from "@/lib/schemas/timesheet";
 import { loadAppSettings } from "@/lib/settings-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
@@ -75,128 +79,164 @@ export default async function TeamWeekPage({
   const days = weekDates(monday);
   const lastDay = days[days.length - 1]!;
 
-  const [entriesResult, weeksResult, overtimeResult, leaveResult, peopleResult, dtrResult, settings] =
-    await Promise.all([
-      /*
-       * Every entry the policy will show this lead, for this week — and P8-07,
-       * WHAT THE HOURS WENT TO.
-       *
-       * This used to select `user_id, work_date, minutes` and nothing else, so
-       * the reviewer got a number per day and no way to check it. The page's own
-       * header calls itself a defence against a rubber stamp; a total with no
-       * breakdown is the rubber stamp.
-       *
-       * NO POLICY CHANGE AND NO MIGRATION. "timesheet readable by owner and
-       * department leads" (`20260817090000_p6_01_timesheet.sql:154-164`) is
-       * row-level and names no columns — a lead who could read the minutes could
-       * always read the note and the clocks beside them.
-       *
-       * ⚠️ THE EMBED IS LEFT, NOT `!inner`, and the reason is on the member's own
-       * page at `app/(app)/timesheet/page.tsx:104-120`. The entries policy is
-       * wider than the TASKS policy, so the two diverge the moment a task is
-       * reassigned away from somebody who already logged against it. An inner
-       * join turns "I cannot see that task" into "that row does not exist" and
-       * takes a person's whole week with it. Pinned by
-       * tests/db/timesheet.test.ts, "entries survive losing sight of their task".
-       */
-      supabase
-        .from("vizserve_pms_timesheet_entries")
-        .select(
-          "id, user_id, task_id, work_date, minutes, note, started_at, ended_at, vizserve_pms_tasks(title, status)",
-        )
-        .gte("work_date", monday)
-        .lte("work_date", lastDay),
+  const [
+    entriesResult,
+    weeksResult,
+    overtimeResult,
+    leaveResult,
+    peopleResult,
+    dtrResult,
+    departmentsResult,
+    listsResult,
+    groupsResult,
+    settings,
+  ] = await Promise.all([
+    /*
+     * Every entry the policy will show this lead, for this week — and P8-07,
+     * WHAT THE HOURS WENT TO.
+     *
+     * This used to select `user_id, work_date, minutes` and nothing else, so
+     * the reviewer got a number per day and no way to check it. The page's own
+     * header calls itself a defence against a rubber stamp; a total with no
+     * breakdown is the rubber stamp.
+     *
+     * NO POLICY CHANGE AND NO MIGRATION. "timesheet readable by owner and
+     * department leads" (`20260817090000_p6_01_timesheet.sql:154-164`) is
+     * row-level and names no columns — a lead who could read the minutes could
+     * always read the note and the clocks beside them.
+     *
+     * ⚠️ THE EMBED IS LEFT, NOT `!inner`, and the reason is on the member's own
+     * page at `app/(app)/timesheet/page.tsx:104-120`. The entries policy is
+     * wider than the TASKS policy, so the two diverge the moment a task is
+     * reassigned away from somebody who already logged against it. An inner
+     * join turns "I cannot see that task" into "that row does not exist" and
+     * takes a person's whole week with it. Pinned by
+     * tests/db/timesheet.test.ts, "entries survive losing sight of their task".
+     */
+    supabase
+      .from("vizserve_pms_timesheet_entries")
+      .select(
+        "id, user_id, task_id, work_date, minutes, note, started_at, ended_at, vizserve_pms_tasks(title, status, list_id, department_id)",
+      )
+      .gte("work_date", monday)
+      .lte("work_date", lastDay),
 
-      supabase
-        .from("vizserve_pms_timesheet_weeks")
-        .select("id, user_id, status, submitted_minutes, submitted_at, decision_reason")
-        .eq("week_start", monday),
+    supabase
+      .from("vizserve_pms_timesheet_weeks")
+      .select("id, user_id, status, submitted_minutes, submitted_at, decision_reason")
+      .eq("week_start", monday),
 
-      // The team's approved overtime, not just the viewer's. This widens from
-      // the member's page with NO policy change: the SELECT policy on internal
-      // requests already returns `requester_id = auth.uid() or
-      // vizserve_pms_manages_department(department_id)`.
-      supabase
-        .from("vizserve_pms_internal_requests")
-        .select("requester_id, work_date, overtime_minutes")
-        .eq("request_type", "OVERTIME")
-        .eq("status", "APPROVED")
-        .gte("work_date", monday)
-        .lte("work_date", lastDay),
+    // The team's approved overtime, not just the viewer's. This widens from
+    // the member's page with NO policy change: the SELECT policy on internal
+    // requests already returns `requester_id = auth.uid() or
+    // vizserve_pms_manages_department(department_id)`.
+    supabase
+      .from("vizserve_pms_internal_requests")
+      .select("id, requester_id, work_date, overtime_minutes")
+      .eq("request_type", "OVERTIME")
+      .eq("status", "APPROVED")
+      .gte("work_date", monday)
+      .lte("work_date", lastDay),
 
-      /*
-       * P7-10 — who was away.
-       *
-       * WITHOUT THIS THE PAGE LIBELS PEOPLE. Slice C refuses to submit an empty
-       * week ("an approved empty week is a signed statement that somebody did
-       * nothing"), so a person on approved leave all week has no week row at
-       * all — and on this grid that is indistinguishable from somebody who has
-       * simply not filed. A lead would chase someone who was on holiday, which
-       * is the exact manual process this module exists to remove.
-       *
-       * The function returns name and dates and no reason and no type, so the
-       * grid can say "on leave" and nothing more. That is all a lead needs and
-       * all they are entitled to.
-       */
-      supabase.rpc("vizserve_pms_leave_calendar", { p_from: monday, p_to: lastDay }),
+    /*
+     * P7-10 — who was away.
+     *
+     * WITHOUT THIS THE PAGE LIBELS PEOPLE. Slice C refuses to submit an empty
+     * week ("an approved empty week is a signed statement that somebody did
+     * nothing"), so a person on approved leave all week has no week row at
+     * all — and on this grid that is indistinguishable from somebody who has
+     * simply not filed. A lead would chase someone who was on holiday, which
+     * is the exact manual process this module exists to remove.
+     *
+     * The function returns name and dates and no reason and no type, so the
+     * grid can say "on leave" and nothing more. That is all a lead needs and
+     * all they are entitled to.
+     */
+    supabase.rpc("vizserve_pms_leave_calendar", { p_from: monday, p_to: lastDay }),
 
-      /*
-       * Names, and — P8-07 — each person's unpaid break.
-       *
-       * `break_minutes` is nullable and NULL MEANS "INHERIT THE COMPANY FIGURE",
-       * never zero. It is read here because the punched span between two clocks
-       * includes the break and a logged minute does not, so nothing on this page
-       * may compare the two without it. See `breakAdjustedPunches`.
-       */
-      /*
-       * ⚠️ NO `is_active` FILTER, AND THAT IS DELIBERATE. This is a LOOKUP —
-       * `userIds` below is built from entries, weeks, leave and punches, never
-       * from here — so filtering only ever removes a name and a break from
-       * somebody whose rows are on the grid regardless. A person deactivated
-       * part-way through the week is exactly that case, and it is the week a
-       * lead most needs to read: they would otherwise have shown up nameless and
-       * marked "not compared", blaming a break setting nobody failed to read.
-       * RLS still scopes this to the caller's own department.
-       */
-      supabase.from("vizserve_pms_users").select("id, full_name, break_minutes"),
+    /*
+     * Names, and — P8-07 — each person's unpaid break.
+     *
+     * `break_minutes` is nullable and NULL MEANS "INHERIT THE COMPANY FIGURE",
+     * never zero. It is read here because the punched span between two clocks
+     * includes the break and a logged minute does not, so nothing on this page
+     * may compare the two without it. See `breakAdjustedPunches`.
+     */
+    /*
+     * ⚠️ NO `is_active` FILTER, AND THAT IS DELIBERATE. This is a LOOKUP —
+     * `userIds` below is built from entries, weeks, leave and punches, never
+     * from here — so filtering only ever removes a name and a break from
+     * somebody whose rows are on the grid regardless. A person deactivated
+     * part-way through the week is exactly that case, and it is the week a
+     * lead most needs to read: they would otherwise have shown up nameless and
+     * marked "not compared", blaming a break setting nobody failed to read.
+     * RLS still scopes this to the caller's own department.
+     */
+    supabase.from("vizserve_pms_users").select("id, full_name, break_minutes"),
 
-      /*
-       * P8-07 — what the clock says, beside what the timesheet says.
-       *
-       * A lead could not previously see that somebody punched nine hours and
-       * logged four. Both facts already existed; nothing put them on one screen.
-       *
-       * ⚠️ A READ, NOT A RELATION. There is deliberately no foreign key, join
-       * table or derivation between the DTR and the timesheet — `p6_01:15-19`
-       * and `p7_21:12-24` both argue it: the DTR owns "when somebody was at
-       * work", the timesheet owns "where the day went", and two tables claiming
-       * the same fact will disagree. This page shows both figures and names the
-       * difference. It asserts nothing about which one is right, and nothing
-       * downstream may treat the gap as an error.
-       *
-       * ⚠️ NO USER FILTER AND NO ROLE BRANCH. "dtr readable by owner and
-       * department leads" (`20260804150000_p5_01_dtr.sql:243-253`) is the same
-       * self-or-managed-department shape as the entries policy, so the rows that
-       * arrive are exactly the rows this viewer may see. P7-40 made the point:
-       * restating the scope implies the policy is optional.
-       *
-       * ⚠️ NO EMBED OF `vizserve_pms_users` HERE. That table has TWO foreign
-       * keys into it from this one — `user_id` and `corrected_by` — and an
-       * unqualified embed is refused by PostgREST every time. It shipped once as
-       * "DTR is empty", because the page swallowed the error with `data ?? []`.
-       * Names come from `peopleResult` above, which needs no embed at all.
-       */
-      supabase
-        .from("vizserve_pms_dtr_entries")
-        .select("user_id, work_date, time_in, time_out")
-        .gte("work_date", monday)
-        .lte("work_date", lastDay),
+    /*
+     * P8-07 — what the clock says, beside what the timesheet says.
+     *
+     * A lead could not previously see that somebody punched nine hours and
+     * logged four. Both facts already existed; nothing put them on one screen.
+     *
+     * ⚠️ A READ, NOT A RELATION. There is deliberately no foreign key, join
+     * table or derivation between the DTR and the timesheet — `p6_01:15-19`
+     * and `p7_21:12-24` both argue it: the DTR owns "when somebody was at
+     * work", the timesheet owns "where the day went", and two tables claiming
+     * the same fact will disagree. This page shows both figures and names the
+     * difference. It asserts nothing about which one is right, and nothing
+     * downstream may treat the gap as an error.
+     *
+     * ⚠️ NO USER FILTER AND NO ROLE BRANCH. "dtr readable by owner and
+     * department leads" (`20260804150000_p5_01_dtr.sql:243-253`) is the same
+     * self-or-managed-department shape as the entries policy, so the rows that
+     * arrive are exactly the rows this viewer may see. P7-40 made the point:
+     * restating the scope implies the policy is optional.
+     *
+     * ⚠️ NO EMBED OF `vizserve_pms_users` HERE. That table has TWO foreign
+     * keys into it from this one — `user_id` and `corrected_by` — and an
+     * unqualified embed is refused by PostgREST every time. It shipped once as
+     * "DTR is empty", because the page swallowed the error with `data ?? []`.
+     * Names come from `peopleResult` above, which needs no embed at all.
+     */
+    supabase
+      .from("vizserve_pms_dtr_entries")
+      .select("user_id, work_date, time_in, time_out")
+      .gte("work_date", monday)
+      .lte("work_date", lastDay),
 
-      // `cache()`d, so a request that also renders the punch panel pays once.
-      // Degrades to the default break rather than throwing, and says so through
-      // `fellBack` — which is the only thing this page trusts it for.
-      loadAppSettings(),
-    ]);
+    /*
+     * P8-08 — WHERE the work sat: department, folder, list.
+     *
+     * A reviewer reading "Client QA · 7h" on somebody's week had no way to tell
+     * which Client QA it was — two lists in two departments produce two rows that
+     * read identically — and no way to open the task and find out. The title is
+     * now a link and these three reads are the line under it.
+     *
+     * ⚠️ THREE SMALL LOOKUPS, NOT A DEEPER EMBED. The entries embed above is a
+     * LEFT join whose whole job is to survive a task leaving this lead's scope;
+     * hanging `vizserve_pms_lists(name, vizserve_pms_task_groups(name))` off it
+     * buries that guard two levels down in a select string, which is the one
+     * thing on this page nobody should have to squint at. The member's own page
+     * made the same call for the same reason.
+     *
+     * ⚠️ NO DEPARTMENT FILTER AND NO ROLE BRANCH. `lists readable in department`
+     * and `task groups readable in department` scope these to the departments
+     * this person leads or belongs to, so what arrives is exactly what they may
+     * read. A task whose list they cannot see simply resolves to a shorter
+     * breadcrumb — see `where` below, which drops what it cannot name rather than
+     * printing a gap.
+     */
+    supabase.from("vizserve_pms_departments").select("id, name"),
+    supabase.from("vizserve_pms_lists").select("id, name, group_id"),
+    supabase.from("vizserve_pms_task_groups").select("id, name"),
+
+    // `cache()`d, so a request that also renders the punch panel pays once.
+    // Degrades to the default break rather than throwing, and says so through
+    // `fellBack` — which is the only thing this page trusts it for.
+    loadAppSettings(),
+  ]);
 
   const nameOf = new Map((peopleResult.data ?? []).map((row) => [row.id, row.full_name]));
 
@@ -223,6 +263,32 @@ export default async function TeamWeekPage({
     ]),
   );
 
+  const departmentName = new Map((departmentsResult.data ?? []).map((row) => [row.id, row.name]));
+  const listRow = new Map((listsResult.data ?? []).map((row) => [row.id, row]));
+  const groupName = new Map((groupsResult.data ?? []).map((row) => [row.id, row.name]));
+
+  /**
+   * P8-08 — "Marketing / Campaigns / Client QA", or as much of it as resolves.
+   *
+   * ⚠️ EVERY PART IS OPTIONAL AND A MISSING PART IS DROPPED, NEVER PLACEHOLDERED.
+   * A list with no folder is a ClickUp "Folderless List" and is the state of
+   * every list made before P7-18, so a rendered "—" in the middle would be
+   * decorating the ordinary case as a fault. A department or list this viewer's
+   * policies do not return is the same shape: the breadcrumb simply says less.
+   * Empty string when nothing resolves at all, which the grid renders as no line.
+   */
+  function whereTaskSat(task: { list_id: string | null; department_id: string | null }): string {
+    const list = task.list_id ? listRow.get(task.list_id) : null;
+
+    return [
+      task.department_id ? departmentName.get(task.department_id) : null,
+      list?.group_id ? groupName.get(list.group_id) : null,
+      list?.name ?? null,
+    ]
+      .filter(Boolean)
+      .join(" / ");
+  }
+
   type Entry = {
     id: string;
     user_id: string;
@@ -234,7 +300,12 @@ export default async function TeamWeekPage({
     started_at: string | null;
     ended_at: string | null;
     /** Null when the task has left THIS LEAD's scope. The hours are still real. */
-    vizserve_pms_tasks: { title: string; status: VizservePmsTaskStatus } | null;
+    vizserve_pms_tasks: {
+      title: string;
+      status: VizservePmsTaskStatus;
+      list_id: string | null;
+      department_id: string | null;
+    } | null;
   };
 
   const entries = (entriesResult.data ?? []) as unknown as Entry[];
@@ -266,6 +337,14 @@ export default async function TeamWeekPage({
          */
         title: entry.vizserve_pms_tasks?.title ?? "Task no longer visible to you",
         status: entry.vizserve_pms_tasks?.status ?? null,
+        /*
+         * ⚠️ EMPTY WHEN THE EMBED CAME BACK NULL, and it must stay empty. There
+         * is no task row to ask where it sat, and inventing "—" or guessing from
+         * the person's own department would be putting a location on hours whose
+         * work this viewer is explicitly not allowed to see. The grid renders the
+         * placeholder title and no breadcrumb, and offers no link.
+         */
+        where: entry.vizserve_pms_tasks ? whereTaskSat(entry.vizserve_pms_tasks) : "",
         cells: {},
       };
       byTask.set(entry.task_id, task);
@@ -319,13 +398,25 @@ export default async function TeamWeekPage({
     punched.set(userId, breakAdjustedPunches({ punched: byDay, breakMinutes: breakOf.get(userId) ?? null }));
   }
 
-  // Approved overtime per person per day, summed — two approvals for one day
-  // both count, for the same reason they do on the member's page.
-  const overtime = new Map<string, Record<string, number>>();
+  /*
+   * Approved overtime per person per day — the requests, not just their total.
+   *
+   * Two approvals for one day both count, for the same reason they do on the
+   * member's page: there is no unique constraint on (requester, work_date,
+   * OVERTIME), and each of the two needed a lead's signature. `overtimeGranted`
+   * sums them at the point of use.
+   *
+   * ⚠️ THE IDS ARE ONLY OFFERED AS LINKS BECAUSE THIS READ IS POLICY-SCOPED.
+   * `requester_id = auth.uid() or manages_department(department_id)` is the
+   * SELECT policy, so a lead who may not read somebody's overtime request gets
+   * no row for it here and therefore no link to a page that would refuse them —
+   * the day simply keeps the plain 480 threshold, exactly as it did before.
+   */
+  const overtime = new Map<string, Record<string, OvertimeApproval[]>>();
   for (const row of overtimeResult.data ?? []) {
     if (!row.work_date) continue;
     const byDay = overtime.get(row.requester_id) ?? {};
-    byDay[row.work_date] = (byDay[row.work_date] ?? 0) + (row.overtime_minutes ?? 0);
+    (byDay[row.work_date] ??= []).push({ id: row.id, minutes: row.overtime_minutes ?? 0 });
     overtime.set(row.requester_id, byDay);
   }
 

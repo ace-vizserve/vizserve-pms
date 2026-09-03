@@ -4,6 +4,7 @@ import { weekDates } from "@/lib/dates";
 import { DEFAULT_BREAK_MINUTES, scheduledDayMinutes } from "@/lib/dtr-schedule";
 import { expandLeaveDays, leaveKey, type DayHalf, type LeaveSpan } from "@/lib/leave";
 import { scheduledWeekMinutes } from "@/lib/schemas/timesheet";
+import { resolveScheduledWeek, type ScheduleReads } from "@/lib/timesheet-schedule";
 
 /**
  * P8-05 — the two pure functions behind "this week is short of your schedule".
@@ -236,10 +237,11 @@ describe("the two together, as the timesheet page composes them", () => {
  * warning must never be wrong in. The SQL now walks the week's own dates the
  * way the loop below does; these cases are the shape both sides must agree on.
  *
- * This mirrors the accumulation in `app/(app)/timesheet/page.tsx` rather than
- * importing it — that loop lives inside an async server component and cannot be
- * called from here. Keep the two in step: if the page's loop changes, this
- * helper is the second place to change.
+ * This mirrored the accumulation inside `app/(app)/timesheet/page.tsx`, which
+ * could not be called from a test because it lived in an async server component.
+ * P8-08 moved that loop into `resolveScheduledWeek`, so the real thing is now
+ * exercised directly at the bottom of this file — these cases stay because they
+ * pin `expandLeaveDays` itself, one layer below it.
  */
 describe("approved leave, expanded into days before it is counted", () => {
   const USER = "11111111-1111-4111-8111-111111111111";
@@ -352,5 +354,229 @@ describe("approved leave, expanded into days before it is counted", () => {
   it("ignores leave that falls on the weekend", () => {
     // Saturday and Sunday, which were never expected days.
     expect(leaveDaysInWeek([span("2026-09-05", "2026-09-06")])).toBe(0);
+  });
+});
+
+/**
+ * P8-08 — the whole rule in one function, and the two screens that call it.
+ *
+ * WHY THIS BLOCK EXISTS. All of the above pinned the PIECES; the composition
+ * lived inside `/timesheet`'s server component, where nothing could reach it —
+ * and the moment the dashboard wanted the same figure it wrote its own, which
+ * was `STANDARD_DAY_MINUTES * 5`: a 40-hour week for everybody, part-timers
+ * included, holidays ignored. `resolveScheduledWeek` is that composition pulled
+ * out so both screens call one implementation and this file can hold it still.
+ *
+ * ⚠️ MOST OF THESE CASES ARE REFUSALS, NOT SUMS. The arithmetic would be
+ * obviously wrong if it were wrong. The dangerous cases are the ones where the
+ * honest answer is "state nothing" — and every one of them fails silently in the
+ * SAME direction, by inventing a target against a fact nobody read and telling
+ * somebody they are short of a week `vizserve_pms_submit_timesheet_week` would
+ * accept without a murmur.
+ */
+describe("resolveScheduledWeek", () => {
+  const USER = "22222222-2222-4222-8222-222222222222";
+
+  // Monday 31 Aug 2026 through Sunday 6 Sep. Mon 08-31 … Fri 09-04.
+  const WEEK = weekDates("2026-08-31");
+
+  /** Everything read successfully, a 09:00-18:00 person, nothing in the way. */
+  function reads(overrides: Partial<ScheduleReads> = {}): ScheduleReads {
+    return {
+      userId: USER,
+      days: WEEK,
+      profile: { work_start: "09:00:00", work_end: "18:00:00", break_minutes: null },
+      profileError: false,
+      holidays: [],
+      holidaysError: false,
+      leave: [],
+      leaveError: false,
+      companyBreakMinutes: 60,
+      settingsFellBack: false,
+      ...overrides,
+    };
+  }
+
+  function away(start: string, end: string, endHalf: DayHalf | null = null): LeaveSpan {
+    return {
+      user_id: USER,
+      start_date: start,
+      end_date: end,
+      start_half: null,
+      end_half: endHalf,
+      type_name: null,
+    };
+  }
+
+  it("states the ordinary five-day week", () => {
+    expect(resolveScheduledWeek(reads())).toEqual({
+      scheduledWeek: { expectedDays: 5, minimumMinutes: 2400 },
+      readFailure: null,
+    });
+  });
+
+  it("drops a proclaimed holiday from what the week expects", () => {
+    // Read from `vizserve_pms_holidays`, not from `isBusinessDay`'s seeded list:
+    // a holiday an admin added mid-year is exactly the one that would be missing.
+    expect(resolveScheduledWeek(reads({ holidays: ["2026-09-02"] })).scheduledWeek).toEqual({
+      expectedDays: 4,
+      minimumMinutes: 1920,
+    });
+  });
+
+  it("drops approved leave, and half a day for a half day", () => {
+    // Monday to Wednesday, back at midday on the Wednesday.
+    expect(
+      resolveScheduledWeek(reads({ leave: [away("2026-08-31", "2026-09-02", "MORNING")] }))
+        .scheduledWeek,
+    ).toEqual({ expectedDays: 2.5, minimumMinutes: 1200 });
+  });
+
+  it("counts a day covered by two approved requests once", () => {
+    // Absent on a day, not absent twice. `vizserve_pms_submit_timesheet_week`
+    // once summed per request and asked for 960 where this asked for 1440.
+    expect(
+      resolveScheduledWeek(
+        reads({ leave: [away("2026-09-02", "2026-09-02"), away("2026-09-01", "2026-09-03")] }),
+      ).scheduledWeek,
+    ).toEqual({ expectedDays: 2, minimumMinutes: 960 });
+  });
+
+  it("ignores leave that falls on the weekend", () => {
+    // `days.slice(0, 5)` is the weekend test, and it only works because the week
+    // is Monday-anchored. Saturday was never an expected day to give back.
+    expect(
+      resolveScheduledWeek(reads({ leave: [away("2026-09-05", "2026-09-06")] })).scheduledWeek,
+    ).toEqual({ expectedDays: 5, minimumMinutes: 2400 });
+  });
+
+  it("keeps a deliberate zero break, and asks MORE of that person", () => {
+    // ⚠️ THE `??` vs `||` TRAP, and the reason the resolution happens in one
+    // place. `0 || 60` is 60, which would hand somebody the company hour they
+    // explicitly do not take and demand an hour a day LESS of them than their
+    // schedule says. `coalesce(u.break_minutes, s.break_minutes)`, in TypeScript.
+    expect(
+      resolveScheduledWeek(
+        reads({ profile: { work_start: "09:00", work_end: "18:00", break_minutes: 0 } }),
+      ).scheduledWeek?.minimumMinutes,
+    ).toBe(2700);
+  });
+
+  it("inherits the company break when the person has none of their own", () => {
+    expect(
+      resolveScheduledWeek(reads({ companyBreakMinutes: 30 })).scheduledWeek?.minimumMinutes,
+    ).toBe(2550);
+  });
+
+  // EXEMPTION — no schedule recorded. Most of this company. The claim must not
+  // exist for them, and this is silence rather than failure: `readFailure` null.
+  it("says nothing about somebody with no recorded hours, and calls it no failure", () => {
+    expect(
+      resolveScheduledWeek(
+        reads({ profile: { work_start: null, work_end: null, break_minutes: null } }),
+      ),
+    ).toEqual({ scheduledWeek: null, readFailure: null });
+  });
+
+  // EXEMPTION — a schedule the break swallows. A broken record must never become
+  // a demand made of the person it describes.
+  it("says nothing when the break is longer than the day", () => {
+    expect(
+      resolveScheduledWeek(
+        reads({ profile: { work_start: "09:00", work_end: "10:00", break_minutes: 90 } }),
+      ).scheduledWeek,
+    ).toBeNull();
+  });
+
+  // EXEMPTION — a week that expected nothing. Holiday week, or leave all week.
+  it("says nothing about a week that expected nothing of anybody", () => {
+    expect(
+      resolveScheduledWeek(reads({ leave: [away("2026-08-31", "2026-09-04")] })).scheduledWeek,
+    ).toBeNull();
+  });
+
+  it("has no schedule to state when the user row is simply missing", () => {
+    // `maybeSingle` reports no error for zero rows, so this is the exemption
+    // path rather than the failure path — and it must not throw on the way.
+    expect(resolveScheduledWeek(reads({ profile: null }))).toEqual({
+      scheduledWeek: null,
+      readFailure: null,
+    });
+  });
+
+  it("withholds the figure when holidays could not be read", () => {
+    // ⚠️ A FAILED READ INFLATES, IT DOES NOT DEGRADE. Holidays and leave only
+    // ever subtract, so `?? []` would demand 2400 where the true answer is 1920
+    // and accuse somebody of being eight hours short of a week Postgres accepts.
+    expect(resolveScheduledWeek(reads({ holidaysError: true }))).toEqual({
+      scheduledWeek: null,
+      readFailure: "Holidays",
+    });
+  });
+
+  it("withholds the figure when approved leave could not be read", () => {
+    expect(resolveScheduledWeek(reads({ leaveError: true }))).toEqual({
+      scheduledWeek: null,
+      readFailure: "Approved leave",
+    });
+  });
+
+  it("withholds the figure when the person's own hours could not be read", () => {
+    // Without this the failure is SILENT: the day computes from `{}`, comes out
+    // null, and the screen shows no shortfall line and no reason for its absence.
+    expect(resolveScheduledWeek(reads({ profileError: true }))).toEqual({
+      scheduledWeek: null,
+      readFailure: "Your working hours",
+    });
+  });
+
+  it("withholds the figure when the company break fell back and this person inherits it", () => {
+    // `loadAppSettings` degrades to 60 rather than throwing — three other screens
+    // depend on that. If the real figure is 30, the minimum lands 2.5h A DAY too
+    // low, the screen stays quiet, and the database refuses the submission with a
+    // number nobody mentioned.
+    expect(resolveScheduledWeek(reads({ settingsFellBack: true }))).toEqual({
+      scheduledWeek: null,
+      readFailure: "The company break setting",
+    });
+  });
+
+  it("still states the figure for somebody carrying their own break", () => {
+    // ⚠️ THE HALF OF THAT RULE THAT IS EASY TO OVER-APPLY. Their break was read;
+    // the company row they never touch is irrelevant to their week. Withholding
+    // it anyway would leave the database computing a minimum and refusing the
+    // week in silence — the exact surprise the banner exists to prevent.
+    expect(
+      resolveScheduledWeek(
+        reads({
+          settingsFellBack: true,
+          profile: { work_start: "09:00", work_end: "18:00", break_minutes: 30 },
+        }),
+      ),
+    ).toEqual({ scheduledWeek: { expectedDays: 5, minimumMinutes: 2550 }, readFailure: null });
+  });
+
+  it("keeps a deliberate zero out of the inherit branch", () => {
+    // `== null` catches undefined too, and 0 is a real break that was read.
+    // Testing it with `!` would send every no-break person down the "company
+    // setting failed" path and silence their shortfall line for good.
+    expect(
+      resolveScheduledWeek(
+        reads({
+          settingsFellBack: true,
+          profile: { work_start: "09:00", work_end: "18:00", break_minutes: 0 },
+        }),
+      ).readFailure,
+    ).toBeNull();
+  });
+
+  it("names the first failure when several reads died together", () => {
+    // An outage takes everything at once. The banner says one thing, so the
+    // order is fixed rather than incidental — and every branch withholds the
+    // same figure, so which name wins changes only the sentence.
+    expect(
+      resolveScheduledWeek(reads({ holidaysError: true, leaveError: true, profileError: true }))
+        .readFailure,
+    ).toBe("Holidays");
   });
 });

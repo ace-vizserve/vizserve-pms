@@ -24,6 +24,7 @@ import {
 } from "@/lib/dates";
 import { TASK_CATEGORY_LABELS, taskCategory, type TaskStatus } from "@/lib/schemas/tasks";
 import type { TimesheetWeekStatus } from "@/lib/schemas/timesheet";
+import { loadScheduledWeek } from "@/lib/timesheet-schedule-server";
 import { PageShell } from "@/components/page-shell";
 import { StatTile } from "@/components/stat-tile";
 import { PunchPanel } from "../dtr/punch-panel";
@@ -83,7 +84,10 @@ export default async function DashboardPage() {
 
   const today = todayInAppZone();
   const monday = startOfWeek(today) ?? today;
-  const weekEnd = weekDates(monday).at(-1)!;
+  // The seven dates, kept rather than discarded after the last one: `loadScheduledWeek`
+  // needs the whole week, and `days.slice(0, 5)` inside it is the weekend test.
+  const weekDays = weekDates(monday);
+  const weekEnd = weekDays.at(-1)!;
   const lastMonday = addDays(monday, -7) ?? monday;
   const lastSunday = addDays(monday, -1) ?? monday;
 
@@ -100,6 +104,7 @@ export default async function DashboardPage() {
     lastWeek,
     teamWeeks,
     waitingRows,
+    schedule,
   ] = await Promise.all([
     loadPunchState(context.userId),
 
@@ -214,6 +219,22 @@ export default async function DashboardPage() {
     // disagree about what is in somebody's queue — which they already had once,
     // when each counted it inline.
     listWaitingOnYou(supabase, context.userId, isApprover),
+
+    /*
+     * P8-05 — what this week was actually supposed to come to, for THIS person.
+     *
+     * ⚠️ THE STRIP USED TO INVENT THIS. It rendered `STANDARD_DAY_MINUTES * 5`
+     * and told everybody "22h of 40h" — a weekly constant `lib/dates.ts:417-419`
+     * deliberately refuses to define, because it would mean deciding whether
+     * Saturday counts. So the dashboard contradicted the module it imported the
+     * figure from, and it was wrong for every part-timer, every week with a
+     * public holiday in it and everybody on approved leave.
+     *
+     * THE SAME FUNCTION `/timesheet` CALLS, not a copy of its arithmetic. Two
+     * screens quoting different targets for one week is worse than one screen
+     * quoting none, because the person then has to guess which is real.
+     */
+    loadScheduledWeek(context.userId, weekDays),
   ]);
 
   // ------------------------------------------------------------------ I3
@@ -344,6 +365,11 @@ export default async function DashboardPage() {
         weekStart={monday}
         status={weekStatus}
         minutes={weekMinutes}
+        /* Null when this person is exempt from a schedule, or when one of the
+           four reads behind it failed. Either way the strip states the logged
+           total alone — it does NOT fall back to a number, which is the whole
+           reason the 40 came out. */
+        scheduledWeekMinutes={schedule.scheduledWeek?.minimumMinutes ?? null}
         decisionReason={thisWeekRow.data?.decision_reason ?? null}
         lastWeekUnsubmitted={lastWeekUnsubmitted}
       />

@@ -1,10 +1,12 @@
 "use client";
 
 import { Fragment, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Check, ChevronRight, Clock, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 
+import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Chip, TaskStatusBadge } from "@/components/status-badge";
@@ -12,10 +14,12 @@ import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import {
   TIMESHEET_WEEK_LABELS,
+  type OvertimeApproval,
   type PunchComparison,
   type TimesheetWeekStatus,
   daySummary,
   formatCellDuration,
+  overtimeGranted,
   punchComparison,
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
@@ -38,6 +42,14 @@ export type TeamTaskRow = {
   title: string;
   /** Null when the task has left this lead's scope. The hours are unaffected. */
   status: VizservePmsTaskStatus | null;
+  /**
+   * P8-08 — "Marketing / Campaigns / Client QA", or as much of it as resolved.
+   *
+   * Empty for a task this reviewer can no longer see, and empty is rendered as
+   * nothing at all. Two lists called "Client QA" in two departments produced two
+   * rows that read identically before this line existed.
+   */
+  where: string;
   /** `YYYY-MM-DD` → the entries logged against this task that day. */
   cells: Record<string, TeamEntry[]>;
 };
@@ -47,8 +59,15 @@ export type TeamRow = {
   name: string;
   /** `YYYY-MM-DD` → minutes logged. */
   cells: Record<string, number>;
-  /** `YYYY-MM-DD` → approved overtime minutes. */
-  overtime: Record<string, number>;
+  /**
+   * `YYYY-MM-DD` → the approved OVERTIME requests covering that day.
+   *
+   * ⚠️ THE REQUESTS, NOT THEIR TOTAL. `overtimeGranted` sums them for the
+   * threshold; the ids are what let a reviewer open the signature behind a day
+   * marked "OT". A day this lead may not read the request for arrives absent,
+   * not empty-with-minutes — see the page.
+   */
+  overtime: Record<string, OvertimeApproval[]>;
   /** Days this person was on approved leave. */
   leaveDays: string[];
   /** P8-07 — what the hours went to, alphabetical by task. */
@@ -266,7 +285,8 @@ export function TeamWeekGrid({
 
                     {days.map((day) => {
                       const minutes = row.cells[day] ?? 0;
-                      const granted = row.overtime[day] ?? 0;
+                      const approvals = row.overtime[day];
+                      const granted = overtimeGranted(approvals);
                       // The same function the member's own grid reads, so the two
                       // views cannot drift into disagreeing about a day — which is
                       // the exact disagreement a lead would have to arbitrate.
@@ -320,6 +340,21 @@ export function TeamWeekGrid({
                                         capacityMinutes,
                                       )} approved for this day.`}
                                 </span>
+                              ) : null}
+
+                              {/* P8-08 — who signed off on this day, and for how
+                                  long. A lead deciding whether to send a week
+                                  back needs the approval itself, not the fact
+                                  that one exists; without it the only way to
+                                  check was to go and search the queue.
+
+                                  Only on a flagged day, and only for approvals
+                                  that came back from the policy-scoped read — so
+                                  a lead is never offered a link to somebody
+                                  else's request that `/approvals/[id]` would
+                                  refuse them. */}
+                              {state === "over" || state === "overtime" ? (
+                                <OvertimeApprovalLinks approvals={approvals} />
                               ) : null}
                             </>
                           ) : onLeave ? (
@@ -465,15 +500,52 @@ function detailEntries(task: TeamTaskRow, days: string[]) {
 function TaskRow({ task, days }: { task: TeamTaskRow; days: string[] }) {
   const total = taskTotal(task, days);
 
+  /*
+   * ⚠️ A NULL STATUS IS THE NULL EMBED — the page sets both from the same
+   * `entry.vizserve_pms_tasks` — and that is what decides whether the title may
+   * be a link. A task this reviewer can no longer read must keep its hours and
+   * its placeholder and must NOT be offered as a link to a page `/tasks/[id]`
+   * would refuse them, which is a 404 dressed up as an affordance.
+   */
+  const visible = task.status !== null;
+
   return (
     <tr className="border-b bg-muted">
       <th
         scope="row"
         className="sticky left-0 z-10 max-w-0 bg-muted py-1.5 pr-3 pl-11 text-left font-normal"
       >
-        <span className="block truncate text-xs font-medium" title={task.title}>
-          {task.title}
-        </span>
+        {/* P8-08 — the way OUT of the review. A reviewer could see that "Client
+            QA" took seven hours and had no way to look at it; the house
+            treatment for a task title is a link to the task, the same as
+            `/tasks` and every dashboard row. */}
+        {visible ? (
+          <Link
+            href={`/tasks/${task.taskId}`}
+            className="block truncate text-xs font-medium hover:underline"
+            title={task.title}
+          >
+            {task.title}
+          </Link>
+        ) : (
+          <span className="block truncate text-xs font-medium" title={task.title}>
+            {task.title}
+          </span>
+        )}
+
+        {/* Where the hours sat. Two lists called "Client QA" in two departments
+            read identically without it, and a lead reviewing a week cannot ask
+            about work they cannot locate.
+
+            ONE MUTED LINE THAT TRUNCATES. The grid is seven day columns wide
+            before it is readable; a breadcrumb that wrapped would push every day
+            on the row down a line, and `max-w-0` on the cell above is what makes
+            `truncate` do anything at all. The full path stays in the tooltip. */}
+        {task.where ? (
+          <span className="block truncate text-2xs text-muted-foreground" title={task.where}>
+            {task.where}
+          </span>
+        ) : null}
 
         {task.status ? (
           <TaskStatusBadge status={task.status} className="mt-0.5 h-5 px-1.5" />

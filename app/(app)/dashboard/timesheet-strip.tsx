@@ -3,7 +3,6 @@ import { AlertTriangle, ArrowRight, Clock } from "lucide-react";
 
 import { buttonVariants } from "@/components/ui/button";
 import { formatWeekRange } from "@/lib/dates";
-import { STANDARD_DAY_MINUTES } from "@/lib/dates";
 import {
   TIMESHEET_WEEK_LABELS,
   type TimesheetWeekStatus,
@@ -24,15 +23,24 @@ import { cn } from "@/lib/utils";
  * waiting on this user, and until now you found out by navigating to /timesheet
  * and reading the bar.
  *
- * NO NEW ARITHMETIC. `formatCellDuration` and `STANDARD_DAY_MINUTES` come from
- * the same modules the grid uses. A dashboard that computes hours its own way is
- * how two screens start disagreeing about the same week — and this one would be
- * the copy without the day-state rules.
+ * NO NEW ARITHMETIC. `formatCellDuration` comes from the same module the grid
+ * uses, and the week's target arrives already computed by `loadScheduledWeek` —
+ * the function `/timesheet` calls. A dashboard that computes hours its own way is
+ * how two screens start disagreeing about the same week, and this one did: it
+ * rendered `STANDARD_DAY_MINUTES * 5` and told everybody they owed 40 hours.
+ *
+ * ⚠️ THERE IS NO WEEKLY CONSTANT IN THIS REPO AND THERE MUST NOT BE ONE.
+ * `lib/dates.ts:417-419` says why — a 40-hour constant means deciding whether
+ * Saturday counts, and nobody has answered that. The honest per-person figure is
+ * `(scheduled day) x (working days - approved leave)`, which is what P8-05
+ * computes and what `vizserve_pms_submit_timesheet_week` enforces. Anything that
+ * reintroduces a multiplication by five here is a regression, not a shortcut.
  */
 export function TimesheetStrip({
   weekStart,
   status,
   minutes,
+  scheduledWeekMinutes,
   decisionReason,
   /**
    * A PREVIOUS week with entries and no week row.
@@ -47,6 +55,17 @@ export function TimesheetStrip({
   weekStart: string;
   status: TimesheetWeekStatus | null;
   minutes: number;
+  /**
+   * P8-05 — what this person's week was supposed to come to, or NULL.
+   *
+   * ⚠️ NULL IS A REAL ANSWER AND ITS RENDERING IS "SAY NOTHING". It arrives for
+   * somebody with no recorded schedule, for a week that expected nothing of them
+   * (all holiday, all approved leave), and for a week where one of the four reads
+   * behind the figure failed. In every one of those cases the logged total stands
+   * alone: falling back to a number would be asserting a target derived from a
+   * value nobody read, which is exactly how the 40 got here.
+   */
+  scheduledWeekMinutes: number | null;
   decisionReason: string | null;
   lastWeekUnsubmitted: string | null;
 }) {
@@ -59,9 +78,6 @@ export function TimesheetStrip({
       : status === "RETURNED"
         ? "border-warning-border bg-warning-subtle"
         : "border-accent-border bg-accent";
-
-  /** Five working days. The comparison, not a target — see below. */
-  const standardWeek = STANDARD_DAY_MINUTES * 5;
 
   return (
     <section
@@ -79,12 +95,21 @@ export function TimesheetStrip({
 
         <span className="text-xs tabular-nums text-muted-foreground">
           {formatCellDuration(minutes)}
-          {/* Against the standard week rather than as a bare number — 22h means
-              nothing until you know whether the week is half over. It is stated
-              as a comparison and NOT as a progress bar: a bar implies a target,
-              and hours logged is a record of what happened, not a quota. */}
-          {" of "}
-          {formatCellDuration(standardWeek)}
+          {/* Against THIS PERSON'S week when one could be worked out — 22h means
+              nothing until you know whether the week is half over. Stated as a
+              comparison and NOT as a progress bar: a bar implies a quota, and
+              hours logged is a record of what happened.
+
+              A bare total when it could not: no schedule recorded, a week that
+              expected nothing, or a read that failed. Silence is the only honest
+              rendering of "we do not know", and the shortfall check still runs
+              on /timesheet and again in the database at submit time. */}
+          {scheduledWeekMinutes !== null ? (
+            <>
+              {" of "}
+              {formatCellDuration(scheduledWeekMinutes)}
+            </>
+          ) : null}
         </span>
 
         <Link

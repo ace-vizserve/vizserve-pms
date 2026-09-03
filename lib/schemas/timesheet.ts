@@ -685,6 +685,45 @@ export function cellCommit(typed: string, cell: { total: number; entryCount: num
 export type DayState = "empty" | "normal" | "overtime" | "over";
 
 /**
+ * One approved OVERTIME request covering a day — and the id that opens it.
+ *
+ * WHY THE ID TRAVELS WITH THE MINUTES. Both grids used to be handed a bare
+ * `Record<day, minutes>`, so a day marked "OT" or "over +1h" was a claim about a
+ * decision somebody made with no way to reach that decision: who approved it,
+ * for how long, and on what grounds. The marker is the only thing this rule has,
+ * and a marker you cannot audit is one people learn to ignore.
+ *
+ * ⚠️ THE ID IS ONLY SAFE TO LINK BECAUSE OF WHERE IT CAME FROM. The internal
+ * requests SELECT policy is `requester_id = auth.uid() or
+ * manages_department(department_id)`, so a row that arrived in a query result is
+ * a row this viewer may open. Anything that manufactures an id from somewhere
+ * else — a definer function, a wider read — would be offering people a link to a
+ * 404, which on the lead's grid means offering it for somebody else's overtime.
+ */
+export type OvertimeApproval = {
+  id: string;
+  /** `overtime_minutes` on the request. Never null by the time it gets here. */
+  minutes: number;
+};
+
+/**
+ * How much overtime was approved for one day.
+ *
+ * SUMMED, not last-one-wins: there is deliberately no unique constraint on
+ * (requester, work_date, OVERTIME), because two separate approvals for one day
+ * is a legitimate thing that happened and each needed a lead's signature. Taking
+ * one and discarding the other would quietly lower the threshold below what was
+ * actually granted.
+ *
+ * One function rather than the reduce both grids used to carry, so the number
+ * that raises the threshold and the list that links to the approvals behind it
+ * are derived from exactly the same rows.
+ */
+export function overtimeGranted(approvals: readonly OvertimeApproval[] | undefined): number {
+  return (approvals ?? []).reduce((total, approval) => total + approval.minutes, 0);
+}
+
+/**
  * How a day's total should read, given any overtime approved for that date.
  *
  * Advisory, not enforcement — nothing refuses a nine-hour day, and the only
