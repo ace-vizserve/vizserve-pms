@@ -3,7 +3,7 @@
 import { EyeOff, Pencil, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { Badge } from "@/components/ui/badge";

@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { Download, Loader2, Paperclip } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 import { formatBytes } from "@/lib/attachments";
 

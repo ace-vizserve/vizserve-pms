@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { Download } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
 import { exportFormResponses } from "@/app/(app)/forms/actions";

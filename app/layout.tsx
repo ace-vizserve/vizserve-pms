@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import { Figtree, Geist_Mono, Plus_Jakarta_Sans } from "next/font/google";
 import NextTopLoader from "nextjs-toploader";
-import { Toaster } from "sonner";
+import { Toaster } from "@/components/ui/toast";
 
 import { ThemeProvider } from "@/components/theme-provider";
 import "./globals.css";
@@ -58,7 +58,10 @@ export default function RootLayout({
         <ThemeProvider>
           <NextTopLoader color="#4359A5" height={2} showSpinner={false} />
           {children}
-          <Toaster position="top-right" richColors closeButton />
+          {/* Position, theme and every visual decision live in the wrapper —
+              see `components/ui/toast.tsx`. Nothing in the app imports the
+              toast library directly, so replacing it costs that one file. */}
+          <Toaster />
         </ThemeProvider>
       </body>
     </html>

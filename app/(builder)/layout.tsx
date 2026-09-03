@@ -22,7 +22,7 @@ import { requireAuthContext } from "@/lib/auth/authorization";
  * auth and its own header.
  *
  * WHAT THE SHELL PROVIDED AND WHERE IT NOW COMES FROM:
- *   - `ThemeProvider`, `Toaster` (sonner) and `NextTopLoader` are in the ROOT
+ *   - `ThemeProvider`, `Toaster` and `NextTopLoader` are in the ROOT
  *     layout, not the shell, so they are untouched by the move. The builder
  *     calls `toast` on every save and would have gone silent otherwise.
  *   - The sidebar, its unread/awaiting-review badges and the project tree are

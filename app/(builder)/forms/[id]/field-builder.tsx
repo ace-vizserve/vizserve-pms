@@ -2,7 +2,7 @@
 
 import { FilePlus2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 import { saveSchema } from "@/app/(app)/forms/actions";
 import type { FormSchema } from "@/lib/form-builder/builder";

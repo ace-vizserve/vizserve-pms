@@ -2,7 +2,7 @@
 
 import { useTransition } from "react";
 import { FileDown } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
 import { downloadPdf } from "@/lib/download-file";

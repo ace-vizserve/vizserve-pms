@@ -2,7 +2,7 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { FileDown, KeyRound, Pencil, Plus, Search } from "lucide-react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 import { ReportBuilder } from "@/app/(app)/hr/reports/report-builder";
 

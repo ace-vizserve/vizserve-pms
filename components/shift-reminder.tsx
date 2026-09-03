@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { toast } from "sonner";
+import { toast } from "@/components/ui/toast";
 
 import { loadReminderState, type ReminderState } from "@/app/(app)/reminder-actions";
 import { formatAppTime } from "@/lib/dates";
