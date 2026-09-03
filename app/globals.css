@@ -936,51 +936,110 @@
 }
 
 /* ---------------------------------------------------------------------------
-   The toast's edge and its lift.
+   The toast's edge, its lift, and every part of its type.
 
-   ⚠️ sileo DRAWS NEITHER. `[data-sileo-toast]` is `background: transparent` and
-   `[data-sileo-svg]` is `overflow: visible` and nothing else — the whole
-   surface is one filled SVG shape with no stroke and no shadow. On this app's
-   `--background` that is a white shape on a near-white page, and on a card it
-   is white on white. It disappeared entirely.
+   ⚠️ THIS IS PLAIN CSS ON sileo's OWN ATTRIBUTES, NOT TAILWIND CLASSNAMES, and
+   that is a correction. `<Toaster options={{styles}}>` takes classNames and
+   they DID reach the DOM — but Tailwind never generated them. Its scanner
+   emits a utility when it sees the class in source; `text-sm!` inside a string
+   in a `const` object is not reliably a candidate, and the compiled stylesheet
+   contained none of them. The elements carried classes that styled nothing.
 
-   ⚠️ THE BORDER IS A REAL STROKE, and an earlier note here claiming one was not
-   possible was simply wrong. The gooey filter ends with
-   `feComposite in="SourceGraphic" in2="goo" operator="atop"` — the source
-   graphic is composited back over the blurred blob, so a stroke on the path
-   survives the filter rather than being smeared by it.
-
-   `vector-effect: non-scaling-stroke` because the shape is animated by
-   transform during the morph, and without it the hairline would thicken and
-   thin as the toast springs open.
-
-   THE CASTS STAY `drop-shadow` rather than `box-shadow`: box-shadow traces the
-   toast's rectangular BOX, not the rounded shape inside it — a rectangle
-   floating around a capsule. `drop-shadow` follows the rendered alpha, so it
-   hugs the real silhouette through every frame. They are `--elev-3`, because
-   this is an overlay and `--shadow-overlay` is what every other overlay carries.
+   Attribute selectors have no such dependency: sileo puts `data-sileo-*` on
+   every part, they are in the DOM by construction, and the rules below win on
+   WEIGHT — `:root [data-sileo-title]` is (0,2,0) against sileo's (0,1,0), so
+   source order does not matter. Which is the other half of the fix: sileo
+   INJECTS its stylesheet from JavaScript at mount, so it always lands after
+   ours and always wins a tie.
    -------------------------------------------------------------------------- */
-:root [data-sileo-svg] path {
+
+/* ⚠️ `rect`, NOT `path`. The surface is two `<rect>` elements —
+   `[data-sileo-pill]` (the collapsed capsule) and `[data-sileo-body]` (the
+   panel that grows beneath it) — merged by the gooey filter. An earlier version
+   of this rule said `path` and therefore matched nothing at all, which is why
+   the toast had no border.
+
+   A REAL STROKE, and it survives the filter: the chain ends with
+   `feComposite in="SourceGraphic" in2="goo" operator="atop"`, compositing the
+   source back over the blurred blob.
+
+   `vector-effect: non-scaling-stroke` because both rects are transformed while
+   the toast springs open, and the hairline would otherwise breathe. */
+:root [data-sileo-pill],
+:root [data-sileo-body] {
   stroke: var(--border);
   stroke-width: 1;
   vector-effect: non-scaling-stroke;
 }
 
+/* The lift. `drop-shadow` rather than `box-shadow`: box-shadow traces the
+   toast's rectangular BOX, not the rounded shape inside it — a rectangle
+   floating around a capsule. drop-shadow follows the rendered alpha, so it hugs
+   the real silhouette through every frame of the morph. These are `--elev-3`,
+   because a toast is an overlay. */
 :root [data-sileo-svg] {
   filter:
     drop-shadow(0 2px 4px rgb(15 22 38 / 0.06))
     drop-shadow(0 12px 22px -6px rgb(15 22 38 / 0.13));
 }
 
-/* ⚠️ THE EDGE HAS TO WORK HARDER IN DARK, and this is the one place the two
-   themes are not the same declaration with different tokens. A dark toast sits
-   on a dark page, so nothing is contributed by a cast shadow — there is nothing
-   for it to darken. `--border-strong` is what actually separates it.
+/* ---------------------------------- Type --------------------------------- */
+
+/* sileo ships this at 13.2px/500, `text-transform: capitalize` — so every toast
+   read "Time-out Updated. The Latest Time-out Stands." — and coloured by the
+   STATE. Direction B keeps the state in the badge alone, so the title is
+   plain foreground at the app's own 14/600. */
+:root [data-sileo-title] {
+  font-size: 0.875rem;
+  line-height: 1.35;
+  font-weight: 600;
+  text-transform: none;
+  color: var(--foreground);
+}
+
+/* 14px with a 1rem pad, unmuted, out of the box. */
+:root [data-sileo-description] {
+  padding: 0.25rem 0 0;
+  font-size: 0.8125rem;
+  line-height: 1.45;
+  color: var(--muted-foreground);
+}
+
+/* A 9999px pill out of the box; ours is `--radius-md`. The colours are the
+   variant's, set above. */
+:root [data-sileo-button] {
+  height: 1.75rem;
+  border-radius: var(--radius-md);
+  padding: 0 0.6875rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+/* 24px and no edge out of the box. §4.1: a status is a fill, a HAIRLINE and a
+   solid, and without the third it dissolves into a light surface. */
+:root [data-sileo-badge] {
+  height: 1.25rem;
+  width: 1.25rem;
+  border: 1px solid var(--sileo-tone-border, transparent);
+}
+
+:root [data-sileo-badge] svg {
+  height: 0.75rem;
+  width: 0.75rem;
+}
+
+/* ---------------------------------- Dark --------------------------------- */
+
+/* ⚠️ THE EDGE HAS TO WORK HARDER HERE, and it is the one place the two themes
+   are not the same declaration with different tokens. A dark toast sits on a
+   dark page, so nothing is contributed by a cast shadow — there is nothing for
+   it to darken. `--border-strong` is what actually separates it.
 
    `:root.dark`, not `.dark` — next-themes puts the class on <html>, so both
    match the same element, but (0,3,0) beats the (0,2,0) above on WEIGHT rather
    than on source order, and order is what a reshuffle of this file breaks. */
-:root.dark [data-sileo-svg] path {
+:root.dark [data-sileo-pill],
+:root.dark [data-sileo-body] {
   stroke: var(--border-strong);
 }
 

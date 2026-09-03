@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import {
   Dialog,
   DialogClose,
@@ -82,8 +82,17 @@ export function OffScheduleDialog({
           <DialogClose render={<Button variant="ghost" />}>Not now</DialogClose>
           {/* A LINK, not a button — it navigates (§2.1). The two query
               parameters are narrowed again on arrival by narrowRequestPrefill,
-              so this and a hand-typed URL are treated identically. */}
-          <Button render={<Link href={href} />}>Request a correction</Button>
+              so this and a hand-typed URL are treated identically.
+
+              ⚠️ `buttonVariants`, NOT `<Button render={<Link/>}>`. The comment
+              above always said "a link, not a button" and the code said the
+              opposite: Base UI's Button is a native <button> and warned, on
+              every render of the DTR, that the semantics it promised were gone.
+              §2.1 names this exact pairing — if it navigates, it is a link, and
+              `buttonVariants` is how a link borrows the styling. */}
+          <Link href={href} className={buttonVariants()}>
+            Request a correction
+          </Link>
         </DialogFooter>
       </DialogContent>
     </Dialog>

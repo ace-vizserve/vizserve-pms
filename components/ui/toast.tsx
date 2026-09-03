@@ -21,9 +21,13 @@ import { sileo, Toaster as SileoToaster, type SileoPosition } from "sileo";
  * the shape the app speaks is the shape the app chose rather than whichever
  * library is underneath this month.
  *
- * What NO CALL SITE may pass: sileo's `styles`, `fill`, `roundness`, `icon` and
+ * What NO CALL SITE may pass: sileo's `fill`, `roundness`, `icon`, `styles` and
  * `autopilot`. Per-call visual overrides are how a toast system ends up with
- * fourteen looks; those decisions are made once, in `<Toaster>` below.
+ * fourteen looks; those decisions are made once — `fill` and `roundness` in
+ * `<Toaster>` below, and everything else as plain CSS on sileo's own
+ * `data-sileo-*` attributes in `app/globals.css`. The `styles` classNames it
+ * offers were tried and abandoned: they reached the DOM, but Tailwind never
+ * emitted the utilities, so the elements carried classes that styled nothing.
  */
 
 /** Everything a call site may pass. Mirrors what `sonner` accepted, minus what nothing used. */
@@ -161,34 +165,6 @@ function ToastSurfaceDefs() {
 const ROUNDNESS = 14;
 
 /**
- * The text parts, as classNames.
- *
- * ⚠️ EVERY ONE CARRIES `!`, AND WITHOUT IT NONE OF THEM APPLIED. sileo's own
- * rules are single attribute selectors — `[data-sileo-title]`, (0,1,0) — which
- * TIES with a Tailwind utility, and ties go to source order. sileo injects its
- * stylesheet from JavaScript at mount, so it always lands after ours and always
- * won. The trailing `!` is Tailwind v4's important modifier, the same escape
- * `components/ui/command.tsx` already uses on `h-8!` for the same reason.
- *
- * What each one is actually correcting:
- *
- *   title        13.2px / 500, `text-transform: capitalize`, coloured by the
- *                STATE. Three problems: our scale says 14/600, we do not
- *                Capitalise Every Word Of A Sentence, and Direction B puts the
- *                state in the badge alone so the title stays `--foreground`.
- *   description  14px and a 1rem pad; ours is 13px, tighter, and muted.
- *   button       a 9999px pill; ours is `--radius-md`.
- *   badge        24px; ours is the 20px icon-tile size, with the state's
- *                hairline so it reads as a chip rather than a dot.
- */
-const STYLES = {
-  title: "text-sm! leading-snug! font-semibold! text-foreground! normal-case!",
-  description: "px-0! pt-1! pb-0! text-[13px]! leading-relaxed! text-muted-foreground!",
-  button: "h-7! rounded-md! px-2.5! text-xs! font-semibold!",
-  badge: "size-5! border! border-(--sileo-tone-border)!",
-} as const;
-
-/**
  * Mounted once, in the root layout, INSIDE `ThemeProvider`.
  *
  * ⚠️ THE THEME IS PASSED EXPLICITLY RATHER THAN LEFT ON "system". This app
@@ -216,7 +192,6 @@ export function Toaster() {
         options={{
           fill: dark ? SURFACE_DARK : SURFACE_LIGHT,
           roundness: ROUNDNESS,
-          styles: { ...STYLES },
         }}
       />
     </>
