@@ -97,27 +97,61 @@ export const toast = Object.assign(
 const POSITION: SileoPosition = "top-center";
 
 /**
- * ⚠️ `fill` IS AN SVG ATTRIBUTE, NOT A CSS BACKGROUND, and this cost a round.
+ * ⚠️ `fill` IS AN SVG ATTRIBUTE, NOT A CSS BACKGROUND, and that is what makes
+ * the raised surface possible rather than what prevents it.
  *
- * sileo draws the toast as a filtered SVG shape — that is what the gooey
- * morph between collapsed and expanded actually is — so `fill` reaches an SVG
- * `fill`, which takes a paint value: a colour, or `url(#id)`. It was first set
- * to `linear-gradient(...)`, which is CSS syntax an SVG cannot parse. Nothing
- * warned; the shape simply fell back to its default white, which is why the
- * rendered toast looked nothing like the mockup.
+ * sileo draws the toast as a filtered SVG shape — that is what the gooey morph
+ * actually is — and passes `fill` straight through to the path's `fill`
+ * attribute. So it takes an SVG PAINT value. `linear-gradient(...)` is CSS
+ * syntax and was silently ignored (that shipped once, and the toast fell back
+ * to flat white); `url(#id)` is the SVG spelling of the same idea, and it works.
  *
- * ⚠️ SO THE LIT TOP EDGE IS NOT AVAILABLE HERE, and the earlier note claiming
- * it arrives "through fill as a gradient" was wrong. §1.5's `--hl` is an inset
- * box-shadow on a DOM box; this surface is a filtered SVG path, and neither an
- * inset shadow of ours nor a gradient fill can sit on it without a `<defs>`
- * gradient the library gives no way to inject. The toast is the one raised
- * object in the product without the highlight. Getting it back means a fork.
- *
- * These are the top stop of `--gradient-raised`, flattened — restated here
- * because `fill` is a value prop and cannot read a token.
+ * §1.5 says a raised object is lighter at the top, where the light is. That is
+ * `--gradient-raised`, and `<ToastSurfaceDefs>` below is it, expressed as the
+ * `<linearGradient>` an SVG can actually use. The hairline is a real `stroke`
+ * on the same path — see `app/globals.css`.
  */
-const SURFACE_LIGHT = "#ffffff";
-const SURFACE_DARK = "#1d222c";
+const SURFACE_LIGHT = "url(#vizserve-toast-surface-light)";
+const SURFACE_DARK = "url(#vizserve-toast-surface-dark)";
+
+/**
+ * The two gradients the surface paints with.
+ *
+ * ⚠️ IT MUST BE IN THE DOCUMENT FOR `url(#id)` TO RESOLVE, and it has to be
+ * OUTSIDE sileo's own tree — sileo unmounts a toast when it exits, and a
+ * gradient living inside one would take the definition with it, leaving any
+ * toast still on screen painted with nothing. So it renders here, once, beside
+ * the Toaster and independent of whether any toast exists.
+ *
+ * Both are declared always, not switched on the theme: an `id` that appears and
+ * disappears is an `id` a mid-animation repaint can miss.
+ *
+ * The stops are `--gradient-surface` and `--gradient-raised` from
+ * `app/globals.css`, restated because SVG `stop-color` cannot read a CSS custom
+ * property that is redefined per theme — it resolves against this element, not
+ * against the toast. ⚠️ IF THOSE GRADIENTS CHANGE, THESE CHANGE; it is the only
+ * duplicated colour in this file.
+ *
+ * `aria-hidden` and zero-sized: it draws nothing, it only defines.
+ */
+function ToastSurfaceDefs() {
+  return (
+    <svg width="0" height="0" aria-hidden focusable="false" style={{ position: "absolute" }}>
+      <defs>
+        {/* x1/y1 → x2/y2 top-to-bottom. The default is LEFT to right, which
+            would light the wrong edge. */}
+        <linearGradient id="vizserve-toast-surface-light" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#ffffff" />
+          <stop offset="100%" stopColor="#fafbfd" />
+        </linearGradient>
+        <linearGradient id="vizserve-toast-surface-dark" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#1d222c" />
+          <stop offset="100%" stopColor="#171b23" />
+        </linearGradient>
+      </defs>
+    </svg>
+  );
+}
 
 /**
  * `--radius-xl`. A toast is an overlay, so it takes the overlay radius rather
@@ -165,23 +199,26 @@ const STYLES = {
  * `resolvedTheme` is undefined until after hydration, which is why it falls
  * back to "system" rather than to "light": on the first paint the OS guess is
  * right far more often than a coin flip, and it is corrected within a frame.
- * The FILL has no such fallback available — it is one value, not a media query
- * — so it follows `resolvedTheme` directly and is simply light until the theme
- * resolves. A toast cannot fire that early.
+ * The FILL has no such fallback available — it names one gradient, not a media
+ * query — so it follows `resolvedTheme` directly and is simply the light one
+ * until the theme resolves. A toast cannot fire that early.
  */
 export function Toaster() {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
 
   return (
-    <SileoToaster
-      position={POSITION}
-      theme={dark ? "dark" : resolvedTheme === "light" ? "light" : "system"}
-      options={{
-        fill: dark ? SURFACE_DARK : SURFACE_LIGHT,
-        roundness: ROUNDNESS,
-        styles: { ...STYLES },
-      }}
-    />
+    <>
+      <ToastSurfaceDefs />
+      <SileoToaster
+        position={POSITION}
+        theme={dark ? "dark" : resolvedTheme === "light" ? "light" : "system"}
+        options={{
+          fill: dark ? SURFACE_DARK : SURFACE_LIGHT,
+          roundness: ROUNDNESS,
+          styles: { ...STYLES },
+        }}
+      />
+    </>
   );
 }
