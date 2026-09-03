@@ -935,6 +935,26 @@
   --sileo-tone-border: var(--accent-border);
 }
 
+
+/* ⚠️ EVERY DECLARATION BELOW IS `!important`, AND THAT IS A DELIBERATE RETREAT
+   FROM ARGUING ABOUT THE CASCADE.
+
+   On paper none of it is needed: these selectors are (0,2,0) against sileo's
+   (0,1,0), sileo uses no `!important` anywhere, and nothing here sits in a
+   cascade layer. On paper the rules already win.
+
+   They did not, repeatedly, and the reason is that sileo injects its stylesheet
+   from a MODULE-LEVEL side effect (`__insertCSS` runs on import, appending a
+   <style> to <head>) — so when it lands relative to Next's own style injection
+   depends on chunk order, on dev versus production, and on whether the route
+   was server-rendered or client-navigated to. That is not a thing to reason
+   about once and trust; it is a thing to take off the table.
+
+   This is the app's own design system being applied to a third-party component
+   that ships no theming contract beyond a handful of variables. `!important`
+   is the right tool for exactly that, and the wrong tool almost everywhere
+   else in this file.
+*/
 /* ---------------------------------------------------------------------------
    The toast's edge, its lift, and every part of its type.
 
@@ -967,9 +987,9 @@
    the toast springs open, and the hairline would otherwise breathe. */
 :root [data-sileo-pill],
 :root [data-sileo-body] {
-  stroke: var(--border);
-  stroke-width: 1;
-  vector-effect: non-scaling-stroke;
+  stroke: var(--border) !important;
+  stroke-width: 1 !important;
+  vector-effect: non-scaling-stroke !important;
 }
 
 /* The lift. `drop-shadow` rather than `box-shadow`: box-shadow traces the
@@ -980,7 +1000,7 @@
 :root [data-sileo-svg] {
   filter:
     drop-shadow(0 2px 4px rgb(15 22 38 / 0.06))
-    drop-shadow(0 12px 22px -6px rgb(15 22 38 / 0.13));
+    drop-shadow(0 12px 22px -6px rgb(15 22 38 / 0.13)) !important;
 }
 
 /* ---------------------------------- Type --------------------------------- */
@@ -990,42 +1010,42 @@
    STATE. Direction B keeps the state in the badge alone, so the title is
    plain foreground at the app's own 14/600. */
 :root [data-sileo-title] {
-  font-size: 0.875rem;
-  line-height: 1.35;
-  font-weight: 600;
-  text-transform: none;
-  color: var(--foreground);
+  font-size: 0.875rem !important;
+  line-height: 1.35 !important;
+  font-weight: 600 !important;
+  text-transform: none !important;
+  color: var(--foreground) !important;
 }
 
 /* 14px with a 1rem pad, unmuted, out of the box. */
 :root [data-sileo-description] {
-  padding: 0.25rem 0 0;
-  font-size: 0.8125rem;
-  line-height: 1.45;
-  color: var(--muted-foreground);
+  padding: 0.25rem 0 0 !important;
+  font-size: 0.8125rem !important;
+  line-height: 1.45 !important;
+  color: var(--muted-foreground) !important;
 }
 
 /* A 9999px pill out of the box; ours is `--radius-md`. The colours are the
    variant's, set above. */
 :root [data-sileo-button] {
-  height: 1.75rem;
-  border-radius: var(--radius-md);
-  padding: 0 0.6875rem;
-  font-size: 0.75rem;
-  font-weight: 600;
+  height: 1.75rem !important;
+  border-radius: var(--radius-md) !important;
+  padding: 0 0.6875rem !important;
+  font-size: 0.75rem !important;
+  font-weight: 600 !important;
 }
 
 /* 24px and no edge out of the box. §4.1: a status is a fill, a HAIRLINE and a
    solid, and without the third it dissolves into a light surface. */
 :root [data-sileo-badge] {
-  height: 1.25rem;
-  width: 1.25rem;
-  border: 1px solid var(--sileo-tone-border, transparent);
+  height: 1.25rem !important;
+  width: 1.25rem !important;
+  border: 1px solid var(--sileo-tone-border, transparent) !important;
 }
 
 :root [data-sileo-badge] svg {
-  height: 0.75rem;
-  width: 0.75rem;
+  height: 0.75rem !important;
+  width: 0.75rem !important;
 }
 
 /* ---------------------------------- Dark --------------------------------- */
@@ -1040,11 +1060,11 @@
    than on source order, and order is what a reshuffle of this file breaks. */
 :root.dark [data-sileo-pill],
 :root.dark [data-sileo-body] {
-  stroke: var(--border-strong);
+  stroke: var(--border-strong) !important;
 }
 
 :root.dark [data-sileo-svg] {
   filter:
     drop-shadow(0 2px 4px rgb(0 0 0 / 0.4))
-    drop-shadow(0 12px 22px -6px rgb(0 0 0 / 0.55));
+    drop-shadow(0 12px 22px -6px rgb(0 0 0 / 0.55)) !important;
 }

@@ -1,7 +1,7 @@
 "use client";
 
-import * as React from "react";
 import { useTheme } from "next-themes";
+import * as React from "react";
 import { sileo, Toaster as SileoToaster, type SileoPosition } from "sileo";
 
 /**
@@ -53,9 +53,7 @@ function emit(send: Emit, message: React.ReactNode, options?: ToastOptions): str
     title: typeof message === "string" ? message : String(message ?? ""),
     description: options?.description,
     duration: options?.duration,
-    button: options?.action
-      ? { title: options.action.label, onClick: options.action.onClick }
-      : undefined,
+    button: options?.action ? { title: options.action.label, onClick: options.action.onClick } : undefined,
   });
 }
 
@@ -72,17 +70,12 @@ export const toast = Object.assign(
      * conveyed by colour, and wrong colour at that: "You have a new
      * notification" has not succeeded at anything.
      */
-    options?.action
-      ? emit(sileo.action, message, options)
-      : emit(sileo.show, message, options),
+    options?.action ? emit(sileo.action, message, options) : emit(sileo.show, message, options),
   {
-    success: (message: React.ReactNode, options?: ToastOptions) =>
-      emit(sileo.success, message, options),
-    error: (message: React.ReactNode, options?: ToastOptions) =>
-      emit(sileo.error, message, options),
+    success: (message: React.ReactNode, options?: ToastOptions) => emit(sileo.success, message, options),
+    error: (message: React.ReactNode, options?: ToastOptions) => emit(sileo.error, message, options),
     info: (message: React.ReactNode, options?: ToastOptions) => emit(sileo.info, message, options),
-    warning: (message: React.ReactNode, options?: ToastOptions) =>
-      emit(sileo.warning, message, options),
+    warning: (message: React.ReactNode, options?: ToastOptions) => emit(sileo.warning, message, options),
 
     /** By the id `toast(…)` returned. */
     dismiss: (id: string) => sileo.dismiss(id),
@@ -98,7 +91,7 @@ export const toast = Object.assign(
  * reaching for when a toast arrives. Centre clears both, and it is where the
  * eye already is after pressing a button in the middle of a page.
  */
-const POSITION: SileoPosition = "top-center";
+const POSITION: SileoPosition = "bottom-right";
 
 /**
  * ⚠️ `fill` IS AN SVG ATTRIBUTE, NOT A CSS BACKGROUND, and that is what makes
@@ -130,11 +123,17 @@ const SURFACE_DARK = "url(#vizserve-toast-surface-dark)";
  * Both are declared always, not switched on the theme: an `id` that appears and
  * disappears is an `id` a mid-animation repaint can miss.
  *
- * The stops are `--gradient-surface` and `--gradient-raised` from
- * `app/globals.css`, restated because SVG `stop-color` cannot read a CSS custom
- * property that is redefined per theme — it resolves against this element, not
- * against the toast. ⚠️ IF THOSE GRADIENTS CHANGE, THESE CHANGE; it is the only
- * duplicated colour in this file.
+ * ⚠️ THE STOPS ARE `--gradient-RAISED`, NOT `--gradient-surface`, and the
+ * difference is the whole point. `--gradient-surface` is #ffffff → #fafcfd —
+ * a panel, near-white, and on a white card it is invisible. `--gradient-raised`
+ * is #fdfeff → #f1f5f9: its bottom stop is properly grey, so the shape reads as
+ * a lit object sitting ON the page rather than as a hole cut in it. A toast is
+ * the most raised thing in the product; it takes the raised gradient.
+ *
+ * Restated as literals because SVG `stop-color` cannot read a CSS custom
+ * property that is redefined per theme — it resolves against THIS element, not
+ * against the toast, so a token would always give the light value. ⚠️ IF THOSE
+ * GRADIENTS CHANGE, THESE CHANGE; they are the only duplicated colours here.
  *
  * `aria-hidden` and zero-sized: it draws nothing, it only defines.
  */
@@ -145,12 +144,12 @@ function ToastSurfaceDefs() {
         {/* x1/y1 → x2/y2 top-to-bottom. The default is LEFT to right, which
             would light the wrong edge. */}
         <linearGradient id="vizserve-toast-surface-light" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#ffffff" />
-          <stop offset="100%" stopColor="#fafbfd" />
+          <stop offset="0%" stopColor="#fdfeff" />
+          <stop offset="100%" stopColor="#f1f5f9" />
         </linearGradient>
         <linearGradient id="vizserve-toast-surface-dark" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#1d222c" />
-          <stop offset="100%" stopColor="#171b23" />
+          <stop offset="0%" stopColor="#252b37" />
+          <stop offset="100%" stopColor="#1c212b" />
         </linearGradient>
       </defs>
     </svg>
