@@ -21,9 +21,9 @@ import { sileo, Toaster as SileoToaster, type SileoPosition } from "sileo";
  * the shape the app speaks is the shape the app chose rather than whichever
  * library is underneath this month.
  *
- * What is deliberately NOT re-exposed: sileo's `styles`, `fill`, `roundness`,
- * `icon` and `autopilot`. Per-call visual overrides are how a toast system ends
- * up with fourteen looks; the design decisions belong in `<Toaster>` below.
+ * What NO CALL SITE may pass: sileo's `styles`, `fill`, `roundness`, `icon` and
+ * `autopilot`. Per-call visual overrides are how a toast system ends up with
+ * fourteen looks; those decisions are made once, in `<Toaster>` below.
  */
 
 /** Everything a call site may pass. Mirrors what `sonner` accepted, minus what nothing used. */
@@ -97,20 +97,27 @@ export const toast = Object.assign(
 const POSITION: SileoPosition = "top-center";
 
 /**
- * ⚠️ THE SURFACE IS A GRADIENT, NOT A FLAT FILL, AND THAT IS THE ONE PLACE
- * THIS COULD NOT BE A STRAIGHT TOKEN SWAP.
+ * ⚠️ `fill` IS AN SVG ATTRIBUTE, NOT A CSS BACKGROUND, and this cost a round.
  *
- * §1.5: a raised object carries `--hl`, a 1px inset highlight along its top
- * edge. sileo paints its own surface, so an inset box-shadow of ours would sit
- * under it — the lit edge has to arrive as part of the fill instead. These two
- * gradients are `--gradient-raised` from `app/globals.css`, restated here
- * because `fill` is a colour prop rather than a class and cannot read a token.
+ * sileo draws the toast as a filtered SVG shape — that is what the gooey
+ * morph between collapsed and expanded actually is — so `fill` reaches an SVG
+ * `fill`, which takes a paint value: a colour, or `url(#id)`. It was first set
+ * to `linear-gradient(...)`, which is CSS syntax an SVG cannot parse. Nothing
+ * warned; the shape simply fell back to its default white, which is why the
+ * rendered toast looked nothing like the mockup.
  *
- * ⚠️ IF THE RAISED GRADIENT CHANGES, THIS CHANGES. It is the only duplicated
- * colour in this file and the only one a redesign could leave behind.
+ * ⚠️ SO THE LIT TOP EDGE IS NOT AVAILABLE HERE, and the earlier note claiming
+ * it arrives "through fill as a gradient" was wrong. §1.5's `--hl` is an inset
+ * box-shadow on a DOM box; this surface is a filtered SVG path, and neither an
+ * inset shadow of ours nor a gradient fill can sit on it without a `<defs>`
+ * gradient the library gives no way to inject. The toast is the one raised
+ * object in the product without the highlight. Getting it back means a fork.
+ *
+ * These are the top stop of `--gradient-raised`, flattened — restated here
+ * because `fill` is a value prop and cannot read a token.
  */
-const SURFACE_LIGHT = "linear-gradient(180deg, #ffffff 0%, #fafbfd 100%)";
-const SURFACE_DARK = "linear-gradient(180deg, #1d222c 0%, #171b23 100%)";
+const SURFACE_LIGHT = "#ffffff";
+const SURFACE_DARK = "#1d222c";
 
 /**
  * `--radius-xl`. A toast is an overlay, so it takes the overlay radius rather
@@ -122,14 +129,29 @@ const ROUNDNESS = 14;
 /**
  * The text parts, as classNames.
  *
- * Tailwind rather than inline values, so these read as the same declarations
- * every other surface in the app uses and move with the tokens.
+ * ⚠️ EVERY ONE CARRIES `!`, AND WITHOUT IT NONE OF THEM APPLIED. sileo's own
+ * rules are single attribute selectors — `[data-sileo-title]`, (0,1,0) — which
+ * TIES with a Tailwind utility, and ties go to source order. sileo injects its
+ * stylesheet from JavaScript at mount, so it always lands after ours and always
+ * won. The trailing `!` is Tailwind v4's important modifier, the same escape
+ * `components/ui/command.tsx` already uses on `h-8!` for the same reason.
+ *
+ * What each one is actually correcting:
+ *
+ *   title        13.2px / 500, `text-transform: capitalize`, coloured by the
+ *                STATE. Three problems: our scale says 14/600, we do not
+ *                Capitalise Every Word Of A Sentence, and Direction B puts the
+ *                state in the badge alone so the title stays `--foreground`.
+ *   description  14px and a 1rem pad; ours is 13px, tighter, and muted.
+ *   button       a 9999px pill; ours is `--radius-md`.
+ *   badge        24px; ours is the 20px icon-tile size, with the state's
+ *                hairline so it reads as a chip rather than a dot.
  */
 const STYLES = {
-  title: "text-sm font-semibold text-foreground",
-  description: "text-[13px] leading-relaxed text-muted-foreground",
-  button: "h-7 rounded-md px-2.5 text-xs font-semibold",
-  badge: "size-5",
+  title: "text-sm! leading-snug! font-semibold! text-foreground! normal-case!",
+  description: "px-0! pt-1! pb-0! text-[13px]! leading-relaxed! text-muted-foreground!",
+  button: "h-7! rounded-md! px-2.5! text-xs! font-semibold!",
+  badge: "size-5! border! border-(--sileo-tone-border)!",
 } as const;
 
 /**

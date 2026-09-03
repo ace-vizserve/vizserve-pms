@@ -20,7 +20,7 @@
   <div style="display: flex; flex-direction: column; gap: 5px;">
     <div style="font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: #656f82;">Anatomy</div>
     <div style="font-size: 18px; font-weight: 600; color: #0f1626;">Which knob paints which part</div>
-    <div style="font-size: 13px; color: #656f82; line-height: 1.5; max-width: 520px;">Every part below is reachable from <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">&lt;Toaster options={…}&gt;</span> — a className for the text parts, a CSS custom property for the colours. No fork needed.</div>
+    <div style="font-size: 13px; color: #656f82; line-height: 1.5; max-width: 520px;">Every part below is reachable from <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">&lt;Toaster options={…}&gt;</span> — a className for the text parts, a CSS custom property for the colours. Every className needs Tailwind's <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">!</span>: sileo injects its stylesheet at mount, so it lands after ours and wins every tie.</div>
   </div>
 
   <!-- the specimen, with callout rules -->
@@ -36,7 +36,7 @@
           <div style="font-size: 13px; color: #656f82; line-height: 1.45; outline: 1.5px dashed #4359a5; outline-offset: 2px; margin-top: 4px;">Time in from the DTR or the dashboard.</div>
         </div>
         <div style="display: flex;">
-          <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; border: 1px solid #d2d8e2; border-bottom-color: #b9c1ce; background: linear-gradient(180deg, #ffffff 0%, #f4f6fa 100%); box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 1px rgb(15 22 38 / 0.04); font-size: 12px; font-weight: 550; color: #0f1626; outline: 1.5px dashed #4359a5; outline-offset: 3px;">Open DTR</span>
+          <span style="display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 6px; background: #4359a5; font-size: 12px; font-weight: 600; color: #ffffff; outline: 1.5px dashed #4359a5; outline-offset: 3px;">Open DTR</span>
         </div>
       </div>
     </div>
@@ -56,7 +56,7 @@
       </div>
       <div style="display: flex; flex-direction: column; gap: 2px;">
         <div style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px; font-weight: 500; color: #4359a5;">styles.button</div>
-        <div style="font-size: 12px; color: #656f82; line-height: 1.45;">Our outline Button, 28px — not a tinted pill.</div>
+        <div style="font-size: 12px; color: #656f82; line-height: 1.45;">Filled with the variant solid, 28px, --radius-md.</div>
       </div>
     </div>
   </div>
@@ -112,7 +112,7 @@
   <!-- the one thing to decide -->
   <div style="display: flex; gap: 11px; padding: 14px 16px; border-radius: 10px; border: 1px solid #e8d6ac; background: #fbf2e0;">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8a6206" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
-    <div style="font-size: 13px; color: #4a3603; line-height: 1.5;"><span style="font-weight: 600;">One thing sileo cannot do:</span> its lit top edge. The design system's raised objects carry <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">--hl</span>, an inset highlight — and sileo paints its own surface, so that has to arrive through <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">fill</span> as a gradient rather than a box-shadow. Direction B does; Direction A drops it, which is why A reads flatter.</div>
+    <div style="font-size: 13px; color: #4a3603; line-height: 1.5;"><span style="font-weight: 600;">One thing sileo genuinely cannot do:</span> the lit top edge. sileo draws the toast as a filtered SVG shape — that is what the gooey morph is — so <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">fill</span> is an SVG paint attribute, not a CSS background. It takes a colour or a <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">url(#id)</span>, never a gradient, and <span style="font-family: 'Geist Mono', ui-monospace, monospace; font-size: 12px;">--hl</span> is an inset box-shadow on a DOM box. <span style="font-weight: 600;">The toast is the one raised object in the product without the highlight.</span> The boards above draw it because they are HTML; the shipped toast has a flat surface. Getting it back means forking sileo.</div>
   </div>
 
 </div>

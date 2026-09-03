@@ -890,3 +890,47 @@
   --sileo-btn-bg-hover: color-mix(in oklch, var(--sileo-tone) 86%, var(--foreground));
   --sileo-btn-color: var(--primary-foreground);
 }
+
+/* ---------------------------------------------------------------------------
+   The badge — a chip, not a dot.
+
+   sileo fills it with `color-mix(… var(--_c) 20%, transparent)` and gives it no
+   edge. §4.1: a status in this app is a fill, a HAIRLINE and a solid, and
+   without the third the badge dissolves into a light card. `--sileo-tone-bg`
+   is public and takes our measured subtle fill; `--sileo-tone-border` is ours,
+   read by the `badge` className in `components/ui/toast.tsx` — sileo has no
+   border of its own to retarget.
+
+   ⚠️ ENUMERATED PER STATE rather than derived. A `color-mix` of the solid would
+   be a sixth way to make a subtle fill in a system that already has five
+   measured ones, and the first time it disagreed with a status chip beside it
+   nobody would know which was right.
+   -------------------------------------------------------------------------- */
+:root [data-sileo-badge][data-state="success"] {
+  --sileo-tone-bg: var(--success-subtle);
+  --sileo-tone-border: var(--success-border);
+}
+
+:root [data-sileo-badge][data-state="error"] {
+  --sileo-tone-bg: var(--destructive-subtle);
+  --sileo-tone-border: var(--destructive-border);
+}
+
+:root [data-sileo-badge][data-state="warning"] {
+  --sileo-tone-bg: var(--warning-subtle);
+  --sileo-tone-border: var(--warning-border);
+}
+
+:root [data-sileo-badge][data-state="info"] {
+  --sileo-tone-bg: var(--info-subtle);
+  --sileo-tone-border: var(--info-border);
+}
+
+/* `action` is the neutral-with-a-button case and `loading` the spinner. Both
+   take the brand tint — the accent pair, which is what every other neutral
+   raised chip in the app uses. */
+:root [data-sileo-badge][data-state="action"],
+:root [data-sileo-badge][data-state="loading"] {
+  --sileo-tone-bg: var(--accent);
+  --sileo-tone-border: var(--accent-border);
+}
