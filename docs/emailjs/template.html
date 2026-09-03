@@ -1,3 +1,48 @@
+<!--
+  P8-10 — THE GENERIC TEMPLATE. ONE TEMPLATE FOR EVERY EMAIL THIS APP SENDS.
+
+  ⚠️ THIS FILE IS A COPY. The template that actually renders lives in the
+  EmailJS dashboard; this is what gets pasted into it, kept in the repo so the
+  markup is reviewable and diffable. Change one, paste the other, or they drift
+  and nobody can tell which is live.
+
+  ⚠️ IT RENDERS AN `EmailBody`, NOT A REQUEST. The previous version of this file
+  was request-specific — it knew about reference numbers, status labels and a
+  progress timeline, which meant it could only ever carry the two client emails
+  the browser sent. Everything else in the system (internal notifications, the
+  whole Gate 3 flow) was written as an `EmailBody` in `lib/email/layout.ts` and
+  rendered locally for Resend, and the two content models had nothing to do with
+  each other.
+
+  That is the whole reason the transport could not be switched. So the variables
+  below are now exactly the fields of `EmailBody`, mapped by `bodyToParams` in
+  `lib/email/transports/emailjs.ts`. Both adapters render the same seven emails
+  from the same definition, and moving to Resend is one environment variable.
+
+  ⚠️ SECTION SYNTAX AND FALSEY VALUES. A section block renders only when its
+  variable is truthy, and AN EMPTY STRING IS FALSEY. The adapter passes an
+  empty string rather than omitting a key, so an absent button and an empty one
+  behave identically — an unguarded empty href ships as a full-size call to
+  action pointing nowhere, which is worse in a client's inbox than no button at
+  all.
+
+  ⚠️ `has_facts` IS A SEPARATE SCALAR, deliberately. Wrapping the facts table in
+  the facts section itself would make it ITERATE — the table furniture would
+  repeat once per row. The array drives only the rows; the scalar drives the
+  wrapper.
+
+  ⚠️ EmailJS HTML-ESCAPES ITS PLACEHOLDERS, and `renderEmail` escapes on the
+  Resend side. Content is escaped exactly ONCE on each path. Do not add escaping
+  here, and do not switch a placeholder to the unescaped triple-brace form — a
+  request title comes off a public, unauthenticated form.
+
+  Colours are the measured-safe ones from docs/12 §1 and match
+  `lib/email/layout.ts` so both transports render the same email:
+  #4359A5 carries white text at 6.54:1. #5BC0DE fails against white in BOTH
+  directions at 2.09:1 and is only ever a surface with dark ink on it.
+
+  Preview it without sending: `node docs/emailjs/preview.mjs`.
+-->
 <div
   style="
     font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
@@ -5,9 +50,13 @@
     color: #202020;
   "
 >
-  <div style="font-size: 15px; line-height: 1.6">{{intro}}</div>
-
-  <div style="margin-top: 20px; padding: 16px; background-color: #4359a5; border-radius: 8px">
+  <!--
+    The header block. `preheader` is the short orienting line — a reference
+    number, a task name — and `heading` is what the email is actually about.
+    Both sit on the brand blue, which is the one place white text is safe.
+  -->
+  <div style="margin-bottom: 20px; padding: 16px; background-color: #4359a5; border-radius: 8px">
+    {{#preheader}}
     <div
       style="
         color: #ffffff;
@@ -17,22 +66,78 @@
         opacity: 0.85;
       "
     >
-      {{reference_no}}
+      {{preheader}}
     </div>
+    {{/preheader}}
     <div style="color: #ffffff; font-size: 20px; font-weight: 700; margin-top: 4px">
-      {{status_label}}
+      {{heading}}
     </div>
   </div>
 
+  <!-- The body. Rendered in order, one block per paragraph. -->
+  {{#paragraphs}}
+  <div style="font-size: 15px; line-height: 1.6; margin-bottom: 14px">{{text}}</div>
+  {{/paragraphs}}
+
+  <!--
+    Label/value rows — a target date, a department, who picked the work up.
+    `has_facts` guards the table; `facts` fills it. See the note at the top for
+    why those are two different variables.
+  -->
+  {{#has_facts}}
+  <table
+    role="presentation"
+    cellpadding="0"
+    cellspacing="0"
+    style="width: 100%; margin-top: 4px; margin-bottom: 20px; border-collapse: collapse"
+  >
+    {{#facts}}
+    <tr>
+      <td
+        style="
+          padding: 8px 12px 8px 0;
+          vertical-align: top;
+          color: #5f6368;
+          font-size: 13px;
+          white-space: nowrap;
+          border-bottom: 1px solid #e4e6eb;
+        "
+      >
+        {{label}}
+      </td>
+      <td
+        style="
+          padding: 8px 0;
+          vertical-align: top;
+          color: #202020;
+          font-size: 14px;
+          border-bottom: 1px solid #e4e6eb;
+        "
+      >
+        {{value}}
+      </td>
+    </tr>
+    {{/facts}}
+  </table>
+  {{/has_facts}}
+
+  <!--
+    The quoted block — a Team Leader's reason for returning a request, a QA
+    comment, what was delivered. `white-space: pre-wrap` because these are typed
+    by a person and their line breaks are meaningful.
+  -->
+  {{#quote_text}}
   <div
     style="
       margin-top: 20px;
+      margin-bottom: 20px;
       padding: 16px;
       background-color: #f7f8fa;
       border-left: 3px solid #4359a5;
       border-radius: 0 6px 6px 0;
     "
   >
+    {{#quote_label}}
     <div
       style="
         color: #5f6368;
@@ -42,202 +147,30 @@
         margin-bottom: 6px;
       "
     >
-      What this means
+      {{quote_label}}
     </div>
+    {{/quote_label}}
     <div style="color: #202020; font-size: 15px; line-height: 1.6; white-space: pre-wrap">
-      {{status_note}}
+      {{quote_text}}
     </div>
   </div>
+  {{/quote_text}}
 
   <!--
-    P7-51 — the SAME progress trail the tracking page shows, inline.
+    The call to action — approving at Gate 3, tracking a request, leaving
+    feedback. Guarded on the URL rather than the label, because a label with no
+    href is the dead-button case described at the top of this file.
 
-    Here so the client does not have to click to learn where their request
-    stands. The wording is mirrored from `vizserve_pms_get_request_status`
-    (20260825150000_p7_51_request_status_page.sql) — an email and a page that
-    describe the same stage in different words is how a client ends up asking
-    which one is right.
-
-    The block below is EmailJS's LOOP form of the same section syntax the button
-    uses: it repeats once per array item, and the label, detail and at
-    placeholders resolve against each ITEM rather than the top-level bag. It
-    renders nothing when the array is empty or absent, so it needs no guard.
-
-    ⚠️ NO PLACEHOLDER SYNTAX IN THESE COMMENTS. An HTML comment is not a
-    template comment — EmailJS parses the whole file, so a section marker
-    written here as an example opens a real block, and everything down to the
-    next matching close tag is swallowed. That is not hypothetical: the first
-    draft of this comment did exactly that and ate the progress trail.
-
-    A TABLE PER ROW, not a bulleted list. Outlook draws through Word, which
-    ignores `list-style` on a styled `ul` and collapses the markers — a table is
-    the only construct that lays out reliably in every client.
-
-    The dot is a text character, not a background colour: state is never carried
-    by colour alone, and a client reading this in plain text or greyscale still
-    gets the order and the labels.
+    A table wrapping the anchor, and the background set on the cell as well as
+    the link: Outlook draws through Word and drops the padding on a bare styled
+    <a>, which collapses the button to underlined text.
   -->
-  <!--
-    Its own scalar rather than a heading inside the loop below — a heading in
-    the loop repeats once per stage. It is set only when there are stages to
-    show, so an email without a trail gets neither the heading nor a gap.
-  -->
-  {{#progress_title}}
-  <div
-    style="
-      color: #5f6368;
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      margin: 24px 0 4px;
-    "
-  >
-    {{progress_title}}
-  </div>
-  {{/progress_title}}
-
-  {{#timeline}}
-  <table
-    role="presentation"
-    cellpadding="0"
-    cellspacing="0"
-    style="width: 100%; border-collapse: collapse; margin-top: 12px"
-  >
-    <tr>
-      <td style="width: 18px; vertical-align: top; padding: 0; color: #4359a5; font-size: 15px">
-        &bull;
-      </td>
-      <td style="vertical-align: top; padding: 0">
-        <div style="color: #202020; font-size: 15px; font-weight: 600">{{label}}</div>
-        <div style="color: #5f6368; font-size: 13px; line-height: 1.5; margin-top: 2px">
-          {{detail}}
-        </div>
-        <div style="color: #9aa0a6; font-size: 12px; margin-top: 2px">{{at}}</div>
-      </td>
-    </tr>
-  </table>
-  {{/timeline}}
-
-  <div style="margin-top: 20px; padding: 15px; background-color: #f7f8fa; border-radius: 8px">
-    <table role="presentation" style="width: 100%; border-collapse: collapse">
-      <tr>
-        <td
-          style="
-            padding: 8px 0;
-            border-bottom: 1px solid #e4e6eb;
-            width: 38%;
-            vertical-align: top;
-          "
-        >
-          <strong style="color: #4359a5">Request:</strong>
-        </td>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          {{title}}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          <strong style="color: #4359a5">From:</strong>
-        </td>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          {{requester_name}} &middot; {{requester_org}}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          <strong style="color: #4359a5">Email:</strong>
-        </td>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          {{requester_email}}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          <strong style="color: #4359a5">Form:</strong>
-        </td>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          {{form_name}}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          <strong style="color: #4359a5">Date requested:</strong>
-        </td>
-        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
-          {{target_date}}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding: 8px 0; vertical-align: top">
-          <strong style="color: #4359a5">Submitted:</strong>
-        </td>
-        <td style="padding: 8px 0; vertical-align: top">{{submitted_at}}</td>
-      </tr>
-    </table>
-  </div>
-
-  <div
-    style="
-      margin-top: 20px;
-      padding: 15px 0;
-      border-width: 1px 0;
-      border-style: dashed;
-      border-color: #d9dce1;
-    "
-  >
-    <table role="presentation">
-      <tr>
-        <td style="vertical-align: top">
-          <div
-            style="
-              padding: 6px 10px;
-              margin: 0 10px 0 0;
-              background-color: #eef1f8;
-              border-radius: 5px;
-              font-size: 26px;
-            "
-            role="img"
-          >
-            📝
-          </div>
-        </td>
-        <td style="vertical-align: top">
-          <div style="color: #202020; font-size: 16px"><strong>{{requester_name}}</strong></div>
-          <div style="color: #9aa0a6; font-size: 13px">{{submitted_at}}</div>
-          <p
-            style="
-              font-size: 15px;
-              color: #333333;
-              line-height: 1.6;
-              white-space: pre-wrap;
-              margin: 8px 0 0;
-            "
-          >
-            {{description}}
-          </p>
-        </td>
-      </tr>
-    </table>
-  </div>
-
-  <!--
-    WRAPPED, and it has to be. EmailJS renders an unresolved variable as an
-    empty string and reports no error, so an unguarded button ships as a
-    full-size blue call to action with href="" — a dead link in a client's
-    inbox, which is worse than no button at all. The wrapper below is EmailJS's
-    section syntax: the block renders only when the variable is truthy, and an
-    empty string is not.
-
-    Three comments in the codebase already claimed this guard existed before it
-    did — lib/emailjs.ts, the README, and the call site in public-form.tsx.
-    preview-04-missing-values.html was the proof that it did not.
-  -->
-  {{#status_url}}
+  {{#button_url}}
   <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top: 24px">
     <tr>
       <td style="border-radius: 6px; background: #4359a5">
         <a
-          href="{{status_url}}"
+          href="{{button_url}}"
           style="
             display: inline-block;
             padding: 12px 24px;
@@ -248,13 +181,20 @@
             border-radius: 6px;
           "
         >
-          Track this request
+          {{button_label}}
         </a>
       </td>
     </tr>
   </table>
-  {{/status_url}}
+  {{/button_url}}
 
+  <!--
+    Small print under the button — the approval deadline, "quote this reference
+    in any reply". Amber rather than blue so it reads as a note about the email
+    rather than another thing to click. Dark ink on a light surface; see the
+    contrast note at the top.
+  -->
+  {{#footnote}}
   <div
     style="
       margin-top: 20px;
@@ -264,10 +204,9 @@
       border-radius: 4px;
     "
   >
-    <p style="margin: 0; color: #666666; font-size: 13px; line-height: 1.6">
-      Quote <strong>{{reference_no}}</strong> in any reply about this request.
-    </p>
+    <p style="margin: 0; color: #666666; font-size: 13px; line-height: 1.6">{{footnote}}</p>
   </div>
+  {{/footnote}}
 
   <p style="margin-top: 20px; color: #5f6368; font-size: 12px; line-height: 1.5">
     Sent by VizServe PMS.

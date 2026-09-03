@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { approvedParams, receivedParams, type RequestEmailSubject } from "@/lib/emailjs";
+import type { EmailBody } from "@/lib/email/layout";
+import { emailJsTemplateParams } from "@/lib/email/transports/emailjs";
 
 /**
  * The EmailJS template is the one artefact in this repo with NO runtime safety
@@ -14,6 +16,13 @@ import { approvedParams, receivedParams, type RequestEmailSubject } from "@/lib/
  * beside it, in a client's inbox, and nothing anywhere says why.
  *
  * So the checks that would normally be a compiler's job are here instead.
+ *
+ * ⚠️ P8-10 RETARGETED THIS FILE RATHER THAN DELETING IT. The template stopped
+ * being request-specific and became a generic `EmailBody` renderer, which made
+ * the old `receivedParams`/`approvedParams` builders dead — but the reason
+ * these checks exist did not change at all. If anything it grew: ONE template
+ * now carries all seven emails, so one broken placeholder is seven broken
+ * emails rather than two.
  */
 
 const TEMPLATE = readFileSync(join(process.cwd(), "docs/emailjs/template.html"), "utf8");
@@ -21,18 +30,25 @@ const TEMPLATE = readFileSync(join(process.cwd(), "docs/emailjs/template.html"),
 /** The template with HTML comments removed — what EmailJS's variables live in. */
 const WITHOUT_COMMENTS = TEMPLATE.replace(/<!--[\s\S]*?-->/g, "");
 
-const SUBJECT: RequestEmailSubject = {
-  referenceNo: "VB-2026-0042",
-  requesterName: "Maria Santos",
-  requesterEmail: "maria.santos@hfse.edu.sg",
-  requesterOrg: "HFSE",
-  title: "Quarterly newsletter layout",
-  description: "Four pages, A4.",
-  formName: "Design Request",
-  targetDate: "5 Aug 2026",
-  submittedAt: "25 Aug 2026, 2:14 PM",
-  statusUrl: "https://pms.vizserve.com/status/abc123",
+/**
+ * A body that fills EVERY optional field, because the question these tests ask
+ * is "can the template resolve everything a body can carry". A minimal body
+ * would pass while leaving `quote_label` and `footnote` unchecked.
+ */
+const FULL_BODY: EmailBody = {
+  preheader: "VB-2026-0042",
+  heading: "Your work is ready to review",
+  paragraphs: ["Hi Maria,", "The quarterly newsletter layout is ready for your approval."],
+  facts: [
+    { label: "Reference", value: "VB-2026-0042" },
+    { label: "Target date", value: "5 Aug 2026" },
+  ],
+  quote: { label: "What was delivered", text: "Four pages, A4.\nSecond line." },
+  button: { label: "Review and approve", path: "/approve/abc123" },
+  footnote: "If we do not hear from you by 8 Aug 2026 this will close automatically.",
 };
+
+const ENVELOPE = { to: "maria.santos@hfse.edu.sg", subject: "Your work is ready to review" };
 
 describe("no placeholder syntax inside HTML comments", () => {
   /**
@@ -45,7 +61,7 @@ describe("no placeholder syntax inside HTML comments", () => {
    * symptom is silent: the markup renders as literal text or vanishes, and no
    * error is raised anywhere.
    */
-  it("has no {{ ... }} anywhere in a comment", () => {
+  it("has no placeholder braces anywhere in a comment", () => {
     const comments = TEMPLATE.match(/<!--[\s\S]*?-->/g) ?? [];
     const offenders = comments.filter((comment) => comment.includes("{{"));
 
@@ -65,7 +81,7 @@ describe("section blocks are balanced", () => {
       if (kind === "/") {
         // An unmatched close means the block above it swallowed markup, which
         // is the same failure mode as the comment bug and just as silent.
-        expect(stack.pop(), `unexpected {{/${name}}}`).toBe(name);
+        expect(stack.pop(), `unexpected close of ${name}`).toBe(name);
       } else {
         stack.push(name);
       }
@@ -75,112 +91,124 @@ describe("section blocks are balanced", () => {
   });
 });
 
-describe("every placeholder is a variable the builders actually pass", () => {
+describe("every placeholder is a variable the adapter actually passes", () => {
   /**
-   * The README's warning, enforced. "EmailJS renders a missing variable as
-   * empty, never as an error — so a typo ships as a blank row in a client's
-   * email and nothing says why."
+   * ⚠️ TWO LOOPS NOW, NOT ONE. Placeholders inside the paragraphs and facts
+   * sections resolve against the ITEM, not the outer bag — a name that is only
+   * a top-level variable renders empty inside a loop, silently. So the loop
+   * bodies are cut out before the top-level check and asserted separately.
    */
-  const LOOP = /\{\{#\s*timeline\s*\}\}([\s\S]*?)\{\{\/\s*timeline\s*\}\}/;
+  const LOOPS = {
+    paragraphs: /\{\{#\s*paragraphs\s*\}\}([\s\S]*?)\{\{\/\s*paragraphs\s*\}\}/,
+    facts: /\{\{#\s*facts\s*\}\}([\s\S]*?)\{\{\/\s*facts\s*\}\}/,
+  } as const;
 
-  /** Placeholders outside the timeline loop resolve against the top-level bag. */
   function topLevelPlaceholders(): string[] {
-    const outside = WITHOUT_COMMENTS.replace(LOOP, "");
+    let outside = WITHOUT_COMMENTS;
+
+    // Strip each loop's BODY but keep its open and close markers. Removing the
+    // whole match would take the section name with it, and the loop variables
+    // would then read as "sent but never rendered".
+    for (const pattern of Object.values(LOOPS)) {
+      outside = outside.replace(pattern, (full, body: string) => full.replace(body, ""));
+    }
+
     return [...new Set([...outside.matchAll(/\{\{[#^/]?\s*([a-z_]+)\s*\}\}/g)].map((m) => m[1]))];
   }
 
-  it("resolves every top-level placeholder from receivedParams", () => {
-    const params = receivedParams(SUBJECT);
+  it("resolves every top-level placeholder from emailJsTemplateParams", () => {
+    const params = emailJsTemplateParams(FULL_BODY, ENVELOPE);
     const missing = topLevelPlaceholders().filter((name) => !(name in params));
-    expect(missing).toEqual([]);
+
+    expect(missing, "the template names a variable the adapter never sends").toEqual([]);
   });
 
-  it("resolves every top-level placeholder from approvedParams", () => {
-    const params = approvedParams(SUBJECT, "12 Aug 2026", "26 Aug 2026, 9:02 AM");
-    const missing = topLevelPlaceholders().filter((name) => !(name in params));
-    expect(missing).toEqual([]);
-  });
+  it("sends no variable the template never renders", () => {
+    /*
+     * The other direction, and it catches the opposite mistake: a field added
+     * to `EmailBody` and mapped in the adapter but never given a place in the
+     * template renders nowhere, and the content is silently dropped.
+     *
+     * The envelope fields are the exception — they are configured in the
+     * EmailJS dashboard's own To / Reply-To / Subject boxes rather than written
+     * into the body, so they legitimately have no placeholder in this file.
+     */
+    const ENVELOPE_FIELDS = ["to_email", "reply_to", "subject"];
+    const params = emailJsTemplateParams(FULL_BODY, ENVELOPE);
+    const rendered = new Set(topLevelPlaceholders());
 
-  it("resolves every placeholder inside the loop from a timeline entry", () => {
-    const body = WITHOUT_COMMENTS.match(LOOP)?.[1] ?? "";
-    const names = [...new Set([...body.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map((m) => m[1]))];
-
-    // Inside the loop, placeholders resolve against the ITEM, not the outer
-    // bag — a name that is only a top-level variable renders empty here.
-    const entry = (receivedParams(SUBJECT).timeline as { label: string }[])[0];
-    const missing = names.filter((name) => !(name in entry));
-
-    expect(names.length, "the loop body should use its item's fields").toBeGreaterThan(0);
-    expect(missing).toEqual([]);
-  });
-});
-
-describe("the progress trail", () => {
-  it("carries one stage on the acknowledgement", () => {
-    const params = receivedParams(SUBJECT);
-    expect(params.timeline).toEqual([
-      {
-        label: "Request received",
-        detail: "We have your request and it is queued for review.",
-        at: "25 Aug 2026, 2:14 PM",
-      },
-    ]);
-  });
-
-  it("carries both stages on the approval, oldest first", () => {
-    // Repeating "received" is deliberate — this email is read on its own, often
-    // weeks later, and a trail starting at "Approved" gives no sense of how
-    // long it took.
-    const params = approvedParams(SUBJECT, "12 Aug 2026", "26 Aug 2026, 9:02 AM");
-    const timeline = params.timeline as { label: string; at: string }[];
-
-    expect(timeline.map((entry) => entry.label)).toEqual([
-      "Request received",
-      "Approved — work scheduled",
-    ]);
-    expect(timeline[1].at).toBe("26 Aug 2026, 9:02 AM");
-  });
-
-  it("heads the trail only when there is one", () => {
-    // The heading is its own scalar because a heading inside the loop would
-    // repeat once per stage. Empty means the template's guard drops it.
-    expect(receivedParams(SUBJECT).progress_title).toBe("Progress so far");
-  });
-
-  /**
-   * ⚠️ MIRRORED FROM `vizserve_pms_get_request_status`
-   * (`20260825150000_p7_51_request_status_page.sql`), which is the source of
-   * truth — it is what `/status/[token]` renders.
-   *
-   * Pinned here so a change to the SQL wording that is not carried across fails
-   * a test rather than shipping an email and a page that describe the same
-   * stage in different words.
-   */
-  it("uses the same wording the tracking page does", () => {
-    const sql = readFileSync(
-      join(process.cwd(), "supabase/migrations/20260825150000_p7_51_request_status_page.sql"),
-      "utf8",
+    const unused = Object.keys(params).filter(
+      (name) => !rendered.has(name) && !ENVELOPE_FIELDS.includes(name),
     );
 
-    expect(sql).toContain("'Request received'");
-    expect(sql).toContain("'We have your request and it is queued for review.'");
-    expect(sql).toContain("'Approved — work scheduled'");
-    expect(sql).toContain("'A team member has been assigned and work is scheduled.'");
+    expect(unused, "the adapter sends a variable the template never renders").toEqual([]);
+  });
+
+  it("resolves every placeholder inside the paragraphs loop from an item", () => {
+    const inner = WITHOUT_COMMENTS.match(LOOPS.paragraphs)?.[1] ?? "";
+    const names = [...new Set([...inner.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map((m) => m[1]))];
+    const item = emailJsTemplateParams(FULL_BODY, ENVELOPE).paragraphs[0];
+
+    expect(names.length, "the loop body should use its item's fields").toBeGreaterThan(0);
+    expect(names.filter((name) => !(name in item))).toEqual([]);
+  });
+
+  it("resolves every placeholder inside the facts loop from an item", () => {
+    const inner = WITHOUT_COMMENTS.match(LOOPS.facts)?.[1] ?? "";
+    const names = [...new Set([...inner.matchAll(/\{\{\s*([a-z_]+)\s*\}\}/g)].map((m) => m[1]))];
+    const item = emailJsTemplateParams(FULL_BODY, ENVELOPE).facts[0];
+
+    expect(names.length, "the loop body should use its item's fields").toBeGreaterThan(0);
+    expect(names.filter((name) => !(name in item))).toEqual([]);
   });
 });
 
-describe("the tracking button stays guarded", () => {
-  it("wraps the button in a section block", () => {
-    // Without the guard it ships as a full-size blue call to action with
-    // href="" — a dead CTA in a client's inbox, worse than no button.
-    const guarded = /\{\{#\s*status_url\s*\}\}[\s\S]*?Track this request[\s\S]*?\{\{\/\s*status_url\s*\}\}/;
-    expect(WITHOUT_COMMENTS).toMatch(guarded);
+describe("the mapping from EmailBody", () => {
+  it("wraps paragraphs as objects, because an EmailJS loop cannot read a bare string", () => {
+    const params = emailJsTemplateParams(FULL_BODY, ENVELOPE);
+
+    expect(params.paragraphs).toEqual([
+      { text: "Hi Maria," },
+      { text: "The quarterly newsletter layout is ready for your approval." },
+    ]);
   });
 
-  it("passes an empty string rather than omitting the key", () => {
-    // Both are falsy to EmailJS, but keeping the key means the params bag is
-    // one shape whatever happened to the token.
-    const params = receivedParams({ ...SUBJECT, statusUrl: null });
-    expect(params.status_url).toBe("");
+  it("guards the facts table with a scalar, not the array itself", () => {
+    /*
+     * Wrapping the table furniture in the facts section would make it ITERATE,
+     * repeating the whole table once per row. `has_facts` drives the wrapper;
+     * the array drives only the rows.
+     */
+    const withFacts = emailJsTemplateParams(FULL_BODY, ENVELOPE);
+    const without = emailJsTemplateParams({ ...FULL_BODY, facts: [] }, ENVELOPE);
+
+    expect(withFacts.has_facts).toBe("yes");
+    expect(without.has_facts).toBe("");
+  });
+
+  it("passes an empty string for every absent optional, never undefined", () => {
+    /*
+     * ⚠️ AN EMPTY STRING IS FALSEY TO EmailJS AND AN ABSENT KEY IS NOT
+     * RELIABLY SO. Omitting the button url would leave its section opening on a
+     * missing variable, and an unguarded button ships as a full-size call to
+     * action pointing nowhere — a dead link in a client's inbox, which is worse
+     * than no button at all.
+     */
+    const bare: EmailBody = { preheader: "", heading: "Hello", paragraphs: ["One line."] };
+    const params = emailJsTemplateParams(bare, ENVELOPE);
+
+    expect(params.button_url).toBe("");
+    expect(params.button_label).toBe("");
+    expect(params.quote_label).toBe("");
+    expect(params.quote_text).toBe("");
+    expect(params.footnote).toBe("");
+    expect(params.has_facts).toBe("");
+    expect(params.facts).toEqual([]);
+  });
+
+  it("makes the button path absolute, so the link works from an inbox", () => {
+    const params = emailJsTemplateParams(FULL_BODY, ENVELOPE);
+
+    expect(params.button_url).toMatch(/^https?:\/\/.+\/approve\/abc123$/);
   });
 });

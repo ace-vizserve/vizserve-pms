@@ -157,19 +157,31 @@ system error.
 
 ## Keys
 
-Browser-readable keys need the **`NEXT_PUBLIC_` prefix** in Next.js. The
-`VITE_EMAILJS_*` entries in `.env` use Vite's prefix and are invisible here —
-leftovers from another project.
-
 ```
-NEXT_PUBLIC_EMAILJS_PUBLIC_KEY=...
-NEXT_PUBLIC_EMAILJS_SERVICE_ID=...
-NEXT_PUBLIC_EMAILJS_TEMPLATE_ID=...
+VITE_EMAILJS_PUBLIC_KEY=...     # not a credential; safe in a bundle
+VITE_EMAILJS_SERVICE_ID=...     # not a credential
+VITE_EMAILJS_TEMPLATE_ID=...    # not a credential
+EMAILJS_PRIVATE_KEY=...         # ⚠️ IS a credential. No prefix, server only.
 ```
 
-## ⚠️ The status-change send cannot come from the browser
+The first three keep Vite's prefix, which means nothing to Next and is exactly
+why they were safe to hand to a browser back when the browser did the sending.
+The private key never was, and the missing prefix is the guard: `lib/email/config.ts`
+is `server-only`, so nothing can read it from a component that ships.
 
-Submission emails are fine client-side — the requester is on the page, so a
+### ⚠️ Setting the keys is necessary but NOT sufficient
+
+EmailJS **disables API requests from non-browser applications by default**. Turn
+them on in the dashboard under **Account → Security**, or every server-side send
+is rejected and nothing arrives.
+
+The REST endpoint is also rate-limited to **one request per second**. The
+adapter serialises sends behind that limit itself, so a cron sweep of several
+reminders cannot trip it — do not add a second throttle at a call site.
+
+## The status-change send cannot come from the browser — and no longer does
+
+Submission emails were fine client-side: the requester is on the page, so a
 browser is open and it is theirs.
 
 A status change is not. It happens when a Team Leader clicks Approve, or when
@@ -180,7 +192,27 @@ the Phase 4 auto-complete cron runs overnight. Fired from the browser:
 - your service and template IDs are readable in view-source, and the public key
   permits sending.
 
-Call EmailJS's REST API from a server action with the private key, or use the
-Resend outbox already in `lib/email/` — it retries, cannot roll back the
-approval it reports on, and refuses to deliver to `@example.com` so a QA run
-cannot mail a real client.
+**P8-10 fixed this.** Every send is now server-side, through one port with two
+adapters:
+
+```
+sendEmail({ to, subject, body })            lib/email/send.ts   ← the port
+  ├─ EmailBody → renderEmail() → HTML       transports/resend.ts
+  └─ EmailBody → template params → REST     transports/emailjs.ts
+```
+
+`lib/emailjs-client.ts` and `lib/emailjs.ts` are **gone**, along with the
+`@emailjs/browser` dependency and the two browser sends in `public-form.tsx` and
+`review-panel.tsx` — which, once the server path was live, would have delivered
+two of each to a real client.
+
+### Switching to Resend later
+
+Set `EMAIL_TRANSPORT=resend` and supply `RESEND_API_KEY` + `EMAIL_FROM`. Nothing
+else changes: no call site names a transport, and both adapters render the same
+seven emails from the same `EmailBody`. That property is the whole reason the
+template below is generic rather than request-shaped.
+
+⚠️ `NEXT_PUBLIC_SITE_URL` is transport-independent and still required. Without
+it `appUrl()` falls back to `http://localhost:3177`, so the Gate 3 approval
+button is a dead link in a real inbox. On Vercel, `VERCEL_URL` covers it.

@@ -26,9 +26,6 @@ import {
   type FieldValues,
 } from "@/lib/form-builder/values";
 import { requestCoreSchema, type AttachmentRef, type PublicForm } from "@/lib/schemas/forms";
-import { formatDate, formatDateTime } from "@/lib/dates";
-import { sendClientEmail } from "@/lib/emailjs-client";
-import { receivedParams, type EmailJsConfig } from "@/lib/emailjs";
 
 import { submitPublicRequest, uploadPublicAttachment } from "./actions";
 
@@ -88,7 +85,6 @@ function attachmentsFor(values: FieldValues, fieldKey: string): AttachmentRef[] 
 
 export function PublicFormRenderer({
   form,
-  emailJs,
 }: {
   form: PublicForm;
   /**
@@ -97,7 +93,6 @@ export function PublicFormRenderer({
    * invisible to the browser otherwise. Null when EmailJS is not set up, which
    * is a normal state: the form still works, the client just gets no email.
    */
-  emailJs: EmailJsConfig | null;
 }) {
   const [submitted, setSubmitted] = useState<{ reference_no: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
@@ -318,39 +313,6 @@ export function PublicFormRenderer({
     });
 
     if (result.ok) {
-      /*
-       * P7-49 — tell the requester their request arrived.
-       *
-       * AWAITED BEFORE THE SUCCESS SCREEN, deliberately. The alternative is to
-       * fire it and render immediately, but this is a browser send: navigating
-       * away kills it, and the success screen is exactly what invites somebody
-       * to close the tab. A second of waiting buys a delivered email.
-       *
-       * The outcome is ignored on purpose — `sendClientEmail` never throws and
-       * logs its own failure. The request is already committed, so surfacing a
-       * mail problem here would tell the client their submission failed when it
-       * did not, and their next move would be to submit it again.
-       */
-      await sendClientEmail(
-        emailJs,
-        receivedParams({
-          referenceNo: result.reference_no,
-          requesterName: String(values.requester_name ?? ""),
-          requesterEmail: String(values.requester_email ?? ""),
-          requesterOrg: String(values.requester_org ?? ""),
-          title: String(values.title ?? ""),
-          description: String(values.description ?? ""),
-          formName: form.name,
-          targetDate: values.target_date ? formatDate(String(values.target_date)) : null,
-          submittedAt: formatDateTime(new Date()),
-          // P7-51. The tracking page. Issued by the server action a moment ago —
-          // the raw token exists only in that response, so this is the only
-          // place the browser can learn it. Undefined when it could not be
-          // minted, and the template drops the button rather than linking to
-          // nowhere.
-          statusUrl: result.status_url,
-        }),
-      );
 
       setSubmitted({ reference_no: result.reference_no });
       return;

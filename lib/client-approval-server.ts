@@ -108,7 +108,20 @@ export async function issueAndSendApproval(taskId: string): Promise<IssueOutcome
     return { ok: true, sent: false };
   }
 
-  return { ok: true, sent: outcome.status === "sent" || outcome.status === "dry-run" };
+  /*
+   * ⚠️ `dry-run` IS NOT SENT, AND COUNTING IT AS SENT IS WHY THIS FAILURE HID
+   * FOR MONTHS.
+   *
+   * The transport had no keys, every send returned `dry-run`, this line called
+   * it a success, and QA saw a clean "moved to For client approval" while the
+   * client was never written to. Three days later the cron closed the task as
+   * COMPLETED_NO_RESPONSE — a client who was never asked, recorded as one who
+   * did not answer.
+   *
+   * `ok: true` still, because the task HAS moved and unwinding a committed QA
+   * pass over a mail problem is the worse trade. But `sent` now means sent.
+   */
+  return { ok: true, sent: outcome.status === "sent" };
 }
 
 /**
@@ -213,7 +226,8 @@ export async function sendFeedbackRequestEmailFor(
     autoCompleted: options.autoCompleted,
   });
 
-  return outcome.status === "sent" || outcome.status === "dry-run";
+  // Same rule as `issueAndSendApproval` above: dry-run is not a delivery.
+  return outcome.status === "sent";
 }
 
 /**

@@ -97,109 +97,118 @@ function render(template, values) {
 }
 
 /** Shared between both variants — the request itself does not change. */
-const request = {
-  reference_no: "VB-2026-0042",
-  requester_name: "Maria Santos",
-  requester_email: "maria.santos@hfse.edu.sg",
-  requester_org: "HFSE",
-  title: "Quarterly newsletter layout",
-  // Deliberate line breaks and an ampersand: the first proves `pre-wrap` is
-  // working, the second proves escaping is.
-  description:
-    "Four pages, A4.\n\n- Cover with the new logo\n- Two feature spreads\n- Back page for events & notices\n\nBrand guide is in the shared drive.",
-  form_name: "Design Request",
-  target_date: "5 Aug 2026",
-  submitted_at: "25 Aug 2026, 2:14 PM",
-  // P7-51. The tracking page. preview-04 deliberately omits it, which is what a
-  // request whose token could not be minted looks like: NO BUTTON. Before the
-  // section wrap went into the template that preview rendered a full blue call
-  // to action with href="" — which is why it is still generated.
-  status_url: "https://pms.vizserve.com/status/kQ7x2mVn8pLr4TzYbW1sJdHgFcAeRuNi",
-  progress_title: "Progress so far",
-};
-
-/**
- * The first stage, shared by every variant that has a trail at all.
+/*
+ * P8-10 — THE SAMPLES ARE `EmailBody` BAGS NOW, NOT REQUESTS.
  *
- * Wording mirrored from `vizserve_pms_get_request_status` — see the note on
- * `STAGE_RECEIVED` in `lib/emailjs.ts`. If these previews and the tracking page
- * ever disagree, the SQL is right and both of the others are wrong.
+ * The template stopped being request-specific and became a generic renderer, so
+ * these variants are shaped exactly like `emailJsTemplateParams` output in
+ * `lib/email/transports/emailjs.ts`. If you change that mapping, change these —
+ * `tests/unit/emailjs-template.test.ts` pins the template against the real
+ * mapping, but nothing pins THIS file, because it is a dev tool.
  */
-const RECEIVED = {
-  label: "Request received",
-  detail: "We have your request and it is queued for review.",
-  at: "25 Aug 2026, 2:14 PM",
-};
+
+/** Paragraphs arrive as objects: an EmailJS loop has no field to read on a bare string. */
+const p = (...lines) => lines.map((text) => ({ text }));
 
 const VARIANTS = [
   {
     file: "preview-01-staff.html",
     label: "to the team, on submission",
     values: {
-      ...request,
       to_email: "kurt.vizserve@gmail.com",
-      reply_to: request.requester_email,
-      intro: `${request.requester_name} submitted a request. It is in the queue waiting for a Team Leader.`,
-      status_label: "New request",
-      status_note: "Nobody has picked this up yet.",
-      timeline: [RECEIVED],
+      reply_to: "maria.santos@hfse.edu.sg",
+      subject: "New request — VB-2026-0042",
+      preheader: "VB-2026-0042",
+      heading: "New request",
+      paragraphs: p(
+        "Maria Santos submitted a request. It is in the queue waiting for a Team Leader.",
+        "Nobody has picked this up yet.",
+      ),
+      has_facts: "yes",
+      facts: [
+        { label: "From", value: "Maria Santos · HFSE" },
+        { label: "Form", value: "Design Request" },
+        { label: "Target date", value: "5 Aug 2026" },
+        { label: "Submitted", value: "25 Aug 2026, 2:14 PM" },
+      ],
+      quote_label: "What they asked for",
+      // Deliberate line breaks and an ampersand: the first proves `pre-wrap` is
+      // working, the second proves escaping is.
+      quote_text:
+        "Four pages, A4.\n\n- Cover with the new logo\n- Two feature spreads\n- Back page for events & notices\n\nBrand guide is in the shared drive.",
+      button_url: "https://pms.vizserve.com/requests/42",
+      button_label: "Open the request",
+      footnote: "",
     },
   },
   {
     file: "preview-02-requester.html",
     label: "to the requester, on submission",
     values: {
-      ...request,
-      to_email: request.requester_email,
+      to_email: "maria.santos@hfse.edu.sg",
       reply_to: "hello@vizserve.com",
-      intro: "Hi Maria, thanks for sending this through.",
-      status_label: "Received",
-      status_note:
+      subject: "We have your request — VB-2026-0042",
+      preheader: "VB-2026-0042",
+      heading: "Request received",
+      paragraphs: p(
+        "Hi Maria, thanks for sending this through.",
         "It has reached the team and somebody will review it shortly. You do not need to do anything else for now.",
-      timeline: [RECEIVED],
+      ),
+      has_facts: "yes",
+      facts: [
+        { label: "Reference", value: "VB-2026-0042" },
+        { label: "Target date", value: "5 Aug 2026" },
+      ],
+      quote_label: "",
+      quote_text: "",
+      button_url: "https://pms.vizserve.com/status/kQ7x2mVn8pLr4TzYbW1sJdHgFcAeRuNi",
+      button_label: "Track this request",
+      footnote: "Quote VB-2026-0042 in any reply about this request.",
     },
   },
   {
-    file: "preview-03-returned.html",
-    label: "to the requester, on a status change",
+    file: "preview-03-approval.html",
+    label: "to the client, at Gate 3 — the email that was never arriving",
     values: {
-      ...request,
-      to_email: request.requester_email,
+      to_email: "maria.santos@hfse.edu.sg",
       reply_to: "hello@vizserve.com",
-      intro: "Hi Maria, there is an update on your request.",
-      status_label: "We need a bit more before we start",
-      status_note:
-        "Could you confirm the page count? The brief says four pages but the outline lists five sections.\n\nSend that back and it goes straight into the queue.",
-      // TWO stages, and the variant worth looking at hardest now: it is the one
-      // that proves the loop repeats its body rather than rendering it once.
-      timeline: [
-        RECEIVED,
-        {
-          label: "More information needed",
-          detail:
-            "Could you confirm the page count? The brief says four pages but the outline lists five sections.",
-          at: "26 Aug 2026, 9:02 AM",
-        },
+      subject: "Your work is ready to review — VB-2026-0042",
+      preheader: "VB-2026-0042",
+      heading: "Ready for your approval",
+      paragraphs: p(
+        "Hi Maria, the quarterly newsletter layout is finished and has passed our internal check.",
+        "Have a look and let us know — the button below approves it or asks for changes, and you do not need an account.",
+      ),
+      has_facts: "yes",
+      facts: [
+        { label: "Reference", value: "VB-2026-0042" },
+        { label: "Files", value: "3 attachments" },
       ],
+      quote_label: "What was delivered",
+      quote_text: "Four pages, A4, with the new cover and the events & notices back page.",
+      button_url: "https://pms.vizserve.com/approve/kQ7x2mVn8pLr4TzYbW1sJdHgFcAeRuNi",
+      button_label: "Review and approve",
+      footnote:
+        "If we do not hear from you by 28 Aug 2026 this will close automatically and we will assume it is fine.",
     },
   },
   {
     /*
      * The one worth looking at hardest. Every optional value is missing, which
      * is what a caller passing `undefined` produces — EmailJS does not error, it
-     * renders nothing, so the email goes out with labelled rows and no values.
-     * If this preview looks broken, that is the point: pass fallbacks.
+     * renders nothing, so the email goes out with a heading and little else.
+     *
+     * ⚠️ THERE MUST BE NO BUTTON HERE. Before the section wrap went into the
+     * template this preview rendered a full blue call to action with an empty
+     * href, which is why it is still generated.
      */
     file: "preview-04-missing-values.html",
     label: "what a forgotten variable actually looks like",
     values: {
       to_email: "kurt.vizserve@gmail.com",
-      reference_no: "VB-2026-0043",
-      requester_name: "Jun Dela Cruz",
-      title: "Poster for the open day",
-      status_label: "New request",
-      // intro, status_note, requester_org, requester_email, form_name,
-      // target_date, description and submitted_at all deliberately absent.
+      heading: "New request",
+      paragraphs: p("Jun Dela Cruz submitted a request."),
+      // preheader, facts, quote, button and footnote all deliberately absent.
     },
   },
 ];
@@ -235,6 +244,6 @@ for (const variant of VARIANTS) {
 }
 
 console.log("\nOpen them in a browser. Check, in order:");
-console.log("  1. the description keeps its line breaks (pre-wrap)");
-console.log("  2. '&' in the description shows as '&', not '&amp;' (escaping)");
-console.log("  3. preview-04 shows the blank rows a forgotten variable leaves");
+console.log("  1. the quote keeps its line breaks (pre-wrap)");
+console.log("  2. '&' in the quote shows as '&', not '&amp;' (escaping)");
+console.log("  3. preview-04 has NO button — an absent url must not ship an empty one");
