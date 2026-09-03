@@ -2,10 +2,11 @@ import type { Metadata } from "next";
 
 import { ListSearch } from "@/components/list-search";
 import { PageShell } from "@/components/page-shell";
+import { RealtimeTasks } from "@/components/realtime-refresh";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
 import { ilikeAnyOf } from "@/lib/search";
 import { isRequestStatus } from "@/components/status-badge";
-import { requireRole } from "@/lib/auth/authorization";
+import { realtimeDepartmentFilter, requireRole } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { RequestFilters } from "./filters";
 import { RequestsTable, type RequestRow } from "./requests-table";
@@ -40,7 +41,10 @@ export default async function RequestsPage({
     size?: string;
   }>;
 }) {
-  await requireRole("team_leader");
+  // The context is kept now rather than discarded: P8-03 needs the
+  // department scope below, and re-resolving it would be a second
+  // `getUser()` round trip for something already in hand.
+  const context = await requireRole("team_leader");
   const params = await searchParams;
   const supabase = await createClient();
 
@@ -192,6 +196,37 @@ export default async function RequestsPage({
 
   return (
     <PageShell>
+      {/*
+        P8-03 — ⚠️ A TASK SUBSCRIPTION ON THE REQUESTS PAGE. THIS IS NOT A
+        COPY-PASTE MISTAKE.
+
+        `vizserve_pms_requests` is deliberately NOT published to Realtime,
+        and the reason is one missing column: a request has no
+        `department_id`, only a `form_id`. A Postgres Changes `filter` is a
+        single `column=operator.value` on the changed table and cannot
+        join, so there is no way to scope a request stream to a department
+        — publishing it would put every request event in the company on a
+        stream bounded only by RLS, which is the firehose this design
+        exists to avoid.
+
+        THIS QUEUE GOES LIVE ANYWAY BECAUSE APPROVING AT GATE 1 CREATES A
+        TASK. `vizserve_pms_approve_request` inserts into
+        `vizserve_pms_tasks` in the request's department, and that INSERT
+        is an event the filtered task stream already carries. The refresh
+        it triggers re-runs this whole server component, so the request
+        rows come back fresh through their own RLS — the task channel is
+        only the doorbell.
+
+        ⚠️ THE HONEST GAP: a second Team Leader RETURNING or REJECTING a
+        request writes no task, so nothing is published and this page will
+        not push for it. It corrects on the next navigation, which is what
+        it did before P8-03 — a place this phase did not reach, not a
+        regression. Closing it means adding a NOTIFICATION on those two
+        transitions (that table is published and is filtered to the
+        recipient), never widening this stream.
+      */}
+      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+
       <RequestsTable
         toolbar={
           <>

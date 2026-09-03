@@ -5,6 +5,7 @@ import Link from "next/link";
 import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
+import { RealtimeTasks } from "@/components/realtime-refresh";
 import {
   TaskCategoryBadge,
   TaskPriorityBadge,
@@ -12,7 +13,11 @@ import {
   taskCategoryEdge,
   taskStatusSurface,
 } from "@/components/status-badge";
-import { canAdminDepartment, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  canAdminDepartment,
+  realtimeDepartmentFilter,
+  requireAuthContext,
+} from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, isOverdue } from "@/lib/dates";
@@ -402,6 +407,19 @@ export default async function TaskBoardPage({
 
   return (
     <PageShell className="h-[calc(100svh-3.5rem)] min-h-0 gap-3 overflow-hidden">
+      {/*
+        P8-03 — the board is the screen this matters most on, because it is
+        the one people leave open. A colleague moving a card, or a Gate 1
+        approval creating a task, now redraws it within a moment instead of
+        on the next navigation.
+
+        Renders nothing, and patches nothing into the columns: the ping
+        triggers `router.refresh()` and the whole board is re-queried under
+        RLS. That is why a card can never appear here that the policy would
+        have refused — the payload is thrown away unread.
+      */}
+      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+
       {/* No <h1> — the breadcrumb is the page label. Now that a board can be a
           view of ONE list, the crumb has to name it, or two lists' boards are
           the same page with different cards on it and nothing on screen says

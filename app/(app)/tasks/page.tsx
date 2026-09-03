@@ -9,7 +9,11 @@ import {
   type TaskRow,
 } from "./tasks-table";
 import { isTaskStatus } from "@/components/status-badge";
-import { canAdminDepartment, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  canAdminDepartment,
+  realtimeDepartmentFilter,
+  requireAuthContext,
+} from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { sanitizeRichText } from "@/lib/rich-text-server";
@@ -25,6 +29,7 @@ import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { fetchJoinedTaskIds, mineFilter } from "@/lib/tasks-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
+import { RealtimeTasks } from "@/components/realtime-refresh";
 import { QueryError } from "@/components/query-error";
 import { createClient } from "@/utils/supabase/server";
 import type { TaskComment } from "./comment-thread";
@@ -629,6 +634,23 @@ export default async function TasksPage({
 
   return (
     <PageShell>
+      {/*
+        P8-03 — the list refreshes itself when a task in one of this
+        person's departments changes.
+
+        Renders nothing. On a row event it calls `router.refresh()`, which
+        re-runs THIS server component — so every query above runs again
+        under RLS, with the same filters and the same sort, and the rows
+        that come back are the rows a navigation would have produced. No
+        row is patched into client state.
+
+        The scope comes from `realtimeDepartmentFilter`, which is narrower
+        than the SELECT policy on purpose: a task assigned to you in
+        another department is visible here and will not push. See the doc
+        comment there — the failure is a stale row, never a leaked one.
+      */}
+      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+
       {/* Wraps the toolbar AND the groups: the menu lives in the filter row and
           the tables it controls are further down, so the provider has to span
           both. */}

@@ -5,6 +5,7 @@ import { notFound } from "next/navigation";
 
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
+import { RealtimeTasks } from "@/components/realtime-refresh";
 import { Chip } from "@/components/status-badge";
 import {
   Card,
@@ -15,7 +16,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import { canAdminDepartment, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  canAdminDepartment,
+  realtimeDepartmentFilter,
+  requireAuthContext,
+} from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { RichText } from "@/components/ui/rich-text";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
@@ -375,6 +380,23 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     // Full width, like the list pages. The old `max-w-4xl` centred a column and
     // left a third of a wide screen empty on either side.
     <PageShell className="gap-3">
+      {/*
+        P8-03 — the detail page follows the task while two people are on it.
+
+        ⚠️ THE SUBSCRIPTION IS DEPARTMENT-WIDE, NOT `id=eq.<this task>`, and
+        that is deliberate. A per-task filter would be tighter and would
+        miss the things this page actually renders from OTHER rows — the
+        subtask list is tasks, and a subtask changing status changes the
+        progress bar here. One channel shape across all four pages also
+        means one thing to reason about rather than four.
+
+        The cost is refreshes this page did not need: a card moving on a
+        colleague's board re-runs this render. It is a cheap RSC re-fetch,
+        debounced, and the alternative was a second channel shape whose
+        coverage gaps would have to be worked out per component.
+      */}
+      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={task.title} />

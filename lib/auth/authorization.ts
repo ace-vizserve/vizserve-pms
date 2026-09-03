@@ -628,3 +628,112 @@ export function departmentShapeScope(context: AuthContext): DepartmentPickerScop
   const ids = base.kind === "some" ? base.ids : [];
   return { kind: "some", ids: ids.includes(own) ? ids : [...ids, own] };
 }
+
+/**
+ * P8-03 — WHICH DEPARTMENTS' TASK ROWS SHOULD PUSH A REFRESH TO THIS PERSON?
+ *
+ * ⚠️ THIS IS NOT AN ENFORCEMENT BOUNDARY, AND IT MUST NEVER BE USED TO DECIDE
+ * WHAT A QUERY RETURNS. RLS decides that, and it is the only thing that does.
+ * The answer here becomes a Supabase Realtime `filter` string — a hint sent to
+ * the Realtime server about which row events are worth delivering. Every event
+ * that survives it is STILL authorized against the subscriber's own JWT through
+ * the same `vizserve_pms_tasks` SELECT policy a page render goes through. Widen
+ * this and nobody sees a row they could not already select; narrow it and
+ * somebody's page is stale. Those are the only two failure modes, and they are
+ * both about freshness, never about access.
+ *
+ * WHAT IT RETURNS: the union of the department the person BELONGS to
+ * (`primaryDepartmentId`) and the departments they LEAD
+ * (`managedDepartmentIds`), de-duplicated. A lead is normally mapped to the
+ * department they also belong to, so the two overlap and the duplicate would
+ * otherwise reach the filter string as `in.(x,x)`.
+ *
+ * ⚠️ DELIBERATELY NOT `departmentScopeFilter`, AND REUSING IT WOULD BE WRONG IN
+ * BOTH DIRECTIONS. That function is the APPROVAL/visibility scope for list
+ * queries, and its two edge answers are exactly the two this cannot accept:
+ *
+ *   `[]` FOR A PLAIN MEMBER — "leads nothing". Correct there; wrong here. A
+ *   member does see their own department's tasks (the policy's
+ *   "same department and not personal" branch), and an empty set would mean
+ *   they never subscribe at all — the one group whose board would stay dead.
+ *
+ *   `null` FOR AN OWNER — "no filter". In a list query that means "RLS shows
+ *   you everything". In a subscription it would mean AN UNFILTERED STREAM,
+ *   which is the single thing this design forbids: every task event in the
+ *   company, authorized per subscriber, to deliver a ping. Passing `null`
+ *   through by accident is not a small bug, it is the firehose.
+ *
+ * ⚠️ TWO DELIBERATE GAPS. BOTH ARE NARROWING-ONLY — the cost is a stale page,
+ * never a leaked row, and a stale page is what every page in this app is today.
+ *
+ *   AN OWNER GETS ONLY THEIR OWN AND MANAGED DEPARTMENTS, NOT THE COMPANY. An
+ *   owner can see every task, so a "correct" filter would have to enumerate
+ *   every department id in the business — a list that goes stale the moment
+ *   somebody adds a department, and one more query on every page load to build
+ *   it. The alternative, no filter, is the firehose above. So an owner's board
+ *   pushes for the departments they belong to or lead and is stale elsewhere
+ *   until they navigate, which is precisely today's behaviour: no regression,
+ *   just an improvement that did not reach as far as it could.
+ *
+ *   A TASK ASSIGNED TO YOU IN ANOTHER DEPARTMENT WILL NOT PUSH. The SELECT
+ *   policy's `assignee_id`, `qa_assignee_id` and `vizserve_pms_is_on_task`
+ *   branches all reach outside your departments, and a single-column filter
+ *   cannot express "or I am named on it". You can open the task and see it; you
+ *   just are not told the moment it changes. Same conservative failure.
+ *
+ * Closing either one properly means a second channel keyed on `assignee_id`,
+ * not a wider department filter — see the note in
+ * `supabase/migrations/20260903120000_p8_03_realtime.sql`.
+ */
+export function realtimeDepartmentScope(context: AuthContext): string[] {
+  const ids: string[] = [];
+
+  // The department they belong to comes first, so a member's single-department
+  // filter is an `eq.` rather than a one-element `in.()`.
+  if (context.primaryDepartmentId) ids.push(context.primaryDepartmentId);
+
+  for (const id of context.managedDepartmentIds) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+
+  return ids;
+}
+
+/**
+ * P8-03 — the same scope, serialized as a Supabase Realtime `filter` string.
+ *
+ * ⚠️ `null` MEANS DO NOT SUBSCRIBE, AND EVERY CALLER MUST TREAT IT THAT WAY.
+ * This is the same trap `departmentPickerScope` was written for, one layer
+ * further out: there is no such thing as a filter that matches nothing. An
+ * empty scope cannot become `department_id=in.()` — the Realtime server would
+ * reject or, worse, ignore the clause and hand back an unfiltered stream. So
+ * "this person belongs to no department and leads none" resolves to `null`, and
+ * `useRealtimeRefresh` declines to open a channel at all.
+ *
+ * That state is real, not hypothetical: a newly created account with no
+ * department mapping is in it until somebody maps them. Their pages simply
+ * behave as they did before this phase.
+ *
+ * THE GRAMMAR. Postgres Changes filters are `column=operator.value` and the
+ * operator set is PostgREST's minus the containment/range/full-text ones —
+ * `eq`, `neq`, `lt`, `lte`, `gt`, `gte`, `in`, `like`, `ilike`, `is`, `match`,
+ * `imatch`, `isdistinct` (verified in
+ * `@supabase/realtime-js/dist/module/RealtimePostgresFilterBuilder.d.ts`). `in`
+ * IS supported, so several departments are one channel rather than one channel
+ * per department — which matters because each channel is its own subscription
+ * the server authorizes separately.
+ *
+ * No quoting or escaping is applied and none is needed: these are uuids out of
+ * the database, and a uuid contains none of the reserved characters (`,`, `(`,
+ * `)`, `"`, `\`) that PostgREST-style quoting exists for. If this is ever reused
+ * for a free-text column, use `postgresChangesFilter()` from realtime-js instead
+ * of building the string by hand.
+ */
+export function realtimeDepartmentFilter(context: AuthContext): string | null {
+  const ids = realtimeDepartmentScope(context);
+
+  if (ids.length === 0) return null;
+  if (ids.length === 1) return `department_id=eq.${ids[0]}`;
+
+  return `department_id=in.(${ids.join(",")})`;
+}

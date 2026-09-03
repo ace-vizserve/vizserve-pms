@@ -12,6 +12,7 @@ import {
   BreadcrumbLabelProvider,
   DynamicBreadcrumb,
 } from "@/components/app-shell/dynamic-breadcrumb";
+import { RealtimeNotifications } from "@/components/realtime-refresh";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -233,6 +234,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   return (
     <TooltipProvider>
       <BreadcrumbLabelProvider>
+        {/*
+          P8-03 — the unread badge above stops being a number that was only true
+          at the moment this layout last rendered.
+
+          IN THE SHELL, NOT ON /inbox, because the badge is in the shell: a
+          notification arriving while somebody is on the board has to move the
+          count in the rail, and a subscription mounted on the inbox page would
+          only fire for the one person already looking at it.
+
+          Renders nothing. It subscribes to `vizserve_pms_notifications` filtered
+          to `user_id=eq.<me>` — the same predicate as the "notifications read
+          own" policy — and calls `router.refresh()`, which re-runs THIS server
+          component and therefore re-runs the `count` query above. No count is
+          computed in the browser and there is no second source of truth for it.
+        */}
+        <RealtimeNotifications userId={context.userId} />
+
         <SidebarProvider>
           <AppSidebar
             sections={sections}
