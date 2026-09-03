@@ -987,7 +987,12 @@
    the toast springs open, and the hairline would otherwise breathe. */
 :root [data-sileo-pill],
 :root [data-sileo-body] {
-  stroke: var(--border) !important;
+  /* ⚠️ `--input`, NOT `--border`. `--border` (#e3e7ee) is the hairline for a
+     card sitting IN the page; this thing hovers OVER it, arrives unannounced
+     and has to be found in under a second. `--input` (#d2d8e2) is the same
+     family two steps darker — the edge this system already uses on controls,
+     which are the other things you are meant to notice and act on. */
+  stroke: var(--input) !important;
   stroke-width: 1 !important;
   vector-effect: non-scaling-stroke !important;
 }
@@ -998,9 +1003,63 @@
    the real silhouette through every frame of the morph. These are `--elev-3`,
    because a toast is an overlay. */
 :root [data-sileo-svg] {
+  /* ⚠️ ALL THREE OF `--elev-3`, and the third is the one that matters. An
+     earlier version stopped after two and the toast read as flat — the
+     `0 30px 50px -18px` cast at 0.22 is what actually lifts an overlay off the
+     page. `--shadow-overlay` is `--hl` plus exactly these three, and a toast is
+     the most raised thing in the product. */
   filter:
     drop-shadow(0 2px 4px rgb(15 22 38 / 0.06))
-    drop-shadow(0 12px 22px -6px rgb(15 22 38 / 0.13)) !important;
+    drop-shadow(0 12px 22px -6px rgb(15 22 38 / 0.13))
+    drop-shadow(0 30px 50px -18px rgb(15 22 38 / 0.22)) !important;
+}
+
+/* ---------------------------------------------------------------------------
+   THE SURFACE IS TINTED BY STATE — Direction A's fills, on Direction B's shape.
+
+   ⚠️ THIS REPLACES THE NEUTRAL PANEL, and the reason is one Amier put better
+   than the mockup did: a white toast on a white page is hard to see, and no
+   amount of border and shadow fixes that. The measurements agree — the raised
+   gradient sits at 1.06:1 against `--background`, which is no separation at
+   all. What the eye actually finds is the HUE, not the luminance.
+
+   So the surface takes the same `-subtle` fill and `-border` hairline every
+   status chip in the app uses (§4.1). The toast now says what KIND of thing it
+   is before a word of it is read, which is the one job it has in the second it
+   appears.
+
+   ⚠️ CSS `fill` BEATS THE `fill=""` ATTRIBUTE sileo renders. A presentation
+   attribute loses to any cascade rule, so these override the gradient without
+   sileo needing to know — which is also why `ToastSurfaceDefs` stays as the
+   neutral fallback for a state nothing here matches.
+   -------------------------------------------------------------------------- */
+:root [data-state="success"] :is([data-sileo-pill], [data-sileo-body]) {
+  fill: var(--success-subtle) !important;
+  stroke: var(--success-border) !important;
+}
+
+:root [data-state="error"] :is([data-sileo-pill], [data-sileo-body]) {
+  fill: var(--destructive-subtle) !important;
+  stroke: var(--destructive-border) !important;
+}
+
+:root [data-state="warning"] :is([data-sileo-pill], [data-sileo-body]) {
+  fill: var(--warning-subtle) !important;
+  stroke: var(--warning-border) !important;
+}
+
+:root [data-state="info"] :is([data-sileo-pill], [data-sileo-body]) {
+  fill: var(--info-subtle) !important;
+  stroke: var(--info-border) !important;
+}
+
+/* `action` is the neutral-with-a-button case and `loading` the spinner. The
+   brand tint, which is what every other neutral raised chip in the app uses —
+   still a tint, so still findable. */
+:root [data-state="action"] :is([data-sileo-pill], [data-sileo-body]),
+:root [data-state="loading"] :is([data-sileo-pill], [data-sileo-body]) {
+  fill: var(--accent) !important;
+  stroke: var(--accent-border) !important;
 }
 
 /* ---------------------------------- Type --------------------------------- */
@@ -1018,11 +1077,16 @@
 }
 
 /* 14px with a 1rem pad, unmuted, out of the box. */
+/* ⚠️ `--foreground-muted`, NOT `--muted-foreground`, and this is a measurement.
+   On the tinted fills the tertiary grey lands 4.41–4.55:1 — three of the five
+   are BELOW 4.5 and fail. `--foreground-muted` (#556074) is the secondary tone
+   and clears it on every one. The page-background version of this text can stay
+   on the lighter grey; a toast's cannot. */
 :root [data-sileo-description] {
   padding: 0.25rem 0 0 !important;
   font-size: 0.8125rem !important;
   line-height: 1.45 !important;
-  color: var(--muted-foreground) !important;
+  color: var(--foreground-muted) !important;
 }
 
 /* A 9999px pill out of the box; ours is `--radius-md`. The colours are the
@@ -1037,10 +1101,15 @@
 
 /* 24px and no edge out of the box. §4.1: a status is a fill, a HAIRLINE and a
    solid, and without the third it dissolves into a light surface. */
+/* ⚠️ NO FILL AND NO EDGE, now that the SURFACE carries the state. A subtle
+   badge on a subtle card is a tint on a tint — it disappears, and it says the
+   same thing twice. The icon alone, in the state's solid, is the marker; the
+   card is the status. */
 :root [data-sileo-badge] {
   height: 1.25rem !important;
   width: 1.25rem !important;
-  border: 1px solid var(--sileo-tone-border, transparent) !important;
+  background: transparent !important;
+  border: 0 !important;
 }
 
 :root [data-sileo-badge] svg {
@@ -1066,5 +1135,6 @@
 :root.dark [data-sileo-svg] {
   filter:
     drop-shadow(0 2px 4px rgb(0 0 0 / 0.4))
-    drop-shadow(0 12px 22px -6px rgb(0 0 0 / 0.55)) !important;
+    drop-shadow(0 12px 22px -6px rgb(0 0 0 / 0.55))
+    drop-shadow(0 30px 50px -18px rgb(0 0 0 / 0.7)) !important;
 }
