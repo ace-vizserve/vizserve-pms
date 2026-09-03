@@ -934,3 +934,51 @@
   --sileo-tone-bg: var(--accent);
   --sileo-tone-border: var(--accent-border);
 }
+
+/* ---------------------------------------------------------------------------
+   The toast's edge and its lift.
+
+   ⚠️ sileo DRAWS NEITHER. `[data-sileo-toast]` is `background: transparent` and
+   `[data-sileo-svg]` is `overflow: visible` and nothing else — the whole
+   surface is one filled SVG shape with no stroke and no shadow. On this app's
+   `--background` that is a white shape on a near-white page, and on a card it
+   is white on white. It disappeared.
+
+   ⚠️ `drop-shadow`, NOT `box-shadow`, AND NOT A STROKE.
+
+   `box-shadow` would trace the toast's rectangular BOX, not the rounded
+   gooey shape inside it — a rectangle floating around a capsule. `drop-shadow`
+   follows the rendered alpha, so it hugs the real silhouette through every
+   frame of the morph.
+
+   A stroke on the path would be the more literal hairline, and it is the wrong
+   tool here: the shape is drawn as several paths passed through a
+   `feGaussianBlur` + `feColorMatrix` gooey filter, so stroking them draws the
+   internal seams the filter exists to hide. A 0.75px zero-offset drop-shadow
+   reads as the same hairline and cannot expose them.
+
+   The two lifts below are `--elev-3` restated as drop-shadows, because this is
+   an overlay and `--shadow-overlay` is what every other overlay in the app
+   carries.
+   -------------------------------------------------------------------------- */
+:root [data-sileo-svg] {
+  filter:
+    drop-shadow(0 0 0.75px var(--border))
+    drop-shadow(0 2px 4px rgb(15 22 38 / 0.06))
+    drop-shadow(0 12px 22px -6px rgb(15 22 38 / 0.13));
+}
+
+/* ⚠️ THE HAIRLINE HAS TO WORK HARDER IN DARK, and this is the one place the two
+   themes are not the same declaration with different tokens. A dark toast sits
+   on a dark page, so the edge cannot come from a shadow — there is nothing for
+   a shadow to darken. `--border-strong` at full opacity is what separates it,
+   with the cast shadows deepened to `--elev-3`'s dark values. */
+/* `:root.dark`, not `.dark` — next-themes puts the class on <html>, so both are
+   the same element, but (0,3,0) beats the (0,2,0) above on WEIGHT rather than
+   on source order. Order is what an accidental reshuffle of this file breaks. */
+:root.dark [data-sileo-svg] {
+  filter:
+    drop-shadow(0 0 0.75px var(--border-strong))
+    drop-shadow(0 2px 4px rgb(0 0 0 / 0.4))
+    drop-shadow(0 12px 22px -6px rgb(0 0 0 / 0.55));
+}
