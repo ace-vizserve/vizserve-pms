@@ -53,9 +53,9 @@ export async function signInWithPassword(
  *
  * Two things it touched are deliberately still here:
  *
- *   * `app/auth/callback/route.ts`, which now serves password resets alone.
- *     `forgot-password/actions.ts` and the admin's reset link both point their
- *     `redirectTo` at it. Deleting it as OAuth leftovers breaks both.
+ *   * `app/auth/callback/route.ts`. It served password resets after the button
+ *     went; since P8-11 withdrew those too, it has no caller at all and is kept
+ *     ONLY for the restoration described below. See its own header.
  *   * The app-access gate (`20260804120000_app_access_gate.sql`), which exists
  *     because the auth pool is shared with other HFSE systems. That is a fact
  *     about the pool, not about Entra, and it outlives this button.

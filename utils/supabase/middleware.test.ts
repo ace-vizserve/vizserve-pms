@@ -41,6 +41,15 @@ describe("isPublicPath", () => {
     "/forms/new",
     "/inbox",
     "/admin/users",
+    // P8-11. `/forgot-password` was public and is now gone entirely — there is
+    // no self-service reset. Asserted as GATED rather than simply dropped from
+    // the public list, so that re-adding the prefix without re-adding the
+    // route, or the other way round, fails here.
+    "/forgot-password",
+    // P8-11. Its replacement is deliberately NOT public: the only person who
+    // should ever see it is somebody already signed in with a temporary
+    // password, and `requireAuthContext` is what sends them there.
+    "/change-password",
   ])("keeps %s behind the session gate", (pathname) => {
     expect(isPublicPath(pathname)).toBe(false);
   });
@@ -48,7 +57,6 @@ describe("isPublicPath", () => {
   it.each([
     "/login",
     "/auth/callback",
-    "/forgot-password",
     "/request/intake-form",
     // P7-29 — the OLD address, and it has to stay public or the permanent
     // redirect that replaced it sends a client with no account to a login.

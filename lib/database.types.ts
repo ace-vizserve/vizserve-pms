@@ -250,6 +250,13 @@ export type Database = {
            * not, and neither is defaulting it anywhere.
            */
           break_minutes: number | null;
+          /**
+           * P8-11. True while this account holds a password an owner chose.
+           * `requireAuthContext` sends the holder to /change-password until
+           * they clear it, and only the service role can write it — a person
+           * who could clear their own flag could keep the temporary password.
+           */
+          must_change_password: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -269,6 +276,8 @@ export type Database = {
           work_end?: string | null;
           /** P8-05. NULL means inherit the company break, never zero. */
           break_minutes?: number | null;
+          /** P8-11. See the Row comment. */
+          must_change_password?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -288,6 +297,8 @@ export type Database = {
           work_end?: string | null;
           /** P8-05. NULL means inherit the company break, never zero. */
           break_minutes?: number | null;
+          /** P8-11. See the Row comment. */
+          must_change_password?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -299,6 +310,55 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      /**
+       * P8-12. One OPTIONAL row per person — there is no backfill and no create
+       * trigger, so a missing row is the normal state and means the column
+       * defaults. `lib/preferences.ts` restates every one of them.
+       */
+      vizserve_pms_user_preferences: {
+        Row: {
+          user_id: string;
+          clock_in_reminder: boolean;
+          clock_out_reminder: boolean;
+          reminder_lead_minutes: number;
+          /**
+           * 'default' (the shipped chime) or 'custom'. A text column with a
+           * CHECK rather than an enum, so this is `string` here — narrow it
+           * through `isSoundKey` rather than asserting.
+           */
+          sound_key: string;
+          /**
+           * An object path in the `user-sounds` bucket, never a URL. Paired with
+           * `sound_key` by a CHECK constraint: 'custom' requires it, 'default'
+           * requires it to be null.
+           */
+          custom_sound_path: string | null;
+          /** Percent. Divided by 100 before it reaches HTMLMediaElement.volume. */
+          sound_volume: number;
+          updated_at: string;
+        };
+        Insert: {
+          user_id: string;
+          clock_in_reminder?: boolean;
+          clock_out_reminder?: boolean;
+          reminder_lead_minutes?: number;
+          sound_key?: string;
+          custom_sound_path?: string | null;
+          sound_volume?: number;
+          updated_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          clock_in_reminder?: boolean;
+          clock_out_reminder?: boolean;
+          reminder_lead_minutes?: number;
+          sound_key?: string;
+          custom_sound_path?: string | null;
+          sound_volume?: number;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       vizserve_pms_user_managed_departments: {
         Row: {
@@ -1916,6 +1976,16 @@ export type Database = {
        */
       vizserve_pms_is_dept_admin: {
         Args: { p_department_id: string };
+        Returns: boolean;
+      };
+      /**
+       * P7-33. Weekends and proclaimed holidays excluded — the same rule
+       * `vizserve_pms_add_business_days` applies, shared so the two cannot
+       * drift. P8-12's clock reminder calls it to decide whether today is a day
+       * worth nagging anybody about.
+       */
+      vizserve_pms_is_working_day: {
+        Args: { p_date: string };
         Returns: boolean;
       };
       vizserve_pms_has_app_access: {

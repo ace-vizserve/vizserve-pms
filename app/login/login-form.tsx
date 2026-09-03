@@ -45,10 +45,16 @@ function SubmitButton() {
  * request: email and password is the only way in. The `signInWithMicrosoft`
  * action went with them, so nothing here can start an Entra flow.
  *
- * `app/auth/callback/route.ts` STAYS — it is not the Entra callback any more,
- * it is the password-reset callback. Both `forgot-password/actions.ts` and the
- * admin's "send a reset link" point their `redirectTo` at it, and deleting it
- * as OAuth leftovers would silently break password resets for everybody.
+ * `app/auth/callback/route.ts` stays too, and since P8-11 it has no live
+ * caller at all: the reset email it was serving is withdrawn, and the route is
+ * kept only because restoring Entra would need it back. See its own header.
+ *
+ * ⚠️ NO "FORGOT PASSWORD?" LINK EITHER, as of P8-11, and its absence is the
+ * same kind of decision. There is no self-service reset any more — somebody
+ * locked out asks an owner for a temporary password, which is a conversation
+ * rather than a link. A link to a route that no longer exists is worse than no
+ * link; so is one to a page that says "ask an admin", because it puts a dead
+ * end where a working control used to be.
  */
 export function LoginForm({ next, initialError }: { next: string; initialError?: string }) {
   const [state, formAction] = useActionState<LoginState, FormData>(signInWithPassword, {
@@ -92,17 +98,13 @@ export function LoginForm({ next, initialError }: { next: string; initialError?:
             aria-describedby={passwordError ? "password-error" : undefined}
           />
           <FieldError id="password-error" message={passwordError} />
-          <div className="flex justify-end">
-            {/* next/link, not a bare <a>: this is an internal route, and an
-                anchor here threw away the client router and reloaded the whole
-                application to reach a page one hop away. */}
-            <Link
-              href="/forgot-password"
-              className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline"
-            >
-              Forgot password?
-            </Link>
-          </div>
+          {/* P8-11. Where the "Forgot password?" link was. Replaced by a
+              sentence rather than removed outright: somebody who cannot get in
+              needs to be told what to do, and silence sends them round the
+              login form a fourth time. */}
+          <p className="text-xs text-muted-foreground">
+            Forgotten it? Ask an admin to issue you a temporary password.
+          </p>
         </div>
 
         {state.error ? (

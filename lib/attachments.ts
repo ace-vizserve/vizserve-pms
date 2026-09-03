@@ -35,16 +35,51 @@ const SIGNATURES: Signature[] = [
     offset: 0,
     bytes: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1],
   },
+  // P8-12 — the audio types the reminder sound accepts. A DIFFERENT ALLOWLIST
+  // from the one above: `vizserve_pms_attachment_rules` never admits these, and
+  // `lib/preferences.ts:ALLOWED_SOUND_MIME_TYPES` never admits the ones above.
+  // Two audiences (an anonymous client posting a brief, a colleague picking a
+  // ringtone), two rule sets, two buckets — but ONE sniffer, because "does the
+  // content match the claim" is the same question either way.
+  { mime: ["audio/ogg"], offset: 0, bytes: [0x4f, 0x67, 0x67, 0x53] }, // "OggS"
+  { mime: ["audio/webm"], offset: 0, bytes: [0x1a, 0x45, 0xdf, 0xa3] }, // EBML
+  // .m4a and friends — the ISO base media box, whose length prefix occupies the
+  // first four bytes, which is why this one has an offset.
+  { mime: ["audio/mp4"], offset: 4, bytes: [0x66, 0x74, 0x79, 0x70] }, // "ftyp"
 ];
 
-/** WEBP is RIFF….WEBP — two checks at two offsets, so it gets its own path. */
-function isWebp(head: Uint8Array): boolean {
+/**
+ * RIFF containers — `RIFF….<tag>`, two checks at two offsets.
+ *
+ * WEBP was the only one until P8-12; WAV is the same container with `WAVE` in
+ * place of `WEBP`, so the special case became a parameter rather than a second
+ * copy of itself.
+ */
+function isRiff(head: Uint8Array, tag: string): boolean {
   const riff = [0x52, 0x49, 0x46, 0x46];
-  const webp = [0x57, 0x45, 0x42, 0x50];
+  const wanted = [...tag].map((character) => character.charCodeAt(0));
+
   return (
     riff.every((byte, index) => head[index] === byte) &&
-    webp.every((byte, index) => head[8 + index] === byte)
+    wanted.every((byte, index) => head[8 + index] === byte)
   );
+}
+
+/**
+ * MP3 has TWO legal beginnings and no single magic number, which is why it
+ * cannot go in the table above.
+ *
+ * A file with metadata starts with an ID3 tag; one without starts straight in
+ * on an MPEG audio frame, whose sync word is eleven set bits — `0xFF` followed
+ * by a byte whose top three bits are set. Checking only for `ID3` would reject
+ * perfectly ordinary tagless exports, and checking only for the sync word would
+ * reject almost every file anybody actually has.
+ */
+function isMp3(head: Uint8Array): boolean {
+  const id3 = [0x49, 0x44, 0x33];
+  if (id3.every((byte, index) => head[index] === byte)) return true;
+
+  return head[0] === 0xff && ((head[1] ?? 0) & 0xe0) === 0xe0;
 }
 
 /** Types with no signature at all. Verified by shape, not by prefix. */
@@ -76,7 +111,26 @@ export function sniffMatchesDeclaredType(head: Uint8Array, declaredMime: string)
   }
 
   if (declaredMime === "image/webp") {
-    return isWebp(head) ? { ok: true } : { ok: false, reason: "That file is not a WEBP image." };
+    return isRiff(head, "WEBP")
+      ? { ok: true }
+      : { ok: false, reason: "That file is not a WEBP image." };
+  }
+
+  // P8-12. Both spellings of each type, because browsers disagree: Chrome
+  // reports `audio/wav` for the same file Safari calls `audio/x-wav`, and
+  // `audio/mp3` still turns up alongside the correct `audio/mpeg`. Rejecting
+  // the unfashionable spelling would refuse a valid file for a reason nobody
+  // could act on.
+  if (declaredMime === "audio/wav" || declaredMime === "audio/x-wav") {
+    return isRiff(head, "WAVE")
+      ? { ok: true }
+      : { ok: false, reason: "That file is not a WAV audio file." };
+  }
+
+  if (declaredMime === "audio/mpeg" || declaredMime === "audio/mp3") {
+    return isMp3(head)
+      ? { ok: true }
+      : { ok: false, reason: "That file is not an MP3 audio file." };
   }
 
   const signature = SIGNATURES.find((candidate) => candidate.mime.includes(declaredMime));

@@ -18,6 +18,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). **P7-44 rebuilt the entry editor on 25 Aug** — see below. P6-04/06/07/08/09 not begun |
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-eight migrations live, **P7-52/P7-53 applied 1 Sep** (HR as a capability + the filterable leave audit — see below), P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
+| **8 — Live board, email transport, owner rung, personal settings** | **In progress.** P8-01 through P8-12 — see the Phase 8 section below. P8-11/P8-12 (personal settings, temporary passwords, clock reminders) ship with a migration that is **not yet applied** |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -1241,6 +1242,99 @@ Three things worth knowing before changing it:
 The table was added by hand, in the same style as the note at the top of that file: hand-written until a database is reachable. **Re-run `npm run db:types` once the migration is applied** and treat the generated file as authoritative from that point.
 
 ---
+
+---
+
+## Phase 8 — the live board, one email port, the owner rung, and personal settings
+
+**Undocumented until now, and that is the first thing to fix about it.**
+`docs/03-roadmap.md` stops at Phase 6 and `docs/09-later-phases.md` covers 5 and
+6, so every P8 item has lived in commit messages and code comments alone.
+Reconstructed here from `git log`:
+
+| ID | What | State |
+|---|---|---|
+| P8-01 / P8-01a/b/c | `owner` tops the role ladder; `admin` becomes a dead rung; the department-admin tick gets its three powers | Applied |
+| P8-02 | Every sortable header tells the truth about its column | Shipped |
+| P8-03 | The board says it changed instead of waiting to be asked — Supabase Realtime on `notifications` and `tasks` | Applied |
+| P8-04 | The client rates the work on the page they approved it on | Shipped |
+| P8-05 | A week short of its schedule cannot be handed in — `break_minutes`, company and per-person | Applied |
+| P8-06 | The third approval queue is on the approvals screen | Shipped |
+| P8-07 | The timesheet approver can see what the hours went to | Shipped |
+| P8-08 | The week's target is real, and the hours are reachable | Shipped |
+| P8-09 | — | Never existed; a gap in the sequence |
+| P8-10 | One email port, two adapters, and the client finally gets the Gate 3 mail | Shipped |
+| **P8-11** | **Personal settings, and the end of the password reset email** | **Code done, migration NOT applied** |
+| **P8-12** | **Clock-in / clock-out reminders with a sound you can replace** | **Code done, migration NOT applied** |
+
+### P8-11 — the password moves into `/settings`
+
+**The reset email is withdrawn.** `resetPasswordForEmail` sent a link that
+landed on `/auth/callback?next=/`, which exchanged the code and dropped the
+person on the dashboard *signed in but never asked for a new password* — the
+screen at the end of that flow was never built. Rather than finish it:
+
+- **`/settings`** — the first per-user screen in the product. `requireAuthContext()`,
+  no role floor. Reached from the user menu in the sidebar footer, deliberately
+  **not** from the rail, where `/admin/settings` already holds the word.
+- **`changeOwnPassword`** verifies the current password against GoTrue on a
+  throwaway client that holds no cookies — `signInWithPassword` on the real
+  session client would rotate a live refresh token as the by-product of a
+  validation check.
+- **`setTemporaryPassword`** replaces `sendPasswordReset` on `/admin/users`.
+  Owner-gated, audited, shown once, stored nowhere.
+- **`createUser` now sets a password too.** It used to create the auth identity
+  with none, because the reset email was the only way in — without this change
+  a new account would have no route in at all.
+- **`must_change_password`** on `vizserve_pms_users`, enforced in
+  `requireAuthContext()`, which sends the holder to `/change-password` and
+  nowhere else.
+
+⚠️ **This reverses a decision the code stated**, at the user's explicit request.
+`app/(app)/admin/users/actions.ts` argued that an admin who can type a
+colleague's password can sign in as that colleague and every audit row after
+that names the wrong person. That risk is real and has not gone away — the
+mitigations are the forced change, the audit row, and showing the password once.
+The alternative, once the email path is gone, is an owner opening the Supabase
+dashboard, which is the same power with none of the three. **Note also that a
+locked-out owner now has no route back except that dashboard.**
+
+⚠️ **`app/auth/callback/route.ts` has no caller at all now.** Kept for a
+restored Entra, not deleted, and its header says so.
+
+### P8-12 — clock reminders
+
+A nudge N minutes (default 15) before `work_start` and before `work_end`.
+
+- **`vizserve_pms_user_preferences`** — the first per-user preference row in the
+  product, which `docs/12` §3 rule 3 predicted. Typed columns, no backfill, no
+  create trigger: **a missing row means the defaults**, restated in
+  `lib/preferences.ts`.
+- **It writes nothing and sends nothing.** No `vizserve_pms_notify` call, so no
+  new notification enum value (and none of the two-migration dance that needs),
+  no `PRESENTATION` entry, no email, no cron. It is a browser timer in the app
+  shell. The only trace is a `localStorage` key stopping a repeat — the same
+  position `off-schedule-dialog.tsx` takes on dismissals.
+- **Silent on a day nobody is expected to work** — `vizserve_pms_is_working_day`
+  plus the person's own approved leave, both resolved server-side in
+  `loadPunchState`, which is now `cache()`d because the shell reads it too.
+- **The sound** is `public/assets/default_ringtone.mp3`, replaceable per person
+  through a new **private `user-sounds` bucket**. Not a prefix inside
+  `request-attachments`: that bucket's allowlist is read by the PUBLIC client
+  form, so widening it to audio would let anonymous submitters post audio.
+- **Known limitation, said in the UI:** browsers refuse audio in a tab nobody
+  has clicked. The toast always renders and the OS notification fires where
+  permission was granted, so a blocked sound degrades the nudge rather than
+  losing it.
+
+### What is owed
+
+`supabase/migrations/20260904090000_p8_11_password_and_preferences.sql` **has
+not been applied.** Until it is, both features degrade rather than break:
+`loadUserPreferences` returns the defaults, `loadMustChangePassword` returns
+false, and `setTemporaryPassword` fails on the flag write after changing the
+password — which it reports, with the password, rather than swallowing.
+
 
 ## Decisions taken during the build
 

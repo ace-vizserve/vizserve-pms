@@ -276,6 +276,41 @@ export const resolveAuth = cache(
   },
 );
 
+/**
+ * P8-11 — is this account holding a password somebody else chose?
+ *
+ * ⚠️ A SEPARATE READ, DELIBERATELY NOT A COLUMN ON `PROFILE_COLUMNS`, and the
+ * reason is written out at length above `deptAdminColumnMissing`: migrations in
+ * this repo are pasted by hand AFTER the code is deployed, and a select naming
+ * a column that does not exist yet is rejected WHOLE. Adding
+ * `must_change_password` to `resolveAuth`'s select would mean that between the
+ * deploy and the paste, every signed-in person is answered `not_provisioned` —
+ * a total outage, locking out the owner who would have pasted the migration.
+ *
+ * P8-01 solved that with a second degraded read and a narrow error matcher.
+ * That machinery earned its complexity because `is_dept_admin` GRANTS
+ * something. This flag only ever WITHHOLDS — it sends somebody to one screen —
+ * so the far simpler answer is available: ask separately, and treat every
+ * failure as false. Nothing is lost in the window; the flag simply has no
+ * holders yet, because nothing can set it until the same migration lands.
+ *
+ * `cache()`d, so the layout's check costs one read per request.
+ */
+export const loadMustChangePassword = cache(async (userId: string): Promise<boolean> => {
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("vizserve_pms_users")
+    .select("must_change_password")
+    .eq("id", userId)
+    .maybeSingle();
+
+  // FALSE ON ANY DOUBT. A missing column, a missing row, an RLS wobble: none of
+  // them is evidence that this person is holding a temporary password, and
+  // guessing true would trap the whole company on /change-password.
+  return data?.must_change_password === true;
+});
+
 /** The common case: a context or nothing, without caring which denial applied. */
 export const getAuthContext = cache(async (): Promise<AuthContext | null> => {
   return (await resolveAuth()).context;
@@ -292,10 +327,29 @@ export const getAuthContext = cache(async (): Promise<AuthContext | null> => {
 export async function requireAuthContext(): Promise<AuthContext> {
   const result = await resolveAuth();
 
-  if (result.context) return result.context;
+  if (!result.context) {
+    if (result.denial === "no_session") redirect("/login");
+    redirect(`/no-access?reason=${result.denial}`);
+  }
 
-  if (result.denial === "no_session") redirect("/login");
-  redirect(`/no-access?reason=${result.denial}`);
+  /*
+   * P8-11 — THE TEMPORARY-PASSWORD WALL, and this is the only place it is
+   * enforced.
+   *
+   * Every authenticated page in `(app)` reaches this function, so putting the
+   * check here means there is no route that forgets it — the same argument that
+   * puts the app-access gate in `resolveAuth` rather than in a layout. It is
+   * NOT in `proxy.ts`, which would cost a database read on every request
+   * including every static asset the matcher lets through.
+   *
+   * ⚠️ `/change-password` MUST NOT CALL THIS FUNCTION. It calls `resolveAuth()`
+   * directly, for the obvious reason: a screen redirected to itself is a loop,
+   * and the loop would be unbreakable because the only way to clear the flag is
+   * the form on that page.
+   */
+  if (await loadMustChangePassword(result.context.userId)) redirect("/change-password");
+
+  return result.context;
 }
 
 /** For pages that a role floor guards. */

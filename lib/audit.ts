@@ -110,6 +110,12 @@ const ACTION_LABELS: Record<string, string> = {
   punch_in: "Timed in",
   punch_out: "Timed out",
   leave_allocation_set: "Leave allocation set",
+  // "Temporary password set" is what the de-snake-caser produces anyway; pinned
+  // because the wording is the whole meaning here. "Password set" would read as
+  // an owner choosing somebody's permanent password, which is precisely what
+  // this is not.
+  temporary_password_set: "Temporary password issued",
+  password_changed: "Password changed by the account holder",
   auto_completed: "Auto-completed",
   completed_no_response: "Closed — no client response",
 };
@@ -133,10 +139,17 @@ const ACTION_TONES: Record<string, ChipTone> = {
   corrected: "brand",
   status_overridden: "brand",
   pending_review: "warning",
-  // Not destructive and not routine. An admin sending a colleague a reset link
-  // is the action people come to this screen to check on, so it must not sit at
-  // the same weight as an "updated".
-  password_reset_sent: "warning",
+  // P8-11. Not destructive and not routine. An owner issuing a colleague a
+  // TEMPORARY PASSWORD is the action people come to this screen to check on —
+  // more so than the reset link it replaced, because for a short window two
+  // people know one credential. It must not sit at the same weight as an
+  // "updated".
+  temporary_password_set: "warning",
+  // The other half of the same story, and deliberately NOT a warning: this is
+  // the person closing the window above, which is the outcome the flag exists
+  // to produce. A trail where the fix reads as alarming as the risk teaches
+  // people to ignore both.
+  password_changed: "success",
   returned: "info",
   // Both spellings are live in the database — `returned` from the request gates
   // and `revision_requested` from QA. Same meaning to a reader, so same tone.

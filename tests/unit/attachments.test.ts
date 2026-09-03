@@ -130,3 +130,85 @@ describe("formatBytes", () => {
     expect(formatBytes(10 * 1024 * 1024)).toBe("10 MB");
   });
 });
+
+/**
+ * P8-12 — the audio types the reminder sound accepts.
+ *
+ * ⚠️ A SEPARATE ALLOWLIST FROM THE ONE ABOVE, going into a separate bucket.
+ * `vizserve_pms_attachment_rules` never admits audio, and
+ * `ALLOWED_SOUND_MIME_TYPES` never admits documents — because the first is read
+ * by the PUBLIC client form and the second is not. One sniffer serves both,
+ * because "does the content match the claim" is the same question either way,
+ * which is exactly why these cases belong beside the ones above.
+ */
+
+const MP3_ID3 = [0x49, 0x44, 0x33, 0x04]; // "ID3" — a tagged file.
+const MP3_SYNC = [0xff, 0xfb, 0x90, 0x00]; // A tagless frame sync.
+const RIFF = [0x52, 0x49, 0x46, 0x46];
+const WAVE = [0x57, 0x41, 0x56, 0x45];
+const OGG = [0x4f, 0x67, 0x67, 0x53]; // "OggS"
+const WEBM = [0x1a, 0x45, 0xdf, 0xa3]; // EBML
+const MP4 = [0x00, 0x00, 0x00, 0x20, 0x66, 0x74, 0x79, 0x70]; // size, then "ftyp"
+
+/** RIFF containers put their tag at byte 8, past a four-byte length. */
+function riff(tag: number[]): Uint8Array {
+  const buffer = new Uint8Array(64).fill(0x41);
+  buffer.set(RIFF, 0);
+  buffer.set([0x24, 0x00, 0x00, 0x00], 4);
+  buffer.set(tag, 8);
+  return buffer;
+}
+
+describe("sniffMatchesDeclaredType — audio (P8-12)", () => {
+  /**
+   * BOTH LEGAL BEGINNINGS. A file with metadata starts with an ID3 tag; one
+   * without starts straight in on an MPEG frame sync. Accepting only the first
+   * would reject perfectly ordinary tagless exports, and only the second would
+   * reject almost every file anybody actually has.
+   */
+  it("accepts an MP3 with an ID3 tag and one without", () => {
+    expect(sniffMatchesDeclaredType(head(...MP3_ID3), "audio/mpeg").ok).toBe(true);
+    expect(sniffMatchesDeclaredType(head(...MP3_SYNC), "audio/mpeg").ok).toBe(true);
+  });
+
+  /**
+   * Browsers disagree about the spelling of the same file — Chrome says
+   * `audio/wav` where Safari says `audio/x-wav`, and `audio/mp3` still turns up
+   * beside the correct `audio/mpeg`. Refusing the unfashionable spelling would
+   * reject a valid file for a reason nobody could act on.
+   */
+  it("accepts both spellings browsers actually send", () => {
+    expect(sniffMatchesDeclaredType(head(...MP3_ID3), "audio/mp3").ok).toBe(true);
+    expect(sniffMatchesDeclaredType(riff(WAVE), "audio/wav").ok).toBe(true);
+    expect(sniffMatchesDeclaredType(riff(WAVE), "audio/x-wav").ok).toBe(true);
+  });
+
+  it("accepts OGG, WebM and M4A", () => {
+    expect(sniffMatchesDeclaredType(head(...OGG), "audio/ogg").ok).toBe(true);
+    expect(sniffMatchesDeclaredType(head(...WEBM), "audio/webm").ok).toBe(true);
+    expect(sniffMatchesDeclaredType(head(...MP4), "audio/mp4").ok).toBe(true);
+  });
+
+  /** The whole point: an executable renamed to chime.mp3. */
+  it("refuses an executable declaring itself audio", () => {
+    expect(sniffMatchesDeclaredType(head(...MZ), "audio/mpeg").ok).toBe(false);
+    expect(sniffMatchesDeclaredType(head(...MZ), "audio/wav").ok).toBe(false);
+    expect(sniffMatchesDeclaredType(head(...MZ), "audio/ogg").ok).toBe(false);
+  });
+
+  /**
+   * ⚠️ RIFF IS NOT ENOUGH. A WEBP and a WAV share the first eight bytes and
+   * differ only at byte 8, so a check that stopped at "RIFF" would let an image
+   * through as audio and vice versa — which is why `isRiff` takes the tag.
+   */
+  it("does not confuse the two RIFF containers", () => {
+    expect(sniffMatchesDeclaredType(riff([0x57, 0x45, 0x42, 0x50]), "audio/wav").ok).toBe(false);
+    expect(sniffMatchesDeclaredType(riff(WAVE), "image/webp").ok).toBe(false);
+  });
+
+  /** And the reverse direction: audio must not pass as a document. */
+  it("refuses audio declaring itself a document", () => {
+    expect(sniffMatchesDeclaredType(head(...MP3_ID3), "application/pdf").ok).toBe(false);
+    expect(sniffMatchesDeclaredType(head(...OGG), "image/png").ok).toBe(false);
+  });
+});

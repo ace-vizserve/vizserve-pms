@@ -133,7 +133,9 @@ function revalidateProfileScreens(): void {
 // Create
 // ---------------------------------------------------------------------------
 
-export async function createUser(input: unknown): Promise<ActionResult<{ id: string }>> {
+export async function createUser(
+  input: unknown,
+): Promise<ActionResult<{ id: string; password: string; email: string }>> {
   const context = await requireRole("owner");
 
   const parsed = createUserSchema.safeParse(input);
@@ -158,9 +160,23 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
   // making the metadata copy redundant. Given the choice between a redundant
   // write and an allowlist entry, take the one that keeps `npm run check:metadata`
   // absolute. A rule with no exceptions is the only kind that stays enforced.
+  /*
+   * ⚠️ P8-11 — A PASSWORD IS SET HERE NOW, and without it this whole function
+   * creates an account nobody can sign in to.
+   *
+   * It used to create the auth identity with no password at all, because the
+   * only way in was the reset email — the new person got a link, chose their
+   * own, and an admin never touched a credential. That email path is withdrawn,
+   * so an account created with no password is an account with no route in at
+   * all. The temporary password below is that route, and
+   * `must_change_password` in the profile upsert is what makes it temporary.
+   */
+  const password = generateTemporaryPassword();
+
   const { data: created, error: authError } = await admin.auth.admin.createUser({
     email: values.email,
     email_confirm: true,
+    password,
   });
 
   if (authError || !created.user) {
@@ -202,6 +218,10 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
       // — a new account has never been assessed for one. Writing 0 here would
       // claim they take no break and raise their weekly minimum accordingly.
       break_minutes: values.break_minutes,
+      // P8-11. Set on creation, always. The password above was chosen by an
+      // admin, so it is temporary by definition — and this is the flag that
+      // stops it being permanent by accident.
+      must_change_password: true,
     },
     { onConflict: "id" },
   );
@@ -222,7 +242,10 @@ export async function createUser(input: unknown): Promise<ActionResult<{ id: str
   });
 
   revalidateProfileScreens();
-  return { ok: true, data: { id: userId } };
+  // The password travels back to the screen that will show it once and forget
+  // it. Same contract as `setTemporaryPassword`: it exists in this return value
+  // and nowhere else.
+  return { ok: true, data: { id: userId, password, email: values.email } };
 }
 
 // ---------------------------------------------------------------------------
@@ -410,55 +433,139 @@ export async function readLeaveBalances(
 // member and any employee printing their own record.
 
 // ---------------------------------------------------------------------------
-// Password reset
+// Temporary passwords
 // ---------------------------------------------------------------------------
 
 /**
- * Sends a reset link. Deliberately NOT "set a new password for them".
+ * P8-11 — an owner issues a temporary password, and the holder must replace it.
  *
- * An admin who can type a colleague's password can sign in as that colleague,
- * and every audit row after that names the wrong person. A reset link keeps the
- * credential between the user and GoTrue.
+ * ⚠️ THIS REVERSES A DECISION THIS FILE USED TO STATE, and the reversal was
+ * asked for deliberately, so the old reasoning is kept here rather than deleted.
+ * `sendPasswordReset` mailed a link precisely because "an admin who can type a
+ * colleague's password can sign in as that colleague, and every audit row after
+ * that names the wrong person". That risk has not gone away. What has changed is
+ * the trade: the email path was withdrawn, so the alternative to this is an
+ * owner opening the Supabase dashboard — which is the same power with none of
+ * the three mitigations below.
+ *
+ * The mitigations, and they are the whole justification:
+ *
+ *   1. `must_change_password` is set, so the credential is dead the moment its
+ *      holder next signs in. `requireAuthContext` will not let them anywhere
+ *      else, and `changeOwnPassword` refuses a "new" password that turns out to
+ *      be the temporary one.
+ *   2. An audit row names the owner who issued it. The window in which two
+ *      people know one password is a matter of record, not a guess.
+ *   3. It is SHOWN ONCE and stored nowhere. Not mailed, not logged, not
+ *      returned by any later read — if the owner loses it before handing it
+ *      over, the only recourse is to issue another, which writes another audit
+ *      row.
+ *
+ * What is NOT claimed: this does not make the window safe, only short and
+ * visible. Between issuing and first sign-in, an owner holds a working
+ * credential for somebody else's account.
  */
-export async function sendPasswordReset(userId: string): Promise<ActionResult> {
+
+/**
+ * A password that satisfies `passwordSchema` and can be read down a phone.
+ *
+ * ⚠️ NO `0/O`, `1/l/I`, `5/S` — this string gets dictated aloud or typed off a
+ * screen, and a temporary password that fails on the third attempt because
+ * somebody heard an O for a zero is a support call, not security. Length makes
+ * up for the smaller alphabet: 16 characters from ~50 symbols is far past
+ * anything a login endpoint could be walked through.
+ *
+ * `crypto.getRandomValues`, never `Math.random()`. This is a live credential
+ * for somebody else's account, and a predictable one would be worse than no
+ * reset path at all.
+ */
+function generateTemporaryPassword(): string {
+  const lower = "abcdefghijkmnpqrstuvwxyz";
+  const upper = "ABCDEFGHJKLMNPQRSTUVWXYZ";
+  const digits = "23456789";
+  const alphabet = lower + upper + digits;
+
+  const bytes = new Uint32Array(16);
+  crypto.getRandomValues(bytes);
+
+  const body = Array.from(bytes, (value) => alphabet[value % alphabet.length]).join("");
+
+  /*
+   * The policy demands upper, lower and a digit, and 16 random characters
+   * satisfy that with overwhelming probability — but "overwhelming" is not
+   * "always", and a generator that fails one time in ten thousand fails on
+   * somebody's worst day. One guaranteed character of each class is prepended,
+   * which is why the body is 16 and the result is 19.
+   */
+  const pick = (set: string) => {
+    const one = new Uint32Array(1);
+    crypto.getRandomValues(one);
+    return set[one[0]! % set.length]!;
+  };
+
+  return pick(upper) + pick(lower) + pick(digits) + body;
+}
+
+/**
+ * Issues a temporary password and returns it ONCE.
+ *
+ * The password is in the return value and nowhere else. It is deliberately not
+ * in the audit payload, not in a notification and not in any column — an audit
+ * trail an owner can read must never carry a way to take over the account it is
+ * recording, which was true of the reset link this replaces and is more true of
+ * a live password.
+ */
+export async function setTemporaryPassword(
+  userId: string,
+): Promise<ActionResult<{ password: string; email: string }>> {
   const context = await requireRole("owner");
 
   const admin = createAdminClient();
   const { data: profile } = await admin
     .from("vizserve_pms_users")
-    .select("email")
+    .select("email, full_name")
     .eq("id", userId)
     .maybeSingle();
 
   if (!profile) return { ok: false, error: "That user no longer exists." };
 
-  // The user's own client, not the admin one — resetPasswordForEmail is a public
-  // GoTrue endpoint and sends the mail Supabase owns.
-  const supabase = await createClient();
-  const { error } = await supabase.auth.resetPasswordForEmail(profile.email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL ?? ""}/auth/callback`,
-  });
+  const password = generateTemporaryPassword();
 
-  if (error) return { ok: false, error: error.message };
+  const { error: authError } = await admin.auth.admin.updateUserById(userId, { password });
+  if (authError) return { ok: false, error: authError.message };
 
-  // Audited, and it is the one admin action on this screen that was not.
-  //
-  // Nothing about the account changes here, which is exactly why it was missed
-  // — and exactly why it belongs in the trail. This is one admin causing a
-  // credential-reset mail to reach another person's inbox; if that person later
-  // asks who triggered it, the answer has to exist somewhere. There is no
-  // before/after because no stored value moved: the action IS the record.
+  /*
+   * ⚠️ THE FLAG IS SET AFTER THE PASSWORD, AND A FAILURE HERE IS REPORTED.
+   *
+   * By this point the account's password HAS changed — reporting a clean
+   * failure would send an owner away believing the old one still worked, while
+   * its holder is locked out. And silently succeeding would leave somebody
+   * holding an owner-chosen password with nothing forcing them to replace it,
+   * which is the entire point of this function.
+   */
+  const { error: flagError } = await admin
+    .from("vizserve_pms_users")
+    .update({ must_change_password: true })
+    .eq("id", userId);
+
+  if (flagError) {
+    return {
+      ok: false,
+      error: `The password was changed to "${password}", but we could not mark it as temporary. Give it to them and ask them to change it manually.`,
+    };
+  }
+
   await admin.rpc("vizserve_pms_write_audit_log", {
     p_entity_type: "user",
     p_entity_id: userId,
-    p_action: "password_reset_sent",
+    p_action: "temporary_password_set",
     p_actor_id: context.userId,
     p_before: null,
-    // The address the link went to. Not the token and not the link — those are
-    // the credential, and an audit trail an admin can read must never carry a
-    // way to take over the account it is recording.
+    // Who it was for, never what it was. See the note above the function.
     p_after: { email: profile.email },
   });
 
-  return { ok: true, data: undefined };
+  revalidateProfileScreens();
+
+  return { ok: true, data: { password, email: profile.email } };
 }

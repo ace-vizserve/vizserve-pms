@@ -1,6 +1,7 @@
 "use client";
 
-import { ChevronsUpDown, LogOut } from "lucide-react";
+import Link from "next/link";
+import { ChevronsUpDown, LogOut, Settings } from "lucide-react";
 
 import {
   DropdownMenu,
@@ -19,6 +20,10 @@ const ROLE_LABELS: Record<string, string> = {
   team_leader: "Team Leader",
   manager: "Manager",
   admin: "Admin",
+  // P8-01a added the top rung and this table was never updated, so an owner's
+  // chip rendered the raw string "owner" — the one role whose holder is most
+  // likely to be looking at it.
+  owner: "Owner",
 };
 
 /**
@@ -102,6 +107,24 @@ export function NavUser({
                 </div>
               </DropdownMenuLabel>
             </DropdownMenuGroup>
+
+            <DropdownMenuSeparator />
+
+            {/* ------------------------------------------------------------
+                P8-11 / P8-12 — the person's own settings.
+
+                HERE RATHER THAN IN THE RAIL, and the reason is that the rail
+                already has a "Settings" with the same icon: `/admin/settings`,
+                owner-only, company-wide. Two rows reading "Settings" is a coin
+                toss for the reader, and the one that changes policy for
+                everybody is the wrong one to guess. Personal settings belong
+                under the person's own name, which is also where every other
+                product of this shape puts them.
+                ------------------------------------------------------------ */}
+            <DropdownMenuItem render={<Link href="/settings" />}>
+              <Settings />
+              Settings
+            </DropdownMenuItem>
 
             <DropdownMenuSeparator />
 

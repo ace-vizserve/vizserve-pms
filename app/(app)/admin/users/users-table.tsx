@@ -23,7 +23,8 @@ import { Chip } from "@/components/status-badge";
 import { formatAppTime } from "@/lib/dates";
 import { GENDER_LABELS, ROLE_LABELS } from "@/lib/schemas/users";
 
-import { sendPasswordReset } from "./actions";
+import { setTemporaryPassword } from "./actions";
+import { TemporaryPasswordDialog } from "./temporary-password-dialog";
 import {
   UserEditor,
   type AllocatableLeaveType,
@@ -68,6 +69,16 @@ export function UsersTable({
   const [editing, setEditing] = useState<EditableUser | undefined>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [resetting, startReset] = useTransition();
+  /*
+   * P8-11. The one-time password dialog's whole state. Held here rather than
+   * inside the dialog because it arrives from an action fired by the row, and
+   * because `null` closing the dialog is what discards the only copy.
+   */
+  const [issued, setIssued] = useState<{
+    email: string;
+    password: string;
+    created?: boolean;
+  } | null>(null);
 
   /**
    * P7-53 — the leave audit dialog.
@@ -109,14 +120,22 @@ export function UsersTable({
     setEditorOpen(true);
   }
 
-  function resetPassword(user: EditableUser) {
+  /**
+   * P8-11 — issue a temporary password instead of mailing a reset link.
+   *
+   * ⚠️ THE RESULT GOES STRAIGHT INTO STATE AND NOWHERE ELSE. No toast carrying
+   * the password, no console line, no URL: a credential for somebody else's
+   * account belongs on screen once, in a dialog, and then gone. The toast below
+   * deliberately says nothing about what was issued.
+   */
+  function issueTemporaryPassword(user: EditableUser) {
     startReset(async () => {
-      const result = await sendPasswordReset(user.id);
+      const result = await setTemporaryPassword(user.id);
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
-      toast.success(`Reset link sent to ${user.email}`);
+      setIssued({ email: result.data.email, password: result.data.password });
     });
   }
 
@@ -287,10 +306,10 @@ export function UsersTable({
             variant="ghost"
             size="icon-sm"
             disabled={resetting || !user.is_active}
-            onClick={() => resetPassword(user)}
-            title="Send a password reset link">
+            onClick={() => issueTemporaryPassword(user)}
+            title="Issue a temporary password">
             <KeyRound />
-            <span className="sr-only">Send password reset to {user.email}</span>
+            <span className="sr-only">Issue a temporary password for {user.email}</span>
           </Button>
           <Button variant="ghost" size="icon-sm" onClick={() => openEdit(user)}>
             <Pencil />
@@ -396,6 +415,8 @@ export function UsersTable({
         </DialogContent>
       </Dialog>
 
+      <TemporaryPasswordDialog issued={issued} onClose={() => setIssued(null)} />
+
       <UserEditor
         departments={departments}
         leaveTypes={leaveTypes}
@@ -404,6 +425,7 @@ export function UsersTable({
         viewerIsOwner={viewerIsOwner}
         open={editorOpen}
         onOpenChange={setEditorOpen}
+        onIssued={(next) => setIssued({ ...next, created: true })}
       />
     </>
   );

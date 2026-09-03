@@ -5,12 +5,19 @@ import { createClient } from "@/utils/supabase/server";
 /**
  * Auth code callback — exchanges a one-time code for a session.
  *
- * THIS IS THE PASSWORD-RESET CALLBACK NOW. It was written for Entra, and the
- * Microsoft sign-in was removed from the login page, but the route is still
- * load-bearing: `resetPasswordForEmail` sends a link whose `redirectTo` lands
- * here, from `app/forgot-password/actions.ts` and from the admin's "send a
- * reset link" in `app/(app)/admin/users/actions.ts`. Delete it as OAuth
- * leftovers and every password reset in the product silently 404s.
+ * ⚠️ IT HAS NO CALLER, AND THAT IS ITS CURRENT STATE RATHER THAN A BUG.
+ *
+ * Written for Entra; the Microsoft sign-in was then removed from the login page
+ * and this became the password-reset callback, because `resetPasswordForEmail`
+ * pointed its `redirectTo` here. P8-11 withdrew the reset email as well —
+ * passwords are changed at `/settings` and reissued by an owner — so nothing in
+ * the product sends anybody here any more.
+ *
+ * It is kept because restoring Entra needs it back unchanged, and because a
+ * route that 404s is not free: a stale link in somebody's inbox reaching a 404
+ * says "this application is broken" rather than "that link has expired". With
+ * no `code` it redirects to the login page, which is the honest answer to a
+ * link that no longer means anything.
  *
  * `exchangeCodeForSession` is the same call either way — a PKCE code is a PKCE
  * code, whether an identity provider or a reset email produced it.

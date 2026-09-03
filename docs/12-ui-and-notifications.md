@@ -90,11 +90,32 @@ The reasoning is not aesthetic. Phase 4's entire value rests on a client opening
 
 Status transitions, comments, `WAITING_FOR_INFO` toggles, edits at approval time, list changes. All of it lands in the inbox and the dashboard card, none of it sends mail.
 
+### Neither — the clock reminders (P8-12)
+
+The nudge before you clock in or out is a **third category**, and it is worth
+naming so nobody later "fixes" it by giving it a notification type.
+
+It writes no `vizserve_pms_notifications` row and sends no mail. It is a browser
+timer in the app shell that plays a sound, raises an OS notification where
+permission was granted, and shows a toast. Rule 1 above — *every emailed event
+also writes a notification row* — is untouched, because nothing here is emailed.
+
+The reasoning is the same budget argument as the rest of this section, applied
+one level down: a reminder is only useful in the fifteen minutes before a punch,
+and an inbox row that is stale by the time anybody reads it is noise in the one
+place this app asks people to trust.
+
 ### Rules
 
 1. **One place to look.** Every emailed event also writes a `vizserve_pms_notifications` row. Email is a nudge toward the inbox, never a separate truth.
 2. **Every email links to the exact record**, not to a dashboard the recipient then has to search.
 3. **Make it configurable per type from the start** — a boolean column on the notification type, not a hardcoded `if`. Preferences will be asked for eventually, and retrofitting them into scattered send calls is tedious.
+
+   *P8-12: the first per-user preference row now exists —
+   `vizserve_pms_user_preferences`. It does **not** cover notification types.
+   It holds the clock-reminder settings, which are deliberately outside all of
+   this: no `vizserve_pms_notify` call, no type, no inbox row, no mail. Per-type
+   per-user preferences are still owed, and this table is where they would go.*
 4. **Client email and internal email are different budgets.** A client who receives four emails about one request will stop reading them, and that breaks Phase 4.
 
 ---

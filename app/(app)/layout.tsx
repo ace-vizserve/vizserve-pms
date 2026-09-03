@@ -4,8 +4,10 @@ import {
   canShapeAnyDepartment,
   requireAuthContext,
 } from "@/lib/auth/authorization";
+import { loadPunchState } from "@/lib/dtr-server";
 import { groupedNavItems } from "@/lib/navigation";
 import { formatNavBadge } from "@/lib/navigation";
+import { loadUserPreferences, signSoundUrl } from "@/lib/preferences-server";
 import { createClient } from "@/utils/supabase/server";
 import { AppSidebar } from "@/components/app-shell/app-sidebar";
 import {
@@ -13,6 +15,7 @@ import {
   DynamicBreadcrumb,
 } from "@/components/app-shell/dynamic-breadcrumb";
 import { RealtimeNotifications } from "@/components/realtime-refresh";
+import { ShiftReminder } from "@/components/shift-reminder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
@@ -113,6 +116,8 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     { data: groups },
     { data: openTasks },
     { data: pendingRequests },
+    punchState,
+    preferences,
   ] = await Promise.all([
       supabase
         .from("vizserve_pms_departments")
@@ -158,7 +163,31 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         .from("vizserve_pms_requests")
         .select("vizserve_pms_forms!inner(default_list_id)")
         .eq("status", "PENDING_REVIEW"),
+
+      /*
+       * P8-12 — what the clock reminder needs, folded into the shell's existing
+       * round trip rather than awaited ahead of it.
+       *
+       * Both are `cache()`d: `loadPunchState` is shared with the punch panel on
+       * `/`, `/dashboard` and `/dtr`, and `loadUserPreferences` with /settings.
+       * On every one of those pages this costs nothing at all — the promise
+       * resolves from the same request's cache.
+       */
+      loadPunchState(context.userId),
+      loadUserPreferences(context.userId),
     ]);
+
+  /*
+   * Signed only when there is something to sign — `signSoundUrl` returns null
+   * for the shipped chime, which is served from `public/` and needs no signature
+   * and no expiry. So the overwhelming majority of page loads make no storage
+   * call at all, and the ones that do are for a person who deliberately
+   * uploaded a ringtone.
+   *
+   * Sequential rather than in the block above because it takes the preferences
+   * as its input; there is nothing to overlap it with.
+   */
+  const soundUrl = await signSoundUrl(preferences);
 
   const countByList = new Map<string, number>();
   for (const task of openTasks ?? []) {
@@ -250,6 +279,33 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           computed in the browser and there is no second source of truth for it.
         */}
         <RealtimeNotifications userId={context.userId} />
+
+        {/*
+          P8-12 — the clock reminder, mounted beside the realtime badge for the
+          same reason: it renders nothing, it needs a browser timer, and it has
+          to be live on EVERY page. A reminder that only fires while somebody is
+          looking at their own time record is a reminder for the one person who
+          does not need it.
+
+          ⚠️ ITS FACTS ARE COMPUTED HERE, ON THE SERVER, and the component makes
+          no decisions of its own. `loadPunchState` is `cache()`d as of P8-12
+          precisely so this costs nothing on `/`, `/dashboard` and `/dtr`, which
+          all read it already for the punch panel.
+        */}
+        <ShiftReminder
+          userId={context.userId}
+          workDate={punchState.today?.work_date ?? ""}
+          schedule={punchState.schedule}
+          timeIn={punchState.today?.time_in ?? null}
+          timeOut={punchState.today?.time_out ?? null}
+          approvedOvertimeMinutes={punchState.approvedOvertimeMinutes}
+          isWorkingDay={punchState.isWorkingDay}
+          leadMinutes={preferences.leadMinutes}
+          clockInReminder={preferences.clockInReminder}
+          clockOutReminder={preferences.clockOutReminder}
+          soundUrl={soundUrl}
+          soundVolume={preferences.soundVolume}
+        />
 
         <SidebarProvider>
           <AppSidebar

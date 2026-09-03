@@ -116,6 +116,7 @@ export function UserEditor({
   viewerIsOwner,
   open,
   onOpenChange,
+  onIssued,
 }: {
   departments: Department[];
   leaveTypes: AllocatableLeaveType[];
@@ -135,6 +136,15 @@ export function UserEditor({
   viewerIsOwner: boolean;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * P8-11. Called with the temporary password a newly created account was given.
+   *
+   * The dialog that SHOWS it belongs to the table, not to this form, for one
+   * reason: this form unmounts the moment the account is created (`onDone`
+   * closes it and the content is conditional on `open`). A password rendered
+   * inside a component that is about to disappear is a password nobody reads.
+   */
+  onIssued: (issued: { email: string; password: string }) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -155,6 +165,7 @@ export function UserEditor({
             user={user}
             viewerIsOwner={viewerIsOwner}
             onDone={() => onOpenChange(false)}
+            onIssued={onIssued}
           />
         ) : null}
       </DialogContent>
@@ -169,6 +180,7 @@ function UserForm({
   user,
   viewerIsOwner,
   onDone,
+  onIssued,
 }: {
   departments: Department[];
   leaveTypes: AllocatableLeaveType[];
@@ -177,6 +189,8 @@ function UserForm({
   /** P8-01. See `UserEditor`. Only an owner may grant Owner, Admin or HR. */
   viewerIsOwner: boolean;
   onDone: () => void;
+  /** P8-11. See `UserEditor`. */
+  onIssued: (issued: { email: string; password: string }) => void;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -415,6 +429,13 @@ function UserForm({
       // A shared `result` would union it with `updateUser`'s void and need a
       // cast to get the new user's id back out.
       let savedId = user?.id;
+      /*
+       * P8-11. The temporary password `createUser` now issues, on its way to
+       * the one-time dialog the table owns. Held in a local rather than put in
+       * a toast: a credential for somebody else's account belongs on screen
+       * once, deliberately, and never in a message that stacks with others.
+       */
+      let issuedPassword: { email: string; password: string } | null = null;
 
       if (user) {
         const result = await updateUser(user.id, {
@@ -438,6 +459,7 @@ function UserForm({
         }
 
         savedId = result.data.id;
+        issuedPassword = { email: result.data.email, password: result.data.password };
       }
 
       /*
@@ -476,7 +498,16 @@ function UserForm({
         }
       }
 
-      toast.success(user ? "User updated" : "User created");
+      /*
+       * ⚠️ NO "USER CREATED" TOAST WHEN A PASSWORD WAS ISSUED. The dialog that
+       * follows says the account was created AND carries the one thing that
+       * has to be read before anything else is clicked; a toast underneath it
+       * is a second, quieter claim about the same event, and the risk is
+       * somebody reading the toast and dismissing the dialog.
+       */
+      if (issuedPassword) onIssued(issuedPassword);
+      else toast.success(user ? "User updated" : "User created");
+
       onDone();
       router.refresh();
     });

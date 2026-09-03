@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
@@ -24,6 +25,17 @@ export type PunchState = {
   graceMinutes: number;
   /** P7-04. Overtime already approved for TODAY, which extends the day's end. */
   approvedOvertimeMinutes: number;
+  /**
+   * P8-12. Is today a day this person is expected to work — a weekday, not a
+   * proclaimed holiday, and not covered by their own approved leave?
+   *
+   * READ ONLY BY THE CLOCK REMINDER, never by this panel. The buttons stay
+   * exactly as available on a Sunday as on a Tuesday: somebody who comes in on
+   * a weekend must be able to record it, and the DTR has always let them. This
+   * decides whether to NAG about a punch, which is a different question from
+   * whether to accept one.
+   */
+  isWorkingDay: boolean;
 };
 
 /**
@@ -50,6 +62,7 @@ export function PunchPanel({
   initial: PunchState;
   compact?: boolean;
 }) {
+  const router = useRouter();
   const [state, setState] = useState(initial);
   const [pending, startTransition] = useTransition();
   const [offSchedule, setOffSchedule] = useState<{
@@ -98,6 +111,22 @@ export function PunchPanel({
             // no longer open.
             { ...previous, today: previous.today, openYesterday: null },
       );
+
+      /*
+       * P8-12 — TELL THE SHELL, not just this panel.
+       *
+       * The local `setState` above is what keeps the button honest without a
+       * round trip, and it stays. But since P8-12 the app shell holds its own
+       * copy of "have they timed in yet", because that is what decides whether
+       * the clock reminder fires — and the shell only re-renders on navigation.
+       * Somebody who times in early at 08:40 and then sits on this page would
+       * be reminded to clock in at 08:45, which is the exact false alarm that
+       * gets a reminder switched off for good.
+       *
+       * Fire-and-forget, and NOT awaited: the off-schedule dialog below must
+       * open on the punch that just happened, not after a network round trip.
+       */
+      if (punched.captured) router.refresh();
 
       // ⚠️ ONLY ON A PUNCH THAT WAS ACTUALLY CAPTURED, and only for today.
       //

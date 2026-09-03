@@ -275,13 +275,21 @@ export async function uploadTaskAttachment(input: {
  * The bucket is private and `authenticated` holds no storage policy, so this is
  * the only way staff reach a file — and the scope check happens at the call
  * site, before this is reached.
+ *
+ * P8-12 adds the `bucket` parameter rather than a second signer. `user-sounds`
+ * has the same posture as this one — private, no storage policy, service-role
+ * writes, signed reads after the caller has been identified — so a second copy
+ * of these five lines would be two places for the "is it still private?"
+ * assumption to be checked. The DEFAULT is unchanged, so no existing call site
+ * moves.
  */
 export async function signAttachmentUrl(
   storagePath: string,
   expiresInSeconds = 60,
+  bucket: string = ATTACHMENT_BUCKET,
 ): Promise<string | null> {
   const { data } = await createAdminClient()
-    .storage.from(ATTACHMENT_BUCKET)
+    .storage.from(bucket)
     .createSignedUrl(storagePath, expiresInSeconds);
 
   return data?.signedUrl ?? null;
