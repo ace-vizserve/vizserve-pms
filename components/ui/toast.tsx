@@ -91,7 +91,7 @@ export const toast = Object.assign(
  * reaching for when a toast arrives. Centre clears both, and it is where the
  * eye already is after pressing a button in the middle of a page.
  */
-const POSITION: SileoPosition = "bottom-right";
+const POSITION: SileoPosition = "top-center";
 
 /**
  * ⚠️ `fill` IS AN SVG ATTRIBUTE, NOT A CSS BACKGROUND, and that is what makes
@@ -157,11 +157,15 @@ function ToastSurfaceDefs() {
 }
 
 /**
- * `--radius-xl`. A toast is an overlay, so it takes the overlay radius rather
- * than sileo's stock capsule — the collapsed pill was the one shape in the
- * product that belonged to no other component.
+ * Between `--radius-lg` (10) and `--radius-xl` (14), picked by eye.
+ *
+ * A toast is an overlay, so it takes an overlay radius rather than sileo's
+ * stock capsule — the collapsed pill was the one shape in the product that
+ * belonged to no other component. It is not a token because it is not a value
+ * anything else in the system uses: the shape here is 40px tall collapsed, and
+ * the radius that reads right on it is not the one that reads right on a card.
  */
-const ROUNDNESS = 14;
+const ROUNDNESS = 12;
 
 /**
  * Mounted once, in the root layout, INSIDE `ThemeProvider`.
