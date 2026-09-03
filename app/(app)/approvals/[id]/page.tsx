@@ -1,11 +1,12 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft } from "lucide-react";
+import { ArrowLeft, ArrowUpRight } from "lucide-react";
 
+import { timesheetWeekHref } from "@/lib/approvals-queue-server";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
-import type { InternalRequestRow } from "@/lib/database.types";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import type { InternalRequestRow, VizservePmsTimesheetWeekStatus } from "@/lib/database.types";
+import { formatDate, formatDateTime, formatWeekRange, weeksSpanned } from "@/lib/dates";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { internalRequestLabel, isTimeCorrectionType } from "@/lib/schemas/internal-requests";
 import { createClient } from "@/utils/supabase/server";
@@ -13,7 +14,11 @@ import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { RichText } from "@/components/ui/rich-text";
-import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
+import {
+  InternalStatusBadge,
+  InternalTypeBadge,
+  TimesheetWeekBadge,
+} from "@/components/status-badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { DecisionPanel } from "../decision-panel";
 import { requestDetail } from "../request-summary";
@@ -86,6 +91,56 @@ export default async function InternalRequestPage({ params }: { params: Promise<
 
   const request = data as unknown as Row;
   const isOwn = request.requester_id === context.userId;
+
+  /* Can this reader actually open the destination? Their own week is on
+     /timesheet, which every signed-in person reaches; somebody else's is on
+     /timesheet/team, which refuses below team_leader. */
+  const weeksAreReachable = isOwn || roleAtLeast(context.role, "team_leader");
+
+  /*
+   * P8-05 — WHICH TIMESHEET WEEKS THIS LEAVE TOUCHES.
+   *
+   * Approved leave lowers what a week has to add up to: a member off Monday and
+   * Tuesday is submitting against a 24-hour target, not a 40-hour one. Nothing
+   * on this screen said so, so a lead reading an approved request had no way to
+   * connect it to the short week it explains — and the two live in different
+   * modules with no link between them.
+   *
+   * A READ AND A LINK, and deliberately nothing more. No foreign key: leave is
+   * dated and weeks are keyed by Monday, and a stored pointer between them would
+   * have to be maintained on every edit of either. `weeksSpanned` derives the
+   * Mondays from the dates already on this row, which is arithmetic, not state.
+   *
+   * ⚠️ IT DOES NOT RESTATE THE TARGET. The rule that turns a schedule plus days
+   * off into a weekly minimum lives in `scheduledWeekMinutes` and in
+   * `vizserve_pms_submit_timesheet_week`; a third copy printed here would be a
+   * third thing to keep in step, and the week itself shows the figure.
+   */
+  const affectedWeeks =
+    request.request_type === "LEAVE" && request.start_date && request.end_date
+      ? weeksSpanned(request.start_date, request.end_date)
+      : [];
+
+  /*
+   * The status of each of those weeks, for the person who filed the leave.
+   *
+   * No department filter — the weeks policy scopes by the department snapshotted
+   * at submission, exactly as it does on `/timesheet/team`. A lead outside that
+   * scope simply gets no rows back and the links still render, which is the
+   * correct outcome: the week EXISTS whether or not this reader may see it.
+   */
+  const { data: weekRows, error: weeksError } =
+    affectedWeeks.length > 0
+      ? await supabase
+          .from("vizserve_pms_timesheet_weeks")
+          .select("id, week_start, status")
+          .eq("user_id", request.requester_id)
+          .in("week_start", affectedWeeks)
+      : { data: null, error: null };
+
+  const weekStatus = new Map(
+    (weekRows ?? []).map((week) => [week.week_start, week.status as VizservePmsTimesheetWeekStatus]),
+  );
 
   // Deciding needs department scope AND not being the requester — the engine
   // and the decide function both re-check this, so what follows is only about
@@ -170,6 +225,73 @@ export default async function InternalRequestPage({ params }: { params: Promise<
               <Field label="Amount" value={requestDetail(request)} />
             ) : null}
           </dl>
+
+          {/* P8-05 — the link the two modules never had between them. A leave
+              request and the timesheet week it shortens are the same fact seen
+              from two screens, and only one of them said so. */}
+          {affectedWeeks.length > 0 ? (
+            <div className="mt-5 border-t pt-4">
+              <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+                Timesheet {affectedWeeks.length === 1 ? "week" : "weeks"} affected
+              </dt>
+              <dd className="mt-2 space-y-1.5">
+                {affectedWeeks.map((monday) => (
+                  <div key={monday} className="flex flex-wrap items-center gap-2">
+                    {weeksAreReachable ? (
+                      <Link
+                        /* Your own week is on your own timesheet; somebody else's
+                           is on the team grid, which is also the only place it can
+                           be decided. Same destination the approvals queue uses. */
+                        href={isOwn ? `/timesheet?week=${monday}` : timesheetWeekHref(monday)}
+                        className="inline-flex items-center gap-1 text-sm font-medium hover:underline"
+                      >
+                        {formatWeekRange(monday)}
+                        <ArrowUpRight aria-hidden className="size-3.5 shrink-0" />
+                      </Link>
+                    ) : (
+                      /* ⚠️ NOT A LINK FOR SOMEBODY THE DESTINATION WOULD REFUSE.
+                         `/timesheet/team` is `requireRole("team_leader")`, and HR
+                         is a TICK rather than a rank (D33) — p7_54 lets an
+                         HR-ticked MEMBER read a colleague's leave request, so
+                         they reach this panel while that page throws at them.
+                         The week is still worth naming; the door is not worth
+                         offering. Hiding a link protects nobody, but offering a
+                         dead one is a promise the next click breaks. */
+                      <span className="text-sm font-medium">{formatWeekRange(monday)}</span>
+                    )}
+                    {/* ⚠️ "Not handed in" also covers a week this reader cannot
+                        see — the weeks policy scopes by the department
+                        snapshotted at submission, which can differ from the one
+                        on this request if somebody moved teams. The week exists
+                        either way, so the link stays and only the badge goes. */}
+                    {weekStatus.get(monday) ? (
+                      <TimesheetWeekBadge status={weekStatus.get(monday)!} />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">Not handed in</span>
+                    )}
+                  </div>
+                ))}
+
+                {/* No figures. The week itself does the arithmetic — see the
+                    note on the read above. */}
+                <p className="pt-1 text-xs text-muted-foreground">
+                  {request.status === "APPROVED"
+                    ? "Approved leave lowers what these weeks have to add up to, so a short week here is expected. Open one to see what it now needs."
+                    : "If this is approved, these weeks will need correspondingly fewer hours."}
+                </p>
+
+                {/* Degraded, not fatal: the links above are derived from dates on
+                    this row and are correct whether or not this read landed. Only
+                    the badges are missing, and saying so beats a row that quietly
+                    reads "Not handed in" for every week. */}
+                {weeksError ? (
+                  <p className="text-xs text-warning">
+                    Could not check whether these weeks have been handed in: {weeksError.message}
+                  </p>
+                ) : null}
+              </dd>
+            </div>
+          ) : null}
 
           <div className="mt-5 border-t pt-4">
             <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Reason</dt>

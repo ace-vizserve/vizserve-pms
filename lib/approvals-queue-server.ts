@@ -6,6 +6,7 @@ import {
   INTERNAL_REQUEST_LABELS,
   describeLeaveSpan,
 } from "@/lib/schemas/internal-requests";
+import type { TimesheetWeekStatus } from "@/lib/schemas/timesheet";
 
 /**
  * "Waiting on you" — the one definition of an approver's queue.
@@ -50,6 +51,143 @@ const EMPTY: WaitingOnYou = {
   breakdown: "",
 };
 
+// ---------------------------------------------------------------------------
+// The timesheet-week queue
+// ---------------------------------------------------------------------------
+
+/**
+ * The status a week is in while it waits on a lead.
+ *
+ * RETURNED is back with the member and APPROVED is finished — the same
+ * three-way split `vizserve_pms_timesheet_week_locked` reads, and the reason
+ * RETURNED appears in none of these lists. Named once because three queries in
+ * this file now filter on it.
+ */
+const WEEK_WAITING = "SUBMITTED" as const;
+
+/**
+ * Where a submitted week is DECIDED.
+ *
+ * ⚠️ NOT `/approvals/<id>`. `vizserve_pms_decide_timesheet_week` is reachable
+ * from the team grid and only from there, deliberately: a queue of weeks with no
+ * view of the hours inside them is a rubber stamp, which is the argument
+ * `app/(app)/timesheet/team/page.tsx` opens with. A second route to the same
+ * transition would be a second thing to keep in step with it.
+ *
+ * It lives here so every screen that lists a pending week points at the same
+ * place — /, /dashboard and now /approvals.
+ */
+export function timesheetWeekHref(weekStart: string): string {
+  return `/timesheet/team?week=${weekStart}`;
+}
+
+/**
+ * A week handed in and waiting on somebody other than the person who handed it
+ * in.
+ *
+ * Richer than `WaitingRow` on purpose: /approvals renders these as table rows
+ * with the submitted total and the week's own status on them, and a flattened
+ * "Week of 18 Aug" string cannot be widened back into columns.
+ */
+export type PendingWeek = {
+  id: string;
+  userId: string;
+  /** Null when the users policy withheld the row. Callers pick their own fallback. */
+  name: string | null;
+  /** Monday, `YYYY-MM-DD`. */
+  weekStart: string;
+  /**
+   * What the person ATTESTED TO — not what the grid shows now. The reviewer sees
+   * live entries, and the two can differ; the team grid says so where they do.
+   */
+  submittedMinutes: number;
+  submittedAt: string;
+  /**
+   * Always `SUBMITTED` given the filter, and carried anyway so callers render
+   * the week's own vocabulary rather than borrowing the internal-request one.
+   * ⚠️ A week is never `rejected` and a request is never `returned` (D23) — the
+   * two label sets stay apart.
+   */
+  status: TimesheetWeekStatus;
+  href: string;
+};
+
+/**
+ * The rows behind the `weeks` count above.
+ *
+ * ⚠️ RETURNS ITS ERROR. Every other read on this page's callers does, because
+ * `data ?? []` renders a failed query as an empty queue — and an empty APPROVALS
+ * queue is the one people believe and act on. The counting half of this file can
+ * afford to swallow a failure into a zero on a dashboard tile; a list somebody
+ * works off cannot.
+ *
+ * NO DEPARTMENT FILTER. `vizserve_pms_timesheet_weeks` scopes by the department
+ * snapshotted at submission, through the policy.
+ */
+export async function listPendingTimesheetWeeks(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+  isApprover: boolean,
+  limit = 5,
+): Promise<{ rows: PendingWeek[]; error: { message: string } | null }> {
+  if (!isApprover) return { rows: [], error: null };
+
+  const { data, error } = await supabase
+    .from("vizserve_pms_timesheet_weeks")
+    /*
+     * ⚠️ THE CONSTRAINT IS NAMED, AND IT HAS TO BE. `vizserve_pms_timesheet_weeks`
+     * has TWO foreign keys to `vizserve_pms_users` — `user_id` and
+     * `reviewed_by` (p7_05:41, :66) — so an unqualified embed is ambiguous and
+     * PostgREST refuses the WHOLE query with PGRST201. Measured against the live
+     * project: unqualified → 300 PGRST201, hinted → 200.
+     *
+     * This exact shape shipped once before on `vizserve_pms_dtr_entries` and
+     * read as "no entries in this range", because the page did `data ?? []` and
+     * the empty state explained the failure away. `tests/db/phase5.test.ts`
+     * pins that one. Here it would be worse: the dashboard head-count query has
+     * no embed, so the tile would keep saying "3 waiting" while the list it
+     * links to showed none.
+     */
+    .select(
+      "id, user_id, week_start, submitted_minutes, submitted_at, status, " +
+        "vizserve_pms_users!vizserve_pms_timesheet_weeks_user_id_fkey(full_name)",
+    )
+    .eq("status", WEEK_WAITING)
+    // ⚠️ SELF-APPROVAL. A lead hands in a week like everybody else and
+    // `vizserve_pms_decide_timesheet_week` refuses to let them decide it, so
+    // listing it would put work in a queue that cannot be worked off. Mirrors
+    // the `.neq` on the count above and the one on internal requests.
+    .neq("user_id", userId)
+    // Oldest first: the bottom of a newest-first queue is the part that has been
+    // waiting longest, and nobody reaches it.
+    .order("week_start", { ascending: true })
+    .limit(limit);
+
+  const rows = ((data ?? []) as unknown as Array<{
+    id: string;
+    user_id: string;
+    week_start: string;
+    submitted_minutes: number;
+    submitted_at: string | null;
+    status: TimesheetWeekStatus;
+    vizserve_pms_users: { full_name: string } | null;
+  }>).map((week) => ({
+    id: week.id,
+    userId: week.user_id,
+    name: week.vizserve_pms_users?.full_name ?? null,
+    weekStart: week.week_start,
+    submittedMinutes: week.submitted_minutes,
+    // The column is NOT NULL, and the fallback stays because a row that somehow
+    // lacks one should still sort and render as of its own week rather than
+    // crashing a queue.
+    submittedAt: week.submitted_at ?? week.week_start,
+    status: week.status,
+    href: timesheetWeekHref(week.week_start),
+  }));
+
+  return { rows, error: error ?? null };
+}
+
 export async function countWaitingOnYou(
   supabase: SupabaseClient<Database>,
   userId: string,
@@ -76,13 +214,15 @@ export async function countWaitingOnYou(
       .eq("status", "PENDING_REVIEW")
       .neq("requester_id", userId),
 
-    // SUBMITTED only. RETURNED is back with the member and APPROVED is
-    // finished — the same three-way split `vizserve_pms_timesheet_week_locked`
-    // reads, and the reason RETURNED is absent from both lists.
+    // The same pair `listPendingTimesheetWeeks` applies — `WEEK_WAITING` and not
+    // your own. Written out rather than shared through that function because a
+    // head count wants no columns and no embed back; the two filters are the
+    // part that must not drift, and `tests/unit/approvals-queue.test.ts` pins
+    // them saying the same thing.
     supabase
       .from("vizserve_pms_timesheet_weeks")
       .select("id", { count: "exact", head: true })
-      .eq("status", "SUBMITTED")
+      .eq("status", WEEK_WAITING)
       .neq("user_id", userId),
   ]);
 
@@ -172,13 +312,11 @@ export async function listWaitingOnYou(
       .order("created_at", { ascending: true })
       .limit(perQueue),
 
-    supabase
-      .from("vizserve_pms_timesheet_weeks")
-      .select("id, user_id, week_start, submitted_at")
-      .eq("status", "SUBMITTED")
-      .neq("user_id", userId)
-      .order("week_start", { ascending: true })
-      .limit(perQueue),
+    // The SAME read /approvals now renders as rows. It was inline here until
+    // that page needed the submitted total and the week's status, which a
+    // `WaitingRow` has nowhere to put — and a second copy of "which weeks are
+    // waiting on you" is exactly the divergence this file exists to stop.
+    listPendingTimesheetWeeks(supabase, userId, isApprover, perQueue),
 
     supabase.from("vizserve_pms_users").select("id, full_name"),
   ]);
@@ -236,16 +374,18 @@ export async function listWaitingOnYou(
       href: `/approvals/${request.id}`,
     })),
 
-    ...(weeks.data ?? []).map((week) => ({
+    ...weeks.rows.map((week) => ({
       id: `wk-${week.id}`,
       kind: "Timesheet",
       tone: "neutral" as const,
-      title: `Week of ${formatDate(week.week_start)}`,
-      who: nameOf.get(week.user_id) ?? "A colleague",
-      since: (week.submitted_at ?? week.week_start).slice(0, 10),
+      title: `Week of ${formatDate(week.weekStart)}`,
+      // The embedded name, falling back to the shared map for a row whose embed
+      // came back empty, and to prose only when neither knows.
+      who: week.name ?? nameOf.get(week.userId) ?? "A colleague",
+      since: week.submittedAt.slice(0, 10),
       // `/timesheet/team` anchored on the week in question, so the row lands on
       // the grid that shows it rather than on this week's.
-      href: `/timesheet/team?week=${week.week_start}`,
+      href: week.href,
     })),
   ];
 }

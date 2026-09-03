@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Inbox } from "lucide-react";
 
+import { listPendingTimesheetWeeks } from "@/lib/approvals-queue-server";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { todayInAppZone } from "@/lib/dates";
@@ -14,6 +15,7 @@ import { QueryError } from "@/components/query-error";
 import { MyLeaveRecordButton } from "./my-leave-record";
 import { NewRequestDialog } from "./new-request-dialog";
 import { Section, type Row } from "./approvals-table";
+import { TimesheetWeeksSection } from "./timesheet-weeks-table";
 
 /** Rows rendered. The query asks for one more so the cap is detectable. */
 const APPROVALS_PAGE_SIZE = 200;
@@ -133,11 +135,28 @@ export default async function ApprovalsPage({
   const SELECT =
     "*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)";
 
+  /*
+   * P8 — THE THIRD QUEUE.
+   *
+   * A lead approves client requests, internal requests AND handed-in timesheet
+   * weeks, and until now this page read internal requests alone while the
+   * dashboard tile counted all three. That divergence has already shipped a bug
+   * twice ("Pending approvals: 0" for a lead with seven items) — see the header
+   * of `lib/approvals-queue-server.ts`. Sending somebody to a queue that shows
+   * fewer things than the count that sent them is the same class of lie.
+   *
+   * Client Gate 1 stays out: it has its own screen at `/requests`, and this page
+   * is where INTERNAL work is settled. Weeks are here because they had no screen
+   * of their own at all.
+   */
+  const isApprover = roleAtLeast(context.role, "team_leader");
+
   const [
     { data: mineData, error: requestsError, count: mineCount },
     { data: queueData },
     { data: leaveTypes },
     { data: balances },
+    weeksQueue,
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_internal_requests")
@@ -189,6 +208,20 @@ export default async function ApprovalsPage({
     // beside a field; the page it decorates is somebody's approval queue, and
     // that must render whether or not the entitlement figures came back.
     supabase.rpc("vizserve_pms_leave_balance_summary", {}),
+
+    /*
+     * The SHARED definition, not a second query — `listPendingTimesheetWeeks`
+     * is what `/` and `/dashboard` count and list from, so this page cannot
+     * disagree with the tile that sent somebody here.
+     *
+     * NO DEPARTMENT FILTER, like everything else on this page: the weeks policy
+     * scopes by the department snapshotted at submission. It also drops the
+     * caller's OWN week — a lead hands one in like anybody else and cannot
+     * decide it.
+     *
+     * The same detectable cap as the queue above: one more than shown.
+     */
+    listPendingTimesheetWeeks(supabase, context.userId, isApprover, APPROVALS_PAGE_SIZE + 1),
   ]);
 
   /*
@@ -210,6 +243,13 @@ export default async function ApprovalsPage({
   const pendingOnMe = truncated ? queue.slice(0, APPROVALS_PAGE_SIZE) : queue;
   const rows = [...mine, ...pendingOnMe];
   const total = mineCount ?? 0;
+
+  /* Same trick as the queue: the read asked for one more than is shown, so a
+     truncated list is detectable instead of silently short. */
+  const weeksTruncated = weeksQueue.rows.length > APPROVALS_PAGE_SIZE;
+  const pendingWeeks = weeksTruncated
+    ? weeksQueue.rows.slice(0, APPROVALS_PAGE_SIZE)
+    : weeksQueue.rows;
 
   /* Rebuilt from the narrowed values, so the paginator cannot drop the sort. */
   function hrefFor(target: number) {
@@ -295,6 +335,31 @@ export default async function ApprovalsPage({
           reviewerNames={reviewerNames}
           empty={null}
         />
+      ) : null}
+
+      {/* The other thing waiting on a lead, and the one that had no queue at
+          all — the decision itself stays on the team week grid. Rendered when
+          there is something to show OR when the read FAILED: an empty approvals
+          queue is the one people believe and act on, so a broken query must not
+          be able to look like an empty one. Hidden entirely for a member, who
+          approves nothing and would otherwise get a heading with a permanent
+          empty table under it. */}
+      {isApprover && (pendingWeeks.length > 0 || weeksQueue.error) ? (
+        <>
+          <TimesheetWeeksSection
+            rows={pendingWeeks}
+            empty={
+              weeksQueue.error ? (
+                <QueryError what="timesheet weeks awaiting you" message={weeksQueue.error.message} />
+              ) : null
+            }
+          />
+          {weeksTruncated ? (
+            <p className="text-xs text-muted-foreground">
+              Showing the first {APPROVALS_PAGE_SIZE} weeks handed in.
+            </p>
+          ) : null}
+        </>
       ) : null}
 
       <Section

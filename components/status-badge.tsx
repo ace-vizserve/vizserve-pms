@@ -19,9 +19,11 @@ import type {
   VizservePmsInternalRequestType,
   VizservePmsRequestStatus,
   VizservePmsTaskStatus,
+  VizservePmsTimesheetWeekStatus,
 } from "@/lib/database.types";
 import { APPROVAL_DECISION_LABELS, type ApprovalDecision } from "@/lib/schemas/approvals";
 import { internalRequestLabel } from "@/lib/schemas/internal-requests";
+import { TIMESHEET_WEEK_LABELS } from "@/lib/schemas/timesheet";
 import {
   TASK_CATEGORY_LABELS,
   TASK_PRIORITY_LABELS,
@@ -454,6 +456,42 @@ export function InternalTypeBadge({
   // edited by hand in the SQL editor, so it can hold a value this build has
   // never heard of — and a bare lookup renders that as an EMPTY pill.
   return <Pill tone="neutral" label={internalRequestLabel(type)} className={className} />;
+}
+
+/**
+ * A handed-in timesheet week (P7-05).
+ *
+ * ⚠️ A THIRD VOCABULARY, AND IT IS NOT THE INTERNAL-REQUEST ONE. A week is
+ * SUBMITTED / RETURNED / APPROVED and can never be REJECTED — D23: hours already
+ * worked cannot be un-worked, so a lead either accepts them or sends them back
+ * to be fixed. An internal request takes the opposite subset: it can be REJECTED
+ * and can never be RETURNED. Folding the two maps together would put a label on
+ * each set for a state it cannot reach.
+ *
+ * `TIMESHEET_WEEK_LABELS` stays the source of the wording — it is the schema's
+ * half of the contract and the timesheet screens already read it. Only the
+ * status→tone map is new here, which is what this file owns.
+ */
+const TIMESHEET_WEEK_TONES: Record<VizservePmsTimesheetWeekStatus, Tone> = {
+  SUBMITTED: "info",
+  RETURNED: "warning",
+  APPROVED: "success",
+};
+
+export function TimesheetWeekBadge({
+  status,
+  className,
+}: {
+  status: VizservePmsTimesheetWeekStatus;
+  className?: string;
+}) {
+  return (
+    <Pill
+      tone={TIMESHEET_WEEK_TONES[status] ?? "neutral"}
+      label={TIMESHEET_WEEK_LABELS[status] ?? status}
+      className={className}
+    />
+  );
 }
 
 /**

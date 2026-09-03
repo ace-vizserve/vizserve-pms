@@ -161,6 +161,44 @@ export function weekDates(value: string): string[] {
   );
 }
 
+/**
+ * Every timesheet week a date range touches, as Mondays.
+ *
+ * For the one question a leave request cannot currently answer: which weeks did
+ * this affect. Leave running Thu–Tue lands on TWO timesheets, and a reader
+ * looking at the approved request has no way to tell which — the request stores
+ * dates and the weeks are keyed by Monday.
+ *
+ * ARITHMETIC ONLY, deliberately. It says which weeks are touched, never how many
+ * hours the leave removes from any of them: that rule lives with
+ * `scheduledWeekMinutes` and the submit function, and a second copy of it here
+ * would be a second thing to keep in step with the database.
+ *
+ * Walks in steps of seven through `addDays` for the reason at the top of this
+ * file — a bare date is parsed at midday UTC so stepping cannot slide onto the
+ * previous day in a negative offset.
+ */
+export function weeksSpanned(from: string, to: string): string[] {
+  const first = startOfWeek(from);
+  const last = startOfWeek(to);
+  if (!first) return [];
+  // A backwards range is bad data, not a request for zero weeks. The start is
+  // the honest answer; `vizserve_pms_internal_requests_shape` refuses end < start
+  // anyway, so this is only reachable through a caller passing them swapped.
+  if (!last || last < first) return [first];
+
+  const weeks: string[] = [];
+  let monday: string | null = first;
+  // The cap is a guard against a runaway loop on nonsense dates ("0002-01-01"),
+  // not a business rule: five years of weeks is far past anything a leave
+  // request can legitimately span.
+  while (monday && monday <= last && weeks.length < 260) {
+    weeks.push(monday);
+    monday = addDays(monday, 7);
+  }
+  return weeks;
+}
+
 /** Short weekday for a column heading — "Mon". */
 export function formatWeekday(value: string): string {
   const date = parseDateOnly(value);

@@ -11,6 +11,7 @@ import {
   parseDateOnly,
   toAppDateString,
   todayInAppZone,
+  weeksSpanned,
   workedMinutes,
   yesterdayInAppZone,
 } from "@/lib/dates";
@@ -210,5 +211,59 @@ describe("allowedTimeOutDates — Q4's backdating guard", () => {
 describe("yesterdayInAppZone", () => {
   it("is exactly one day before today in app time", () => {
     expect(daysBetween(yesterdayInAppZone(), todayInAppZone())).toBe(1);
+  });
+});
+
+/**
+ * P8 — which timesheet weeks a leave request touches.
+ *
+ * The failure this guards is a leave request pointing at the WRONG week, which
+ * is worse than pointing at none: the reader opens a timesheet, sees a full
+ * week, and concludes the leave did not apply. Every case here is a boundary,
+ * because the middle of a week is never where this goes wrong.
+ */
+describe("weeksSpanned — the Mondays a date range covers", () => {
+  it("gives one week for leave inside a single week", () => {
+    // Tue 18 Aug – Thu 20 Aug 2026, all in the week of Mon 17 Aug.
+    expect(weeksSpanned("2026-08-18", "2026-08-20")).toEqual(["2026-08-17"]);
+  });
+
+  it("gives two weeks for leave that crosses the weekend", () => {
+    // Thu 20 Aug – Tue 25 Aug lands on two timesheets, and the request itself
+    // says nothing about that. This is the whole reason the helper exists.
+    expect(weeksSpanned("2026-08-20", "2026-08-25")).toEqual(["2026-08-17", "2026-08-24"]);
+  });
+
+  it("puts a Sunday in the week that has just ended, like startOfWeek", () => {
+    // Sun 23 Aug belongs to the week of Mon 17 Aug — Monday-start weeks, so a
+    // Sunday must not open a second one on its own.
+    expect(weeksSpanned("2026-08-23", "2026-08-23")).toEqual(["2026-08-17"]);
+  });
+
+  it("counts the whole span, not just its ends", () => {
+    // Four Mondays, one of them belonging to a week with no leave day at either
+    // end of it. Dropping the middles would leave a week short of a target with
+    // nothing on the request explaining why.
+    expect(weeksSpanned("2026-08-19", "2026-09-08")).toEqual([
+      "2026-08-17",
+      "2026-08-24",
+      "2026-08-31",
+      "2026-09-07",
+    ]);
+  });
+
+  it("crosses a month and a year boundary without losing a week", () => {
+    expect(weeksSpanned("2026-12-30", "2027-01-05")).toEqual(["2026-12-28", "2027-01-04"]);
+  });
+
+  it("treats a backwards range as the start alone rather than as nothing", () => {
+    // Refused by the request's own CHECK, so this is only reachable through a
+    // caller passing the two the wrong way round. Returning [] would silently
+    // drop the panel; returning the start shows something true.
+    expect(weeksSpanned("2026-08-25", "2026-08-20")).toEqual(["2026-08-24"]);
+  });
+
+  it("returns nothing for an unparseable date", () => {
+    expect(weeksSpanned("banana", "2026-08-20")).toEqual([]);
   });
 });
