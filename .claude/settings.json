@@ -20,10 +20,17 @@
       "Bash(sed -n '1,20p' \"C:/Users/Ace/.claude/plans/shiny-beaming-crab.md\")",
       "Bash(npx vitest *)",
       "Bash(node --env-file=.env -e ' *)",
-      "Bash(xargs grep -ln \"status_token\\\\|approval_token\\\\|feedback_token\")"
+      "Bash(xargs grep -ln \"status_token\\\\|approval_token\\\\|feedback_token\")",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(grep -v \"\\\\.map$\")",
+      "Bash(grep -v \"^\\\\s*/\\\\*\")",
+      "Bash(grep -v \"^\\\\s*$\")"
     ],
     "additionalDirectories": [
-      "C:\\Users\\Ace\\.claude\\plans"
+      "C:\\Users\\Ace\\.claude\\plans",
+      "c:\\Users\\Ace\\.claude\\projects\\c--Users-Ace-OneDrive---HFSE-International-School-Desktop-vizserve-pms\\memory",
+      "C:\\Users\\Ace\\OneDrive - HFSE International School\\Desktop\\vizserve-pms\\app\\(builder)\\forms\\[id]"
     ]
   }
 }

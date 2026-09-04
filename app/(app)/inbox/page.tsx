@@ -1,25 +1,21 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { revalidatePath } from "next/cache";
+import Link from "next/link";
 
 import { Bell, CheckCheck, SearchX } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 
-import {
-  isNotificationType,
-  isReadFilter,
-  type ReadFilter,
-} from "@/lib/notifications";
-import { ilikeAnyOf } from "@/lib/search";
-import { InboxTable, type Notification } from "./inbox-table";
 import { EmptyState } from "@/components/empty-state";
+import { ListSearch } from "@/components/list-search";
 import { PageShell } from "@/components/page-shell";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
 import { Button, buttonVariants } from "@/components/ui/button";
-import { ListSearch } from "@/components/list-search";
+import { isNotificationType, isReadFilter, type ReadFilter } from "@/lib/notifications";
+import { ilikeAnyOf } from "@/lib/search";
 import { InboxFilters } from "./inbox-filters";
+import { InboxTable, type Notification } from "./inbox-table";
 
 export const metadata: Metadata = { title: "Inbox" };
 
@@ -133,10 +129,7 @@ export default async function InboxPage({
     // Counted separately, and this is not optional. It used to be derived from
     // the fetched rows, which was correct only while the page held everything —
     // with paging that would report "3 unread" meaning "3 on this page".
-    supabase
-      .from("vizserve_pms_notifications")
-      .select("id", { count: "exact", head: true })
-      .is("read_at", null),
+    supabase.from("vizserve_pms_notifications").select("id", { count: "exact", head: true }).is("read_at", null),
   ]);
 
   const total = count ?? 0;
@@ -154,10 +147,7 @@ export default async function InboxPage({
     // Deliberately NOT limited to the current page or the current search. The
     // button says "all", and a Mark-all-read that leaves unread rows behind the
     // paginator is the kind of thing people stop trusting.
-    await client
-      .from("vizserve_pms_notifications")
-      .update({ read_at: new Date().toISOString() })
-      .is("read_at", null);
+    await client.from("vizserve_pms_notifications").update({ read_at: new Date().toISOString() }).is("read_at", null);
     revalidatePath("/inbox");
   }
 
@@ -187,6 +177,18 @@ export default async function InboxPage({
     // title, a line of context and a timestamp, and constraining it just wasted
     // two thirds of a wide screen and made the list taller than it needed to be.
     <PageShell>
+      {/* Marking all read while a search is active would silently clear
+                rows the person cannot see, so the control goes away — searching
+                is a reading task, not a triage one. */}
+      {unreadCount > 0 && !term ? (
+        <form className="ml-auto" action={markAllRead}>
+          <Button type="submit" size="sm">
+            <CheckCheck />
+            Mark all read
+          </Button>
+        </form>
+      ) : null}
+
       {/*
         A PLAIN toolbar. This used to be sticky, and it was wrong in three ways
         at once: `top-16` was measured against an `h-16` shell header that is now
@@ -212,27 +214,13 @@ export default async function InboxPage({
             />
 
             <InboxFilters type={type} read={read} />
-
-            {/* Marking all read while a search is active would silently clear
-                rows the person cannot see, so the control goes away — searching
-                is a reading task, not a triage one. */}
-            {unreadCount > 0 && !term ? (
-              <form action={markAllRead}>
-                <Button type="submit" variant="outline" size="sm">
-                  <CheckCheck />
-                  Mark all read
-                </Button>
-              </form>
-            ) : null}
           </>
         }
         count={
           isFiltered ? (
             <>
               <span className="tabular-nums">{total}</span> {total === 1 ? "result" : "results"}
-              {unreadCount > 0 ? (
-                <span className="text-muted-foreground/70"> · {unreadCount} unread</span>
-              ) : null}
+              {unreadCount > 0 ? <span className="text-muted-foreground/70"> · {unreadCount} unread</span> : null}
             </>
           ) : unreadCount > 0 ? (
             `${unreadCount} unread`
@@ -269,13 +257,7 @@ export default async function InboxPage({
         }
       />
 
-      <Pagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        hrefFor={hrefFor}
-        basePath="/inbox"
-      />
+      <Pagination page={page} pageSize={pageSize} total={total} hrefFor={hrefFor} basePath="/inbox" />
     </PageShell>
   );
 }
