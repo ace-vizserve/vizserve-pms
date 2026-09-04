@@ -324,53 +324,81 @@ export function TaskGroupTable({
           // parent, which reads as two tasks that happen to mention each other.
           // The indent is the relationship — it is how every reference draws it,
           // and it survives a screenshot where a word in a meta row does not.
-          <div className={cn("group/task", isChild && "pl-6")}>
+          //
+          // ⚠️ THE INDENT WAS BEING SPENT BEFORE IT WAS DRAWN, AND THE RESULT
+          // LOOKED LIKE NO INDENT AT ALL. The disclosure control sat in the same
+          // inline flow as the title, so a parent WITH subtasks pushed its own
+          // title about 26px right — and the child's "pl-6" was 24px. The two
+          // rows landed within a few pixels of each other, and they did so only
+          // on the rows that have children: precisely the rows where the nesting
+          // is the entire point. Reported as subtasks not looking indented.
+          //
+          // Two changes fix it, and both are about the LEADING SLOT below. It is
+          // a fixed width, so a title's position no longer depends on whether
+          // the task happens to have children; and it is present on every row,
+          // so the elbow lands exactly where the parent's chevron was, one step
+          // down. The indent is then a real 36px and is the only thing moving.
+          <div className={cn("group/task", isChild && "pl-9")}>
             <span className="flex min-w-0 items-center gap-2">
-              {/* The elbow. Decoration only — the row's meaning is carried by
-                  the indent and by the parent link in the meta line, so this is
-                  hidden from a screen reader rather than read out as a glyph.
-                  `--foreground-faint` is legal here for exactly that reason:
-                  it is 3.44:1 and NON-TEXT ONLY (§1.1). */}
-              {isChild ? (
-                <CornerDownRight
-                  aria-hidden
-                  className="-ml-4 size-3.5 shrink-0 text-foreground-faint"
-                />
-              ) : null}
-
               {/*
-                P7-65 — COLLAPSE A PARENT.
+                THE LEADING SLOT — 28px, always, on every row at either depth.
 
-                Only on a row that actually has children: `getCanExpand()` is
-                true for an empty `subRows`, so the count is what decides, and a
-                chevron opening onto nothing never renders.
+                RESERVED RATHER THAN CONDITIONAL, and that is the whole repair.
+                An as-needed control makes each title start wherever its own
+                subtask count happened to leave it, so a column of titles has no
+                left edge and an indent measured against it means nothing.
 
-                The count is IN THE LABEL, not beside it as a badge. This
-                control's whole job when collapsed is to say how much is hidden,
-                and a screen reader gets that from the same string the sighted
-                reader gets from the number.
+                The two occupants are mutually exclusive — a subtask cannot have
+                subtasks (one level, by trigger) — so they share the slot rather
+                than each reserving one and paying twice for the space.
               */}
-              {controls.canExpand && childCount > 0 ? (
-                <button
-                  type="button"
-                  onClick={controls.toggleExpanded}
-                  aria-expanded={controls.isExpanded}
-                  className="-ml-1 flex shrink-0 cursor-pointer items-center gap-0.5 rounded-sm text-2xs text-muted-foreground hover:text-foreground"
-                >
-                  <ChevronRight
-                    aria-hidden
-                    className={cn(
-                      "size-3.5 transition-transform",
-                      controls.isExpanded && "rotate-90",
-                    )}
-                  />
-                  <span className="tabular-nums">{childCount}</span>
-                  <span className="sr-only">
-                    {controls.isExpanded ? "Hide" : "Show"} {childCount}{" "}
-                    {childCount === 1 ? "subtask" : "subtasks"} of {task.title}
-                  </span>
-                </button>
-              ) : null}
+              <span className="flex w-7 shrink-0 items-center">
+                {/* The elbow. Decoration only — the row's meaning is carried by
+                    the indent and by the parent link in the meta line, so this is
+                    hidden from a screen reader rather than read out as a glyph.
+                    `--foreground-faint` is legal here for exactly that reason:
+                    it is 3.44:1 and NON-TEXT ONLY (§1.1).
+
+                    No negative margin any more: it used to pull the elbow back
+                    into the padding and spend most of the indent it marked. */}
+                {isChild ? (
+                  <CornerDownRight aria-hidden className="size-3.5 shrink-0 text-foreground-faint" />
+                ) : null}
+
+                {/*
+                  P7-65 — COLLAPSE A PARENT.
+
+                  Only on a row that actually has children: `getCanExpand()` is
+                  true for an empty `subRows`, so the count is what decides, and a
+                  chevron opening onto nothing never renders.
+
+                  The count is IN THE LABEL, not beside it as a badge. This
+                  control's whole job when collapsed is to say how much is hidden,
+                  and a screen reader gets that from the same string the sighted
+                  reader gets from the number.
+                */}
+                {controls.canExpand && childCount > 0 ? (
+                  <button
+                    type="button"
+                    onClick={controls.toggleExpanded}
+                    aria-expanded={controls.isExpanded}
+                    className="flex shrink-0 cursor-pointer items-center gap-0.5 rounded-sm text-2xs text-muted-foreground hover:text-foreground"
+                  >
+                    <ChevronRight
+                      aria-hidden
+                      className={cn(
+                        "size-3.5 transition-transform",
+                        controls.isExpanded && "rotate-90",
+                      )}
+                    />
+                    <span className="tabular-nums">{childCount}</span>
+                    <span className="sr-only">
+                      {controls.isExpanded ? "Hide" : "Show"} {childCount}{" "}
+                      {childCount === 1 ? "subtask" : "subtasks"} of {task.title}
+                    </span>
+                  </button>
+                ) : null}
+              </span>
 
               {/*
                 The stage, always visible and BEFORE the title — the shape the
