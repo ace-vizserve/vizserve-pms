@@ -256,7 +256,8 @@ export async function decideTimesheetWeek(
  */
 const taskSearchSchema = z.object({
   query: z.string().max(200).optional().nullable(),
-  // `YYYY-MM-DD`, inclusive, against the task's CREATED date.
+  // `YYYY-MM-DD`, inclusive, matched as an overlap against the task's own
+  // `start_date`..`due_date` window — see `loadLoggableTasks`.
   from: z.iso.date().optional().nullable(),
   to: z.iso.date().optional().nullable(),
   // A uuid, never a name — the options come from `loadLoggableTaskLists`, and

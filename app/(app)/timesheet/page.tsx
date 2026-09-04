@@ -378,6 +378,10 @@ export default async function TimesheetPage({
     // picker's search results, which never pass through this file, carry the
     // same shape.
     where: task.where,
+    // Carried for the same reason: the picker shows the window its date
+    // filter matches on, and both halves of the list must be able to.
+    start_date: task.start_date,
+    due_date: task.due_date,
   }));
 
   const previousWeek = addDays(monday, -7);

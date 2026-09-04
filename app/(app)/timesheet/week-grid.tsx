@@ -1,5 +1,6 @@
 "use client";
 
+import { toast } from "@/components/ui/toast";
 import {
   CalendarDays,
   Check,
@@ -15,13 +16,11 @@ import {
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { toast } from "@/components/ui/toast";
 
 import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
 import { TaskStatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Input } from "@/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -32,6 +31,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Segmented, SegmentedItem } from "@/components/ui/segmented";
@@ -51,6 +51,7 @@ import {
   formatCellDuration,
   overtimeGranted,
   parseCellDuration,
+  pickedTimesheetRowSchema,
   spanFrom,
   withDuration,
   withEnd,
@@ -71,6 +72,13 @@ export type PickableTask = {
   status: VizservePmsTaskStatus;
   /** "Department / List", already resolved. Empty when neither is readable. */
   where: string;
+  /**
+   * The task's own dates (P7-06), snake_case because that is how they leave
+   * `loadLoggableTasks` and the search action spreads its rows straight
+   * through. Optional: a task with neither date is ordinary.
+   */
+  start_date?: string | null;
+  due_date?: string | null;
 };
 
 export type CellEntry = {
@@ -113,10 +121,23 @@ function sum(entries: CellEntry[] | undefined): number {
 // an external store, and this is the API for one. The snapshots are cached per
 // key because `getSnapshot` must return the SAME array between notifications or
 // React re-renders forever.
+//
+// ⚠️ THE WHOLE TASK IS STORED, NOT ITS ID, AND THAT IS THE BUG THIS FIXES.
+// Ids alone meant the row had to be rebuilt by looking the id up in the
+// server's initial twenty — so a task reached through SEARCH added no row at
+// all: the id went in, the lookup missed, the row was silently dropped, and
+// the id then excluded that task from the picker for the rest of the session.
+// A task somebody could see and click became one they could neither add nor
+// find again. The picker already holds everything the row needs; keeping it is
+// what removes the lookup, and with it the only way this can fail.
+//
+// `:v2:` in the key retires the id-only payloads rather than parsing both:
+// they are shaped differently, one may already carry a wedged id, and this is
+// sessionStorage — the cost of dropping them is one tab's empty rows.
 // ---------------------------------------------------------------------------
 
-const NO_ROWS: string[] = [];
-const rowCache = new Map<string, string[]>();
+const NO_ROWS: PickableTask[] = [];
+const rowCache = new Map<string, PickableTask[]>();
 const rowListeners = new Set<() => void>();
 
 function subscribeToRows(onChange: () => void) {
@@ -126,16 +147,22 @@ function subscribeToRows(onChange: () => void) {
   };
 }
 
-function readRows(key: string): string[] {
+function readRows(key: string): PickableTask[] {
   const cached = rowCache.get(key);
   if (cached) return cached;
 
-  let rows: string[] = NO_ROWS;
+  let rows: PickableTask[] = NO_ROWS;
 
   try {
     const stored = window.sessionStorage.getItem(key);
     const parsed: unknown = stored ? JSON.parse(stored) : null;
-    if (Array.isArray(parsed)) rows = parsed.filter((id): id is string => typeof id === "string");
+    // Validated per entry, not trusted per array: one edited or half-written
+    // row should cost that row, not the week's other empty rows.
+    if (Array.isArray(parsed))
+      rows = parsed
+        .map((entry) => pickedTimesheetRowSchema.safeParse(entry))
+        .filter((result) => result.success)
+        .map((result) => result.data);
   } catch {
     // A corrupt key, private mode, an embedded webview. The week still reads;
     // only the empty rows are lost, and they are the cheapest thing here.
@@ -145,11 +172,16 @@ function readRows(key: string): string[] {
   return rows;
 }
 
-function writeRows(key: string, rows: string[]) {
-  rowCache.set(key, rows);
+function writeRows(key: string, rows: PickableTask[]) {
+  // Deduped on the way in. Nothing in the UI should be able to add the same
+  // task twice, but a duplicate here is a duplicate ROW, and two rows for one
+  // task writing into the same cell is not a state worth trusting a caller
+  // to avoid.
+  const unique = [...new Map(rows.map((task) => [task.id, task])).values()];
+  rowCache.set(key, unique);
 
   try {
-    window.sessionStorage.setItem(key, JSON.stringify(rows));
+    window.sessionStorage.setItem(key, JSON.stringify(unique));
   } catch {
     // Quota or a blocked store. The cache above still holds it for this visit.
   }
@@ -224,8 +256,8 @@ export function WeekGrid({
 }) {
   // The week is in the key, so navigating to another week reads that week's
   // rows rather than carrying this week's across.
-  const storageKey = `vizserve-pms:timesheet-rows:${monday}`;
-  const extraTaskIds = useSyncExternalStore(
+  const storageKey = `vizserve-pms:timesheet-rows:v2:${monday}`;
+  const extraTasks = useSyncExternalStore(
     subscribeToRows,
     () => readRows(storageKey),
     // The server has no sessionStorage. A constant here is what makes the first
@@ -233,15 +265,25 @@ export function WeekGrid({
     () => NO_ROWS,
   );
 
-  const remember = useCallback((next: string[]) => writeRows(storageKey, next), [storageKey]);
+  const remember = useCallback((next: PickableTask[]) => writeRows(storageKey, next), [storageKey]);
 
   const logged = new Set(rows.map((row) => row.taskId));
+
+  /**
+   * The server's twenty, used ONLY to refresh what is already stored.
+   *
+   * It used to be the source of the row itself, which is what made a searched
+   * task unaddable — anything outside these twenty resolved to nothing. A miss
+   * is now ordinary and harmless: the stored copy stands. A hit only means the
+   * title or status has been re-read since the row was added.
+   */
   const byId = new Map(tasks.map((task) => [task.id, task]));
 
-  const extraRows: TaskRow[] = extraTaskIds
-    .filter((id) => !logged.has(id))
-    .map((id) => byId.get(id))
-    .filter((task): task is PickableTask => Boolean(task))
+  const extraTaskIds = extraTasks.map((task) => task.id);
+
+  const extraRows: TaskRow[] = extraTasks
+    .filter((task) => !logged.has(task.id))
+    .map((task) => byId.get(task.id) ?? task)
     .map((task) => ({
       taskId: task.id,
       title: task.title,
@@ -271,11 +313,25 @@ export function WeekGrid({
    * as an empty row means a mistyped 8 can be retyped where it was typed.
    */
   const keepRow = useCallback(
-    (taskId: string) => {
-      if (extraTaskIds.includes(taskId)) return;
-      remember([...extraTaskIds, taskId]);
+    (row: TaskRow) => {
+      if (extraTasks.some((task) => task.id === row.taskId)) return;
+      // Rebuilt from the row rather than looked up, for the same reason the
+      // picker now stores the whole task: the row is right here, and a lookup
+      // that can miss is a row that can disappear.
+      remember([
+        ...extraTasks,
+        {
+          id: row.taskId,
+          title: row.title,
+          // Null only when the task has left this person's scope, and the row
+          // being kept is an EMPTY one — so the fallback is never the thing
+          // that gets rendered for long.
+          status: (row.status ?? "OPEN") as VizservePmsTaskStatus,
+          where: row.where,
+        },
+      ]);
     },
-    [extraTaskIds, remember],
+    [extraTasks, remember],
   );
 
   /**
@@ -560,7 +616,7 @@ export function WeekGrid({
                             variant="ghost"
                             size="icon-xs"
                             className="shrink-0"
-                            onClick={() => remember(extraTaskIds.filter((id) => id !== row.taskId))}>
+                            onClick={() => remember(extraTasks.filter((task) => task.id !== row.taskId))}>
                             <X />
                             <span className="sr-only">Take {row.title} off this week</span>
                           </Button>
@@ -577,7 +633,7 @@ export function WeekGrid({
                         entries={row.cells[day] ?? []}
                         future={day > today}
                         locked={locked}
-                        onEmptied={() => keepRow(row.taskId)}
+                        onEmptied={() => keepRow(row)}
                       />
                     ))}
 
@@ -644,7 +700,9 @@ export function WeekGrid({
                     // this week, so the exclusion has to travel with them.
                     excludeIds={[...logged, ...extraTaskIds]}
                     today={today}
-                    onAdd={(taskId) => remember([...extraTaskIds, taskId])}
+                    // THE TASK, not its id. Search results never reach this
+                    // component, so an id alone is a row it cannot build.
+                    onAdd={(task) => remember([...extraTasks, task])}
                     hasRows={allRows.length > 0}
                   />
                 </th>
@@ -1425,6 +1483,29 @@ const PRESETS = [
 type Preset = (typeof PRESETS)[number]["value"];
 
 /**
+ * The window the date filter matches against, said in one phrase.
+ *
+ * ⚠️ SHOWN BECAUSE THE FILTER IS OTHERWISE UNCHECKABLE. It reads
+ * `start_date`..`due_date` now, and a filter whose effect cannot be seen in
+ * the rows it returns is one people can only take on trust — which is how it
+ * went unnoticed that it had been reading `created_at` instead.
+ *
+ * `formatDate` and nothing else: `lib/dates.ts` is the whole date library
+ * here. A task with neither date says nothing rather than an empty dash — it
+ * is also the task that no date range will match, and the absence is the
+ * honest form of that.
+ */
+function taskDates(task: PickableTask): string | null {
+  const start = task.start_date ? formatDate(task.start_date) : null;
+  const due = task.due_date ? formatDate(task.due_date) : null;
+
+  if (start && due) return start === due ? due : `${start} – ${due}`;
+  if (due) return `Due ${due}`;
+  if (start) return `From ${start}`;
+  return null;
+}
+
+/**
  * The sentinel for "no list chosen".
  *
  * A `Select` cannot hold `null` — Base UI needs a string — so the absence has
@@ -1456,14 +1537,18 @@ function AddTaskRow({
   onAdd,
   hasRows,
 }: {
-  /** The initial twenty. Shown whenever nothing is filtered. */
+  /**
+   * The initial twenty. Shown whenever nothing is filtered — and EMPTY is a
+   * normal state, not a dead end: it means they are all on the week already,
+   * and search still reaches everything older.
+   */
   tasks: PickableTask[];
   taskLists: { id: string; name: string }[];
   /** Already on this week — filtered out of both the initial list and results. */
   excludeIds: string[];
   /** `YYYY-MM-DD` in app time, from the server. The week presets are built off it. */
   today: string;
-  onAdd: (taskId: string) => void;
+  onAdd: (task: PickableTask) => void;
   hasRows: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -1596,35 +1681,33 @@ function AddTaskRow({
    */
   const shown = (filtered ? (results ?? []) : tasks).filter((task) => !excludeIds.includes(task.id));
 
-  // Two ways to be empty, two different next steps — a dead end that only says
-  // "nothing here" is the thing the design system calls out.
-  if (tasks.length === 0) {
+  /*
+   * ONE way to be empty that is genuinely a dead end: this person is on no
+   * task at all, so there is nothing to search FOR.
+   *
+   * ⚠️ IT USED TO FIRE ON `tasks.length === 0` ALONE, AND THAT TOOK THE
+   * SEARCH BOX WITH IT. `tasks` is `pickable`, which shrinks as rows are
+   * added — so once the initial twenty were all on the week the picker
+   * replaced itself with a sentence, and every task older than those twenty
+   * became unreachable. `hasRows` is what tells the two situations apart; the
+   * "already on this week" case is now the CommandEmpty below, which keeps
+   * the search that can still answer it.
+   */
+  if (tasks.length === 0 && !hasRows) {
     return (
       <span className="text-xs text-muted-foreground">
-        {hasRows ? (
-          <>
-            Every task you can log against is already on this week. Take one off to re-add it, or{" "}
-            <Link href="/tasks" className="font-medium text-primary hover:underline">
-              open your tasks
-            </Link>
-            .
-          </>
-        ) : (
-          <>
-            {/* ⚠️ "PIC OR QA REVIEWER" WAS WRONG AND WAS THE BUG PEOPLE
-                REPORTED. P7-13 made every assignee equal — a join-table row
-                confers the same right to log time as being the accountable
-                name. This sentence still described the pre-P7-13 rule, so
-                somebody who WAS an assignee and found an empty picker was told,
-                confidently and falsely, that they had to be made PIC. */}
-            You are not on any task yet, so there is nothing to log against. Being an assignee is enough — you do not
-            have to be the person it is filed under. Ask your team leader to add you, or{" "}
-            <Link href="/tasks" className="font-medium text-primary hover:underline">
-              see what is on your queue
-            </Link>
-            .
-          </>
-        )}
+        {/* ⚠️ "PIC OR QA REVIEWER" WAS WRONG AND WAS THE BUG PEOPLE REPORTED.
+            P7-13 made every assignee equal — a join-table row confers the same
+            right to log time as being the accountable name. This sentence still
+            described the pre-P7-13 rule, so somebody who WAS an assignee and
+            found an empty picker was told, confidently and falsely, that they
+            had to be made PIC. */}
+        You are not on any task yet, so there is nothing to log against. Being an assignee is enough — you do not
+        have to be the person it is filed under. Ask your team leader to add you, or{" "}
+        <Link href="/tasks" className="font-medium text-primary hover:underline">
+          see what is on your queue
+        </Link>
+        .
       </span>
     );
   }
@@ -1711,9 +1794,9 @@ function AddTaskRow({
                 </div>
 
                 <div className="space-y-1.5">
-                  <Label className="text-2xs tracking-wide text-muted-foreground uppercase">Created</Label>
+                  <Label className="text-2xs tracking-wide text-muted-foreground uppercase">Dates</Label>
                   <Segmented
-                    aria-label="Filter by when the task was created"
+                    aria-label="Filter by when the task is scheduled"
                     value={preset}
                     onValueChange={(value) => applyPreset(value as Preset)}
                     className="w-full">
@@ -1819,7 +1902,7 @@ function AddTaskRow({
           {activeFilters > 0 ? (
             <p className="px-2 pt-2 text-2xs text-muted-foreground">
               {preset !== "all"
-                ? `Created ${PRESETS.find((option) => option.value === preset)?.label.toLowerCase()}`
+                ? `Active ${PRESETS.find((option) => option.value === preset)?.label.toLowerCase()}`
                 : null}
               {preset !== "all" && listId ? " · " : null}
               {listId ? listItems[listId] : null}
@@ -1836,8 +1919,8 @@ function AddTaskRow({
             ) : shown.length === 0 ? (
               <CommandEmpty>
                 {filtered
-                  ? "No task you are on matches those filters. Widen the dates, or clear them to see your latest tasks."
-                  : "Every task you can log against is already on this week."}
+                  ? "No task you are on is scheduled in that range. A task with no start or due date is not in any range — widen the dates, or clear them to see your latest tasks."
+                  : "Every one of your 20 most recent tasks is already on this week. Search by name to reach an older one."}
               </CommandEmpty>
             ) : null}
 
@@ -1849,7 +1932,10 @@ function AddTaskRow({
                 key={task.id}
                 value={task.id}
                 onSelect={() => {
-                  onAdd(task.id);
+                  // THE WHOLE TASK. An id alone cannot be turned back into a
+                  // row by the grid — it only knows the twenty the server
+                  // sent, and a searched task is by definition not among them.
+                  onAdd(task);
                   setOpen(false);
                 }}>
                 <span className="flex min-w-0 flex-col gap-0.5">
@@ -1857,6 +1943,9 @@ function AddTaskRow({
                   <span className="flex min-w-0 items-center gap-2">
                     <TaskStatusBadge status={task.status} className="h-5 px-1.5" />
                     {task.where ? <span className="truncate text-xs text-muted-foreground">{task.where}</span> : null}
+                    {taskDates(task) ? (
+                      <span className="shrink-0 text-xs text-muted-foreground tabular-nums">{taskDates(task)}</span>
+                    ) : null}
                   </span>
                 </span>
               </CommandItem>

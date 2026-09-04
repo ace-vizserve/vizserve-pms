@@ -48,6 +48,15 @@ export type LoggableTask = {
    */
   where: string;
   created_at: string;
+  /**
+   * The task's own dates — nullable, both of them (P7-06).
+   *
+   * Carried so the picker can SHOW what it now filters on. A date filter
+   * whose effect is invisible in the rows it returns is one nobody can
+   * check, and this one had been filtering the wrong column unnoticed.
+   */
+  start_date: string | null;
+  due_date: string | null;
 };
 
 /** What the picker shows before anybody types. Newest first. */
@@ -59,7 +68,10 @@ export const LOGGABLE_SEARCH_LIMIT = 50;
 export type LoggableTaskFilters = {
   /** Matched against the title. */
   query?: string | null;
-  /** `YYYY-MM-DD`, inclusive, against the task's CREATED date. */
+  /**
+   * `YYYY-MM-DD`, inclusive, matched as an OVERLAP against the task's own
+   * `start_date`..`due_date` window — NOT against when the row was created.
+   */
   from?: string | null;
   to?: string | null;
   /** One list, from `loadLoggableTaskLists` — never free text. */
@@ -76,13 +88,16 @@ export type LoggableTaskFilters = {
  * be named or PostgREST refuses the whole query.)
  */
 const TASK_COLUMNS =
-  "id, title, status, created_at, vizserve_pms_departments(name), vizserve_pms_lists(name)";
+  "id, title, status, created_at, start_date, due_date, " +
+  "vizserve_pms_departments(name), vizserve_pms_lists(name)";
 
 type TaskRow = {
   id: string;
   title: string;
   status: string;
   created_at: string;
+  start_date: string | null;
+  due_date: string | null;
   vizserve_pms_departments: { name: string } | null;
   vizserve_pms_lists: { name: string } | null;
 };
@@ -99,6 +114,8 @@ function toLoggable(row: TaskRow): LoggableTask {
       .filter(Boolean)
       .join(" / "),
     created_at: row.created_at,
+    start_date: row.start_date,
+    due_date: row.due_date,
   };
 }
 
@@ -133,7 +150,40 @@ export async function loadLoggableTasks(
   // stripped rather than escaped — nobody searches for one, and a search box
   // must not be able to rewrite the query around it.
   const safeTerm = term ? term.replace(/[,()]/g, " ") : null;
-  const to = filters.to ? `${filters.to}T23:59:59.999Z` : null;
+  /*
+   * ⚠️ THE TASK'S OWN DATES, NOT WHEN THE ROW WAS MADE.
+   *
+   * `created_at` was here and was wrong twice over. Somebody narrowing this
+   * picker to a week means "the work I was on that week", which is the
+   * task's `start_date`..`due_date` window — and every task carried over
+   * from ClickUp was inserted WITHOUT an explicit `created_at` (import_03,
+   * import_04), so they all share the import's timestamp and every range
+   * returned all of them or none. The filter looked broken because, for the
+   * only data anybody has, it was.
+   *
+   * OVERLAP, NOT CONTAINMENT. A task that started last week and is due next
+   * week IS active this week, and it is exactly the task somebody is trying
+   * to log against. So the range is expressed as two independent bounds,
+   * each of which may be absent on its own:
+   *
+   *   from → the task must not END before it
+   *   to   → the task must not START after it
+   *
+   * Each bound falls back to the other column when its own is null: a task
+   * with only a due date both starts and ends on that date. A task with
+   * NEITHER date matches no range at all and drops out — a date filter that
+   * returned undated rows would not be a date filter.
+   *
+   * Both columns are `date`, so there is no midnight-vs-end-of-day trap and
+   * no `T23:59:59.999Z` to append. That suffix was correct for a timestamptz
+   * and would silently break the comparison here.
+   */
+  const notEndedBefore = filters.from
+    ? `due_date.gte.${filters.from},and(due_date.is.null,start_date.gte.${filters.from})`
+    : null;
+  const notStartedAfter = filters.to
+    ? `start_date.lte.${filters.to},and(start_date.is.null,due_date.lte.${filters.to})`
+    : null;
 
   /*
    * ⚠️ THE FILTERS ARE SPELLED OUT TWICE, ONCE PER HALF, and a shared helper
@@ -155,11 +205,11 @@ export async function loadLoggableTasks(
 
   if (safeTerm) direct = direct.ilike("title", `%${safeTerm}%`);
   if (filters.listId) direct = direct.eq("list_id", filters.listId);
-  // The CREATED date, and `to` covers the whole day: `created_at` is a
-  // timestamptz, so `lte('2026-09-04')` means midnight and would silently drop
-  // everything made that day.
-  if (filters.from) direct = direct.gte("created_at", filters.from);
-  if (to) direct = direct.lte("created_at", to);
+  // A SECOND AND THIRD `or=`, which is deliberate and is why this composes
+  // with the assignee clause above rather than replacing it: PostgREST ANDs
+  // repeated parameters, and supabase-js APPENDS them.
+  if (notEndedBefore) direct = direct.or(notEndedBefore);
+  if (notStartedAfter) direct = direct.or(notStartedAfter);
 
   /*
    * The extra assignees, reached THROUGH the join table so the request carries
@@ -177,8 +227,13 @@ export async function loadLoggableTasks(
 
   if (safeTerm) joined = joined.ilike("vizserve_pms_tasks.title", `%${safeTerm}%`);
   if (filters.listId) joined = joined.eq("vizserve_pms_tasks.list_id", filters.listId);
-  if (filters.from) joined = joined.gte("vizserve_pms_tasks.created_at", filters.from);
-  if (to) joined = joined.lte("vizserve_pms_tasks.created_at", to);
+  // `referencedTable` rather than a prefixed column: an `or` on an embed is
+  // `vizserve_pms_tasks.or=(…)`, and the columns INSIDE it are already
+  // relative to that table.
+  if (notEndedBefore)
+    joined = joined.or(notEndedBefore, { referencedTable: "vizserve_pms_tasks" });
+  if (notStartedAfter)
+    joined = joined.or(notStartedAfter, { referencedTable: "vizserve_pms_tasks" });
 
   /*
    * Both in parallel, each capped at `limit` on its own.

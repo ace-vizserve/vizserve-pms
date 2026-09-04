@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { formatAppTime, STANDARD_DAY_MINUTES } from "@/lib/dates";
+import { taskStatusSchema } from "@/lib/schemas/tasks";
 
 /**
  * PHASE 6 CONTRACT — timesheet entries (D3a, R11).
@@ -931,3 +932,33 @@ export function breakAdjustedPunches({
 
   return adjusted;
 }
+
+/**
+ * P6-03 — a row put on the week before anything has been logged against it.
+ *
+ * It lives in sessionStorage rather than a table, because an empty row is not
+ * a fact and storing one would mean a migration to remember that somebody
+ * opened a dropdown. That makes it UNTRUSTED INPUT on the way back in: JSON
+ * anyone can edit, rendered as a row and used as a `task_id` on write.
+ *
+ * ⚠️ THE WHOLE TASK, NOT ITS ID, AND THE ID-ONLY VERSION IS THE BUG THIS
+ * REPLACES. The grid could only turn an id back into a row by looking it up
+ * in the twenty tasks the server had sent — so a task found by SEARCH added
+ * nothing at all: the id was stored, the lookup missed, the row was silently
+ * dropped, and the stored id then hid that task from the picker for the rest
+ * of the session. Carrying the fields the row needs is what removes the
+ * lookup, and the lookup was the only thing that could fail.
+ */
+export const pickedTimesheetRowSchema = z.object({
+  id: z.uuid(),
+  title: z.string(),
+  status: taskStatusSchema,
+  /** "Department / List", already resolved server-side. May be empty. */
+  where: z.string(),
+  /** The task's own window — what the picker's date filter matches on. */
+  start_date: z.iso.date().nullish(),
+  due_date: z.iso.date().nullish(),
+});
+
+export type PickedTimesheetRow = z.infer<typeof pickedTimesheetRowSchema>;
+

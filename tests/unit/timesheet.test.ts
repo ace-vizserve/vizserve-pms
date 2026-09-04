@@ -13,6 +13,7 @@ import {
   minutesBetween,
   nearestQuarterHour,
   parseCellDuration,
+  pickedTimesheetRowSchema,
   spanFrom,
   spellDuration,
   withDuration,
@@ -854,3 +855,72 @@ describe("breakAdjustedPunches — P8-07, comparing like with like", () => {
     expect(result.complete).toBe(true);
   });
 });
+
+/**
+ * P6-03 — the row a person puts on the week before logging anything.
+ *
+ * ⚠️ THIS SCHEMA EXISTS BECAUSE THE OLD SHAPE WAS AN ID. The grid could only
+ * turn an id back into a visible row by looking it up among the twenty tasks
+ * the server had sent with the page — so a task found through SEARCH added
+ * NOTHING: the id was stored, the lookup missed, the row was dropped without
+ * a word, and the stored id then excluded that task from the picker for the
+ * rest of the session. It was reported as a task that vanished when clicked.
+ *
+ * What is tested here is the property that makes that impossible: a stored
+ * row carries everything the grid needs to RENDER it, so nothing has to be
+ * looked up and nothing can be missing.
+ */
+describe("pickedTimesheetRowSchema — the row survives without a lookup", () => {
+  const task = {
+    id: "3f1a6b2c-8d4e-4f5a-9b0c-1d2e3f4a5b6c",
+    title: "Rebrand deck",
+    status: "ONGOING",
+    where: "Creative / Collateral",
+    start_date: "2026-08-31",
+    due_date: "2026-09-11",
+  };
+
+  it("keeps every field the grid renders a row from", () => {
+    const parsed = pickedTimesheetRowSchema.parse(task);
+
+    // Title, status and where — not just the id. A row built from these needs
+    // no second source, which is the whole point.
+    expect(parsed).toEqual(task);
+  });
+
+  it("accepts a task with no dates at all", () => {
+    // Ordinary: `start_date` and `due_date` are both nullable columns, and a
+    // task with neither is still a task somebody logs hours against. It is
+    // only unreachable through the DATE filter, never through search.
+    const undated = { ...task, start_date: null, due_date: null };
+
+    expect(pickedTimesheetRowSchema.safeParse(undated).success).toBe(true);
+    // Absent, rather than null, is the same answer — the page and the search
+    // action build this shape from two different places.
+    expect(
+      pickedTimesheetRowSchema.safeParse({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        where: task.where,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("rejects the id-only shape this replaced", () => {
+    // The legacy payload was a bare string per row. It must not parse — the
+    // reader drops what fails, and dropping a legacy entry is exactly right:
+    // it is an empty row in sessionStorage, and it may be one of the ids the
+    // old bug wedged in there.
+    expect(pickedTimesheetRowSchema.safeParse(task.id).success).toBe(false);
+  });
+
+  it("rejects a half-written or edited row", () => {
+    // One bad entry costs that entry. It is user-editable JSON, and a row
+    // with no title renders as a nameless line somebody cannot act on.
+    expect(pickedTimesheetRowSchema.safeParse({ ...task, title: undefined }).success).toBe(false);
+    expect(pickedTimesheetRowSchema.safeParse({ ...task, id: "not-a-uuid" }).success).toBe(false);
+    expect(pickedTimesheetRowSchema.safeParse({ ...task, status: "ALMOST" }).success).toBe(false);
+  });
+});
+
