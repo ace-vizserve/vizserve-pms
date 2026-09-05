@@ -55,7 +55,18 @@ let selects: string[] = [];
 function makeClient() {
   return {
     auth: {
-      getUser: async () => ({ data: { user: config.user } }),
+      /*
+       * ⚠️ `getClaims`, not `getUser`. `resolveAuth` verifies the JWT locally
+       * rather than asking the Auth server to resolve it — same guarantee, no
+       * network — and `claims.sub` is the id that `user.id` used to be.
+       *
+       * The fixture still carries a `user` so these cases read the way they
+       * always have; only the shape handed back changed.
+       */
+      getClaims: async () =>
+        config.user
+          ? { data: { claims: { sub: config.user.id } }, error: null }
+          : { data: null, error: null },
     },
     from(table: string) {
       return {

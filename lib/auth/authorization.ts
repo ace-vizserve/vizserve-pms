@@ -178,8 +178,22 @@ export function deptAdminColumnMissing(error: { code?: string; message?: string 
 /**
  * Resolves the caller once per request.
  *
- * `getUser()` rather than `getSession()` — getSession reads the cookie without
- * revalidating it, which is fine for rendering and not fine for a decision.
+ * ⚠️ NOT `getSession()`, WHICH READS THE COOKIE AND BELIEVES IT. That is fine
+ * for rendering and never fine for a decision, and this function is the input
+ * to every decision in the app.
+ *
+ * `getClaims()` rather than `getUser()` — the same guarantee for no network.
+ * `getUser()` asked the Auth server to resolve the token on every render, 160
+ * to 400 ms against this project, and the middleware had already paid the same
+ * cost moments earlier on the same request: two blocking round trips before a
+ * page began its own queries. `getClaims()` verifies the JWT signature locally
+ * with WebCrypto against the project's published JWKS, which is why Supabase
+ * documents it as safe to trust — the signature is checked every time.
+ *
+ * ⚠️ The local path needs ASYMMETRIC signing keys; this project publishes an
+ * ES256 key. On a symmetric secret `getClaims()` quietly falls back to a
+ * network call — still correct, just no longer free. See the longer note in
+ * `utils/supabase/middleware.ts`.
  *
  * Returns null for: no session, no profile row, or a deactivated profile.
  * Deactivation is a real gate, not a UI flag.
@@ -188,16 +202,19 @@ export const resolveAuth = cache(
   async (): Promise<{ context: AuthContext } | { context: null; denial: AuthDenial }> => {
     const supabase = await createClient();
 
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    const { data: verified } = await supabase.auth.getClaims();
 
-    if (!user) return { context: null, denial: "no_session" };
+    // `sub` IS the user id — the same value `getUser()` returned as `user.id`,
+    // read out of the token this call has just verified rather than out of a
+    // response the Auth server composed. Everything downstream is unchanged.
+    const userId = verified?.claims.sub ?? null;
+
+    if (!userId) return { context: null, denial: "no_session" };
 
     const attempt = await supabase
       .from("vizserve_pms_users")
       .select(`${PROFILE_COLUMNS}, is_dept_admin`)
-      .eq("id", user.id)
+      .eq("id", userId)
       .maybeSingle();
 
     let profile: (typeof attempt)["data"] = attempt.data;
@@ -219,7 +236,7 @@ export const resolveAuth = cache(
       const degraded = await supabase
         .from("vizserve_pms_users")
         .select(PROFILE_COLUMNS)
-        .eq("id", user.id)
+        .eq("id", userId)
         .maybeSingle();
 
       // Still `null` for a genuinely missing row — the fallback re-asks the same
@@ -258,7 +275,7 @@ export const resolveAuth = cache(
     const { data: managed } = await supabase
       .from("vizserve_pms_user_managed_departments")
       .select("department_id")
-      .eq("user_id", user.id);
+      .eq("user_id", userId);
 
     return {
       context: {
