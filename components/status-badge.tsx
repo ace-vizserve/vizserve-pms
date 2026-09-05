@@ -427,6 +427,13 @@ const INTERNAL_STATUS: Record<VizservePmsInternalRequestStatus, { label: string;
   PENDING_REVIEW: { label: "Pending", tone: "warning" },
   APPROVED: { label: "Approved", tone: "success" },
   REJECTED: { label: "Rejected", tone: "danger" },
+  /**
+   * P9-02. NEUTRAL, not danger — the request did not fail, its author took it
+   * back before anybody had answered. Colouring it like a rejection would say
+   * the opposite of what happened to the one person most likely to be looking
+   * at it, and this is precisely the distinction the status exists to draw.
+   */
+  WITHDRAWN: { label: "Withdrawn", tone: "neutral" },
 };
 
 export function InternalStatusBadge({

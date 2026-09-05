@@ -143,6 +143,16 @@ export type TaskLookups = {
   extraAssignees: Record<string, { id: string; full_name: string }[]>;
   closedOn: Record<string, string>;
   tracked: Record<string, number>;
+  /**
+   * P9-01 — who is holding this task today, while its owner is on leave.
+   *
+   * Derived from the approved leave dates by
+   * `vizserve_pms_active_task_coverage`, so it appears on the first morning of
+   * the leave and is gone the day after the last with nothing run. Ordinarily
+   * empty. `assignee_id` is never touched — the person on leave still owns the
+   * task, and this says who is minding it.
+   */
+  coverage: Record<string, { relieverId: string; until: string }>;
   byDepartment: Record<string, { id: string; full_name: string }[]>;
 };
 
@@ -165,6 +175,9 @@ export type TaskLookups = {
 const TASK_MENU_COLUMNS: HideableColumn[] = [
   { key: "progress", header: "Progress", hideable: true },
   { key: "assignee", header: "Assignee", hideable: true },
+  // P9-01. Beside Assignee, which is the column it qualifies: the person named
+  // there is away and this says who is minding their work.
+  { key: "coverage", header: "Cover", hideable: true },
   { key: "start", header: "Start date", hideable: true },
   { key: "closed", header: "Date closed", hideable: true },
   { key: "estimate", header: "Time estimate", hideable: true },
@@ -544,6 +557,30 @@ export function TaskGroupTable({
           showPic={task.request_id !== null}
         />
       ),
+    },
+    {
+      key: "coverage",
+      header: "Cover",
+      hideable: true,
+      className: "hidden lg:table-cell text-muted-foreground",
+      /*
+       * P9-01. Its own column rather than a badge tucked under the assignee
+       * name: this is empty on almost every row almost all of the time, and a
+       * marker that only sometimes appears inside another cell is one people
+       * stop seeing. A column reads as blank until it does not.
+       *
+       * The label is carried, never a colour or an icon alone.
+       */
+      cell: (task) => {
+        const cover = get(lookups.coverage, task.id);
+        if (!cover) return <span className="text-muted-foreground">—</span>;
+        return (
+          <span className="text-2xs">
+            {get(lookups.nameOf, cover.relieverId) ?? "A colleague"}
+            <span className="block text-muted-foreground">to {formatDate(cover.until)}</span>
+          </span>
+        );
+      },
     },
     {
       key: "priority",

@@ -1,0 +1,50 @@
+-- P9-02 — add `WITHDRAWN` to the internal request status enum. NOTHING ELSE.
+--
+-- This file exists on its own for the same reason p7_03/p7_04, p7_07/p7_08 and
+-- p8_01a/p8_01b do, and it is the fourth time this project has paid it:
+--
+--     unsafe use of new value "WITHDRAWN" of enum type
+--     vizserve_pms_internal_request_status
+--
+-- Postgres forbids using a new enum value in the transaction that adds it. The
+-- function that writes it is 20260905092000_p9_03_submit_and_withdraw.sql,
+-- which MUST be run afterwards as a separate statement.
+--
+-- WHAT IT MEANS: the submitter retracted the request before anybody decided on
+-- it. Distinct from REJECTED, and the distinction is the entire point — a
+-- rejection is somebody else's judgement about your leave, and today the only
+-- way to undo a mistyped request is to ask a lead to reject it, which writes a
+-- refusal into the record for a request nobody ever actually refused.
+--
+-- Withdrawal is only ever legal while NO decision exists, so there is no
+-- pending approver whose work this erases.
+--
+-- AFTER 'REJECTED', at the end of the list. Nothing compares these three with
+-- `>=` today, unlike the role enum where declaration order is load-bearing
+-- (p8_01a) and the day-half enum where it is the single-day rule (p7_16). It
+-- goes last anyway, because appending is the only position that cannot
+-- reorder anything.
+--
+-- ---------------------------------------------------------------------------
+-- WHY NOTHING ELSE HAS TO CHANGE FOR THIS VALUE TO BE SAFE, verified before
+-- writing it rather than assumed:
+--
+--   * Every leave reader filters `status = 'APPROVED'` — p7_10 the calendar,
+--     p7_33 balances, p7_34 and p7_53 the report, p7_42 calendar details, p8_05
+--     the weekly minimum. All POSITIVE tests, so a withdrawn request drops out
+--     of every one of them with no edit. A single `status <> 'REJECTED'`
+--     anywhere would have silently counted withdrawn leave as taken; there is
+--     none.
+--
+--   * The `..._decision_reason` CHECK is `status <> 'REJECTED' or reason
+--     present`. WITHDRAWN is not REJECTED, so it satisfies the check without a
+--     reason — which is right: a withdrawal is not a refusal and owes nobody an
+--     explanation.
+--
+--   * `vizserve_pms_decide_internal_request` refuses anything not in
+--     PENDING_REVIEW, so a withdrawn request cannot then be approved.
+-- ---------------------------------------------------------------------------
+alter type vizserve_pms_internal_request_status add value if not exists 'WITHDRAWN' after 'REJECTED';
+
+-- STOP HERE. Run 20260905092000_p9_03_submit_and_withdraw.sql next, as a
+-- separate statement, in a separate transaction.

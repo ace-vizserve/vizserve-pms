@@ -107,6 +107,11 @@ export async function submitInternalRequest(input: unknown): Promise<ActionResul
     // a request that has no days, and the function coerces them anyway.
     p_start_half: value.request_type === "LEAVE" ? value.start_half : null,
     p_end_half: value.request_type === "LEAVE" ? value.end_half : null,
+    // P9-01. Sent as sent; the function decides whether they were needed,
+    // ignores them for a leave type that wants none, and re-checks every
+    // person and every task. Nothing narrowed here is trusted server-side.
+    p_relievers: value.request_type === "LEAVE" ? value.relievers : null,
+    p_turnover_confirmed: value.request_type === "LEAVE" ? value.turnover_confirmed : false,
   });
 
   if (error) return { ok: false, error: readableError(error) };
@@ -155,4 +160,42 @@ export async function decideInternalRequest(
   dispatchPendingEmailsInBackground();
 
   return { ok: true, data: { status: result.status, dtrEntryId: result.dtr_entry_id } };
+}
+
+// ---------------------------------------------------------------------------
+// P9-03 — withdraw
+// ---------------------------------------------------------------------------
+
+/**
+ * The submitter takes their own request back.
+ *
+ * Until P9-03 there was no third export in this file and no write path of any
+ * kind for a requester: `vizserve_pms_internal_requests` carries a SELECT policy
+ * and nothing else, so the only way to undo a mistyped leave request was to ask
+ * a lead to REJECT it — which writes a refusal into the permanent record for
+ * something nobody actually refused, and which Phase 6 will report as one.
+ *
+ * Every rule lives in `vizserve_pms_withdraw_internal_request`: you must be the
+ * requester, it must still be pending, and nobody may have answered it yet —
+ * including a reliever, whose answer lives on their own row rather than in
+ * `vizserve_pms_approvals`. As with the two actions above, none of that is
+ * re-asked here; a check in this file would be a second place for it to drift.
+ */
+export async function withdrawInternalRequest(
+  requestId: string,
+): Promise<ActionResult<{ status: string }>> {
+  await requireAuthContextOrThrow();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("vizserve_pms_withdraw_internal_request", {
+    p_id: requestId,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  refresh(requestId);
+  // Whoever it was waiting on was told inside the function.
+  dispatchPendingEmailsInBackground();
+
+  return { ok: true, data: data as unknown as { status: string } };
 }

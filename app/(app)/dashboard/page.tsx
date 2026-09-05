@@ -111,7 +111,7 @@ export default async function DashboardPage() {
     // Three queues, not one — see `countWaitingOnYou`. This tile counted client
     // requests alone until 18 Aug 2026, so a lead with a full internal queue
     // and no client work was told they had nothing to do.
-    countWaitingOnYou(supabase, context.userId, isApprover),
+    countWaitingOnYou(supabase, context, isApprover),
 
     supabase
       .from("vizserve_pms_notifications")
@@ -218,7 +218,7 @@ export default async function DashboardPage() {
     // I2's approval rows. The SAME function `/` uses, so the two pages cannot
     // disagree about what is in somebody's queue — which they already had once,
     // when each counted it inline.
-    listWaitingOnYou(supabase, context.userId, isApprover),
+    listWaitingOnYou(supabase, context, isApprover),
 
     /*
      * P8-05 — what this week was actually supposed to come to, for THIS person.

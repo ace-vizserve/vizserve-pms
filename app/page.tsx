@@ -121,7 +121,7 @@ export default async function DashboardPage({
      * policy through `vizserve_pms_manages_department`, and restating it would
      * imply the policy is optional.
      */
-    listWaitingOnYou(supabase, context.userId, isApprover, 5),
+    listWaitingOnYou(supabase, context, isApprover, 5),
 
     supabase
       .from("vizserve_pms_notifications")

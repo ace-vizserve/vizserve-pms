@@ -26,7 +26,7 @@ import {
 
 import { EmptyState } from "@/components/empty-state";
 import { loadPendingRequests } from "@/lib/pending-requests-server";
-import { fetchJoinedTaskIds, mineFilter } from "@/lib/tasks-server";
+import { MINE_COLUMN } from "@/lib/tasks-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
@@ -129,12 +129,19 @@ export default async function TasksPage({
   const params = await searchParams;
   const supabase = await createClient();
 
-  /**
-   * P7-13 / P7-43 — the tasks this person is on without being named in
-   * `assignee_id`. Needed twice below: once to widen "Mine", once by `seat()`
-   * to decide whether to draw the controls. `cache()`d, so this is one query.
+  /*
+   * ⚠️ P9-05 REMOVED A QUERY FROM THIS PAGE, and the deletion is the point.
+   *
+   * `fetchJoinedTaskIds` was read here for one reason: to spread every joined
+   * task id into the "Mine" filter. That is what produced a 16,542-character
+   * URL for a user with 444 of them and made `fetch` fail with no status code,
+   * which `data ?? []` then rendered as an empty board.
+   *
+   * "Mine" is the `is_mine` computed column now, answered in Postgres. The
+   * per-row membership this page draws controls from comes from
+   * `lookups.extraAssignees`, which it already fetches for the assignee cell —
+   * so nothing here needs the id list at all.
    */
-  const joinedTaskIds = await fetchJoinedTaskIds(context.userId);
 
   const view = params.view === "mine" || params.view === "qa" ? params.view : "all";
 
@@ -239,10 +246,19 @@ export default async function TasksPage({
   if (priorityFilter) query = query.eq("priority", priorityFilter);
   if (kind === "client") query = query.not("request_id", "is", null);
   if (kind === "internal") query = query.is("request_id", null);
-  // P7-43. "Mine" is the accountable name PLUS, on internal tasks only, being
-  // on the task at all — internal work has no person in charge, so membership
-  // is the whole of the claim. Client tasks keep the column as the answer.
-  if (view === "mine") query = query.or(mineFilter(context.userId, joinedTaskIds));
+  /*
+   * P7-43 semantics, P9-05 mechanism. "Mine" is the accountable name PLUS, on
+   * internal tasks only, being on the task at all — internal work has no person
+   * in charge, so membership is the whole of the claim.
+   *
+   * ⚠️ A COMPUTED COLUMN, not a filter assembled here. This was
+   * `.or(mineFilter(userId, joinedTaskIds))`, which put every joined task id in
+   * the URL — 16,542 characters for a user with 444 of them, and `fetch` failed
+   * with no status code. `data ?? []` below turned that into an empty board.
+   * `is_mine` answers the same question in Postgres and sends nothing but a
+   * boolean, so this query keeps its six filters, its sort and its tie-break.
+   */
+  if (view === "mine") query = query.eq(MINE_COLUMN, true);
   // P3-08 — the QA queue is a view of this list, not a separate screen with a
   // separate set of rules that can drift from it.
   if (view === "qa") {
@@ -298,6 +314,7 @@ export default async function TasksPage({
     { data: commentRows },
     { data: childRows },
     { data: trackedRows },
+    { data: coverageRows },
     { data: assigneeRows },
     { data: closedRows },
   ] = taskIds.length
@@ -344,6 +361,27 @@ export default async function TasksPage({
         supabase.rpc("vizserve_pms_task_time_tracked", { p_task_ids: taskIds }),
 
         /*
+         * P9-01 — who is holding which of these while somebody is away.
+         *
+         * `vizserve_pms_active_task_coverage` already filters to APPROVED leave
+         * whose dates contain today in Manila, so this is a lookup rather than a
+         * date calculation, and it is scoped to the ids on screen.
+         *
+         * ⚠️ ON THE LIST AND NOT ONLY THE DETAIL. "The person whose name is on
+         * this row is away until Friday" is exactly the fact somebody scanning a
+         * board needs, and it is the one place they will not think to open the
+         * task to find out. Ordinarily this returns nothing at all.
+         *
+         * `security_invoker`, so a reader who cannot see the leave request
+         * behind it gets no row — which is right for a request whose reason they
+         * have no business reading.
+         */
+        supabase
+          .from("vizserve_pms_active_task_coverage")
+          .select("task_id, reliever_id, end_date")
+          .in("task_id", taskIds),
+
+        /*
          * P7-13 — everyone on the visible tasks, in one query.
          *
          * The row shows the accountable name and a `+n`, so it needs the join
@@ -373,7 +411,18 @@ export default async function TasksPage({
           .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
           .order("created_at", { ascending: true }),
       ])
-    : [{ data: [] }, { data: [] }, { data: [] }, { data: [] }, { data: [] }];
+    : // ⚠️ ONE ENTRY PER QUERY ABOVE, and the compiler says so only indirectly:
+      // a short tuple here does not error on this line, it mis-binds every
+      // destructured name after the gap and reports the type mismatch several
+      // hundred lines away. P9-01's coverage read is the sixth.
+      [
+        { data: [] },
+        { data: [] },
+        { data: [] },
+        { data: [] },
+        { data: [] },
+        { data: [] },
+      ];
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
   /* Plain objects from here on: a Map cannot cross the RSC boundary. */
@@ -422,6 +471,18 @@ export default async function TasksPage({
 
   const tracked = new Map(
     ((trackedRows ?? []) as { task_id: string; minutes: number }[]).map((row) => [row.task_id, row.minutes]),
+  );
+
+  /*
+   * P9-01. Keyed by task, carrying the covering person and the last day. The
+   * name is resolved through `nameOf` in the row, like every other person on
+   * this page — a second map of names would be a second thing to keep in step.
+   */
+  const coverage = new Map(
+    (coverageRows ?? []).map((row) => [
+      row.task_id,
+      { relieverId: row.reliever_id, until: row.end_date },
+    ]),
   );
 
   const isFiltered =
@@ -628,6 +689,7 @@ export default async function TasksPage({
     extraAssignees: Object.fromEntries(extraAssignees),
     closedOn: Object.fromEntries(closedOn),
     tracked: Object.fromEntries(tracked),
+    coverage: Object.fromEntries(coverage),
     byDepartment: Object.fromEntries(byDepartment),
   };
 

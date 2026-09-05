@@ -108,7 +108,17 @@ export type VizservePmsInternalRequestType =
   | "OVERTIME";
 
 /** No RETURNED: P5-08 specifies approve or reject only. */
-export type VizservePmsInternalRequestStatus = "PENDING_REVIEW" | "APPROVED" | "REJECTED";
+/**
+ * P9-02 added WITHDRAWN — the submitter took it back before anybody decided.
+ * Distinct from REJECTED on purpose: a rejection is somebody else's judgement,
+ * and before P9-03 the only way to undo a mistyped request was to ask a lead
+ * for one.
+ */
+export type VizservePmsInternalRequestStatus =
+  | "PENDING_REVIEW"
+  | "APPROVED"
+  | "REJECTED"
+  | "WITHDRAWN";
 
 /**
  * P7-05. No DRAFT — a week with no row has not been submitted, and a state that
@@ -1090,6 +1100,21 @@ export type Database = {
           created_by: string | null;
           created_at: string;
           updated_at: string;
+          /**
+           * P9-05 — NOT A REAL COLUMN. A PostgREST computed column, backed by
+           * `is_mine(vizserve_pms_tasks)`: the caller is the PIC, or the task is
+           * internal and they are on it (P7-43).
+           *
+           * Declared here because that is the only way `.eq(MINE_COLUMN, true)`
+           * typechecks — PostgREST treats it as a column and so must this file.
+           * It is absent from `Insert` and `Update` for the obvious reason: it
+           * is computed per caller and there is nothing to write.
+           *
+           * ⚠️ It replaces `mineFilter`, which put every joined task id into the
+           * URL and broke at 444 of them with a bare `fetch failed`. Anything
+           * that puts this rule back in the query string is that bug returning.
+           */
+          is_mine: boolean;
         };
         // Tasks are born from an approval (P2-07) or from
         // vizserve_pms_create_task (P3-12). Never from a plain insert.
@@ -1488,6 +1513,13 @@ export type Database = {
            * and is enforced by a trigger as well as filtered in the UI.
            */
           applies_to_gender: VizservePmsGender | null;
+          /**
+           * P9-01. Does this kind of leave need somebody to cover the work?
+           * True on VACATION only, and it is HR's tick to move — the reliever
+           * stage, the task hand-over and the turn-over confirmation all hang
+           * off this one boolean.
+           */
+          requires_reliever: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -1499,6 +1531,7 @@ export type Database = {
           sort_order?: number;
           calendar_visibility?: VizservePmsLeaveCalendarVisibility;
           applies_to_gender?: VizservePmsGender | null;
+          requires_reliever?: boolean;
         };
         Update: Partial<{
           code: string;
@@ -1507,6 +1540,7 @@ export type Database = {
           sort_order: number;
           calendar_visibility: VizservePmsLeaveCalendarVisibility;
           applies_to_gender: VizservePmsGender | null;
+          requires_reliever: boolean;
         }>;
         Relationships: [];
       };
@@ -1879,6 +1913,20 @@ export type Database = {
           /** P7-16. LEAVE only, and null on every row written before it. */
           start_half: VizservePmsDayHalf | null;
           end_half: VizservePmsDayHalf | null;
+          /**
+           * P9-01 — THE APPROVAL CHAIN, as one number.
+           *
+           * 0 = no chain (every non-LEAVE type, decided once by any lead, and
+           * every row filed before P9-01). 1 = relievers, 2 = team leader,
+           * 3 = manager. Leave opens at 1 or 2 depending on its type.
+           *
+           * ⚠️ A request is NOT finished when a lead approves it any more.
+           * Anything reading `status` alone to mean "decided" was right until
+           * P9-04 and is wrong now — see APPROVAL_STAGE_LABELS.
+           */
+          approval_stage: number;
+          /** P9-01. When the requester ticked the turn-over confirmation. */
+          turnover_confirmed_at: string | null;
           decision_reason: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
@@ -1901,7 +1949,14 @@ export type Database = {
           leave_type_id?: string | null;
           start_half?: VizservePmsDayHalf | null;
           end_half?: VizservePmsDayHalf | null;
+          approval_stage?: number;
+          turnover_confirmed_at?: string | null;
         };
+        /**
+         * Still no `approval_stage` here, and that is not an omission. The
+         * column is advanced only by vizserve_pms_decide_internal_request; a
+         * client that could set its own stage could skip straight to 3.
+         */
         Update: Partial<{
           status: VizservePmsInternalRequestStatus;
           decision_reason: string | null;
@@ -1936,8 +1991,102 @@ export type Database = {
           },
         ];
       };
+      /**
+       * P9-01 — who is covering whose work, and what they agreed to.
+       *
+       * One row per person per request, carrying THAT PERSON'S OWN decision.
+       * That is what makes approval stage 1 an AND rather than an OR: the stage
+       * passes when no row is left undecided.
+       *
+       * The decision lives here rather than in `vizserve_pms_approvals` because
+       * a reliever is not approving on behalf of a department — they are
+       * agreeing to take four named tasks — and recording it as a departmental
+       * approval would have Phase 6 count each reliever as an approver of the
+       * leave.
+       */
+      vizserve_pms_internal_request_relievers: {
+        Row: {
+          id: string;
+          request_id: string;
+          reliever_id: string;
+          /** NULL until they answer. Never 'returned'. */
+          decision: VizservePmsApprovalDecision | null;
+          decided_at: string | null;
+          reason: string | null;
+          created_at: string;
+        };
+        /**
+         * Rows arrive through vizserve_pms_submit_internal_request and are
+         * stamped by vizserve_pms_decide_internal_request. There is no INSERT
+         * or UPDATE policy at all — naming somebody as your reliever is a
+         * decision with a rule behind it, not a row anybody may write.
+         */
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_internal_request_relievers_request_id_fkey";
+            columns: ["request_id"];
+            referencedRelation: "vizserve_pms_internal_requests";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_internal_request_relievers_reliever_id_fkey";
+            columns: ["reliever_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      /** P9-01. Which of the requester's tasks each reliever is taking. */
+      vizserve_pms_internal_request_reliever_tasks: {
+        Row: {
+          reliever_row_id: string;
+          task_id: string;
+          created_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_internal_request_reliever_tasks_reliever_row_id_fkey";
+            columns: ["reliever_row_id"];
+            referencedRelation: "vizserve_pms_internal_request_relievers";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_internal_request_reliever_tasks_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "vizserve_pms_tasks";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
-    Views: Record<never, never>;
+    Views: {
+      /**
+       * P9-01 — task coverage in force TODAY, Manila.
+       *
+       * A view rather than a column or a nightly job: coverage is a question
+       * about today that the leave dates already answer, so nothing is written
+       * when the leave starts and nothing has to be un-written when it ends.
+       * `security_invoker`, so it is scoped by the policies beneath it.
+       */
+      vizserve_pms_active_task_coverage: {
+        Row: {
+          task_id: string;
+          reliever_id: string;
+          request_id: string;
+          /** The person on leave — whose task this is when they are here. */
+          absent_user_id: string;
+          start_date: string;
+          end_date: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
+    };
     Functions: {
       vizserve_pms_current_role: {
         Args: Record<PropertyKey, never>;
@@ -2322,6 +2471,22 @@ export type Database = {
            */
           p_start_half?: VizservePmsDayHalf | null;
           p_end_half?: VizservePmsDayHalf | null;
+          /**
+           * P9-03. `[{ reliever_id, task_ids: [...] }, ...]`.
+           *
+           * Optional to the compiler for the same reason as everything above
+           * it, and with the sharpest consequence of the set: omitting it on a
+           * leave type whose `requires_reliever` is true does not degrade the
+           * request — the function refuses it outright with "This kind of leave
+           * needs a reliever".
+           *
+           * Every id in here is re-checked server-side. The person must be an
+           * active member of the requester's own department; each task must be
+           * one the requester is actually on, per vizserve_pms_is_on_task.
+           */
+          p_relievers?: Json | null;
+          /** P9-03. The turn-over attestation. Required whenever relievers are. */
+          p_turnover_confirmed?: boolean;
         };
         Returns: Json;
       };
@@ -2331,7 +2496,39 @@ export type Database = {
           p_decision: VizservePmsApprovalDecision;
           p_reason?: string | null;
         };
+        /**
+         * ⚠️ P9-04 WIDENED WHAT THIS MEANS. On a chained request it returns
+         * `{ ok, status, approval_stage, stage_complete, dtr_entry_id: null }`
+         * and `status` may still be PENDING_REVIEW — an approval that advanced
+         * the chain is not an approval of the request. Read `approval_stage`
+         * alongside it; `Json` is why the compiler will not remind you.
+         */
         Returns: Json;
+      };
+      /**
+       * P9-03. The submitter takes their own request back. Legal only while
+       * nobody — lead, manager or reliever — has answered it.
+       */
+      vizserve_pms_withdraw_internal_request: {
+        Args: { p_id: string };
+        Returns: Json;
+      };
+      /**
+       * P9-01. Is this person covering that task today? Folded into
+       * vizserve_pms_is_on_task, so almost nothing needs to call it directly.
+       */
+      vizserve_pms_is_covering_task: {
+        Args: { p_task_id: string; p_user_id: string };
+        Returns: boolean;
+      };
+      /**
+       * P9-04. May the caller decide the stage this request is sitting at?
+       * Answers stages 2 and 3 only — a reliever's authority is the row with
+       * their name on it, which the decide function reads directly.
+       */
+      vizserve_pms_may_decide_internal_stage: {
+        Args: { p_entity_type: string; p_entity_id: string };
+        Returns: boolean;
       };
       vizserve_pms_create_personal_task: {
         /**

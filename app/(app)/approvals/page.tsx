@@ -1,12 +1,17 @@
 import type { Metadata } from "next";
 import { Inbox } from "lucide-react";
 
-import { listPendingTimesheetWeeks } from "@/lib/approvals-queue-server";
+import {
+  listOwedAsReliever,
+  listPendingTimesheetWeeks,
+  waitingOnMe,
+} from "@/lib/approvals-queue-server";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
+import { fetchHandoverTasks } from "@/lib/tasks-server";
 import { createClient } from "@/utils/supabase/server";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
@@ -157,6 +162,9 @@ export default async function ApprovalsPage({
     { data: leaveTypes },
     { data: balances },
     weeksQueue,
+    { data: relieverCandidates },
+    handoverTasks,
+    owedAsReliever,
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_internal_requests")
@@ -193,7 +201,10 @@ export default async function ApprovalsPage({
     // a PostgREST `or=` string nobody can check.
     supabase
       .from("vizserve_pms_leave_types")
-      .select("id, label, applies_to_gender")
+      // P9-01 — `requires_reliever` is what makes the hand-over block appear.
+      // The dialog asks the CHOSEN TYPE rather than testing for the code
+      // "VACATION", so HR ticking another type needs no change in either place.
+      .select("id, label, applies_to_gender, requires_reliever")
       .eq("is_active", true)
       .order("sort_order"),
 
@@ -222,6 +233,54 @@ export default async function ApprovalsPage({
      * The same detectable cap as the queue above: one more than shown.
      */
     listPendingTimesheetWeeks(supabase, context.userId, isApprover, APPROVALS_PAGE_SIZE + 1),
+
+    /*
+     * P9-01 — who this person may name as a reliever.
+     *
+     * ACTIVE MEMBERS OF THEIR OWN DEPARTMENT, minus themselves, which is the
+     * rule `vizserve_pms_submit_internal_request` enforces. Scoped here as well
+     * so the picker offers only what the function will accept — an option that
+     * is refused after the form is filled in is worse than one that was never
+     * offered.
+     *
+     * ⚠️ `.eq("primary_department_id", ...)` IS NEEDED, unlike almost every
+     * other query on this page. The users policy is not department-scoped for a
+     * lead of several teams, and this list is about the requester's OWN team.
+     */
+    context.primaryDepartmentId
+      ? supabase
+          .from("vizserve_pms_users")
+          .select("id, full_name")
+          .eq("is_active", true)
+          .eq("primary_department_id", context.primaryDepartmentId)
+          .neq("id", context.userId)
+          .order("full_name")
+      : { data: null },
+
+    /*
+     * P9-01 — the tasks this person could hand over.
+     *
+     * ⚠️ A FUNCTION, NOT A FILTER, and the reason is worth reading before
+     * anybody "simplifies" it back into one query. The first version put every
+     * joined task id into a PostgREST `or(...)`; filters travel in the URL, and
+     * a real user with 444 rows in `vizserve_pms_task_assignees` produced a
+     * 16,542-character query string that `fetch` refused outright — no status
+     * code, no PostgREST error. The `?? []` below turned that into "you have no
+     * open tasks to hand over" for somebody holding 22 of them.
+     *
+     * `fetchHandoverTasks` sends two fixed-length queries instead and merges
+     * them, and it RETURNS ITS ERROR rather than an empty list — see its header.
+     */
+    fetchHandoverTasks(context.userId),
+
+    /*
+     * P9-01 — the requests where I am a reliever who has not answered.
+     *
+     * Read for EVERYBODY, not behind `isApprover`: a reliever is usually a
+     * plain member, and the gate that returns nothing for a member is exactly
+     * what would hide the one decision they are owed.
+     */
+    listOwedAsReliever(supabase, context.userId),
   ]);
 
   /*
@@ -238,7 +297,19 @@ export default async function ApprovalsPage({
   );
 
   const mine = (mineData ?? []) as unknown as Row[];
-  const queue = (queueData ?? []) as unknown as Row[];
+  /*
+   * ⚠️ P9-04 — FILTERED, where it used to be taken whole.
+   *
+   * "Pending and not mine" meant "mine to decide" until the chain, and it means
+   * neither direction now: a lead can SEE a stage-1 request the relievers still
+   * hold, and a manager is owed stage-3 requests in departments they do not
+   * lead. `waitingOnMe` is the one place that rule lives — it also backs the
+   * dashboard tile, so the count that sends somebody here and the list they
+   * arrive at cannot disagree.
+   */
+  const queue = ((queueData ?? []) as unknown as Row[]).filter((row) =>
+    waitingOnMe(row, context, owedAsReliever),
+  );
   const truncated = queue.length > APPROVALS_PAGE_SIZE;
   const pendingOnMe = truncated ? queue.slice(0, APPROVALS_PAGE_SIZE) : queue;
   const rows = [...mine, ...pendingOnMe];
@@ -301,6 +372,12 @@ export default async function ApprovalsPage({
           <NewRequestDialog
           leaveTypes={pickableLeaveTypes}
           balances={balances ?? []}
+          relieverCandidates={relieverCandidates ?? []}
+          handoverTasks={handoverTasks.tasks}
+          // P9-01. So the dialog can say "we could not load your tasks" rather
+          // than "you have no tasks", which are opposite claims and only one of
+          // them is ever true by accident.
+          handoverTasksFailed={Boolean(handoverTasks.error)}
           // Read from the resolved auth context rather than re-queried: it is
           // the same row the submit function will consult, so the form cannot
           // disagree with the rule that refuses it.

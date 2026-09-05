@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  canAccessDepartment,
+  type AuthContext,
+} from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import type { Database } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import {
@@ -50,6 +55,87 @@ const EMPTY: WaitingOnYou = {
   total: 0,
   breakdown: "",
 };
+
+/**
+ * P9-04 — IS THIS PARTICULAR REQUEST WAITING ON *ME*?
+ *
+ * Until the chain, `status = 'PENDING_REVIEW'` and RLS answered this between
+ * them: everything you could see that was pending was yours to decide. That is
+ * no longer true in either direction.
+ *
+ *   * A lead can SEE a stage-1 request — they lead the department — and must
+ *     not act on it. The relievers have not answered yet.
+ *   * A manager can see a stage-3 request through the P9-04 policy and IS the
+ *     person it is waiting for, even when they lead no department at all.
+ *   * A reliever is usually a plain `member`, so every `isApprover` gate in
+ *     this file returns zero for them.
+ *
+ * One function, because /approvals, /, /dashboard and the request page itself
+ * all ask it, and four copies of a four-way rule is four chances to show
+ * somebody work they cannot do.
+ *
+ * ⚠️ THIS IS FOR DISPLAY. `vizserve_pms_decide_internal_request` and
+ * `vizserve_pms_may_decide_internal_stage` are the authority; a mistake here
+ * shows the wrong button, not the wrong permission.
+ */
+export function waitingOnMe(
+  row: { id: string; approval_stage: number | null; department_id: string; requester_id: string },
+  context: Pick<AuthContext, "userId" | "role" | "managedDepartmentIds">,
+  /** The requests where I am a reliever who has not yet answered. */
+  owedAsReliever: ReadonlySet<string>,
+): boolean {
+  // Nobody decides their own, at any stage, and the function refuses it too.
+  if (row.requester_id === context.userId) return false;
+
+  switch (row.approval_stage ?? 0) {
+    // Mine only if my name is on it AND I have not answered. A reliever who has
+    // already said yes is waiting on the others, not on themselves.
+    case 1:
+      return owedAsReliever.has(row.id);
+    // Company-wide, and the one place in this app where approval authority is
+    // not scoped to a managed department. Amier, 4 Sep.
+    case 3:
+      return roleAtLeast(context.role, "manager");
+    // Stage 0 (every non-leave type) and stage 2 (the team leader) are the rule
+    // that has always applied: a lead of the department the request was routed
+    // to. `owner` passes through `canAccessDepartment` with no managed set.
+    default:
+      return (
+        roleAtLeast(context.role, "team_leader") &&
+        canAccessDepartment(context as AuthContext, row.department_id)
+      );
+  }
+}
+
+/**
+ * P9-01 — the requests where I am a reliever who has not yet answered.
+ *
+ * ⚠️ THE ONE QUEUE THAT IS NOT GATED ON `isApprover`, and it must not become
+ * one. A reliever is usually a plain `member`; every other read in this file
+ * returns `EMPTY` for them by design, because a member approves nothing. Being
+ * named on somebody's hand-over is the exception — it is the one thing in this
+ * app that puts a decision in front of a person with no role at all.
+ *
+ * `decision is null` rather than every row bearing my name: a reliever who has
+ * already accepted is waiting on their colleagues, not on themselves, and the
+ * request would sit in their queue until the whole chain finished.
+ *
+ * A failure comes back as an empty set, which understates the queue rather than
+ * inventing one. Swallowed here because the caller renders somebody else's
+ * approvals list around it and a thrown read would take the whole page.
+ */
+export async function listOwedAsReliever(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+): Promise<Set<string>> {
+  const { data } = await supabase
+    .from("vizserve_pms_internal_request_relievers")
+    .select("request_id")
+    .eq("reliever_id", userId)
+    .is("decision", null);
+
+  return new Set((data ?? []).map((row) => row.request_id));
+}
 
 // ---------------------------------------------------------------------------
 // The timesheet-week queue
@@ -190,13 +276,35 @@ export async function listPendingTimesheetWeeks(
 
 export async function countWaitingOnYou(
   supabase: SupabaseClient<Database>,
-  userId: string,
+  context: Pick<AuthContext, "userId" | "role" | "managedDepartmentIds">,
   isApprover: boolean,
 ): Promise<WaitingOnYou> {
-  // A member approves nothing. Returning zeroes rather than skipping the call
-  // at every call site keeps the "is this person an approver" test in one place
-  // too.
-  if (!isApprover) return EMPTY;
+  const userId = context.userId;
+
+  /*
+   * ⚠️ P9-01 — THE EARLY RETURN MOVED, and this is the subtle part of the whole
+   * change. It used to be the first line: "a member approves nothing".
+   *
+   * That stopped being true the day a member could be named as somebody's
+   * reliever. A reliever with no role at all is owed a real decision, and an
+   * `isApprover` gate in front of everything sent them a zero — which is not a
+   * soft failure on a landing page. It says THERE IS NOTHING TO DO, and people
+   * act on it by closing the tab.
+   *
+   * So the reliever queue is read for everybody, and the three approver queues
+   * keep their gate below.
+   */
+  const owed = await listOwedAsReliever(supabase, userId);
+
+  if (!isApprover) {
+    if (owed.size === 0) return EMPTY;
+    return {
+      ...EMPTY,
+      internal: owed.size,
+      total: owed.size,
+      breakdown: `${owed.size} to cover`,
+    };
+  }
 
   const [client, internal, weeks] = await Promise.all([
     supabase
@@ -208,9 +316,18 @@ export async function countWaitingOnYou(
     // like everybody else, and `vizserve_pms_decide_internal_request` refuses a
     // self-decision. Counting it would put a number here that cannot be worked
     // off.
+    //
+    // ⚠️ P9-04 — NOT A HEAD COUNT ANY MORE, and that is the whole reason this
+    // query grew columns. "Pending and not mine" used to mean "mine to decide",
+    // and since the chain it means neither direction reliably: a lead sees
+    // stage-1 requests they must not touch, and a manager is owed stage-3 ones
+    // in departments they do not lead. The four-way rule is `waitingOnMe`, it
+    // cannot be expressed as a PostgREST filter, and a count that overstates by
+    // three is worse than no tile — somebody opens the queue and finds nothing
+    // they can do.
     supabase
       .from("vizserve_pms_internal_requests")
-      .select("id", { count: "exact", head: true })
+      .select("id, approval_stage, department_id, requester_id")
       .eq("status", "PENDING_REVIEW")
       .neq("requester_id", userId),
 
@@ -228,7 +345,9 @@ export async function countWaitingOnYou(
 
   const counts = {
     client: client.count ?? 0,
-    internal: internal.count ?? 0,
+    // P9-04. Counted in TypeScript because the rule is a four-way switch on the
+    // stage that no PostgREST filter expresses — see `waitingOnMe`.
+    internal: (internal.data ?? []).filter((row) => waitingOnMe(row, context, owed)).length,
     weeks: weeks.count ?? 0,
   };
 
@@ -285,32 +404,54 @@ export type WaitingRow = {
 
 export async function listWaitingOnYou(
   supabase: SupabaseClient<Database>,
-  userId: string,
+  context: Pick<AuthContext, "userId" | "role" | "managedDepartmentIds">,
   isApprover: boolean,
   /** Per queue, not in total. Five each is enough to fill any list that shows them. */
   perQueue = 5,
 ): Promise<WaitingRow[]> {
-  if (!isApprover) return [];
+  const userId = context.userId;
+
+  // P9-01. Read for everybody, before the approver gate — a reliever named on
+  // somebody's hand-over is usually a plain member. See `listOwedAsReliever`.
+  const owed = await listOwedAsReliever(supabase, userId);
+
+  if (!isApprover && owed.size === 0) return [];
 
   const [client, internal, weeks, people] = await Promise.all([
-    supabase
-      .from("vizserve_pms_requests")
-      .select("id, reference_no, title, requester_org, submitted_at")
-      .eq("status", "PENDING_REVIEW")
-      // Oldest first, everywhere. A queue read newest-first is a queue whose
-      // bottom nobody reaches, and the bottom is the part that has been waiting.
-      .order("submitted_at", { ascending: true })
-      .limit(perQueue),
+    isApprover
+      ? supabase
+          .from("vizserve_pms_requests")
+          .select("id, reference_no, title, requester_org, submitted_at")
+          .eq("status", "PENDING_REVIEW")
+          // Oldest first, everywhere. A queue read newest-first is a queue whose
+          // bottom nobody reaches, and the bottom is the part that has been waiting.
+          .order("submitted_at", { ascending: true })
+          .limit(perQueue)
+      : { data: null },
 
+    /*
+     * ⚠️ P9-04 — `approval_stage` and `department_id` are here for
+     * `waitingOnMe`, and NO `.limit()` is applied any more.
+     *
+     * The rows this query returns are no longer the rows this person is owed:
+     * a lead sees stage-1 requests the relievers still hold. Taking the first
+     * five and THEN filtering would show three, or none, while five others sat
+     * below the cut — a queue that silently shortens is the failure this file
+     * was extracted to stop. The set is small (pending internal requests in
+     * departments you lead), so filtering in full and slicing after is cheap.
+     */
     supabase
       .from("vizserve_pms_internal_requests")
+      // ⚠️ ONE STRING LITERAL, not a concatenation. PostgREST's generated types
+      // parse this select at the type level, and a `+` makes it an opaque
+      // `string` — every row comes back as `GenericStringError` and the whole
+      // block stops typechecking.
       .select(
-        "id, request_type, requester_id, created_at, start_date, end_date, work_date, start_half, end_half",
+        "id, request_type, requester_id, department_id, approval_stage, created_at, start_date, end_date, work_date, start_half, end_half",
       )
       .eq("status", "PENDING_REVIEW")
       .neq("requester_id", userId)
-      .order("created_at", { ascending: true })
-      .limit(perQueue),
+      .order("created_at", { ascending: true }),
 
     // The SAME read /approvals now renders as rows. It was inline here until
     // that page needed the submitted total and the week's status, which a
@@ -364,15 +505,26 @@ export async function listWaitingOnYou(
       href: `/requests/${request.id}`,
     })),
 
-    ...(internal.data ?? []).map((request) => ({
-      id: `int-${request.id}`,
-      kind: INTERNAL_REQUEST_LABELS[request.request_type] ?? "Request",
-      tone: "warning" as const,
-      title: when(request),
-      who: nameOf.get(request.requester_id) ?? "A colleague",
-      since: request.created_at.slice(0, 10),
-      href: `/approvals/${request.id}`,
-    })),
+    // P9-04. Filtered to what is actually mine, THEN cut to `perQueue`. See the
+    // note on the query — slicing first would hide work below the cut.
+    ...(internal.data ?? [])
+      .filter((request) => waitingOnMe(request, context, owed))
+      .slice(0, perQueue)
+      .map((request) => ({
+        id: `int-${request.id}`,
+        // A reliever is not approving a leave request, they are agreeing to
+        // hold somebody's work — and "Leave" on the chip would send them to a
+        // screen asking a question they did not expect.
+        kind:
+          request.approval_stage === 1
+            ? "Cover"
+            : (INTERNAL_REQUEST_LABELS[request.request_type] ?? "Request"),
+        tone: "warning" as const,
+        title: when(request),
+        who: nameOf.get(request.requester_id) ?? "A colleague",
+        since: request.created_at.slice(0, 10),
+        href: `/approvals/${request.id}`,
+      })),
 
     ...weeks.rows.map((week) => ({
       id: `wk-${week.id}`,

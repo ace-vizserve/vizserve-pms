@@ -3,12 +3,20 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
 
-import { timesheetWeekHref } from "@/lib/approvals-queue-server";
+import { timesheetWeekHref, waitingOnMe } from "@/lib/approvals-queue-server";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import type { InternalRequestRow, VizservePmsTimesheetWeekStatus } from "@/lib/database.types";
 import { formatDate, formatDateTime, formatWeekRange, weeksSpanned } from "@/lib/dates";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
-import { internalRequestLabel, isTimeCorrectionType } from "@/lib/schemas/internal-requests";
+import {
+  APPROVAL_STAGE_LABELS,
+  APPROVAL_STAGE_NAMES,
+  type ApprovalStage,
+  TURNOVER_CONFIRMATION_TEXT,
+  internalRequestLabel,
+  isTimeCorrectionType,
+} from "@/lib/schemas/internal-requests";
+import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
@@ -19,9 +27,33 @@ import {
   InternalTypeBadge,
   TimesheetWeekBadge,
 } from "@/components/status-badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { DecisionPanel } from "../decision-panel";
 import { requestDetail } from "../request-summary";
+import { WithdrawButton } from "../withdraw-button";
+
+/**
+ * P9-01 — one reliever, their answer, and what they are taking on.
+ *
+ * ⚠️ THE EMBED CONSTRAINT IS NAMED, and it has to be.
+ * `vizserve_pms_internal_request_relievers` has one FK to
+ * `vizserve_pms_users`, so an unqualified embed resolves today — but the
+ * pattern that broke `vizserve_pms_timesheet_weeks` with PGRST201 is a SECOND
+ * FK arriving later, and the failure takes the whole query rather than the
+ * column. Naming it costs nothing now and cannot break then.
+ */
+type RelieverRow = {
+  id: string;
+  reliever_id: string;
+  decision: "approved" | "returned" | "rejected" | null;
+  decided_at: string | null;
+  reason: string | null;
+  vizserve_pms_users: { full_name: string } | null;
+  vizserve_pms_internal_request_reliever_tasks: Array<{
+    task_id: string;
+    vizserve_pms_tasks: { id: string; title: string } | null;
+  }>;
+};
 
 export const metadata: Metadata = { title: "Request" };
 
@@ -142,11 +174,70 @@ export default async function InternalRequestPage({ params }: { params: Promise<
     (weekRows ?? []).map((week) => [week.week_start, week.status as VizservePmsTimesheetWeekStatus]),
   );
 
-  // Deciding needs department scope AND not being the requester — the engine
-  // and the decide function both re-check this, so what follows is only about
-  // whether to render the panel.
+  /*
+   * P9-01 — the hand-over, if there is one.
+   *
+   * Read for every request rather than only for chained leave: a request that
+   * has been approved keeps its relievers, and the page that shows who covered
+   * what should still show it afterwards. An unchained request simply gets an
+   * empty array, which renders as nothing.
+   *
+   * The names come through an embed on the same read. Policy-scoped like
+   * everything else — a reliever can see their own row, and the requester, the
+   * leads and HR can see them all.
+   */
+  const { data: relieverRows } = await supabase
+    .from("vizserve_pms_internal_request_relievers")
+    .select(
+      "id, reliever_id, decision, decided_at, reason, vizserve_pms_users!vizserve_pms_internal_request_relievers_reliever_id_fkey(full_name), vizserve_pms_internal_request_reliever_tasks(task_id, vizserve_pms_tasks(id, title))",
+    )
+    .eq("request_id", id)
+    .order("created_at", { ascending: true });
+
+  const relievers = (relieverRows ?? []) as unknown as RelieverRow[];
+
+  /*
+   * ⚠️ P9-04 — DECIDING IS NO LONGER A QUESTION ABOUT YOUR ROLE.
+   *
+   * This was `!isOwn && PENDING_REVIEW && roleAtLeast(role, "team_leader")`,
+   * which was right for a single decision by a department lead and is wrong in
+   * both directions now:
+   *
+   *   * A RELIEVER is usually a plain `member`. The role test hid the panel
+   *     from the one person the request was actually waiting for.
+   *   * A STAGE-3 MANAGER may lead no department at all, and a lead who can see
+   *     a stage-1 request must not be offered a button for it.
+   *
+   * `waitingOnMe` is the shared rule — the same one the approvals queue and the
+   * dashboard tile use, so the list that sent somebody here and the panel they
+   * find cannot disagree. The decide function re-checks all of it; this only
+   * decides whether to render.
+   */
+  const owedAsReliever = new Set(
+    relievers
+      .filter((row) => row.reliever_id === context.userId && row.decision === null)
+      .map(() => request.id),
+  );
+
   const canDecide =
-    !isOwn && request.status === "PENDING_REVIEW" && roleAtLeast(context.role, "team_leader");
+    request.status === "PENDING_REVIEW" && waitingOnMe(request, context, owedAsReliever);
+
+  /*
+   * P9-03 — may the author take it back?
+   *
+   * Only while NOBODY has answered. Not "while it is pending": a leave request
+   * whose three relievers have all accepted is still PENDING_REVIEW, and
+   * pulling it out from under people who have already signed is the surprise
+   * this rule exists to prevent. `vizserve_pms_withdraw_internal_request`
+   * enforces it against both decision logs; this mirrors the reliever half,
+   * which is the one visible from here.
+   */
+  const anyRelieverAnswered = relievers.some((row) => row.decision !== null);
+  const canWithdraw =
+    isOwn &&
+    request.status === "PENDING_REVIEW" &&
+    !anyRelieverAnswered &&
+    (request.approval_stage ?? 0) <= 2;
 
   return (
     <PageShell className="mx-auto w-full max-w-3xl">
@@ -320,8 +411,127 @@ export default async function InternalRequestPage({ params }: { params: Promise<
       {/* P5-09, stated on the screen where it matters. Someone deciding a
           correction should know the approval itself rewrites the record — that
           is the difference between this and a chat message saying "ok". */}
+      {/*
+        P9-01 — THE HAND-OVER AND WHERE THE REQUEST HAS GOT TO.
+
+        Shown to everybody who can see the request, not only to whoever is
+        deciding it: the requester needs to know who is still owed, and a
+        reliever who has already accepted needs to see that they are waiting on
+        a colleague rather than on themselves.
+      */}
+      {(request.approval_stage ?? 0) > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm">Approval</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* The stage list. Only the stages this request actually has —
+                non-reliever leave opens at 2 and never had a reliever stage, so
+                drawing an empty "Relievers" step for it would invent one. */}
+            <ol className="space-y-2 text-xs">
+              {([1, 2, 3] as const)
+                .filter((stage) => stage > 1 || relievers.length > 0)
+                .map((stage) => {
+                  const current = request.approval_stage === stage;
+                  // Terminal statuses stop the chain wherever it stood, so
+                  // "past" is only meaningful while it is still moving.
+                  const past =
+                    request.status === "APPROVED" || (request.approval_stage ?? 0) > stage;
+                  return (
+                    <li key={stage} className="flex items-baseline gap-2">
+                      {/* State is never conveyed by colour alone — every step
+                          carries the word for where it stands. */}
+                      <span
+                        className={cn(
+                          "min-w-24 font-medium",
+                          current && "text-foreground",
+                          !current && "text-muted-foreground",
+                        )}
+                      >
+                        {APPROVAL_STAGE_NAMES[stage]}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {request.status === "REJECTED" && current
+                          ? "Rejected here"
+                          : request.status === "WITHDRAWN" && current
+                            ? "Withdrawn before this"
+                            : past
+                              ? "Done"
+                              : current
+                                ? "Waiting"
+                                : "Not yet"}
+                      </span>
+                    </li>
+                  );
+                })}
+            </ol>
+
+            {relievers.length > 0 ? (
+              <div className="space-y-2 border-t pt-3">
+                <p className="text-xs font-medium">Relievers</p>
+                {relievers.map((row) => (
+                  <div key={row.id} className="space-y-1 rounded-md border p-3 text-xs">
+                    <div className="flex flex-wrap items-baseline justify-between gap-2">
+                      <span className="font-medium">
+                        {row.vizserve_pms_users?.full_name ?? "A colleague"}
+                      </span>
+                      <span className="text-muted-foreground">
+                        {row.decision === "approved"
+                          ? `Accepted ${formatDate(row.decided_at)}`
+                          : row.decision === "rejected"
+                            ? `Declined ${formatDate(row.decided_at)}`
+                            : "Not answered yet"}
+                      </span>
+                    </div>
+                    <ul className="list-inside list-disc text-muted-foreground">
+                      {row.vizserve_pms_internal_request_reliever_tasks.map((link) => (
+                        <li key={link.task_id}>
+                          <Link
+                            href={`/tasks/${link.task_id}`}
+                            className="hover:text-foreground hover:underline"
+                          >
+                            {link.vizserve_pms_tasks?.title ?? "A task"}
+                          </Link>
+                        </li>
+                      ))}
+                    </ul>
+                    {row.reason ? (
+                      <p className="text-muted-foreground">{row.reason}</p>
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
+            {/* The attestation, recorded rather than assumed. It is a claim the
+                requester made, and the people approving are approving it. */}
+            {request.turnover_confirmed_at ? (
+              <p className="border-t pt-3 text-xs text-muted-foreground">
+                Turn-over confirmed on {formatDate(request.turnover_confirmed_at)}:{" "}
+                <span className="italic">{TURNOVER_CONFIRMATION_TEXT}</span>
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {canDecide ? (
         <>
+          {/* P9-01. A reliever is not approving leave — they are agreeing to
+              hold four named tasks — and the panel below says "Approve". The
+              sentence is what makes the button mean the right thing. */}
+          {request.approval_stage === 1 ? (
+            <p className="rounded-sm border border-info/30 bg-info-subtle px-3 py-2 text-xs">
+              You have been asked to cover the tasks listed above while this person is away.
+              Approving means you take them on for the dates shown; declining sends the whole
+              request back and needs a reason.
+            </p>
+          ) : null}
+          {request.approval_stage === 3 ? (
+            <p className="rounded-sm border border-info/30 bg-info-subtle px-3 py-2 text-xs">
+              Their team leader has approved this. Yours is the last signature.
+            </p>
+          ) : null}
           {isTimeCorrectionType(request.request_type) ? (
             <p className="rounded-sm border border-info/30 bg-info-subtle px-3 py-2 text-xs">
               Approving this writes {formatDateTime(request.correction_at)} into the DTR for{" "}
@@ -342,9 +552,20 @@ export default async function InternalRequestPage({ params }: { params: Promise<
       ) : null}
 
       {isOwn && request.status === "PENDING_REVIEW" ? (
-        <p className="text-xs text-muted-foreground">
-          Waiting on your department lead. You cannot decide your own request.
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <p className="text-xs text-muted-foreground">
+            {/* P9-04. "Waiting on your department lead" was true of every
+                request until the chain and is now true of some of them. Saying
+                it of one sitting with three relievers sends the requester to
+                chase the wrong person. */}
+            {APPROVAL_STAGE_LABELS[(request.approval_stage ?? 0) as ApprovalStage]}. You cannot
+            decide your own request.
+          </p>
+          {/* P9-03. Only while nobody has answered — see `canWithdraw`. Once
+              somebody has, the way out is a rejection, which is their decision
+              and reads as one. */}
+          {canWithdraw ? <WithdrawButton requestId={request.id} /> : null}
+        </div>
       ) : null}
     </PageShell>
   );

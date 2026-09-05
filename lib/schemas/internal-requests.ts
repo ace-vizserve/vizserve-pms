@@ -154,6 +154,82 @@ export const DAY_HALF_LABELS: Record<DayHalf, string> = {
   AFTERNOON: "Afternoon",
 };
 
+/**
+ * P9-01 — THE APPROVAL STAGE, which is the whole chain.
+ *
+ * `vizserve_pms_internal_requests.approval_stage` is a smallint and these are
+ * its four values. Zero is not "the beginning" — it is "there is no chain", and
+ * every non-leave request carries it for ever.
+ *
+ *   0  decided once, by any lead of the department. Overtime, reimbursement,
+ *      the four corrections, and every request filed before P9-01.
+ *   1  waiting on the relievers. All of them, individually.
+ *   2  waiting on a team leader of the department.
+ *   3  waiting on a manager, company-wide.
+ *
+ * Leave opens at 1 or at 2 depending on its type and takes the same path from
+ * there — reliever leave is not a second workflow, it is this one started a
+ * stage earlier.
+ */
+export const APPROVAL_STAGES = [0, 1, 2, 3] as const;
+
+export type ApprovalStage = (typeof APPROVAL_STAGES)[number];
+
+/** What the request is waiting on. Shown to everybody, including the requester. */
+export const APPROVAL_STAGE_LABELS: Record<ApprovalStage, string> = {
+  0: "Waiting on a team leader",
+  1: "Waiting on the relievers",
+  2: "Waiting on a team leader",
+  3: "Waiting on a manager",
+};
+
+/** The short form, for the stepper on the request page. */
+export const APPROVAL_STAGE_NAMES: Record<Exclude<ApprovalStage, 0>, string> = {
+  1: "Relievers",
+  2: "Team leader",
+  3: "Manager",
+};
+
+export function isChained(stage: number | null | undefined): boolean {
+  return (stage ?? 0) > 0;
+}
+
+/**
+ * P9-01 — at most three.
+ *
+ * Amier's ceiling. Past three the turn-over is not a hand-over, it is a
+ * redistribution, and it wants a conversation rather than a form. The submit
+ * function enforces the same number.
+ */
+export const MAX_RELIEVERS = 3;
+
+/**
+ * The attestation, verbatim.
+ *
+ * ⚠️ EXPORTED AS A CONSTANT because it is a claim somebody makes, not a caption.
+ * The checkbox renders this string, and `turnover_confirmed_at` records when
+ * they agreed to it — so if the wording ever changes, rows written before the
+ * change attest to the OLD sentence and nothing in the database says which. Do
+ * not edit this line casually; if it has to change materially, version it.
+ */
+export const TURNOVER_CONFIRMATION_TEXT =
+  "I confirm that all major and critical tasks have been listed above and each has " +
+  "been assigned a corresponding reliever for the duration of my leave.";
+
+/** One reliever and the tasks they are taking on. */
+export const relieverAssignmentSchema = z.object({
+  reliever_id: z.uuid("Choose a reliever."),
+  /**
+   * The requester's OWN tasks. The server re-checks every one of them against
+   * `vizserve_pms_is_on_task` — being on a task through P7-13's assignee table
+   * counts, being merely in the department does not — so this array is a
+   * proposal, never an authority.
+   */
+  task_ids: z.array(z.uuid()).min(1, "Give every reliever at least one task."),
+});
+
+export type RelieverAssignment = z.infer<typeof relieverAssignmentSchema>;
+
 export const leaveRequestSchema = z
   .object({
     request_type: z.literal("LEAVE"),
@@ -177,6 +253,20 @@ export const leaveRequestSchema = z
      * express.
      */
     leave_type_id: z.uuid("Choose what kind of leave this is."),
+    /**
+     * P9-01. Empty for the leave types that need no cover, which is most of
+     * them.
+     *
+     * ⚠️ WHETHER THIS IS *REQUIRED* IS NOT EXPRESSIBLE HERE, and deliberately so
+     * — the answer lives in `vizserve_pms_leave_types.requires_reliever`, a row
+     * this schema cannot read. So zod validates the SHAPE of what was sent and
+     * `vizserve_pms_submit_internal_request` owns "was it needed at all". The
+     * same split P7-12 made for "is this leave type still active", and for the
+     * same reason: a rule about a row in another table is not a rule about this
+     * payload.
+     */
+    relievers: z.array(relieverAssignmentSchema).default([]),
+    turnover_confirmed: z.boolean().default(false),
   })
   // Checked here so the user sees it on the field, and again as a CHECK
   // constraint in the migration so a direct API call cannot dodge it.
@@ -195,6 +285,70 @@ export const leaveRequestSchema = z
   .refine((value) => value.end_date >= value.start_date, {
     message: "The last day cannot be before the first.",
     path: ["end_date"],
+  })
+  /**
+   * P9-01 — the reliever block's own rules.
+   *
+   * All four are restated in `vizserve_pms_submit_internal_request`, because
+   * the front end will be bypassed. They live here as well so the person
+   * filling the form is told which row is wrong rather than being handed one
+   * sentence about a list of three.
+   *
+   * ⚠️ `superRefine` rather than more `.refine()`s: these need `path` to point
+   * at a SPECIFIC ROW (`["relievers", 1, "reliever_id"]`), and `.refine` gives
+   * one path for the whole check.
+   */
+  .superRefine((value, ctx) => {
+    if (value.relievers.length > MAX_RELIEVERS) {
+      ctx.addIssue({
+        code: "custom",
+        message: `Name at most ${MAX_RELIEVERS} relievers.`,
+        path: ["relievers"],
+      });
+    }
+
+    // The same person twice is not two approvals — the stage would be
+    // impossible to complete honestly.
+    const seenPerson = new Map<string, number>();
+    // One task, one reliever. Two people "covering" the same task is nobody
+    // covering it, and the badge on that task would have to name two.
+    const seenTask = new Map<string, number>();
+
+    value.relievers.forEach((row, index) => {
+      const firstPerson = seenPerson.get(row.reliever_id);
+      if (firstPerson === undefined) {
+        seenPerson.set(row.reliever_id, index);
+      } else {
+        ctx.addIssue({
+          code: "custom",
+          message: "That person is already listed as a reliever.",
+          path: ["relievers", index, "reliever_id"],
+        });
+      }
+
+      row.task_ids.forEach((taskId) => {
+        if (seenTask.has(taskId)) {
+          ctx.addIssue({
+            code: "custom",
+            message: "Another reliever already has that task.",
+            path: ["relievers", index, "task_ids"],
+          });
+        } else {
+          seenTask.set(taskId, index);
+        }
+      });
+    });
+
+    // The tick is a GATE, not a formality: the reliever block is the requester
+    // asserting that the critical work is listed and covered, and without it
+    // the three people downstream are approving a claim nobody made.
+    if (value.relievers.length > 0 && !value.turnover_confirmed) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Confirm the turn-over before submitting.",
+        path: ["turnover_confirmed"],
+      });
+    }
   });
 
 /**

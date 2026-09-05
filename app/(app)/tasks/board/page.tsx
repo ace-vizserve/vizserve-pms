@@ -33,7 +33,7 @@ import {
 } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
-import { fetchJoinedTaskIds, fetchJoinedTaskIdSet, mineFilter } from "@/lib/tasks-server";
+import { fetchJoinedTaskIdSet, MINE_COLUMN } from "@/lib/tasks-server";
 
 import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
@@ -104,10 +104,13 @@ export default async function TaskBoardPage({
 
   /**
    * P7-13 / P7-43 — the tasks this person is on without being named in
-   * `assignee_id`. Widens "Mine" and feeds `seat()`. `cache()`d, so the two
-   * helpers below are one query between them.
+   * `assignee_id`, for `seat()`.
+   *
+   * ⚠️ P9-05 took the id-LIST caller away: "Mine" was widened by spreading
+   * these into a PostgREST filter, which broke at 444 of them. That is the
+   * `is_mine` computed column now. Only the per-row membership test is left,
+   * and it never leaves the server.
    */
-  const joinedTaskIds = await fetchJoinedTaskIds(context.userId);
   const joinedTaskIdSet = await fetchJoinedTaskIdSet(context.userId);
 
   let query = supabase
@@ -168,8 +171,9 @@ export default async function TaskBoardPage({
   // The same three scopes the toolbar offers on both views. The board used to
   // read `mine` and silently ignore `qa`, which is what a control living on only
   // one of the two routes gets you.
-  // P7-43 — same rule as the list view, through the same helper.
-  if (params.view === "mine") query = query.or(mineFilter(context.userId, joinedTaskIds));
+  // P7-43 — same rule as the list view, through the same computed column.
+  // P9-05 replaced the id-list filter here too; see the note on /tasks.
+  if (params.view === "mine") query = query.eq(MINE_COLUMN, true);
   if (params.view === "qa") {
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
@@ -237,7 +241,7 @@ export default async function TaskBoardPage({
         .limit(FINISHED_PER_COLUMN * 2 + 1);
 
       if (listId) done = done.eq("list_id", listId);
-      if (params.view === "mine") done = done.or(mineFilter(context.userId, joinedTaskIds));
+      if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
       if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
       if (kind === "client") done = done.not("request_id", "is", null);
       if (kind === "internal") done = done.is("request_id", null);

@@ -59,23 +59,107 @@ export const fetchJoinedTaskIdSet = cache(async (userId: string): Promise<Set<st
 });
 
 /**
- * The PostgREST `or(...)` fragment that widens a task query to "mine".
+ * P9-05 — the "Mine" view is a COMPUTED COLUMN now, not a filter built here.
  *
- * P7-43: on an INTERNAL task there is no person in charge, so being on it at all
- * makes it yours. On a CLIENT task the accountable name is still the answer to
- * "whose is this" — somebody has to be answerable to the person who filed the
- * request — so membership alone does not put it in your Mine.
+ * `mineFilter` used to live at this spot and returned a PostgREST `or(...)`
+ * fragment containing every id from `vizserve_pms_task_assignees`. Filters
+ * travel in the URL; a real user with 444 rows produced a 16,542-character
+ * query string and `fetch` failed outright — no status code, no PostgREST
+ * error. Callers did `data ?? []`, so it rendered as an empty board.
  *
- * Returned as a string because that is the only shape PostgREST's `.or()`
- * takes. `id.in.()` with an empty list is a syntax error rather than an empty
- * set, so the clause is omitted entirely when there is nothing to add.
+ * The rule now lives in `is_mine(vizserve_pms_tasks)` in Postgres and callers
+ * ask for it with `.eq(MINE_COLUMN, true)`. Nothing variable-length is sent,
+ * the single query keeps its filters and its ordering, and "what counts as
+ * mine" has one home instead of two.
+ *
+ * Exported as a constant so the three call sites cannot misspell it — a wrong
+ * column name here is a PostgREST error at runtime and nothing at compile time,
+ * because it is a string the generated types have never heard of.
  */
-export function mineFilter(userId: string, joinedTaskIds: string[]): string {
-  const clauses = [`assignee_id.eq.${userId}`];
+export const MINE_COLUMN = "is_mine";
 
-  if (joinedTaskIds.length > 0) {
-    clauses.push(`and(request_id.is.null,id.in.(${joinedTaskIds.join(",")}))`);
+/**
+ * P9-01 — the tasks somebody could hand over to a reliever.
+ *
+ * "Could hand over" is `vizserve_pms_is_on_task` — PIC, QA, or a row in
+ * `vizserve_pms_task_assignees` — minus anything already finished.
+ *
+ * ⚠️ TWO QUERIES, AND THE REASON IS THE BUG THIS REPLACES.
+ *
+ * The first version built one `or(...)` fragment containing every joined task
+ * id. A PostgREST filter travels in the URL, and one real user has 444 rows in
+ * `vizserve_pms_task_assignees` — a 16,542-character query string. The request
+ * did not return a PostgREST error, it did not return 414; `fetch` itself
+ * failed. The page did `data ?? []` and rendered "You have no open tasks to
+ * hand over" to somebody with 22 of them.
+ *
+ * So NOTHING VARIABLE-LENGTH GOES IN A FILTER. Both queries below carry one
+ * uuid each, whatever the person's history looks like, and the join table is
+ * reached through an `!inner` embed rather than by listing its ids.
+ *
+ * ⚠️ RETURNS ITS ERROR. Every other read in this file degrades to an empty
+ * array on failure, deliberately — they WIDEN a set the caller already has. This
+ * one IS the set, and an empty one is a sentence telling somebody they have no
+ * work to hand over. That is the wrong zero `lib/approvals-queue-server.ts`
+ * exists to prevent, in a new place, and it is exactly how this shipped broken.
+ */
+export async function fetchHandoverTasks(
+  userId: string,
+): Promise<{ tasks: { id: string; title: string }[]; error: { message: string } | null }> {
+  const supabase = await createClient();
+
+  // Named once: the four statuses split two ways everywhere in this app, and a
+  // second spelling here would drift from the submit function's own test.
+  const FINISHED = "(COMPLETED,COMPLETED_NO_RESPONSE)";
+
+  const [own, joined] = await Promise.all([
+    // The two COLUMNS. Fixed-length filter, always.
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id, title, created_at")
+      .or(`assignee_id.eq.${userId},qa_assignee_id.eq.${userId}`)
+      .not("status", "in", FINISHED),
+
+    /*
+     * The JOIN TABLE, walked from its own side.
+     *
+     * `!inner` makes the embed a real inner join, so filtering the embedded
+     * status drops the parent row too — which is what keeps finished tasks out
+     * without a second pass. Reading it this way is what removes the id list
+     * from the URL entirely.
+     */
+    supabase
+      .from("vizserve_pms_task_assignees")
+      .select("vizserve_pms_tasks!inner(id, title, created_at, status)")
+      .eq("user_id", userId)
+      .not("vizserve_pms_tasks.status", "in", FINISHED),
+  ]);
+
+  const error = own.error ?? joined.error ?? null;
+
+  // A task reached both ways is one task. Somebody is routinely the PIC AND
+  // carries a `task_assignees` row for the same work.
+  const merged = new Map<string, { id: string; title: string; created_at: string }>();
+  for (const task of own.data ?? []) merged.set(task.id, task);
+  for (const row of (joined.data ?? []) as unknown as Array<{
+    vizserve_pms_tasks: { id: string; title: string; created_at: string } | null;
+  }>) {
+    if (row.vizserve_pms_tasks) merged.set(row.vizserve_pms_tasks.id, row.vizserve_pms_tasks);
   }
 
-  return clauses.join(",");
+  /*
+   * NEWEST FIRST, and it cannot be an `.order()` now that the rows arrive from
+   * two places.
+   *
+   * Newest rather than soonest-due, because the picker shows five and lets you
+   * search for the rest: the five you most recently picked up are the five you
+   * can recognise from a title, whereas the five due soonest are as likely to
+   * be a stale deadline on something finished in all but status. Due date is
+   * the right default for a BOARD, which is a different question.
+   */
+  const tasks = [...merged.values()]
+    .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.title.localeCompare(b.title))
+    .map(({ id, title }) => ({ id, title }));
+
+  return { tasks, error: error ? { message: error.message } : null };
 }

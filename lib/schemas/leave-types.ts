@@ -56,6 +56,20 @@ export const updateLeaveTypeSchema = z.object({
   is_active: z.boolean().default(true),
   applies_to_gender: appliesToGenderSchema,
   calendar_visibility: calendarVisibilitySchema,
+  /**
+   * P9-01 — does this kind of leave need somebody to cover the work?
+   *
+   * When true, a request of this type must name 1–3 relievers, give each of
+   * them at least one of the requester's open tasks, and carry the turn-over
+   * confirmation — and those relievers become approval stage 1, in front of the
+   * team leader and the manager.
+   *
+   * A COLUMN ON THE TYPE rather than a hardcoded test for `VACATION`, for the
+   * same reason the list is a table at all (D25): this is policy data. Vacation
+   * is the only one seeded true; whether Maternity or Solo Parent joins it is
+   * HR's call and should cost them a tick, not a migration.
+   */
+  requires_reliever: z.boolean().default(false),
 });
 
 export type UpdateLeaveTypeInput = z.infer<typeof updateLeaveTypeSchema>;

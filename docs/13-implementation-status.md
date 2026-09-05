@@ -19,6 +19,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). **P7-44 rebuilt the entry editor on 25 Aug** — see below. P6-04/06/07/08/09 not begun |
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-eight migrations live, **P7-52/P7-53 applied 1 Sep** (HR as a capability + the filterable leave audit — see below), P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
 | **8 — Live board, email transport, owner rung, personal settings** | **In progress.** P8-01 through P8-12 — see the Phase 8 section below. P8-11/P8-12 (personal settings, temporary passwords, clock reminders) ship with a migration that is **not yet applied** |
+| **9 — Leave hand-over and the approval chain** | **Code done, migrations NOT applied.** Four files (`p9_01`…`p9_04`). Relievers, the turn-over confirmation, task coverage, withdrawal, and a two- or three-stage chain for every leave request. `tests/db/relievers.test.ts` has **never been run** — the project in `.env` is live. See the Phase 9 section below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -1571,3 +1572,143 @@ All surfaced while investigating "I cannot see my logged time".
 - **`vizserve_pms_timesheet_week_locked` must stay granted to `authenticated`.** It runs inside a policy, and policy expressions run as the querying role.
 - **A policy-refused UPDATE or DELETE is not an error.** PostgREST returns success with zero rows, so the actions ask for `.select("id")` and treat an empty result as a refusal. INSERT differs — `WITH CHECK` raises 42501.
 - **The transition mirror test's skip gate must move forward** with every migration that adds a transition row, or it runs against a database that cannot agree with it.
+
+---
+
+## Phase 9 — leave hand-over and the approval chain (4 Sep 2026)
+
+**Code done. None of the four migrations has been applied.** Amier, 4 Sep.
+
+Two changes that landed together, and the first is the one most likely to
+surprise somebody:
+
+1. **Every leave request now needs two approvals** — the department's team
+   leader, then a manager. Not just vacation. A lead approving leave no longer
+   finishes it.
+2. **Leave types HR marks as needing a reliever get a third stage in front of
+   those two.** Vacation is seeded as the only one. The requester names 1–3
+   colleagues from their own department, hands each of them specific tasks, and
+   ticks a turn-over confirmation; those relievers approve before the lead ever
+   sees it.
+
+Plus **task coverage** — a reliever reaches the tasks they were handed for
+exactly the days of the leave — and **withdrawal**, which is general to every
+internal request type.
+
+### The migrations, in order
+
+| File | What | ⚠️ |
+|---|---|---|
+| `20260905090000_p9_01_relievers.sql` | `leave_types.requires_reliever`, `internal_requests.approval_stage` + `turnover_confirmed_at`, the two reliever tables, the coverage view, `is_on_task` | Changes nothing anybody can see. Safe alone |
+| `20260905091000_p9_02_withdrawn_status.sql` | `WITHDRAWN`, and nothing else | **Must commit before p9_03** — Postgres refuses a new enum value in the transaction that adds it |
+| `20260905092000_p9_03_submit_and_withdraw.sql` | Submit takes relievers and sets the stage; withdraw | **Drops the 11-arg submit and regrants the 13.** Skip that and every internal request form breaks at once with a PostgREST overload ambiguity |
+| `20260905093000_p9_04_decide_chain.sql` | The chain-aware decide, `may_decide_internal_stage`, one clause in the P2-00 engine, the manager read policy | Applying p9_03 without this leaves leave at stage 2 decided in one step — degraded, not broken |
+
+### What the design deliberately is not
+
+**There is no step table and no chain engine.** The stage is one `smallint` on
+the request; the relievers' decisions live on the reliever rows; stages 2 and 3
+need no rows at all, because "leads this department" and "is a manager" are
+questions this schema already answered. The first draft built a generic step
+layer with named and ruled rows — it was three times the size and bought nothing
+a number in a column does not.
+
+Because the stage is a number, reliever leave simply *starts one stage earlier*.
+There is one code path for both shapes.
+
+### The seven things worth knowing before touching this
+
+1. **`approval_stage = 0` means NO CHAIN, not "the beginning".** Every non-leave
+   type carries it for ever, and so does every row written before P9-01. Reading
+   it as a first step inverts the whole rule.
+2. **The P2-00 engine gained exactly one clause.** `vizserve_pms_record_decision`
+   now accepts `vizserve_pms_may_decide_internal_stage(...)` alongside
+   `vizserve_pms_can_approve(...)`, because a stage-3 manager may lead no
+   department. That helper returns **false for every entity type but
+   `internal_request`** and for any request at stage 0 or 1 — client requests,
+   timesheet weeks and unchained internal requests evaluate exactly what they
+   did before. **Break that invariant and the clause becomes a company-wide
+   approval bypass.**
+3. **Stage 3 is the only company-wide approval authority in the app.** It is
+   narrowed three ways: only leave, only after the requester's own lead has
+   approved, and the read policy shows a manager a request only while it is
+   still waiting *or* if they are the one who decided it. Without that last
+   clause every manager would read every leave request in the company for ever
+   — undoing P7-12's reason for withholding the leave type from the calendar.
+4. **`vizserve_pms_is_on_task` gained a third clause and that is the entire
+   access story.** It is already what the task policies, `may_log_time` and the
+   transition guard all call, so a reliever gets read/update/comment/log/
+   transition rights on exactly their covered tasks, for exactly the leave
+   dates, with nothing to run and nothing to un-do. `assignee_id` is never
+   touched.
+5. **`mineFilter` is gone; "Mine" is the `is_mine` computed column (P9-05).**
+   Same bug as point 6, found second. `/tasks?view=mine` and
+   `/tasks/board?view=mine` also spread every joined id into a filter. The fix
+   is NOT another two-query split: both pages build one query out of six
+   optional filters, a chosen sort, a direction, `nullsFirst` and a `created_at`
+   tie-break, and splitting them would mean **re-sorting the merge in
+   TypeScript** — a second sort implementation to keep in step with the first,
+   on the page whose sort headers have already been wrong twice (P7-64, P7-65).
+   PostgREST exposes `is_mine(vizserve_pms_tasks)` as a virtual column, so the
+   rule moves into SQL and the query keeps everything. ⚠️ It is declared in
+   `lib/database.types.ts` as a Row field even though no such column exists —
+   that is the only way `.eq(MINE_COLUMN, true)` typechecks. If `/tasks?view=mine`
+   ever returns a PostgREST "column does not exist", the schema cache is stale:
+   `notify pgrst, 'reload schema';`
+   **P9-06 then measured it and fixed two things P9-05 shipped.** A computed
+   column runs PER ROW, and calling the SECURITY DEFINER
+   `vizserve_pms_is_on_task` from it cost ~0.5 ms a row — 1,970 ms across 3,858
+   tasks, against 288 ms for the same query without it. Postgres cannot inline a
+   definer function. P9-06 inlines the one EXISTS it actually needed and makes
+   `is_mine` itself SECURITY DEFINER, which it **must** be to be fast: the join
+   table's own policy calls `is_on_task`, so an invoker-rights function would
+   evaluate that RLS once per row. It is safe because it answers only "is
+   `auth.uid()` on this task", about a task the tasks policy has already let the
+   caller see. Measured again after: **1,970 ms → 199 ms** over all 3,858 tasks,
+   975 → 162 within one department, 554 → 150 with a status filter. Per row,
+   0.44 ms → 0.016 ms. P9-06 also `coalesce`s the result to false — it was
+   returning **NULL** for any task with no assignee, which `.eq(…, true)` hides
+   but `.eq(…, false)` and `.order()` would not; both confirmed by probe.
+6. **The hand-over picker is `fetchHandoverTasks`, and it took two goes.**
+   It shipped using `mineFilter` with a comment claiming that said the same
+   thing as `vizserve_pms_is_on_task`. It does not — `mineFilter` omits
+   `qa_assignee_id` entirely and honours a `vizserve_pms_task_assignees` row
+   only when `request_id IS NULL` (right for a board, wrong for a hand-over).
+   The replacement built one `or(...)` holding every joined id, which was worse:
+   **a PostgREST filter travels in the URL**, and a real user with 444 rows in
+   that table produced a **16,542-character query string that made `fetch`
+   itself fail** — no status code, no PostgREST error. The page did `data ?? []`
+   and told somebody with 22 open tasks they had none.
+   So: **nothing variable-length goes in a filter.** `fetchHandoverTasks` sends
+   two fixed-length queries and reaches the join table through an `!inner` embed
+   from its own side, and it **returns its error** so the dialog can say "could
+   not be loaded" rather than "you have none". `tests/unit/task-filters.test.ts` now asserts that
+   no caller builds an `in.(...)` clause out of an array, in any of the four
+   files that used to.
+7. **The two reliever policies talk to each other through SECURITY DEFINER
+   functions.** Written as plain `EXISTS` subqueries they are infinite RLS
+   recursion — requests → relievers → requests. `vizserve_pms_may_read_internal_request`
+   and `vizserve_pms_is_reliever_on` exist for that and nothing else.
+
+### What is owed
+
+- **All four migrations.** Apply in filename order; p9_02 in its own statement.
+- **`tests/db/relievers.test.ts` has never been run.** It writes — submits
+  requests, names relievers, hands tasks over — and the project in `.env` is
+  live. It needs a scratch project or `supabase db start`.
+- `tests/unit/relievers.test.ts` (13), `tests/unit/task-filters.test.ts` (9)
+  and the extended `tests/unit/approvals-queue.test.ts` (18) pass.
+- **Two more migrations**: `20260905094000_p9_05_is_mine.sql` and
+  `20260905095000_p9_06_is_mine_cost.sql` — see point 5. Both applied.
+
+### The one behaviour change to watch for on the screens
+
+`countWaitingOnYou` and `listWaitingOnYou` no longer take a user id — they take
+an `AuthContext`, because "is this waiting on me" became a four-way question
+about the stage that no PostgREST filter can express. `waitingOnMe` in
+`lib/approvals-queue-server.ts` is the single home for that rule, and
+`/approvals`, `/approvals/[id]`, `/` and `/dashboard` all read it. A member's
+queues also cost **one query now instead of zero**: being named as somebody's
+reliever is the only thing in this app that puts a decision in front of a
+person with no role at all, and the `isApprover` gate that used to return
+`EMPTY` for them would have hidden it.

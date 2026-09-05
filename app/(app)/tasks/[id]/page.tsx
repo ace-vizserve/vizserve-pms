@@ -329,6 +329,24 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   for (const entry of activity) entry.live = entry.id === live;
 
+  /*
+   * P9-01 — is somebody covering this task right now?
+   *
+   * The view already filters to APPROVED leave whose dates contain today in
+   * Manila, so this is a lookup and not a date calculation. `security_invoker`,
+   * so it is scoped by the policies on the tables beneath it — a reader who
+   * cannot see the leave request gets no row, which is the right answer for a
+   * request whose reason they have no business reading.
+   *
+   * Ordinarily empty, and rendering nothing when it is.
+   */
+  const { data: coverageRows } = await supabase
+    .from("vizserve_pms_active_task_coverage")
+    .select("reliever_id, absent_user_id, end_date")
+    .eq("task_id", task.id);
+
+  const coverage = coverageRows ?? [];
+
   const viewer = {
     /*
      * P7-13 / P7-43 — the column OR the join table, mirroring
@@ -451,6 +469,34 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           because "how far along is this" is a header fact — it belongs beside the
           status chip and the button that moves it.
         */}
+        {/*
+          P9-01 — WHO IS HOLDING THIS WHILE SOMEBODY IS AWAY.
+
+          Coverage is derived, not stored: `vizserve_pms_active_task_coverage`
+          answers it from the approved leave dates, so this appears on the first
+          morning of the leave and is gone the day after the last without
+          anything being run. `assignee_id` is untouched throughout — the person
+          on leave still owns this task, and the badge says who is minding it.
+
+          Above the fold, beside the status, because "the person whose name is on
+          this is away until Friday" is the single most useful thing a reader can
+          learn here and is invisible everywhere else.
+        */}
+        {coverage.length > 0 ? (
+          <p className="rounded-sm border border-info/30 bg-info-subtle px-3 py-2 text-xs">
+            {coverage.map((row) => (
+              <span key={row.reliever_id}>
+                Covered by{" "}
+                <span className="font-medium">
+                  {nameOf.get(row.reliever_id) ?? "a colleague"}
+                </span>{" "}
+                until {formatDate(row.end_date)}, while{" "}
+                {nameOf.get(row.absent_user_id) ?? "the assignee"} is on leave.
+              </span>
+            ))}
+          </p>
+        ) : null}
+
         <Card size="sm" className="py-0">
           <GateTrack
             status={task.status}

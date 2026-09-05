@@ -34,7 +34,9 @@ export default async function LeaveTypesPage() {
 
   const { data, error } = await supabase
     .from("vizserve_pms_leave_types")
-    .select("id, code, label, is_active, sort_order, applies_to_gender, calendar_visibility")
+    .select(
+      "id, code, label, is_active, sort_order, applies_to_gender, calendar_visibility, requires_reliever",
+    )
     .order("sort_order")
     .order("label");
 

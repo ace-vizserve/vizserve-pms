@@ -1,12 +1,15 @@
 "use client";
 
-import { Plus } from "lucide-react";
+import { toast } from "@/components/ui/toast";
+import { ChevronsUpDown, Plus, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Dialog,
   DialogContent,
@@ -15,21 +18,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TimePicker } from "@/components/ui/time-picker";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { todayInAppZone } from "@/lib/dates";
-import { formatDays } from "@/lib/schemas/leave-balances";
 import {
   DAY_HALF_LABELS,
   DAY_HALVES,
@@ -37,16 +33,209 @@ import {
   INTERNAL_REQUEST_BLURBS,
   INTERNAL_REQUEST_LABELS,
   INTERNAL_REQUEST_TYPES,
-  MAX_OVERTIME_MINUTES,
   type InternalRequestType,
   isTimeCorrectionType,
+  MAX_OVERTIME_MINUTES,
+  MAX_RELIEVERS,
+  TURNOVER_CONFIRMATION_TEXT,
 } from "@/lib/schemas/internal-requests";
+import { formatDays } from "@/lib/schemas/leave-balances";
 import { toMinutes } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 import { submitInternalRequest } from "./actions";
 
-/** Only what the picker needs. The server page selects the active ones, in order. */
-export type PickableLeaveType = { id: string; label: string };
+/**
+ * Only what the picker needs. The server page selects the active ones, in order.
+ *
+ * P9-01 added `requires_reliever`, and it is what makes the hand-over block
+ * appear at all — the dialog asks the CHOSEN TYPE rather than testing for the
+ * code "VACATION", so HR turning it on for another type needs no change here.
+ */
+export type PickableLeaveType = { id: string; label: string; requires_reliever: boolean };
+
+/** A colleague who could take the work. The server page scopes these to the department. */
+export type RelieverCandidate = { id: string; full_name: string };
+
+/** One of the requester's own open tasks. */
+export type HandoverTask = { id: string; title: string };
+
+/**
+ * P9-01 — one row of the hand-over block: a person and the tasks they take.
+ *
+ * Held as local state and serialised into ONE hidden input as JSON on submit.
+ * The rest of this dialog writes a hidden input per control, which works
+ * because every other field is a scalar; a nested array of arrays has no honest
+ * FormData shape, and inventing one (`relievers[0].task_ids[2]`) would be a
+ * parser in two places.
+ */
+type RelieverRow = { relieverId: string; taskIds: string[] };
+
+const EMPTY_RELIEVER: RelieverRow = { relieverId: "", taskIds: [] };
+
+/** Matches listed at once. Enough to choose from, few enough to read. */
+const MATCHES_SHOWN = 8;
+
+/**
+ * P9-01 — choosing the tasks one reliever takes on.
+ *
+ * ⚠️ A COMBOBOX, AND IT IS THE THIRD SHAPE THIS CONTROL HAS HAD. It shipped as
+ * a checkbox list, which was defensible only while the set was imagined to be
+ * small — the user it was tested against has 22 open tasks, and three relievers
+ * each showing 22 checkboxes is not something anybody reads inside a dialog.
+ * It then became a search with the five most recent listed underneath, which
+ * put a permanent block of rows on screen to answer a question most people were
+ * not asking.
+ *
+ * So: a closed trigger that says what is chosen, and a search that opens on
+ * demand. Nothing is listed until somebody types, because "which of my tasks
+ * does this person take" is a question you already know the answer to — you are
+ * looking for a task you can name, not browsing.
+ *
+ * ITS OWN COMPONENT because the query and the open state are per-row and the
+ * rows are drawn in a `.map()`, where a hook cannot go.
+ */
+function RelieverTaskPicker({
+  tasks,
+  selected,
+  claimed,
+  failed,
+  onChange,
+  index,
+}: {
+  tasks: HandoverTask[];
+  selected: string[];
+  /** Taken by ANOTHER reliever on this request. One task, one reliever. */
+  claimed: Set<string>;
+  failed: boolean;
+  onChange: (taskIds: string[]) => void;
+  index: number;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const titleOf = new Map(tasks.map((task) => [task.id, task.title]));
+  const term = query.trim().toLowerCase();
+
+  const matches = term ? tasks.filter((task) => task.title.toLowerCase().includes(term)) : [];
+
+  const toggle = (id: string) =>
+    onChange(selected.includes(id) ? selected.filter((it) => it !== id) : [...selected, id]);
+
+  if (failed) {
+    /* NOT "you have no tasks". A failed read that reads as an empty one is how
+       this went wrong the first time — somebody files a hand-over with nothing
+       in it, or gives up on the form. */
+    return (
+      <p className="text-xs text-destructive">
+        Your tasks could not be loaded. Reload the page — do not file this without them.
+      </p>
+    );
+  }
+
+  if (tasks.length === 0) {
+    return <p className="text-xs text-muted-foreground">You have no open tasks to hand over.</p>;
+  }
+
+  return (
+    <div className="space-y-2">
+      {/* WHAT IS ALREADY CHOSEN, outside the popover and always visible. The
+          whole point of the block is that somebody can read their own hand-over
+          back before they attest to it, and a combobox that hides its selection
+          behind a trigger would defeat that at the one moment it matters. */}
+      {selected.length > 0 ? (
+        <ul className="flex flex-wrap gap-1.5">
+          {selected.map((id) => (
+            <li key={id}>
+              <button
+                type="button"
+                onClick={() => toggle(id)}
+                className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-2xs hover:bg-muted">
+                <span className="truncate">{titleOf.get(id) ?? "A task"}</span>
+                <X className="size-3 shrink-0" aria-hidden />
+                <span className="sr-only">Remove {titleOf.get(id) ?? "this task"}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : null}
+
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger
+          render={
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              /* Three of these can be on screen at once and every one of them
+                 reads "Choose tasks…". Without this they are three identically
+                 named controls to anybody not looking at the layout. */
+              aria-label={`Choose tasks for reliever ${index + 1}`}
+              /* The count, not the titles: the chips above already carry those,
+                 and a trigger listing three task names is a trigger nobody can
+                 read the label of. */
+              className="w-full justify-between text-xs font-normal">
+              {selected.length === 0
+                ? "Choose tasks…"
+                : `${selected.length} task${selected.length === 1 ? "" : "s"} chosen`}
+              <ChevronsUpDown className="size-3.5 opacity-50" aria-hidden />
+            </Button>
+          }
+        />
+        <PopoverContent className="w-[min(32rem,100vw)] p-0" align="center">
+          {/*
+            `shouldFilter={false}` — cmdk's own fuzzy match is off, and the
+            filtering is the plain substring test above. Same call
+            `app/(app)/timesheet/week-grid.tsx` makes: a fuzzy matcher on task
+            titles that all begin "Implementation of…" ranks by the wrong thing.
+          */}
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder={`Search your ${tasks.length} open tasks`}
+              value={query}
+              onValueChange={setQuery}
+            />
+            <CommandList>
+              {term === "" ? (
+                <CommandEmpty>Type to find a task.</CommandEmpty>
+              ) : matches.length === 0 ? (
+                <CommandEmpty>Nothing matches “{query.trim()}”.</CommandEmpty>
+              ) : (
+                matches.slice(0, MATCHES_SHOWN).map((task) => {
+                  const isClaimed = claimed.has(task.id);
+                  const isSelected = selected.includes(task.id);
+                  return (
+                    <CommandItem
+                      key={task.id}
+                      value={task.id}
+                      disabled={isClaimed}
+                      onSelect={() => toggle(task.id)}
+                      className="text-xs">
+                      {/* Spelled out, never carried by the tint alone. */}
+                      <span aria-hidden className="w-3 shrink-0 text-center">
+                        {isSelected ? "✓" : ""}
+                      </span>
+                      <span className="truncate">
+                        {task.title}
+                        {isClaimed ? <span className="text-muted-foreground"> — with another reliever</span> : null}
+                      </span>
+                    </CommandItem>
+                  );
+                })
+              )}
+            </CommandList>
+          </Command>
+
+          {/* Said out loud, or eight rows reads as "eight is all there is". */}
+          {term && matches.length > MATCHES_SHOWN ? (
+            <p className="border-t px-3 py-2 text-2xs text-muted-foreground">
+              {matches.length - MATCHES_SHOWN} more match — keep typing to narrow it.
+            </p>
+          ) : null}
+        </PopoverContent>
+      </Popover>
+    </div>
+  );
+}
 
 /**
  * P5-06 — the four internal request forms.
@@ -71,11 +260,42 @@ function FieldError({ messages }: { messages?: string[] }) {
 export function NewRequestDialog({
   leaveTypes = [],
   balances = [],
+  relieverCandidates = [],
+  handoverTasks = [],
+  handoverTasksFailed = false,
   prefill,
   hasDepartment = true,
   isAdmin = false,
 }: {
   leaveTypes?: PickableLeaveType[];
+  /**
+   * P9-01 — who may be named as a reliever.
+   *
+   * Already scoped by the server page to ACTIVE members of the filer's own
+   * department, minus the filer. Scoped there rather than filtered here for the
+   * usual reason: the submit function re-checks every one of them, so a wider
+   * list would not be a security hole, it would just be a list of people whose
+   * selection is refused after the form is filled in.
+   */
+  relieverCandidates?: RelieverCandidate[];
+  /**
+   * P9-01 — the filer's own unfinished tasks, the only ones they can hand over.
+   *
+   * "Their own" is `vizserve_pms_is_on_task`, not `assignee_id`: since P7-13 a
+   * person can be on a task through the assignee table without being its PIC,
+   * and that work is just as much theirs to hand over.
+   */
+  handoverTasks?: HandoverTask[];
+  /**
+   * P9-01 — did the read FAIL, as opposed to coming back empty?
+   *
+   * "You have no open tasks" and "we could not load your tasks" are opposite
+   * claims, and only one of them is ever true by accident. This shipped without
+   * the distinction and told a person with 22 open tasks they had none, because
+   * a 16,542-character query string made `fetch` itself fail and the page
+   * rendered `data ?? []`.
+   */
+  handoverTasksFailed?: boolean;
   /**
    * P7-33 — the filer's own allocated / used / remaining, per type.
    *
@@ -165,14 +385,23 @@ export function NewRequestDialog({
   const [correctionTime, setCorrectionTime] = useState<string | null>(prefill?.time ?? null);
   const [startHalf, setStartHalf] = useState<DayHalf>("MORNING");
   const [endHalf, setEndHalf] = useState<DayHalf>("AFTERNOON");
+  // P9-01. One row to begin with — the block only appears when at least one is
+  // required, so starting empty would show a hand-over section with nothing in
+  // it and an "Add" button as the only way forward.
+  const [relievers, setRelievers] = useState<RelieverRow[]>([EMPTY_RELIEVER]);
+  const [turnoverConfirmed, setTurnoverConfirmed] = useState(false);
 
-  const leaveTypeItems = Object.fromEntries(
-    leaveTypes.map((option) => [option.id, option.label]),
-  );
+  const leaveTypeItems = Object.fromEntries(leaveTypes.map((option) => [option.id, option.label]));
   const balance = balances.find((row) => row.leave_type_id === leaveTypeId);
-  const halfItems = Object.fromEntries(
-    DAY_HALVES.map((half) => [half, DAY_HALF_LABELS[half]]),
-  );
+  /**
+   * P9-01. THE CHOSEN TYPE decides whether the hand-over block exists, so
+   * switching from Vacation to Sick mid-form makes it disappear and the
+   * (ignored) rows go with it — the submit function drops a stale array for a
+   * type that wants none rather than refusing it.
+   */
+  const needsReliever =
+    type === "LEAVE" && Boolean(leaveTypes.find((option) => option.id === leaveTypeId)?.requires_reliever);
+  const halfItems = Object.fromEntries(DAY_HALVES.map((half) => [half, DAY_HALF_LABELS[half]]));
   const [pending, startTransition] = useTransition();
 
   const today = todayInAppZone();
@@ -212,6 +441,34 @@ export function NewRequestDialog({
             // meant before these two controls existed.
             start_half: String(formData.get("start_half") ?? "MORNING"),
             end_half: String(formData.get("end_half") ?? "AFTERNOON"),
+            /**
+             * P9-01. Read from state rather than from FormData — this is the
+             * one field on the form that is not a scalar.
+             *
+             * ⚠️ ONLY WHOLLY EMPTY ROWS ARE DROPPED — `||`, not `&&`, and the
+             * difference is a silent data loss.
+             *
+             * A person who pressed "Add a reliever" and then thought better of
+             * it leaves a blank row on screen, and refusing the submission over
+             * it would be a rule about a control rather than about the
+             * hand-over. But a row naming a COLLEAGUE WITH NO TASKS is not
+             * empty, it is unfinished — and `&&` discarded it without a word,
+             * so somebody could tick the confirmation, submit, and be told the
+             * request was filed while the person they had just named held
+             * nothing at all.
+             *
+             * Kept, so `relieverAssignmentSchema` can say "Give every reliever
+             * at least one task" and point at the row. Same for a row with
+             * tasks and nobody chosen.
+             *
+             * Not narrowed by `needsReliever`: the schema takes an empty array
+             * happily and the function ignores a stale one, so sending what is
+             * on screen keeps this branch free of a second copy of the rule.
+             */
+            relievers: relievers
+              .filter((row) => row.relieverId || row.taskIds.length > 0)
+              .map((row) => ({ reliever_id: row.relieverId, task_ids: row.taskIds })),
+            turnover_confirmed: turnoverConfirmed,
           }
         : type === "REIMBURSEMENT"
           ? {
@@ -251,9 +508,18 @@ export function NewRequestDialog({
         return;
       }
 
-      toast.success("Request submitted. Your department lead has been notified.");
+      // P9-01. Who was actually told depends on where the request opens, and
+      // saying "your department lead has been notified" about a request sitting
+      // with three relievers is simply untrue.
+      toast.success(
+        needsReliever
+          ? "Request submitted. Your relievers have been asked to confirm."
+          : "Request submitted. Your department lead has been notified.",
+      );
       setOpen(false);
       setErrors({});
+      setRelievers([EMPTY_RELIEVER]);
+      setTurnoverConfirmed(false);
       router.refresh();
     });
   }
@@ -287,8 +553,7 @@ export function NewRequestDialog({
             <p
               id="no-department"
               role="alert"
-              className="rounded-md border border-destructive-border bg-destructive-subtle px-3 py-2 text-xs text-destructive"
-            >
+              className="rounded-md border border-destructive-border bg-destructive-subtle px-3 py-2 text-xs text-destructive">
               You have no department set, so a request from you has nobody to route to.{" "}
               {isAdmin ? (
                 <Link href="/admin/users" className="font-medium underline underline-offset-2">
@@ -325,8 +590,7 @@ export function NewRequestDialog({
                     // it cannot drift from the value that gets submitted.
                     "has-[:checked]:border-primary has-[:checked]:bg-accent has-[:checked]:font-medium has-[:checked]:text-accent-foreground",
                     "has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring",
-                  )}
-                >
+                  )}>
                   <input
                     type="radio"
                     name="request_type"
@@ -384,8 +648,7 @@ export function NewRequestDialog({
                 <Select
                   items={leaveTypeItems}
                   value={leaveTypeId || null}
-                  onValueChange={(value) => value !== null && setLeaveTypeId(value)}
-                >
+                  onValueChange={(value) => value !== null && setLeaveTypeId(value)}>
                   <SelectTrigger id="leave_type_id" className="w-full">
                     <SelectValue placeholder="Choose one…" />
                   </SelectTrigger>
@@ -419,13 +682,10 @@ export function NewRequestDialog({
                         {formatDays(-balance.days_remaining)} over your allocation
                       </span>
                     ) : (
-                      <span className="font-medium text-foreground">
-                        {formatDays(balance.days_remaining)} left
-                      </span>
+                      <span className="font-medium text-foreground">{formatDays(balance.days_remaining)} left</span>
                     )}{" "}
-                    — {formatDays(balance.days_allocated)} allocated, {formatDays(balance.days_used)}{" "}
-                    approved so far this year. Filing more than you have left is allowed; your lead
-                    decides.
+                    — {formatDays(balance.days_allocated)} allocated, {formatDays(balance.days_used)} approved so far
+                    this year. Filing more than you have left is allowed; your lead decides.
                   </p>
                 ) : null}
               </div>
@@ -451,8 +711,7 @@ export function NewRequestDialog({
                   <Select
                     items={halfItems}
                     value={startHalf}
-                    onValueChange={(value) => value !== null && setStartHalf(value as DayHalf)}
-                  >
+                    onValueChange={(value) => value !== null && setStartHalf(value as DayHalf)}>
                     <SelectTrigger id="start_half" className="w-full">
                       <SelectValue />
                     </SelectTrigger>
@@ -487,8 +746,7 @@ export function NewRequestDialog({
                   <Select
                     items={halfItems}
                     value={endHalf}
-                    onValueChange={(value) => value !== null && setEndHalf(value as DayHalf)}
-                  >
+                    onValueChange={(value) => value !== null && setEndHalf(value as DayHalf)}>
                     <SelectTrigger id="end_half" className="w-full">
                       <SelectValue />
                     </SelectTrigger>
@@ -518,6 +776,153 @@ export function NewRequestDialog({
                   <FieldError messages={errors.end_date} />
                 </div>
               </div>
+
+              {/*
+                P9-01 — THE HAND-OVER.
+
+                Shown only for the leave types HR marked as needing one, which
+                today is Vacation alone. It keys off the CHOSEN TYPE rather than
+                a hardcoded code, so the day HR ticks Maternity this block
+                appears there with no change here.
+
+                It sits AFTER the dates on purpose: you cannot sensibly decide
+                who covers what until you have said how long you are gone. The
+                confirmation then sits after the rows, because it is a claim
+                about what is above it.
+              */}
+              {needsReliever ? (
+                <div className="space-y-3 rounded-lg border p-4">
+                  <div>
+                    <h3 className="text-sm font-medium">Hand-over</h3>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      Name up to {MAX_RELIEVERS} colleagues from your team and give each of them the tasks they will
+                      hold while you are away. They confirm before your team leader sees this.
+                    </p>
+                  </div>
+
+                  {relieverCandidates.length === 0 ? (
+                    /* Not an error state — it is a fact about the department and
+                       the person filing has no way to fix it. Saying so beats an
+                       empty dropdown they will click three times. */
+                    <p className="text-xs text-muted-foreground">
+                      There is nobody else active in your department to hand work to. Ask an admin before filing this.
+                    </p>
+                  ) : null}
+
+                  {relievers.map((row, index) => {
+                    /* Taken by SOMEBODY ELSE. A person cannot appear twice and a
+                       task cannot go to two relievers, so both lists exclude
+                       what other rows have claimed — the rule is enforced in zod
+                       and again in Postgres, and a control that cannot express
+                       the mistake beats three places explaining it afterwards.
+                       This row's own choices stay selectable, or picking one
+                       would remove it. */
+                    const takenPeople = new Set(
+                      relievers.filter((_, at) => at !== index).map((other) => other.relieverId),
+                    );
+                    const takenTasks = new Set(
+                      relievers.filter((_, at) => at !== index).flatMap((other) => other.taskIds),
+                    );
+                    const people = relieverCandidates.filter(
+                      (person) => !takenPeople.has(person.id) || person.id === row.relieverId,
+                    );
+
+                    const update = (next: Partial<RelieverRow>) =>
+                      setRelievers(relievers.map((current, at) => (at === index ? { ...current, ...next } : current)));
+
+                    return (
+                      /* THE INDEX IS THE IDENTITY HERE, as it is in the form
+                         builder's OptionsAttribute. These rows have no id until
+                         they are submitted, and a key derived from the chosen
+                         person would remount the row on every change of it. */
+                      <div key={index} className="space-y-2 rounded-md border bg-muted/30 p-3">
+                        <div className="flex items-end gap-2">
+                          <div className="flex-1 space-y-1.5">
+                            <Label htmlFor={`reliever_${index}`}>Reliever {index + 1}</Label>
+                            <Select
+                              items={Object.fromEntries(people.map((person) => [person.id, person.full_name]))}
+                              value={row.relieverId || null}
+                              onValueChange={(value) => value !== null && update({ relieverId: value })}>
+                              <SelectTrigger id={`reliever_${index}`} className="w-full">
+                                <SelectValue placeholder="Choose a colleague…" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {people.map((person) => (
+                                  <SelectItem key={person.id} value={person.id}>
+                                    {person.full_name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          {relievers.length > 1 ? (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => setRelievers(relievers.filter((_, at) => at !== index))}>
+                              <X className="size-4" aria-hidden />
+                              <span className="sr-only">Remove reliever {index + 1}</span>
+                            </Button>
+                          ) : null}
+                        </div>
+
+                        <fieldset className="space-y-1.5">
+                          {/* A CHECKBOX LIST, not a multi-select popover. These
+                              tasks are the thing the filer has to read carefully
+                              and the thing their reliever is agreeing to —
+                              collapsing them behind a trigger reading "3
+                              selected" is the one place in this form where a
+                              summary is worse than the list. */}
+                          <legend className="text-xs text-muted-foreground">Tasks for this reliever</legend>
+                          <RelieverTaskPicker
+                            index={index}
+                            tasks={handoverTasks}
+                            selected={row.taskIds}
+                            claimed={takenTasks}
+                            failed={handoverTasksFailed}
+                            onChange={(taskIds) => update({ taskIds })}
+                          />
+                        </fieldset>
+                      </div>
+                    );
+                  })}
+
+                  <FieldError messages={errors.relievers} />
+
+                  {relievers.length < MAX_RELIEVERS ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setRelievers([...relievers, EMPTY_RELIEVER])}>
+                      <Plus className="size-4" aria-hidden />
+                      Add a reliever
+                    </Button>
+                  ) : null}
+
+                  {/* P9-01 — THE ATTESTATION.
+
+                      Required, and a real claim rather than a caption: the
+                      hand-over block is the filer asserting that the critical
+                      work is listed and covered, and the three people
+                      downstream are approving that assertion. The wording is a
+                      shared constant so this label and the record of what was
+                      agreed to cannot drift apart. */}
+                  <label className="flex items-start gap-2 border-t pt-3 text-xs">
+                    <Checkbox
+                      checked={turnoverConfirmed}
+                      onCheckedChange={(next) => setTurnoverConfirmed(Boolean(next))}
+                    />
+                    <span>
+                      <span className="font-medium">Turn-over Confirmation (Required)</span>
+                      <br />
+                      {TURNOVER_CONFIRMATION_TEXT}
+                    </span>
+                  </label>
+                  <FieldError messages={errors.turnover_confirmed} />
+                </div>
+              ) : null}
             </>
           ) : null}
 
@@ -593,9 +998,7 @@ export function NewRequestDialog({
               </div>
               <div className="space-y-2">
                 <Label htmlFor="correction_time">
-                  {type === "NO_TIME_IN" || type === "TIME_IN_CORRECTION"
-                    ? "Time you started"
-                    : "Time you finished"}
+                  {type === "NO_TIME_IN" || type === "TIME_IN_CORRECTION" ? "Time you started" : "Time you finished"}
                 </Label>
                 {/*
                  * P7-40 — DEFAULT VALUE, NOT A CONTROLLED ONE, and the
@@ -616,9 +1019,7 @@ export function NewRequestDialog({
                   id="correction_time"
                   name="correction_time"
                   label={
-                    type === "NO_TIME_IN" || type === "TIME_IN_CORRECTION"
-                      ? "Time you started"
-                      : "Time you finished"
+                    type === "NO_TIME_IN" || type === "TIME_IN_CORRECTION" ? "Time you started" : "Time you finished"
                   }
                   value={correctionTime}
                   onChange={setCorrectionTime}
@@ -675,8 +1076,7 @@ export function NewRequestDialog({
               type="submit"
               loading={pending}
               disabled={!hasDepartment}
-              aria-describedby={!hasDepartment ? "no-department" : undefined}
-            >
+              aria-describedby={!hasDepartment ? "no-department" : undefined}>
               Submit request
             </Button>
           </div>

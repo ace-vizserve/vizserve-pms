@@ -1,6 +1,6 @@
 "use client";
 
-import { EyeOff, Pencil, Plus } from "lucide-react";
+import { EyeOff, Pencil, Plus, UserCheck } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
@@ -41,6 +41,7 @@ export type LeaveTypeRow = {
   sort_order: number;
   applies_to_gender: Gender | null;
   calendar_visibility: CalendarVisibility;
+  requires_reliever: boolean;
 };
 
 /** Shorter than the full sentence in the schema — the row has one line. */
@@ -85,6 +86,7 @@ type Draft = {
   is_active: boolean;
   applies_to_gender: string;
   calendar_visibility: CalendarVisibility;
+  requires_reliever: boolean;
 };
 
 function draftFrom(type: LeaveTypeRow | null): Draft {
@@ -96,6 +98,7 @@ function draftFrom(type: LeaveTypeRow | null): Draft {
     is_active: type?.is_active ?? true,
     applies_to_gender: type?.applies_to_gender ?? ANY_GENDER,
     calendar_visibility: type?.calendar_visibility ?? "FULL",
+    requires_reliever: type?.requires_reliever ?? false,
   };
 }
 
@@ -122,6 +125,7 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
       is_active: draft.is_active,
       applies_to_gender: draft.applies_to_gender === ANY_GENDER ? null : draft.applies_to_gender,
       calendar_visibility: draft.calendar_visibility,
+      requires_reliever: draft.requires_reliever,
     };
 
     startTransition(async () => {
@@ -176,6 +180,22 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
           {VISIBILITY_SHORT[row.calendar_visibility]}
         </span>
       ),
+    },
+    {
+      key: "reliever",
+      header: "Reliever",
+      cell: (row) =>
+        // P9-01. Only the types that need one say anything — a column reading
+        // "Not required" on eight rows out of nine spends a column saying
+        // nothing. The label is carried, never the icon alone.
+        row.requires_reliever ? (
+          <span className="inline-flex items-center gap-1.5">
+            <UserCheck className="size-3.5 text-muted-foreground" aria-hidden />
+            Required
+          </span>
+        ) : (
+          <span className="text-muted-foreground">—</span>
+        ),
     },
     { key: "sort", header: "Order", align: "end", cell: (row) => row.sort_order },
     {
@@ -333,6 +353,22 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
                 {fieldErrors.sort_order ? (
                   <p className="text-xs text-destructive">{fieldErrors.sort_order[0]}</p>
                 ) : null}
+              </div>
+
+              <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+                <div>
+                  <Label htmlFor="requires_reliever">Needs a reliever</Label>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {draft.requires_reliever
+                      ? "The person filing it must name up to three colleagues, hand each of them specific tasks, and confirm the turn-over. Those relievers approve it before their team leader does."
+                      : "Filed with no hand-over. It still goes to the team leader and then a manager."}
+                  </p>
+                </div>
+                <Switch
+                  id="requires_reliever"
+                  checked={draft.requires_reliever}
+                  onCheckedChange={(checked) => setDraft({ ...draft, requires_reliever: checked })}
+                />
               </div>
 
               <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
