@@ -52,115 +52,174 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
   const supabase = await createClient();
 
+  /*
+   * ⚠️ ONE WAVE, NOT FOUR. Every read below depends only on `context`, which is
+   * already in hand — and yet the user-menu departments, the unread badge, the
+   * Requests badge and the project tree used to run as four sequential awaits,
+   * each one not even issued until the one before it had come back. Four
+   * blocking round trips in the SHELL, which is the one component every single
+   * authenticated page in the app renders before it starts its own queries.
+   *
+   * None of them reads another's result — the two badges are `head: true`
+   * counts, the tree is assembled below from its own five reads, and the
+   * department names are keyed on `context.managedDepartmentIds` — so they all
+   * go together and the shell's depth drops from four waves to one. Nothing
+   * about the queries, the filters or the fallbacks moves.
+   *
+   * ⚠️ EIGHT IN FLIGHT HERE, AND ABOUT TWENTY PER NAVIGATION. The shell's own
+   * count is the reassuring number and it is not the one that matters — the
+   * layout and the page render CONCURRENTLY, so what the socket pool sees is
+   * the sum. On `/tasks/[id]`, the heaviest route, that is 8 here + 12 in the
+   * page + 2 in `resolveAuth`. It was roughly 14 before this change, because
+   * the four sequential waves were accidentally rate-limiting.
+   *
+   * The ceiling is real — see the note beside `<ShiftReminder />` further down.
+   * Feeding that component from here once put `loadPunchState`'s six queries
+   * plus a preferences read on top of this batch and the combined burst started
+   * failing with `TypeError: fetch failed`, at roughly a dozen concurrent.
+   * Twenty is past that. It is shipped deliberately, not because it is
+   * comfortably under the limit: the shell's own eight is below the twelve that
+   * broke, two of them are `head: true` counts that ship no rows, and undici's
+   * `fetch failed` is socket-burst behaviour rather than a fixed PostgREST cap
+   * — so it is load-dependent rather than certain.
+   *
+   * ⚠️ THE SYMPTOM WILL NOT BE AN ERROR PAGE. Every read in this batch degrades
+   * to `?? []` or `?? 0`, so a burst failure renders an EMPTY project tree or a
+   * zeroed badge and nothing else — a silent partial render, which is the worst
+   * version of this to diagnose. Watch the dev-server log for `fetch failed`
+   * with `ECONNRESET` / `UND_ERR_SOCKET` on `/tasks/[id]`, `/` and
+   * `/timesheet/team` before trusting an empty sidebar.
+   *
+   * ⚠️ THE FIX IF IT COMES BACK, cheapest first. Do NOT unwind the tree.
+   *   1. Split this batch in two: the two badges and the two department reads,
+   *      then the four tree reads. Peak 4, one extra round trip instead of the
+   *      three this removed. A six-line edit and it keeps most of the win.
+   *   2. Failing that, `git revert` this file alone — nothing else depends on
+   *      its shape.
+   *   3. If it shows on a PAGE rather than the shell, the 12-entry batch in
+   *      `app/(app)/tasks/[id]/page.tsx` is the largest in the product and is
+   *      the first place to split.
+   */
+
   // The departments this person leads. Shown in the user menu because it is the
   // thing that decides the contents of every list they open, and is otherwise
   // invisible.
-  let departmentNames: string[] = [];
-  if (context.managedDepartmentIds.length > 0) {
-    const { data } = await supabase
-      .from("vizserve_pms_departments")
-      .select("name")
-      .in("id", context.managedDepartmentIds)
-      .order("name");
-    departmentNames = (data ?? []).map((row) => row.name);
-  }
-
-  // The unread badge, deferred at P0-10 (Amier, 21:20) and asked for since.
   //
-  // `head: true` — a count with no rows, so this costs one indexable aggregate
-  // per navigation rather than shipping notification bodies the shell never
-  // renders. RLS scopes it to the caller, so there is no user filter here.
-  const { count: unread } = await supabase
-    .from("vizserve_pms_notifications")
-    .select("id", { count: "exact", head: true })
-    .is("read_at", null);
+  // ⚠️ STILL CONDITIONAL, and it has to be. `.in("id", [])` is a filter that
+  // matches nothing, which is the trap written out at length above
+  // `departmentPickerScope` — a plain member leads nothing, so the query is not
+  // built at all and a plain `null` rides through the batch in its place.
+  const managedDepartmentsQuery =
+    context.managedDepartmentIds.length > 0
+      ? supabase
+          .from("vizserve_pms_departments")
+          .select("name")
+          .in("id", context.managedDepartmentIds)
+          .order("name")
+      : null;
 
-  /*
-   * P7-50 — the Requests badge: how many are sitting at Gate 1.
-   *
-   * PENDING_REVIEW only. That is the one status where somebody is WAITING on a
-   * decision from whoever is reading the sidebar — approved, returned and
-   * rejected have all had their answer, and counting them would make the badge
-   * a total rather than a to-do.
-   *
-   * NO SCOPE FILTER, exactly as the unread count above. The policy on
-   * `vizserve_pms_requests` already decides what the caller can see, so a Team
-   * Leader gets their departments and an admin gets everyone — restating the
-   * filter here would imply the policy is optional, which is the rule this
-   * codebase enforces everywhere else.
-   *
-   * `head: true` — one indexable aggregate per navigation, no rows shipped.
-   */
-  const { count: awaitingReview } = await supabase
-    .from("vizserve_pms_requests")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "PENDING_REVIEW");
-
-  /*
-   * The project tree — Department → Folder → List (P7-18).
-   *
-   * NO SCOPE FILTER ON ANY OF THESE QUERIES. Departments, lists and folders all
-   * scope by policy, so a member gets their own department's tree and an admin
-   * gets every one from the same queries — restating the rule here would imply
-   * the policies were optional.
-   *
-   * The task counts are a separate query rather than a join, because PostgREST
-   * cannot aggregate a related table and a per-list count would be an N+1 in the
-   * SHELL — the one component on every single page in the app.
-   */
   const [
+    managedDepartments,
+    { count: unread },
+    { count: awaitingReview },
     { data: departments },
     { data: lists },
     { data: groups },
     { data: openTasks },
     { data: pendingRequests },
   ] = await Promise.all([
-      supabase
-        .from("vizserve_pms_departments")
-        .select("id, name")
-        .eq("is_active", true)
-        .order("name"),
-      // `sort_order` first, to agree with /tasks/lists — which has always
-      // ordered that way while this query silently did not.
-      supabase
-        .from("vizserve_pms_lists")
-        .select("id, name, department_id, group_id")
-        .eq("is_active", true)
-        .order("sort_order")
-        .order("name"),
-      supabase
-        .from("vizserve_pms_task_groups")
-        .select("id, name, department_id, is_system")
-        .eq("is_active", true)
-        .order("sort_order")
-        .order("name"),
-      // Live work only. A count including everything ever finished would grow
-      // forever and stop meaning "how much is in here".
-      supabase
-        .from("vizserve_pms_tasks")
-        .select("list_id")
-        .not("list_id", "is", null)
-        .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
-      /*
-       * P7-26 — client requests waiting on Gate 1, counted per list.
-       *
-       * A pending request has no task and therefore no `list_id`; where it WILL
-       * land is the form's inbox list, so the count is grouped through the form.
-       * `!inner` because a request whose form has gone has nowhere to be
-       * counted.
-       *
-       * This is the number that stops a request sitting unlooked-at for a week:
-       * the folder it belongs to says so in the rail, on every page.
-       *
-       * Returns nothing for a member — `vizserve_pms_requests` is lead-only, so
-       * the badge simply never appears for them and no role check is needed.
-       */
-      supabase
-        .from("vizserve_pms_requests")
-        .select("vizserve_pms_forms!inner(default_list_id)")
-        .eq("status", "PENDING_REVIEW"),
+    managedDepartmentsQuery,
 
-    ]);
+    // The unread badge, deferred at P0-10 (Amier, 21:20) and asked for since.
+    //
+    // `head: true` — a count with no rows, so this costs one indexable aggregate
+    // per navigation rather than shipping notification bodies the shell never
+    // renders. RLS scopes it to the caller, so there is no user filter here.
+    supabase
+      .from("vizserve_pms_notifications")
+      .select("id", { count: "exact", head: true })
+      .is("read_at", null),
+
+    /*
+     * P7-50 — the Requests badge: how many are sitting at Gate 1.
+     *
+     * PENDING_REVIEW only. That is the one status where somebody is WAITING on a
+     * decision from whoever is reading the sidebar — approved, returned and
+     * rejected have all had their answer, and counting them would make the badge
+     * a total rather than a to-do.
+     *
+     * NO SCOPE FILTER, exactly as the unread count above. The policy on
+     * `vizserve_pms_requests` already decides what the caller can see, so a Team
+     * Leader gets their departments and an admin gets everyone — restating the
+     * filter here would imply the policy is optional, which is the rule this
+     * codebase enforces everywhere else.
+     *
+     * `head: true` — one indexable aggregate per navigation, no rows shipped.
+     */
+    supabase
+      .from("vizserve_pms_requests")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "PENDING_REVIEW"),
+
+    /*
+     * The project tree — Department → Folder → List (P7-18).
+     *
+     * NO SCOPE FILTER ON ANY OF THESE QUERIES. Departments, lists and folders all
+     * scope by policy, so a member gets their own department's tree and an admin
+     * gets every one from the same queries — restating the rule here would imply
+     * the policies were optional.
+     *
+     * The task counts are a separate query rather than a join, because PostgREST
+     * cannot aggregate a related table and a per-list count would be an N+1 in the
+     * SHELL — the one component on every single page in the app.
+     */
+    supabase
+      .from("vizserve_pms_departments")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("name"),
+    // `sort_order` first, to agree with /tasks/lists — which has always
+    // ordered that way while this query silently did not.
+    supabase
+      .from("vizserve_pms_lists")
+      .select("id, name, department_id, group_id")
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("name"),
+    supabase
+      .from("vizserve_pms_task_groups")
+      .select("id, name, department_id, is_system")
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("name"),
+    // Live work only. A count including everything ever finished would grow
+    // forever and stop meaning "how much is in here".
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("list_id")
+      .not("list_id", "is", null)
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+    /*
+     * P7-26 — client requests waiting on Gate 1, counted per list.
+     *
+     * A pending request has no task and therefore no `list_id`; where it WILL
+     * land is the form's inbox list, so the count is grouped through the form.
+     * `!inner` because a request whose form has gone has nowhere to be
+     * counted.
+     *
+     * This is the number that stops a request sitting unlooked-at for a week:
+     * the folder it belongs to says so in the rail, on every page.
+     *
+     * Returns nothing for a member — `vizserve_pms_requests` is lead-only, so
+     * the badge simply never appears for them and no role check is needed.
+     */
+    supabase
+      .from("vizserve_pms_requests")
+      .select("vizserve_pms_forms!inner(default_list_id)")
+      .eq("status", "PENDING_REVIEW"),
+  ]);
+
+  const departmentNames = (managedDepartments?.data ?? []).map((row) => row.name);
 
   const countByList = new Map<string, number>();
   for (const task of openTasks ?? []) {

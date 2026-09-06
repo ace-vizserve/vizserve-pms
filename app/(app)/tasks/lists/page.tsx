@@ -34,25 +34,41 @@ export default async function ListsPage() {
   const context = await requireDepartmentShape();
   const supabase = await createClient();
 
-  // Both are RLS-scoped: a TL sees the departments they lead and those
+  // All four are RLS-scoped: a TL sees the departments they lead and those
   // departments' lists. No `.in()` needed, and restating it here would imply
   // the policy were optional.
-  const [{ data: lists }, { data: departments }, { data: groups }] = await Promise.all([
-    supabase
-      .from("vizserve_pms_lists")
-      .select("id, name, description, department_id, is_active, sort_order, group_id, form_id")
-      .order("sort_order")
-      .order("name"),
-    supabase.from("vizserve_pms_departments").select("id, name").eq("is_active", true).order("name"),
-    // P7-18. NO `is_active` FILTER, deliberately — same as the lists query above.
-    // This is the screen where an archived folder is un-archived, so filtering it
-    // out here would make that impossible from the only place it is offered.
-    supabase
-      .from("vizserve_pms_task_groups")
-      .select("id, name, description, department_id, is_active, sort_order, is_system")
-      .order("sort_order")
-      .order("name"),
-  ]);
+  //
+  // The task counts used to be awaited on their own, after the department
+  // scoping below — but they depend on nothing computed there, so waiting was
+  // a round trip spent on nothing. Four independent reads, one wave.
+  const [{ data: lists }, { data: departments }, { data: groups }, { data: taskCounts }] =
+    await Promise.all([
+      supabase
+        .from("vizserve_pms_lists")
+        .select("id, name, description, department_id, is_active, sort_order, group_id, form_id")
+        .order("sort_order")
+        .order("name"),
+      supabase
+        .from("vizserve_pms_departments")
+        .select("id, name")
+        .eq("is_active", true)
+        .order("name"),
+      // P7-18. NO `is_active` FILTER, deliberately — same as the lists query above.
+      // This is the screen where an archived folder is un-archived, so filtering it
+      // out here would make that impossible from the only place it is offered.
+      supabase
+        .from("vizserve_pms_task_groups")
+        .select("id, name, description, department_id, is_active, sort_order, is_system")
+        .order("sort_order")
+        .order("name"),
+      // How many tasks each list holds, so nobody archives a list that is
+      // carrying live work without knowing.
+      supabase
+        .from("vizserve_pms_tasks")
+        .select("list_id")
+        .not("list_id", "is", null)
+        .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+    ]);
 
   /*
    * Which departments the pickers on this screen may file a folder or list
@@ -75,14 +91,6 @@ export default async function ListsPage() {
       : scope.kind === "none"
         ? []
         : (departments ?? []).filter((department) => scope.ids.includes(department.id));
-
-  // How many tasks each list holds, so nobody archives a list that is carrying
-  // live work without knowing.
-  const { data: taskCounts } = await supabase
-    .from("vizserve_pms_tasks")
-    .select("list_id")
-    .not("list_id", "is", null)
-    .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)");
 
   const openByList = new Map<string, number>();
   for (const row of taskCounts ?? []) {

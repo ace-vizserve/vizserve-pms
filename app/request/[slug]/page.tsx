@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { Info } from "lucide-react";
@@ -15,7 +16,16 @@ import { BrandLockup } from "@/components/brand-lockup";
  * what a renderer needs — never the owning department, the SLA, or who built it.
  */
 
-async function loadForm(slug: string) {
+/**
+ * ⚠️ `cache()`d, because BOTH `generateMetadata` and the page body call it and
+ * Next runs the two separately — so `vizserve_pms_get_public_form` executed
+ * twice for every visit to a form link, once to produce a `<title>`. This is
+ * the highest-traffic anonymous route in the product.
+ *
+ * The key is the slug and nothing else: the client is built inside, and an
+ * anonymous read has no session to tell two callers apart with.
+ */
+const loadForm = cache(async (slug: string) => {
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("vizserve_pms_get_public_form", { p_slug: slug });
 
@@ -23,7 +33,7 @@ async function loadForm(slug: string) {
 
   const parsed = publicFormSchema.safeParse(data);
   return parsed.success ? parsed.data : null;
-}
+});
 
 export async function generateMetadata({
   params,

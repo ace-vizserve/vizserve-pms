@@ -75,6 +75,20 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   if (!task) notFound();
 
+  /*
+   * ONE WAVE AFTER THE TASK ROW, and it used to be four.
+   *
+   * The brief, the coverage lookup and the joined-task set were each awaited on
+   * their own further down the file — the last of them buried inside the
+   * `viewer` object literal, where a network call reads like a property. None
+   * of the three depends on anything this batch returns: two need only the id
+   * from the URL, the third only the signed-in user. So they went out one after
+   * another, after everything here had already come back, for no reason but the
+   * order the code was written in.
+   *
+   * ⚠️ ONE ENTRY PER LINE BELOW, IN ORDER. A missing entry does not fail here —
+   * it silently binds every name after the gap to the wrong query.
+   */
   const [
     { data: history },
     { data: people },
@@ -85,6 +99,9 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     { data: subtasks },
     { data: trackedRows },
     { data: decisions },
+    { data: briefRow },
+    { data: coverageRows },
+    joinedTaskIdSet,
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_task_status_history")
@@ -184,33 +201,62 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           .eq("task_id", id)
           .order("created_at", { ascending: false })
       : Promise.resolve({ data: null }),
-  ]);
 
-  /*
-   * P7-59 — WHAT THE CLIENT ASKED FOR, WITHOUT WHO THEY ARE.
-   *
-   * This replaces two direct reads — `vizserve_pms_request_attachments` for the
-   * files and `vizserve_pms_form_fields` for the labels — and they had to go,
-   * because both were reached through `request`, and `request` is NULL for
-   * everybody who is not a department lead. The result was that the person
-   * doing the work opened the one screen the work happens on and found no
-   * reference, no client date, none of the answers the client gave, and none of
-   * the reference images they attached. The brief was collected, stored
-   * correctly, and shown to nobody who needed it.
-   *
-   * The obvious fix — widen the requests policy — was tried and reverted
-   * (P7-58): it handed over the client's NAME, ORG and EMAIL too, and the client
-   * is never told who at VizServe holds their task. Anonymity that runs one way
-   * only is not anonymity.
-   *
-   * ⚠️ SO THE SPLIT IS COLUMNS, NOT ROWS, AND RLS CANNOT DRAW IT. This is a
-   * SECURITY DEFINER projection — the same pattern the public form and the Gate
-   * 3 page use — that returns the BRIEF to anyone holding a seat on the task and
-   * the IDENTITY to nobody. Leads still read the row above and still see it.
-   */
-  const { data: briefRow } = await supabase.rpc("vizserve_pms_task_request_brief", {
-    p_task_id: id,
-  });
+    /*
+     * P7-59 — WHAT THE CLIENT ASKED FOR, WITHOUT WHO THEY ARE.
+     *
+     * This replaces two direct reads — `vizserve_pms_request_attachments` for
+     * the files and `vizserve_pms_form_fields` for the labels — and they had to
+     * go, because both were reached through `request`, and `request` is NULL for
+     * everybody who is not a department lead. The result was that the person
+     * doing the work opened the one screen the work happens on and found no
+     * reference, no client date, none of the answers the client gave, and none
+     * of the reference images they attached. The brief was collected, stored
+     * correctly, and shown to nobody who needed it.
+     *
+     * The obvious fix — widen the requests policy — was tried and reverted
+     * (P7-58): it handed over the client's NAME, ORG and EMAIL too, and the
+     * client is never told who at VizServe holds their task. Anonymity that runs
+     * one way only is not anonymity.
+     *
+     * ⚠️ SO THE SPLIT IS COLUMNS, NOT ROWS, AND RLS CANNOT DRAW IT. This is a
+     * SECURITY DEFINER projection — the same pattern the public form and the
+     * Gate 3 page use — that returns the BRIEF to anyone holding a seat on the
+     * task and the IDENTITY to nobody. Leads still read the row above and still
+     * see it.
+     *
+     * Takes `id` and nothing else, which is why it sits in this batch rather
+     * than in a round trip of its own after it.
+     */
+    supabase.rpc("vizserve_pms_task_request_brief", { p_task_id: id }),
+
+    /*
+     * P9-01 — is somebody covering this task right now?
+     *
+     * The view already filters to APPROVED leave whose dates contain today in
+     * Manila, so this is a lookup and not a date calculation. `security_invoker`,
+     * so it is scoped by the policies on the tables beneath it — a reader who
+     * cannot see the leave request gets no row, which is the right answer for a
+     * request whose reason they have no business reading.
+     *
+     * Ordinarily empty, and rendering nothing when it is.
+     */
+    supabase
+      .from("vizserve_pms_active_task_coverage")
+      .select("reliever_id, absent_user_id, end_date")
+      .eq("task_id", task.id),
+
+    /*
+     * P7-13 / P7-43 — the tasks this person is on without being named in
+     * `assignee_id`.
+     *
+     * ⚠️ IT WAS AWAITED INSIDE THE `viewer` OBJECT LITERAL below, which is how a
+     * round trip hides in plain sight: `(await fetchJoinedTaskIdSet(...)).has(…)`
+     * reads like a property access and is a query. It needs only the signed-in
+     * user, so it belongs up here with everything else that does.
+     */
+    fetchJoinedTaskIdSet(context.userId),
+  ]);
 
   // Null for internal work, for a caller with no seat, and for a task that does
   // not exist — three reasons, one answer, because the page treats them alike.
@@ -329,22 +375,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   for (const entry of activity) entry.live = entry.id === live;
 
-  /*
-   * P9-01 — is somebody covering this task right now?
-   *
-   * The view already filters to APPROVED leave whose dates contain today in
-   * Manila, so this is a lookup and not a date calculation. `security_invoker`,
-   * so it is scoped by the policies on the tables beneath it — a reader who
-   * cannot see the leave request gets no row, which is the right answer for a
-   * request whose reason they have no business reading.
-   *
-   * Ordinarily empty, and rendering nothing when it is.
-   */
-  const { data: coverageRows } = await supabase
-    .from("vizserve_pms_active_task_coverage")
-    .select("reliever_id, absent_user_id, end_date")
-    .eq("task_id", task.id);
-
+  // P9-01. Read in the batch above; ordinarily empty, and rendering nothing
+  // when it is.
   const coverage = coverageRows ?? [];
 
   const viewer = {
@@ -357,9 +389,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
      * found it read-only — no edits, no attachments, no comments — on work the
      * database would have let them do all three to.
      */
-    isAssignee:
-      task.assignee_id === context.userId ||
-      (await fetchJoinedTaskIdSet(context.userId)).has(task.id),
+    isAssignee: task.assignee_id === context.userId || joinedTaskIdSet.has(task.id),
     isQa: task.qa_assignee_id === context.userId,
     leadsDepartment:
       roleAtLeast(context.role, "owner") ||

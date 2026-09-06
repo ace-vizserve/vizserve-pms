@@ -73,8 +73,6 @@ export default async function AttendancePage({
   const month = narrowMonth(requested, thisMonth);
   const { from, to } = monthBounds(month);
 
-  const settings = await loadAppSettings();
-
   const [
     { data: people, error: peopleError },
     { data: entries, error: entriesError },
@@ -82,6 +80,7 @@ export default async function AttendancePage({
     { data: holidays },
     { data: overtime },
     { data: departments },
+    settings,
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_users")
@@ -118,6 +117,10 @@ export default async function AttendancePage({
       .gte("work_date", from)
       .lte("work_date", to),
     supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+    // Was awaited on its own line above this batch, holding all six reads
+    // behind it. It takes no argument and is `cache()`d, so it depends on
+    // nothing here — it is simply the seventh thing to go out at once.
+    loadAppSettings(),
   ]);
 
   const error = peopleError ?? entriesError;

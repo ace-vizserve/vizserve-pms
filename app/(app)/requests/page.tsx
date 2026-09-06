@@ -41,9 +41,13 @@ export default async function RequestsPage({
     size?: string;
   }>;
 }) {
-  // The context is kept now rather than discarded: P8-03 needs the
-  // department scope below, and re-resolving it would be a second
-  // `getUser()` round trip for something already in hand.
+  // The context is kept now rather than discarded: P8-03 needs the department
+  // scope below for the realtime filter. Re-resolving it would cost nothing —
+  // `resolveAuth` is wrapped in React `cache()`, and it reads `getClaims()`,
+  // which is a signature check on the cookie rather than a round trip — so the
+  // reason to hold it is legibility, not latency: the scope handed to
+  // `RealtimeTasks` at the bottom is provably the scope this page was
+  // authorised under, not a second resolution that could drift from it.
   const context = await requireRole("team_leader");
   const params = await searchParams;
   const supabase = await createClient();
@@ -127,25 +131,34 @@ export default async function RequestsPage({
   // first second.
   if (params.to) query = query.lt("submitted_at", `${params.to}T23:59:59.999Z`);
 
-  const { data: requests, error: requestsError, count } = await query;
-
   /*
-   * ⚠️ P7-66 Phase 4b — `purpose` NARROWS THIS, and it is not a department
-   * filter in disguise. A request can only come from a CLIENT_REQUEST form, so
-   * an internal form in this picker is an option that can never match a row.
-   * It matters because `published internal forms readable by their audience`
-   * (20260902110000_p7_66_form_responses.sql) makes every published internal
-   * form readable by every signed-in person — so without this line a lead would
-   * see other departments' survey names listed as request filters. Client forms
-   * are untouched by that policy and stay department-scoped by RLS.
+   * TWO READS, ONE WAVE. The form list is the filter dropdown's options and the
+   * SLA lookup for the table; it takes no argument from the results query and
+   * was simply awaited after it, so the page paid two round trips to answer two
+   * unrelated questions. Only `reviewers` below genuinely waits, because it is
+   * keyed by ids that come back on this page of rows.
    */
-  const { data: forms } = await supabase
-    .from("vizserve_pms_forms")
-    // `sla_minutes` feeds the SLA column: how long this form promises a decision
-    // in. Without it the request's `sla_started_at` is a clock with no target.
-    .select("id, name, sla_minutes")
-    .eq("purpose", "CLIENT_REQUEST")
-    .order("name");
+  const [{ data: requests, error: requestsError, count }, { data: forms }] = await Promise.all([
+    query,
+
+    /*
+     * ⚠️ P7-66 Phase 4b — `purpose` NARROWS THIS, and it is not a department
+     * filter in disguise. A request can only come from a CLIENT_REQUEST form, so
+     * an internal form in this picker is an option that can never match a row.
+     * It matters because `published internal forms readable by their audience`
+     * (20260902110000_p7_66_form_responses.sql) makes every published internal
+     * form readable by every signed-in person — so without this line a lead would
+     * see other departments' survey names listed as request filters. Client forms
+     * are untouched by that policy and stay department-scoped by RLS.
+     */
+    supabase
+      .from("vizserve_pms_forms")
+      // `sla_minutes` feeds the SLA column: how long this form promises a decision
+      // in. Without it the request's `sla_started_at` is a clock with no target.
+      .select("id, name, sla_minutes")
+      .eq("purpose", "CLIENT_REQUEST")
+      .order("name"),
+  ]);
   /* A Map cannot cross the RSC boundary; the table rebuilds nothing and just
      indexes this. */
   const formNames = Object.fromEntries((forms ?? []).map((form) => [form.id, form.name]));

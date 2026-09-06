@@ -102,17 +102,6 @@ export default async function TaskBoardPage({
   const params = await searchParams;
   const supabase = await createClient();
 
-  /**
-   * P7-13 / P7-43 — the tasks this person is on without being named in
-   * `assignee_id`, for `seat()`.
-   *
-   * ⚠️ P9-05 took the id-LIST caller away: "Mine" was widened by spreading
-   * these into a PostgREST filter, which broke at 444 of them. That is the
-   * `is_mine` computed column now. Only the per-row membership test is left,
-   * and it never leaves the server.
-   */
-  const joinedTaskIdSet = await fetchJoinedTaskIdSet(context.userId);
-
   let query = supabase
     .from("vizserve_pms_tasks")
     .select(
@@ -193,23 +182,54 @@ export default async function TaskBoardPage({
   if (kind === "internal") query = query.is("request_id", null);
 
   /*
-   * P7-26 — the requests that have not been decided yet, as the first column.
+   * ONE WAVE, and it used to be three.
    *
-   * Awaited on its own rather than joined into the Promise.all below: it is an
-   * addition to the board, not part of it, and a failure here must not be able
-   * to stop the board rendering. The loader returns [] on its own errors.
-   *
-   * The board has no status or priority filter to honour, so the only task-only
-   * filter it can carry is none — `hasTaskOnlyFilter` stays false.
+   * The joined-task set and the pending requests were each awaited on their own
+   * line above this batch, and neither depends on anything the batch returns —
+   * one needs a user id known before the page started, the other the two URL
+   * parameters read a few lines up. So the board sat through two round trips
+   * before it asked for a single card. Everything independent now goes out
+   * together; the only read still left serial is the subtask query at the
+   * bottom, which genuinely needs the parent ids these rows produce.
    */
-  const pendingRequests = await loadPendingRequests({
-    listId,
-    kind,
-    scope: params.view === "mine" || params.view === "qa" ? params.view : "all",
-  });
+  const [
+    joinedTaskIdSet,
+    pendingRequests,
+    { data: tasks },
+    { data: people },
+    { data: openList },
+    { data: finishedTasks },
+  ] = await Promise.all([
+    /**
+     * P7-13 / P7-43 — the tasks this person is on without being named in
+     * `assignee_id`, for `seat()`.
+     *
+     * ⚠️ P9-05 took the id-LIST caller away: "Mine" was widened by spreading
+     * these into a PostgREST filter, which broke at 444 of them. That is the
+     * `is_mine` computed column now. Only the per-row membership test is left,
+     * and it never leaves the server.
+     */
+    fetchJoinedTaskIdSet(context.userId),
 
-  const [{ data: tasks }, { data: people }, { data: openList }, { data: finishedTasks }] =
-    await Promise.all([
+    /*
+     * P7-26 — the requests that have not been decided yet, as the first column.
+     *
+     * IN the batch now, and this note used to say the opposite: it was awaited
+     * on its own so that a failure here could not stop the board rendering.
+     * That goal is unchanged and still met — `loadPendingRequests` returns []
+     * on its own errors rather than throwing (lib/pending-requests-server.ts),
+     * so it cannot reject this `Promise.all` any more than it could reject its
+     * own `await`. What the separate await actually bought was a round trip.
+     *
+     * The board has no status or priority filter to honour, so the only
+     * task-only filter it can carry is none — `hasTaskOnlyFilter` stays false.
+     */
+    loadPendingRequests({
+      listId,
+      kind,
+      scope: params.view === "mine" || params.view === "qa" ? params.view : "all",
+    }),
+
     query,
     supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
     // Just the name, and only when there is one to fetch. The board has no list

@@ -265,25 +265,56 @@ export default async function TasksPage({
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
 
-  const [{ data: tasks, error: tasksError }, { data: people }, { data: lists }, { data: groups }] =
-    await Promise.all([
-      query,
-      supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
-      supabase
-        .from("vizserve_pms_lists")
-        .select("id, name, group_id")
-        .eq("is_active", true)
-        .order("name"),
-      // P7-18. The reserved folder is offered like any other here — "show me
-      // everything that came through a form" is a filter people want, and it is
-      // the one folder guaranteed to exist.
-      supabase
-        .from("vizserve_pms_task_groups")
-        .select("id, name")
-        .eq("is_active", true)
-        .order("sort_order")
-        .order("name"),
-    ]);
+  const [
+    { data: tasks, error: tasksError },
+    { data: people },
+    { data: lists },
+    { data: groups },
+    pendingRequests,
+  ] = await Promise.all([
+    query,
+    supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
+    supabase
+      .from("vizserve_pms_lists")
+      .select("id, name, group_id")
+      .eq("is_active", true)
+      .order("name"),
+    // P7-18. The reserved folder is offered like any other here — "show me
+    // everything that came through a form" is a filter people want, and it is
+    // the one folder guaranteed to exist.
+    supabase
+      .from("vizserve_pms_task_groups")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("name"),
+
+    /*
+     * P7-26 — the requests that have not been decided yet.
+     *
+     * IN this batch, and the note here used to say the opposite: it was awaited
+     * further down, alone, because it is an ADDITION to this page rather than
+     * part of it — the task queries decide whether the page renders at all, and
+     * this one must not be able to change that.
+     *
+     * That is still true and still holds. `loadPendingRequests` returns [] on
+     * its own errors rather than throwing (lib/pending-requests-server.ts), so
+     * it cannot reject this `Promise.all` any more than it could reject its own
+     * `await` — the error posture is unchanged. What the separate await bought
+     * was a round trip after the task reads had already finished, spent on a
+     * query whose every argument was known before the first one started.
+     *
+     * `status` and `priority` are passed as one boolean rather than as values —
+     * the rule is "any task-only filter hides these", and `pendingRequestsApply`
+     * should not have to learn what a status is to express that.
+     */
+    loadPendingRequests({
+      listId: params.list ?? null,
+      kind,
+      scope: view,
+      hasTaskOnlyFilter: Boolean(params.status || priorityFilter || params.group),
+    }),
+  ]);
 
   /*
    * `as unknown` first, and only because the select string is CONDITIONAL.
@@ -491,18 +522,6 @@ export default async function TasksPage({
     kind !== "all";
 
   /*
-   * P7-26 — the requests that have not been decided yet.
-   *
-   * Awaited separately rather than joining the Promise.all above, because it is
-   * an ADDITION to this page rather than part of it: the task queries decide
-   * whether the page renders at all, and this one must not be able to change
-   * that. It returns [] on its own errors for the same reason.
-   *
-   * `status` and `priority` are passed as one boolean rather than as values —
-   * the rule is "any task-only filter hides these", and `pendingRequestsApply`
-   * should not have to learn what a status is to express that.
-   */
-  /*
    * Does this view actually hold both kinds of work?
    *
    * Read off the rows already fetched, so it costs nothing. Counted BEFORE the
@@ -514,12 +533,6 @@ export default async function TasksPage({
    * screen. Without it, a list showing three pending requests and two internal
    * chores would call itself single-kind.
    */
-  const pendingRequests = await loadPendingRequests({
-    listId: params.list ?? null,
-    kind,
-    scope: view,
-    hasTaskOnlyFilter: Boolean(params.status || priorityFilter || params.group),
-  });
 
   /*
    * P7-09 — A SUBTASK LIVES UNDER ITS PARENT, NOT IN ITS OWN STAGE.

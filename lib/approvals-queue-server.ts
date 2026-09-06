@@ -1,3 +1,4 @@
+import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
@@ -135,6 +136,63 @@ export async function listOwedAsReliever(
     .is("decision", null);
 
   return new Set((data ?? []).map((row) => row.request_id));
+}
+
+/**
+ * The same read, ONCE per request.
+ *
+ * `countWaitingOnYou` and `listWaitingOnYou` both open with `listOwedAsReliever`
+ * and `/dashboard` calls both, so the reliever query ran TWICE on every
+ * dashboard render for an answer that cannot have changed between them. Same
+ * treatment `fetchJoinedTaskIds` and `resolveAuth` get: `cache()`, per request.
+ *
+ * ⚠️ KEYED ON THE USER ID, NOT THE CLIENT, and that is the whole reason this is
+ * a Map rather than `cache(listOwedAsReliever)`. `cache()` memoises on its
+ * arguments, and the first argument would be a request-scoped SupabaseClient —
+ * a caller that built its own instance misses the memo silently, and a
+ * per-request client held in a cache key is a thing to keep out of a module
+ * anyway. So the cache holds the Map and the client rides through unkeyed.
+ *
+ * Internal on purpose. Both callers below are Server Components handing in
+ * their own RLS-scoped client, so there is no second client in a request for
+ * the key to have had to tell apart — and `listOwedAsReliever` stays exported
+ * unchanged for /approvals, which reads it once and needs no memo.
+ *
+ * Outside a React request — the unit tests — `cache()` is a pass-through, so a
+ * fresh Map comes back per call and each test's fake client is read for itself.
+ *
+ * ⚠️ THE SET IS SHARED between the two callers now. Both only `.has()` and
+ * `.size` it; nothing may mutate it.
+ *
+ * ⚠️ NEVER HAND THIS AN ADMIN CLIENT. The key is the user id and the client
+ * rides through unkeyed, so within one request the FIRST call for a given id
+ * wins and every later caller is handed that result. Two callers passing
+ * differently-scoped clients for the same id — one RLS-scoped, one from
+ * `utils/supabase/admin`, which bypasses RLS — would silently serve one
+ * scope's answer to the other. No such caller exists today: every call site
+ * passes the request's own `createClient()`. This comment is the only thing
+ * enforcing that, which is why it is stated as a rule rather than an
+ * observation.
+ *
+ * ⚠️ NAMED `owedFor`, NOT `owedAsReliever`. `waitingOnMe` above already has a
+ * PARAMETER called `owedAsReliever`, and a module function of the same name is
+ * shadowed inside it — correct today only because the parameter happens to be a
+ * `ReadonlySet`. Rename that parameter away and `.has()` would silently resolve
+ * to this function instead.
+ */
+const owedMemo = cache(() => new Map<string, Promise<Set<string>>>());
+
+function owedFor(
+  supabase: SupabaseClient<Database>,
+  userId: string,
+): Promise<Set<string>> {
+  const memo = owedMemo();
+  const hit = memo.get(userId);
+  if (hit) return hit;
+
+  const owed = listOwedAsReliever(supabase, userId);
+  memo.set(userId, owed);
+  return owed;
 }
 
 // ---------------------------------------------------------------------------
@@ -294,9 +352,10 @@ export async function countWaitingOnYou(
    * So the reliever queue is read for everybody, and the three approver queues
    * keep their gate below.
    */
-  const owed = await listOwedAsReliever(supabase, userId);
+  const owedPromise = owedFor(supabase, userId);
 
   if (!isApprover) {
+    const owed = await owedPromise;
     if (owed.size === 0) return EMPTY;
     return {
       ...EMPTY,
@@ -306,7 +365,13 @@ export async function countWaitingOnYou(
     };
   }
 
-  const [client, internal, weeks] = await Promise.all([
+  // ⚠️ IT IS IN THE BATCH, NOT IN FRONT OF IT. This used to be an `await` on its
+  // own line and the three approver queues waited a whole round trip behind it —
+  // for a set none of them filter on. `owed` is read by the early return above
+  // and by `waitingOnMe` below, and by nothing in here, so it goes in the batch.
+  const [owed, client, internal, weeks] = await Promise.all([
+    owedPromise,
+
     supabase
       .from("vizserve_pms_requests")
       .select("id", { count: "exact", head: true })
@@ -413,11 +478,20 @@ export async function listWaitingOnYou(
 
   // P9-01. Read for everybody, before the approver gate — a reliever named on
   // somebody's hand-over is usually a plain member. See `listOwedAsReliever`.
-  const owed = await listOwedAsReliever(supabase, userId);
+  // Memoised, so the dashboard — which calls this AND `countWaitingOnYou` —
+  // asks once rather than twice. See `owedFor`.
+  const owedPromise = owedFor(supabase, userId);
 
-  if (!isApprover && owed.size === 0) return [];
+  // Short-circuited on purpose: only a non-approver can trip this guard, so an
+  // approver never waits on the reliever read before the batch starts.
+  if (!isApprover && (await owedPromise).size === 0) return [];
 
-  const [client, internal, weeks, people] = await Promise.all([
+  // ⚠️ IN THE BATCH, as in `countWaitingOnYou`. Nothing in the four queries
+  // below filters on `owed`; it is spent on the guard above and on `waitingOnMe`
+  // in the mapping, so blocking the batch on it bought a round trip and nothing.
+  const [owed, client, internal, weeks, people] = await Promise.all([
+    owedPromise,
+
     isApprover
       ? supabase
           .from("vizserve_pms_requests")

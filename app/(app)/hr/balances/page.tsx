@@ -64,6 +64,7 @@ export default async function LeaveBalancesPage({
     { data: people, error: peopleError },
     { data: types, error: typesError },
     { data: rows, error: rowsError },
+    { data: departments },
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_users")
@@ -82,12 +83,10 @@ export default async function LeaveBalancesPage({
       .from("vizserve_pms_leave_balances")
       .select("user_id, leave_type_id, days_allocated")
       .eq("balance_year", year),
+    // The department list was a fourth read waiting behind this batch for
+    // nothing — it takes no argument from the three above. It joins the wave.
+    supabase.from("vizserve_pms_departments").select("id, name").order("name"),
   ]);
-
-  const { data: departments } = await supabase
-    .from("vizserve_pms_departments")
-    .select("id, name")
-    .order("name");
 
   const error = peopleError ?? typesError ?? rowsError;
 

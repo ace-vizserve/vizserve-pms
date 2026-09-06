@@ -44,35 +44,41 @@ export default async function FormsPage() {
   const context = await requireDepartmentShape();
   const supabase = await createClient();
 
-  const { data: forms } = await supabase
-    .from("vizserve_pms_forms")
-    // P7-66 — `purpose` for the Type column, `is_public` still for the public
-    // URL cell. They cannot disagree (the CHECK sees to that), but they answer
-    // different questions: one is what the form IS, the other is whether the
-    // /request/ route will serve it.
-    // `created_by` is not drawn anywhere — it is read so `administersForm` can
-    // recognise an unrouted draft as its author's.
-    .select(
-      "id, name, slug, purpose, is_public, is_active, reference_prefix, department_id, created_by, created_at, sla_minutes, requires_attachment",
-    )
-    .order("created_at", { ascending: false });
-
-  const { data: departments } = await supabase.from("vizserve_pms_departments").select("id, name");
-
   /*
-   * P7-66 — HOW MUCH EACH FORM IS ACTUALLY USED.
-   *
-   * The single most useful fact about a form, and the list never showed it: a
-   * published form nobody has submitted to and one carrying half the department
-   * s work looked identical.
-   *
-   * Two ids per row rather than a count per form: PostgREST has no GROUP BY, so
-   * the alternative is one `count` query per form. At this row count pulling the
-   * ids and tallying them here is one round trip instead of N.
+   * THREE READS, ONE WAVE. These were awaited one after another and none of
+   * them takes an argument from either of the others — the forms list, the
+   * department names and the submission tally are three independent facts, so
+   * the page was paying three round trips for one wave's worth of dependency.
    */
-  const { data: submissions } = await supabase
-    .from("vizserve_pms_requests")
-    .select("form_id, submitted_at");
+  const [{ data: forms }, { data: departments }, { data: submissions }] = await Promise.all([
+    supabase
+      .from("vizserve_pms_forms")
+      // P7-66 — `purpose` for the Type column, `is_public` still for the public
+      // URL cell. They cannot disagree (the CHECK sees to that), but they answer
+      // different questions: one is what the form IS, the other is whether the
+      // /request/ route will serve it.
+      // `created_by` is not drawn anywhere — it is read so `administersForm` can
+      // recognise an unrouted draft as its author's.
+      .select(
+        "id, name, slug, purpose, is_public, is_active, reference_prefix, department_id, created_by, created_at, sla_minutes, requires_attachment",
+      )
+      .order("created_at", { ascending: false }),
+
+    supabase.from("vizserve_pms_departments").select("id, name"),
+
+    /*
+     * P7-66 — HOW MUCH EACH FORM IS ACTUALLY USED.
+     *
+     * The single most useful fact about a form, and the list never showed it: a
+     * published form nobody has submitted to and one carrying half the department
+     * s work looked identical.
+     *
+     * Two ids per row rather than a count per form: PostgREST has no GROUP BY, so
+     * the alternative is one `count` query per form. At this row count pulling the
+     * ids and tallying them here is one round trip instead of N.
+     */
+    supabase.from("vizserve_pms_requests").select("form_id, submitted_at"),
+  ]);
 
   const submissionCounts: Record<string, number> = {};
   const lastSubmission: Record<string, string> = {};

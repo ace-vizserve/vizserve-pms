@@ -55,20 +55,92 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   if (!request) notFound();
 
-  const { data: form } = await supabase
-    .from("vizserve_pms_forms")
-    .select("id, name, sla_minutes, department_id, default_list_id")
-    .eq("id", request.form_id)
-    .maybeSingle();
-
   // Gate 1 is offered only while there is a decision left to make. A disabled
   // Approve on an already-decided request invites someone to wire around it.
   const awaitingDecision = request.status === "PENDING_REVIEW";
 
+  /*
+   * ⚠️ ONE WAVE, AND IT WAS FIVE. The form, the field labels, the attachments
+   * and — on a decided request — the linked task and the decision log were each
+   * awaited on their own line down the page, every one of them waiting on the
+   * one above it for nothing. All five are keyed by something already in hand:
+   * `request.form_id` from the read above, or the `id` from the URL.
+   *
+   * ⚠️ THE TWO CONDITIONALS ARE PRESERVED EXACTLY, and must stay that way. A
+   * PENDING request still reads neither the task nor the approvals — the slot
+   * holds the same inert `{ data: null }` the ternary used to — so no query
+   * runs here that did not run before. Only the queueing is gone.
+   */
+  const [{ data: form }, { data: fields }, { data: attachments }, { data: linkedTask }, decisions] =
+    await Promise.all([
+      supabase
+        .from("vizserve_pms_forms")
+        .select("id, name, sla_minutes, department_id, default_list_id")
+        .eq("id", request.form_id)
+        .maybeSingle(),
+
+      // Includes archived fields: a historical answer must keep rendering with
+      // its label even after the field is retired from the live form (D20/R5).
+      supabase
+        .from("vizserve_pms_form_fields")
+        .select("field_key, label, field_type, is_active")
+        .eq("form_id", request.form_id)
+        .order("sort_order"),
+
+      supabase
+        .from("vizserve_pms_request_attachments")
+        .select("id, filename, mime_type, size_bytes, field_key")
+        .eq("request_id", id)
+        .order("created_at"),
+
+      /*
+       * P7-59 — THE TASK THIS REQUEST BECAME.
+       *
+       * Approving at Gate 1 creates a task and then says nothing more about it.
+       * The request page carried the submission, a green "Approved" pill and a
+       * two-line Decision card, and no route onward at all — so the answer to
+       * "what happened to this?" was to go to /tasks and search for the title
+       * by eye.
+       *
+       * ⚠️ ONE QUERY, AND ONLY ONCE THE DECISION IS MADE. A pending request has
+       * no task by definition, and this page already refuses to pay for the
+       * capacity scan on a request decided last week — the same reasoning
+       * applies in reverse.
+       *
+       * NO DEPARTMENT FILTER. The task policy is WIDER than the request policy
+       * — a lead who can open this request necessarily manages the department
+       * the task was created in — so RLS returning a row IS the permission
+       * check, and restating it here would imply the policy were optional.
+       */
+      awaitingDecision
+        ? { data: null }
+        : supabase
+            .from("vizserve_pms_tasks")
+            .select("id, title, status, assignee_id, qa_assignee_id")
+            .eq("request_id", id)
+            .maybeSingle(),
+
+      /* The decision log, on the same terms and for the same reason: there is
+         nothing to read until there is a decision. It was the third slot of the
+         ternary below and belongs up here because it is keyed by `id` alone —
+         it never wanted the form, which is the only thing that batch waits on. */
+      awaitingDecision
+        ? { data: null }
+        : supabase
+            .from("vizserve_pms_approvals")
+            .select("decision, reason, created_at, approver_id")
+            .eq("entity_type", "request")
+            .eq("entity_id", id)
+            .order("created_at", { ascending: false }),
+    ]);
+
   // Loaded only when the panel will render — the capacity query is a scan over
   // the department's open tasks and there is no reason to pay for it on a
   // request that was decided last week.
-  const [candidates, capacity, decisions, lists, clientFolder] = awaitingDecision
+  //
+  // STILL A WAVE OF ITS OWN, and it has to be: all four are keyed by the form's
+  // `department_id`, which does not exist until the read above has landed.
+  const [candidates, capacity, lists, clientFolder] = awaitingDecision
     ? await Promise.all([
         supabase
           .from("vizserve_pms_users")
@@ -80,7 +152,6 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           p_department_id: form?.department_id ?? "",
           p_target_date: request.target_date,
         }),
-        Promise.resolve({ data: null }),
         supabase
           .from("vizserve_pms_lists")
           .select("id, name")
@@ -110,57 +181,12 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     : [
         { data: null },
         { data: null },
-        await supabase
-          .from("vizserve_pms_approvals")
-          .select("decision, reason, created_at, approver_id")
-          .eq("entity_type", "request")
-          .eq("entity_id", id)
-          .order("created_at", { ascending: false }),
         { data: null },
-        // Fifth slot, matching the branch above. A decided request renders no
+        // Fourth slot, matching the branch above. A decided request renders no
         // review panel, so neither the lists nor the folder are ever read —
         // but the tuple has to have the same shape either way.
         { data: null },
       ];
-
-  // Includes archived fields: a historical answer must keep rendering with its
-  // label even after the field is retired from the live form (D20/R5).
-  const { data: fields } = await supabase
-    .from("vizserve_pms_form_fields")
-    .select("field_key, label, field_type, is_active")
-    .eq("form_id", request.form_id)
-    .order("sort_order");
-
-  const { data: attachments } = await supabase
-    .from("vizserve_pms_request_attachments")
-    .select("id, filename, mime_type, size_bytes, field_key")
-    .eq("request_id", id)
-    .order("created_at");
-
-  /*
-   * P7-59 — THE TASK THIS REQUEST BECAME.
-   *
-   * Approving at Gate 1 creates a task and then says nothing more about it. The
-   * request page carried the submission, a green "Approved" pill and a two-line
-   * Decision card, and no route onward at all — so the answer to "what happened
-   * to this?" was to go to /tasks and search for the title by eye.
-   *
-   * ⚠️ ONE QUERY, AND ONLY ONCE THE DECISION IS MADE. A pending request has no
-   * task by definition, and this page already refuses to pay for the capacity
-   * scan on a request decided last week — the same reasoning applies in reverse.
-   *
-   * NO DEPARTMENT FILTER. The task policy is WIDER than the request policy — a
-   * lead who can open this request necessarily manages the department the task
-   * was created in — so RLS returning a row IS the permission check, and
-   * restating it here would imply the policy were optional.
-   */
-  const { data: linkedTask } = awaitingDecision
-    ? { data: null }
-    : await supabase
-        .from("vizserve_pms_tasks")
-        .select("id, title, status, assignee_id, qa_assignee_id")
-        .eq("request_id", id)
-        .maybeSingle();
 
   /*
    * Names for the three people this card can mention: whoever approved it, and

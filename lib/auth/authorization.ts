@@ -211,11 +211,45 @@ export const resolveAuth = cache(
 
     if (!userId) return { context: null, denial: "no_session" };
 
-    const attempt = await supabase
-      .from("vizserve_pms_users")
-      .select(`${PROFILE_COLUMNS}, is_dept_admin`)
-      .eq("id", userId)
-      .maybeSingle();
+    /*
+     * ⚠️ TWO READS, ONE WAVE — a latency change only, nothing about the answer
+     * moves.
+     *
+     * Both of these need `userId` and nothing else, and `userId` is already in
+     * hand: `getClaims()` above verified the token locally, so there is no
+     * round trip standing between the two. Yet they used to run one after the
+     * other, the managed-departments read not issued until the profile read had
+     * come back. That is one wasted blocking round trip on EVERY authenticated
+     * request in the app, because every route pays `resolveAuth` before it
+     * starts its own queries.
+     *
+     * They are genuinely independent — nothing in the managed-departments query
+     * reads the profile, and every deny branch below discards both together —
+     * so they go together and the depth here halves.
+     *
+     * ⚠️ THE DEGRADE BELOW STAYS SEQUENTIAL AND MUST NOT JOIN THIS WAVE. It is
+     * a real dependency: it re-asks the profile question only after inspecting
+     * THIS read's error. See `deptAdminColumnMissing`.
+     *
+     * ⚠️ The managed read is now issued even on the paths that go on to deny —
+     * no session profile, deactivated, no app access. That costs one cheap
+     * query for a caller who was going to be turned away anyway, and it cannot
+     * change the answer, because none of the denial branches ever consulted it.
+     * Nor can it turn a transport fault into a throw: PostgREST returns fetch
+     * failures as `error` on the result rather than rejecting, so `Promise.all`
+     * has nothing to reject on and the error posture is exactly as it was.
+     */
+    const [attempt, { data: managed }] = await Promise.all([
+      supabase
+        .from("vizserve_pms_users")
+        .select(`${PROFILE_COLUMNS}, is_dept_admin`)
+        .eq("id", userId)
+        .maybeSingle(),
+      supabase
+        .from("vizserve_pms_user_managed_departments")
+        .select("department_id")
+        .eq("user_id", userId),
+    ]);
 
     let profile: (typeof attempt)["data"] = attempt.data;
 
@@ -272,11 +306,10 @@ export const resolveAuth = cache(
       return { context: null, denial: "no_app_access" };
     }
 
-    const { data: managed } = await supabase
-      .from("vizserve_pms_user_managed_departments")
-      .select("department_id")
-      .eq("user_id", userId);
-
+    // `managed` was read in the same wave as the profile above — see the note
+    // there. It used to be awaited here, serially, for no reason: it depends
+    // only on `userId`, and nothing between there and here can change what it
+    // holds.
     return {
       context: {
         userId: profile.id,

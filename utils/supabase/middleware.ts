@@ -61,11 +61,36 @@ export function isPublicPath(pathname: string) {
 /**
  * Refreshes the auth session on every request and gates the authenticated area.
  *
- * NOTE ON `user_metadata`: the app-access claim read here is a routing
- * convenience only. It is user-writable through Supabase's own GoTrue endpoint,
- * so it is never the answer to "may this person do this" — that is
- * `lib/auth/authorization.ts` reading `vizserve_pms_users.role`, plus RLS.
- * See docs/02-data-model.md §Auth metadata.
+ * ⚠️ THIS GATE ANSWERS ONE QUESTION: "is there a valid session?" It decides
+ * signed-in versus sent-to-login, and nothing else. Every question of the form
+ * "may this person do this" is `lib/auth/authorization.ts` reading
+ * `vizserve_pms_users.role`, plus RLS.
+ *
+ * NOTE ON `user_metadata`: this file reads none, and must not start. It is
+ * user-writable through Supabase's own GoTrue endpoint, so it is never an
+ * authorization input — see docs/02-data-model.md §Auth metadata, and
+ * `npm run check:metadata`, which fails the build over it. The temptation is
+ * newer than the rule: `getClaims()` returns the whole decoded token, so
+ * `user_metadata` is now one property access away at this call site, where
+ * `getUser()` at least made you go looking for it.
+ *
+ * ⚠️ REVOCATION IS NO LONGER INSTANT AT THIS GATE, and that is the one real
+ * behavioural cost of verifying locally. `getUser()` asked the Auth server, so
+ * a deleted, banned or globally-signed-out user was refused here immediately.
+ * `getClaims()` checks the signature and `exp`, so such a token still passes
+ * this gate until it expires.
+ *
+ * The exposure is small and worth stating exactly. `resolveAuth` reads
+ * `is_active` and `app_access` from `vizserve_pms_users` on every request, so a
+ * deactivated account is still refused on the very next page render — the gate
+ * lets them through and the authorization layer turns them away. The app also
+ * has no Supabase-side revocation flow at all today: `signOut` is local-scope
+ * and nothing calls `admin.deleteUser` outside tests.
+ *
+ * ⚠️ IF A "SIGN OUT EVERYWHERE" FEATURE IS EVER ADDED, IT WILL NOT TAKE EFFECT
+ * HERE until the access token expires. Deactivating the user row is what works
+ * today, and any real revocation feature has to lean on that or on a shorter
+ * token lifetime rather than on this function.
  */
 export async function updateSession(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });

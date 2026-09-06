@@ -161,38 +161,47 @@ export default async function InternalRequestPage({ params }: { params: Promise<
    * scope simply gets no rows back and the links still render, which is the
    * correct outcome: the week EXISTS whether or not this reader may see it.
    */
-  const { data: weekRows, error: weeksError } =
+  /*
+   * TWO READS, ONE WAVE. The relievers read was awaited AFTER this one and
+   * needs nothing from it — it is keyed by the `id` from the URL, which has
+   * been in hand since the first line of this function. The weeks read still
+   * genuinely waits on the request row (it is derived from its dates), so the
+   * ternary below is untouched: no query runs that did not run before, and on
+   * a request with no affected weeks the slot is still the same inert literal.
+   */
+  const [{ data: weekRows, error: weeksError }, { data: relieverRows }] = await Promise.all([
     affectedWeeks.length > 0
-      ? await supabase
+      ? supabase
           .from("vizserve_pms_timesheet_weeks")
           .select("id, week_start, status")
           .eq("user_id", request.requester_id)
           .in("week_start", affectedWeeks)
-      : { data: null, error: null };
+      : { data: null, error: null },
+
+    /*
+     * P9-01 — the hand-over, if there is one.
+     *
+     * Read for every request rather than only for chained leave: a request that
+     * has been approved keeps its relievers, and the page that shows who covered
+     * what should still show it afterwards. An unchained request simply gets an
+     * empty array, which renders as nothing.
+     *
+     * The names come through an embed on the same read. Policy-scoped like
+     * everything else — a reliever can see their own row, and the requester, the
+     * leads and HR can see them all.
+     */
+    supabase
+      .from("vizserve_pms_internal_request_relievers")
+      .select(
+        "id, reliever_id, decision, decided_at, reason, vizserve_pms_users!vizserve_pms_internal_request_relievers_reliever_id_fkey(full_name), vizserve_pms_internal_request_reliever_tasks(task_id, vizserve_pms_tasks(id, title))",
+      )
+      .eq("request_id", id)
+      .order("created_at", { ascending: true }),
+  ]);
 
   const weekStatus = new Map(
     (weekRows ?? []).map((week) => [week.week_start, week.status as VizservePmsTimesheetWeekStatus]),
   );
-
-  /*
-   * P9-01 — the hand-over, if there is one.
-   *
-   * Read for every request rather than only for chained leave: a request that
-   * has been approved keeps its relievers, and the page that shows who covered
-   * what should still show it afterwards. An unchained request simply gets an
-   * empty array, which renders as nothing.
-   *
-   * The names come through an embed on the same read. Policy-scoped like
-   * everything else — a reliever can see their own row, and the requester, the
-   * leads and HR can see them all.
-   */
-  const { data: relieverRows } = await supabase
-    .from("vizserve_pms_internal_request_relievers")
-    .select(
-      "id, reliever_id, decision, decided_at, reason, vizserve_pms_users!vizserve_pms_internal_request_relievers_reliever_id_fkey(full_name), vizserve_pms_internal_request_reliever_tasks(task_id, vizserve_pms_tasks(id, title))",
-    )
-    .eq("request_id", id)
-    .order("created_at", { ascending: true });
 
   const relievers = (relieverRows ?? []) as unknown as RelieverRow[];
 
