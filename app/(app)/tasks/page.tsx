@@ -6,11 +6,11 @@ import { redirect } from "next/navigation";
 import {
   TaskColumnsMenu,
   TaskColumnsProvider,
-  TaskGroupTable,
   type ListRow,
   type TaskRow,
 } from "./tasks-table";
 import { isTaskStatus } from "@/components/status-badge";
+import { TaskStatusGroups } from "./task-status-groups";
 import {
   canAdminDepartment,
   realtimeDepartmentFilter,
@@ -42,7 +42,6 @@ import type { TaskComment } from "./comment-thread";
 import { TaskSelectionProvider } from "./task-selection";
 import { TaskFilters } from "./filters";
 import { NewTaskButton } from "./new-task-button";
-import { TaskStatusGroup } from "./status-group";
 import { PendingRequestList } from "./pending-requests";
 import { TaskToolbar } from "./toolbar";
 
@@ -1087,46 +1086,25 @@ async function TaskGroups({
   }
 
   return (
-    <div className="flex flex-col gap-3">
-      {visibleStatuses.map((status) => {
-        const group = grouped.get(status) ?? [];
-
-        return (
-          <TaskStatusGroup
-            key={status}
-            status={status}
-            count={group.length}
-            // A stage with nothing in it opens to one line. Closing it by
-            // default would hide the only thing it has to say.
-            defaultOpen>
-            {/*
-              THE TABLE IS ALWAYS RENDERED, even for an empty stage, because
-              the composer is a `<tr>` inside it — a stage with nothing in it
-              is exactly where somebody wants to add the first task, and a
-              paragraph cannot hold a row. The empty sentence moves into the
-              table as its `empty` state.
-            */}
-            <TaskGroupTable
-              group={group}
-              status={status}
-              viewer={viewer}
-              lookups={lookups}
-              assignable={assignable}
-            />
-
-            {/*
-              The dialog, under the first heading only.
-
-              The composer above now covers everything it does except a
-              description, a list and a QA reviewer — so repeating it under
-              eight headings would be eight controls that mostly duplicate the
-              row directly above them. It renders nothing at all for a member
-              with nobody to assign to, and settles that for itself rather
-              than the page guessing.
-            */}
-          </TaskStatusGroup>
-        );
-      })}
-    </div>
+    /*
+     * P11-05 — THE BUCKETS ARE ASSIGNED IN THE BROWSER NOW.
+     *
+     * The server still does the expensive half above: the query, the filters and
+     * the parent/child nesting. What it no longer decides is which heading a row
+     * sits under at this instant — that moved into `<TaskStatusGroups>` so a
+     * status change moves the row on click rather than 2–3 seconds later, once
+     * this page had re-run all fourteen of its queries.
+     *
+     * `grouped` is a Map and a Map does not cross the RSC boundary
+     * (`components/data-table.tsx` carries the same warning), so it is handed
+     * over as a plain object.
+     */
+    <TaskStatusGroups
+      groups={Object.fromEntries(grouped)}
+      visibleStatuses={visibleStatuses}
+      viewer={viewer}
+      lookups={lookups}
+      assignable={assignable}
+    />
   );
 }

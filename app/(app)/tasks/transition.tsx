@@ -16,6 +16,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { isRichTextEmpty } from "@/lib/rich-text";
+import { useOptimisticMove } from "./task-status-groups";
 import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/tasks";
 
 import { transitionTask } from "./actions";
@@ -103,12 +104,25 @@ export function useTaskTransition({
    */
   const [shownStatus, setShownStatus] = useOptimistic(status);
 
+  /*
+   * ⚠️ THE CHIP IS NOT THE ONLY THING THAT HAS TO MOVE. On `/tasks` the rows
+   * are bucketed under status headings, so a repainted chip in the wrong group
+   * is half an update — and half-instant is worse than not instant, because the
+   * eye goes straight to the thing that did not move.
+   *
+   * Null on the detail page and the board, which render this control with no
+   * groups around them. Optional by construction rather than by check.
+   */
+  const moveRow = useOptimisticMove();
+
   function commit(transition: Transition, comment?: string) {
     setError(null);
     setActive(transition);
     startTransition(async () => {
-      // Inside the transition, before the await: this is the paint.
+      // Inside the transition, before the await: this is the paint. Both of
+      // them, so the chip and the row it sits in move together.
       setShownStatus(transition.to);
+      moveRow?.({ id: taskId, status: transition.to });
 
       await beforeMove?.();
 
