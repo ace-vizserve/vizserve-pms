@@ -23,11 +23,19 @@ export const metadata: Metadata = {
   robots: { index: false, follow: false },
 };
 
-/**
- * Never cached. The point of the page is that it is current — a client
- * refreshing after a phone call must not be served the version from before it.
+/*
+ * ⚠️ STILL NEVER CACHED, AND NOW BY CONSTRUCTION RATHER THAN BY DIRECTIVE.
+ *
+ * This was `export const dynamic = "force-dynamic"`, which cacheComponents
+ * rejects outright. It is not needed under it: the rule inverts, and a read that
+ * is not explicitly wrapped in `'use cache'` is dynamic. This page reads the
+ * token from `params` and calls a SECURITY DEFINER function with it, and neither
+ * is cached, so every request re-reads.
+ *
+ * The requirement that produced the directive is unchanged and still matters: a
+ * client refreshing after a phone call must not be served the version from
+ * before it. ⚠️ SO NOTHING ON THIS PAGE MAY EVER TAKE `'use cache'`.
  */
-export const dynamic = "force-dynamic";
 
 /**
  * THE SAME SHELL `/approve/[token]` USES, down to the class list.

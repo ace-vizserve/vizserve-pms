@@ -1,6 +1,30 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  /**
+   * P11-05 — Instant Navigations (Next 16.3).
+   *
+   * Cache Components gives every route a prerendered SHELL — static chrome plus
+   * Suspense fallbacks — and Partial Prefetching fetches that shell for visible
+   * <Link>s before the click. The shell is what makes navigation feel instant;
+   * the per-user rows stream in behind it.
+   *
+   * ⚠️ THE ONE RULE THAT CANNOT BE BROKEN: `use cache` NEVER WRAPS AN
+   * RLS-SCOPED READ. Every authenticated read in this app is scoped to
+   * `auth.uid()`, and caching one across requests renders one person's leave
+   * request for somebody else. That is a data leak, not a slow page.
+   *
+   * `use cache` is for REFERENCE data only — leave types, holidays,
+   * departments, form definitions. Anything reached through the signed-in user
+   * streams through Suspense instead. There is currently no `use cache` in this
+   * codebase at all, and adding one is a decision, not an optimisation.
+   *
+   * Verified after enabling: all 40 prerendered shells contain a title and a
+   * skeleton and nothing else — no name, no email, no row.
+   */
+  cacheComponents: true,
+  partialPrefetching: true,
+
   experimental: {
     /**
      * Attachments are uploaded through a Server Action, and Next caps a Server

@@ -15,7 +15,9 @@ import { dispatchPendingEmails } from "@/lib/email/dispatch";
  * alongside it and share this authorization shape.
  */
 
-export const dynamic = "force-dynamic";
+// P11-05. `export const dynamic` is incompatible with cacheComponents and is
+// redundant under it: a route handler that reads a request header is dynamic
+// by construction. `isAuthorized` below reads `Authorization` on every call.
 export const maxDuration = 60;
 
 function isAuthorized(request: Request): boolean {
