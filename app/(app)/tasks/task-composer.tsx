@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -82,6 +82,20 @@ function useComposer({
   onDone?: () => void;
 }) {
   const router = useRouter();
+  /*
+   * ⚠️ THE LIST COMES FROM THE URL, not from a prop threaded through six files.
+   *
+   * `?list=` is the same parameter the page filtered by, so a composer rendered
+   * under a list is by definition rendered at that list's URL. Reading it here
+   * keeps one source of truth and avoids passing a value through
+   * GroupComposer / BoardComposer / ComposerRow / ComposerCard, every one of
+   * which would otherwise have to carry a prop it does not itself use.
+   *
+   * Null on `/tasks/[id]`, where subtasks are added and there is no `?list=` —
+   * which is the behaviour those already had.
+   */
+  const searchParams = useSearchParams();
+  const listId = searchParams.get("list");
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const [pending, startTransition] = useTransition();
 
@@ -103,6 +117,9 @@ function useComposer({
         due_date: draft.dueDate,
         estimate_minutes: draft.estimateMinutes,
         parent_task_id: parentId,
+        // The list this was typed into. Both RPCs validate it against the
+        // task's department and refuse a foreign one, so this is a proposal.
+        list_id: listId,
       });
 
       if (!result.ok) {

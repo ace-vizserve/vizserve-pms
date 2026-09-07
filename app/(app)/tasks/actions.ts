@@ -481,6 +481,26 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
        * from the foot of a group — a subtask IS just another task, nested.
        */
       parent_task_id: z.uuid().nullable().default(null),
+      /**
+       * ⚠️ THIS FIELD DID NOT EXIST, AND EVERY TASK TYPED INLINE WAS FILED
+       * NOWHERE.
+       *
+       * Both dialogs pass a list. This action does not CALL them — it
+       * re-implements what they do, dispatching to the same two RPCs itself —
+       * so it carried its own copy of the payload, and that copy sent
+       * `p_list_id: null` hardcoded to both. Three call sites building one
+       * payload; two of them right.
+       *
+       * The failure was invisible in the way that matters most: the task WAS
+       * created and the toast said so, then it did not appear in the list it
+       * had been typed into, because it was not in that list. It read as a save
+       * that had silently failed.
+       *
+       * The real repair is for this action to call `createTask` /
+       * `createPersonalTask` rather than duplicate them. Until then this is the
+       * third copy, kept honest.
+       */
+      list_id: z.uuid().nullable().default(null),
     })
     .safeParse(input);
 
@@ -544,14 +564,18 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
         p_assignee_id: values.assignee_id,
         p_qa_assignee_id: null,
         p_due_date: values.due_date || null,
-        p_list_id: null,
+        // The list the composer was typed into. create_task refuses one outside
+        // the task's own department, so this is a proposal, not an authority.
+        p_list_id: values.list_id,
         p_priority: values.priority,
       })
     : await supabase.rpc("vizserve_pms_create_personal_task", {
         p_title: values.title,
         p_description: "",
         p_due_date: values.due_date || null,
-        p_list_id: null,
+        // create_personal_task RAISES on a list in another department, so a
+        // stale one surfaces as a sentence rather than filing the task nowhere.
+        p_list_id: values.list_id,
         p_priority: values.priority,
       });
 
