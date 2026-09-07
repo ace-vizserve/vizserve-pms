@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { startTransition, useOptimistic, useState, useTransition } from "react";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -146,23 +146,61 @@ export function CommentThread({
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const [pending, startTransition] = useTransition();
+  const [pending, startPending] = useTransition();
+
+  /*
+   * P11-05 — THE COMMENT APPEARS WHEN YOU POST IT.
+   *
+   * Posting used to sit for a round trip with nothing on screen but a disabled
+   * button, and a comment is the one thing on a task where people expect the
+   * feedback loop of a chat box.
+   *
+   * ⚠️ THE OPTIMISTIC ROW IS MARKED `pending` AND SAYS SO. Predicting that a
+   * comment WILL be accepted is fine; pretending it already has been is not —
+   * the row is dimmed and captioned "Sending…" until the server confirms it,
+   * so nobody quotes a comment in a meeting that never landed.
+   *
+   * React drops it when the transition ends, and the real one arrives with the
+   * action's revalidation. A refusal needs no rollback: the row simply
+   * disappears and the text is still in the box.
+   */
+  const [shownComments, addOptimisticComment] = useOptimistic(
+    comments,
+    (state: TaskComment[], text: string): TaskComment[] => [
+      ...state,
+      {
+        // A key React can tell apart from every real id. It exists for one
+        // render and is replaced by the server's row.
+        id: `optimistic-${state.length}`,
+        body: text,
+        authorId: viewerId,
+        authorName:
+          comments.find((row) => row.authorId === viewerId)?.authorName ?? "You",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      },
+    ],
+  );
 
   function post() {
     const text = body.trim();
     if (isRichTextEmpty(text)) return;
 
+    // Cleared FIRST, because the optimistic row is now what shows it. Leaving
+    // it in the box as well would put the same comment on screen twice.
+    setBody("");
+
     startTransition(async () => {
+      addOptimisticComment(text);
+
       const result = await addTaskComment(taskId, { body: text });
 
       if (!result.ok) {
+        // Put it back: a comment the server refused must not be lost to a toast
+        // nobody can copy out of.
+        setBody(text);
         toast.error(result.error);
-        return;
       }
-
-      // Cleared only on success. A comment the server refused stays in the box
-      // rather than being lost to a toast nobody can copy out of.
-      setBody("");
     });
   }
 
@@ -170,7 +208,7 @@ export function CommentThread({
     const text = draft.trim();
     if (isRichTextEmpty(text)) return;
 
-    startTransition(async () => {
+    startPending(async () => {
       const result = await editTaskComment(commentId, { body: text });
 
       if (!result.ok) {
@@ -184,7 +222,7 @@ export function CommentThread({
   }
 
   function remove(commentId: string) {
-    startTransition(async () => {
+    startPending(async () => {
       const result = await deleteTaskComment(commentId);
 
       if (!result.ok) {
@@ -202,7 +240,9 @@ export function CommentThread({
    * component could render two things it already knows how to render.
    */
   const feed = [
-    ...comments.map((comment) => ({
+    // ⚠️ `shownComments`, NOT `comments` — the optimistic row lives here, and
+    // reading the prop straight would render the thread without it.
+    ...shownComments.map((comment) => ({
       at: comment.createdAt,
       comment,
       event: null,
