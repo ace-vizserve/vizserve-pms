@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { richTextSchema } from "./rich-text";
 
 /**
  * PHASE 2 CONTRACT — the decision payload (D3a, R11).
@@ -46,12 +47,28 @@ export const APPROVAL_DECISION_LABELS: Record<ApprovalDecision, string> = {
  * reaches a client who has no other channel. Amier's framing at 37:00 is that
  * negotiation is the primary path — a returned request with the reason "no" is
  * not a negotiation.
+ *
+ * ⚠️ MEASURED ON THE FLATTENED TEXT, AND IT WAS NOT UNTIL 7 SEP 2026.
+ *
+ * The field behind this is a `RichTextEditor` (`review-panel.tsx`), so the value
+ * arriving here is markup. As a plain `z.string().min(10)` it counted the tags:
+ *
+ *   `<p><strong>no</strong></p>`   26 characters of markup, 2 of prose
+ *
+ * That cleared the floor, and the client received an email whose entire
+ * explanation was "no". The submit button was no help either — it gated on
+ * `reason.trim().length` and counted the same tags. Bolding a two-letter refusal
+ * is not a contrived case; it is what somebody does when they are annoyed.
+ *
+ * `lib/schemas/rich-text.ts` opens with a warning about exactly this failure.
+ * This field was the one that did not follow it.
  */
-export const decisionReasonSchema = z
-  .string()
-  .trim()
-  .min(10, "Give the requester something they can act on — at least a sentence.")
-  .max(2000, "Keep it under 2000 characters.");
+export const decisionReasonSchema = richTextSchema({
+  min: 10,
+  max: 2000,
+  requiredMessage: "Give the requester something they can act on — at least a sentence.",
+  tooLongMessage: "Keep it under 2000 characters.",
+});
 
 export const approveDecisionSchema = z.object({
   decision: z.literal("approved"),

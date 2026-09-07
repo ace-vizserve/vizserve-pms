@@ -25,6 +25,7 @@ import {
 } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { formatDate, isOverdue } from "@/lib/dates";
+import { richTextLength } from "@/lib/rich-text";
 import type { CapacityRow } from "@/lib/schemas/approvals";
 
 import { saveList } from "../../tasks/actions";
@@ -530,7 +531,12 @@ export function ReviewPanel({
                   variant={mode === "rejected" ? "destructive" : "default"}
                   onClick={decideNegative}
                   loading={pending}
-                  disabled={reason.trim().length < 10}
+                  // ⚠️ `richTextLength`, NOT `.length`. This is a RichTextEditor,
+                  // so `reason` is markup: `<p><strong>no</strong></p>` is 26
+                  // characters of it and 2 of prose. Counting raw let a
+                  // two-letter refusal through to a client with no other
+                  // channel, and the schema counted the same tags until 7 Sep.
+                  disabled={richTextLength(reason) < 10}
                 >
                   {mode === "returned" ? "Return to requester" : "Reject this request"}
                 </Button>
