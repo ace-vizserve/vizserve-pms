@@ -14,7 +14,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition, useOptimistic } from "react";
 
 import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
 import { TaskStatusBadge } from "@/components/status-badge";
@@ -1188,7 +1188,26 @@ function TimeCell({
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const total = sum(entries);
+  const serverTotal = sum(entries);
+
+  /*
+   * P11-05 — THE CELL KEEPS THE NUMBER IT IS ABOUT TO SAVE.
+   *
+   * ⚠️ THE OPTIMISTIC VALUE IS THE PARSED ONE, NEVER WHAT WAS TYPED, and that
+   * distinction is the whole reason this was not optimistic before. `cellCommit`
+   * REINTERPRETS input — "1.5" becomes 90m, "90m" becomes 1h 30m — so echoing the
+   * keystrokes back would show a number the server was never going to store, and
+   * a timesheet that displays a figure nobody saved is worse than a slow one.
+   * `plan.minutes` is what will be written, so it is what is shown.
+   *
+   * Before this the cell dropped back to the SERVER total the moment focus left,
+   * so on a slow connection a whole row of typed numbers reverted one by one and
+   * then re-appeared. That reads as the grid losing work.
+   *
+   * React drops the value if the write is refused and the server total returns,
+   * with the toast explaining it. No rollback to write.
+   */
+  const [total, setOptimisticTotal] = useOptimistic(serverTotal);
   const split = entries.length > 1;
 
   // Three reasons a cell cannot be typed into, and they are not the same reason:
@@ -1303,13 +1322,15 @@ function TimeCell({
       return;
     }
 
-    // Back to showing the server from here on, so a value it rejected or
-    // reinterpreted never lingers as though it had been accepted.
+    // The draft goes; `total` below carries the value from here on, and it is
+    // the PARSED one rather than the keystrokes.
     setDraft(null);
 
     if (plan.kind === "noop") return;
 
     startTransition(async () => {
+      setOptimisticTotal(plan.kind === "delete" ? 0 : plan.minutes);
+
       const result = await persist(plan);
 
       if (!result.ok) {
