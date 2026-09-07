@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useOptimistic, useState } from "react";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -57,9 +57,26 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
     undefined,
   );
 
+  /*
+   * P11-05 — the panel answers on the click.
+   *
+   * ⚠️ IT DOES NOT PREDICT THE REQUEST'S NEW STATUS, and that distinction is
+   * the point. A leave request at stage 2 that a lead approves does NOT become
+   * Approved — it moves to stage 3 and waits for a manager (P9-04). Painting
+   * "Approved" here would be a lie on the commonest path through this screen.
+   *
+   * What is certain is that THIS person has now decided, so that is what shows:
+   * the two buttons are replaced by what they chose, and the real status arrives
+   * with the action's revalidation a moment later.
+   */
+  const [decided, setDecided] = useOptimistic<"approved" | "rejected" | null>(null);
+
   function decide(decision: "approved" | "rejected") {
     setError(null);
-    startTransition(() => dispatch(decision));
+    startTransition(() => {
+      setDecided(decision);
+      dispatch(decision);
+    });
   }
 
   return (
@@ -101,6 +118,15 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
             React runs a form action in its own transition, which is what the
             pending state hangs off — and the panel keeps working before the
             JavaScript for this route has finished loading. */}
+        {decided ? (
+          <p
+            aria-live="polite"
+            className="rounded-sm border bg-muted px-3 py-2 text-xs text-foreground-muted"
+          >
+            {decided === "approved" ? "Approving…" : "Rejecting…"} — waiting for the server to
+            confirm what happens next.
+          </p>
+        ) : (
         <form className="flex flex-col gap-2 sm:flex-row">
           <Button
             type="submit"
@@ -118,6 +144,7 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
             Reject
           </Button>
         </form>
+        )}
       </CardContent>
     </Card>
   );

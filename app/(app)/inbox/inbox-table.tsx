@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useTransition } from "react";
+import { startTransition, useOptimistic } from "react";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
@@ -218,21 +218,34 @@ export function InboxTable({
  * place either way; the only difference is whether pressing them does anything.
  */
 function MarkReadTitle({ item }: { item: Notification }) {
-  const [pending, startTransition] = useTransition();
+  /*
+   * P11-05 — the row stops being unread on the click.
+   *
+   * Marking read is the most-pressed thing on this page and the only feedback
+   * was a spinner on the title, which is the text you are trying to read. The
+   * optimistic value flips the control out of existence: once read, the title is
+   * a plain span, so the button that was just pressed becomes the thing it
+   * pressed toward.
+   */
+  const [read, markRead] = useOptimistic(Boolean(item.read_at));
 
-  if (item.read_at) {
+  if (read) {
     return <span className="text-sm">{item.title}</span>;
   }
 
   return (
-    <Button
-      variant="link"
-      loading={pending}
-      className="h-auto justify-start p-0 text-left text-sm font-medium whitespace-normal"
-      onClick={() => startTransition(async () => markNotificationRead(item.id))}
-    >
-      {item.title}
-      <span className="sr-only"> (unread — press to mark read)</span>
-    </Button>
+    <form action={() => startTransition(() => {
+      markRead(true);
+      void markNotificationRead(item.id);
+    })}>
+      <Button
+        type="submit"
+        variant="link"
+        className="h-auto justify-start p-0 text-left text-sm font-medium whitespace-normal"
+      >
+        {item.title}
+        <span className="sr-only"> (unread — press to mark read)</span>
+      </Button>
+    </form>
   );
 }
