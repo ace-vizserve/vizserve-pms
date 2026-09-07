@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { Check, MessageSquare } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -47,10 +47,28 @@ export function ApprovalForm({
   // still has to read correctly, so nothing here may assume it is there.
   const [feedbackToken, setFeedbackToken] = useState<string | null>(null);
 
+  /*
+   * P11-05 — SENDING IS PREDICTED. SENT IS NOT.
+   *
+   * ⚠️ THE "THANK YOU" PANEL STAYS BEHIND THE SERVER, deliberately. This is a
+   * CLIENT approving deliverable work — a business record with an audit row and
+   * an email behind it — and a page that says the decision is in when nothing
+   * was written is the DTR-punch problem with a contract attached. `done` is
+   * still set from the response.
+   *
+   * What IS true the instant the button is pressed is that the decision is on
+   * its way, and saying so is worth more here than anywhere else in the app:
+   * the reader is on a phone, on one shot, and the alternative is pressing
+   * Approve three times.
+   */
+  const [sending, setSending] = useOptimistic<"APPROVED" | "REVISION_REQUESTED" | null>(null);
+
   function submit(decision: "APPROVED" | "REVISION_REQUESTED") {
     setError(null);
 
     startTransition(async () => {
+      setSending(decision);
+
       const result = await submitClientDecision(token, {
         decision,
         comment: comment.trim() || undefined,
@@ -65,6 +83,14 @@ export function ApprovalForm({
       setFeedbackToken(result.feedbackToken ?? null);
       setDone(decision);
     });
+  }
+
+  if (sending) {
+    return (
+      <p aria-live="polite" className="text-sm text-foreground-muted">
+        {sending === "APPROVED" ? "Sending your approval…" : "Sending your changes…"}
+      </p>
+    );
   }
 
   if (done) {

@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { CheckCheck } from "lucide-react";
 import { startTransition, useOptimistic } from "react";
 
 import { DataTable, type Column } from "@/components/data-table";
@@ -36,18 +37,45 @@ export type Notification = {
   created_at: string;
 };
 
+/**
+ * P11-05 — "Mark all read", as a client control rather than a bare server form.
+ *
+ * ⚠️ IT LIVES IN HERE BECAUSE ONE OPTIMISTIC VALUE HAS TO COVER BOTH THE BUTTON
+ * AND EVERY ROW. It used to be a `<form action={markAllRead}>` in the page — a
+ * server component, a sibling of this table, with no state either could share.
+ * Optimism there would have hidden the button while forty rows stayed bold,
+ * which is the half-update that reads worse than no update at all.
+ */
 export function InboxTable({
   rows,
   empty,
   toolbar,
   count,
+  markAllAction,
 }: {
   rows: Notification[];
+  /**
+   * P11-05 — "Mark all read", moved in here from the page.
+   *
+   * ⚠️ IT HAD TO MOVE, because ONE optimistic value has to cover the button AND
+   * every row. It was a `<form action={markAllRead}>` in the page — a server
+   * component, a sibling of this table, with no state either could share. An
+   * optimistic hide there would have taken the button away while forty rows
+   * stayed bold, which is the half-update that reads worse than none.
+   *
+   * Absent while a search is active: marking all read would silently clear rows
+   * the person cannot see, so the page passes nothing and no control renders.
+   */
+  markAllAction?: () => Promise<void>;
   empty: React.ReactNode;
   /** Search and filters, for the table's own header strip. */
   toolbar?: React.ReactNode;
   count?: React.ReactNode;
 }) {
+  /* The one flag. Every `read_at` read below goes through `isRead`. */
+  const [allRead, markAllRead] = useOptimistic(false);
+  const isRead = (item: Notification) => allRead || Boolean(item.read_at);
+
   const columns: Column<Notification>[] = [
     {
       key: "notification",
@@ -60,7 +88,7 @@ export function InboxTable({
               is not an accessible status. */}
           <span
             aria-hidden
-            className={cn("mt-1.75 size-1.5 shrink-0 rounded-full", item.read_at ? "bg-transparent" : "bg-primary")}
+            className={cn("mt-1.75 size-1.5 shrink-0 rounded-full", isRead(item) ? "bg-transparent" : "bg-primary")}
           />
           <div className="min-w-0">
             {item.link_path ? (
@@ -68,7 +96,7 @@ export function InboxTable({
               // dashboard the recipient then has to search (docs/12 §3).
               <Link
                 href={item.link_path}
-                className={cn("text-sm hover:underline", !item.read_at && "font-medium")}
+                className={cn("text-sm hover:underline", !isRead(item) && "font-medium")}
                 /*
                  * ⚠️ OPENING IT READS IT, and the request is deliberately NOT
                  * awaited before the link navigates.
@@ -83,11 +111,11 @@ export function InboxTable({
                  * action would ignore it anyway (`.is("read_at", null)`).
                  */
                 onClick={() => {
-                  if (!item.read_at) void markNotificationRead(item.id);
+                  if (!isRead(item)) void markNotificationRead(item.id);
                 }}
               >
                 {item.title}
-                {!item.read_at ? <span className="sr-only"> (unread)</span> : null}
+                {!isRead(item) ? <span className="sr-only"> (unread)</span> : null}
               </Link>
             ) : (
               /*
@@ -103,7 +131,7 @@ export function InboxTable({
                * being a control at all — there is nothing left for it to do,
                * and an inert button is worse than plain text.
                */
-              <MarkReadTitle item={item} />
+              <MarkReadTitle item={item} allRead={allRead} />
             )}
             {/*
               ⚠️ FLATTENED, BECAUSE THE BODY IS MARKUP NOW.
@@ -152,7 +180,7 @@ export function InboxTable({
       defaultHidden: true,
       className: "hidden lg:table-cell",
       cell: (item) =>
-        item.read_at ? (
+        isRead(item) ? (
           <span className="text-xs text-muted-foreground">Read</span>
         ) : (
           <span className="text-xs font-medium">Unread</span>
@@ -198,7 +226,27 @@ export function InboxTable({
       columns={columns}
       rows={rows}
       getRowKey={(item) => item.id}
-      toolbar={toolbar}
+      toolbar={
+        <>
+          {toolbar}
+          {markAllAction && !allRead ? (
+            <form
+              className="ml-auto"
+              action={() =>
+                startTransition(async () => {
+                  markAllRead(true);
+                  await markAllAction();
+                })
+              }
+            >
+              <Button type="submit" size="sm">
+                <CheckCheck />
+                Mark all read
+              </Button>
+            </form>
+          ) : null}
+        </>
+      }
       count={count}
       urlSort
       /* What the server orders by when the URL says nothing. Display only — it
@@ -217,7 +265,7 @@ export function InboxTable({
  * rather than as a control bolted beside one. It is the same words in the same
  * place either way; the only difference is whether pressing them does anything.
  */
-function MarkReadTitle({ item }: { item: Notification }) {
+function MarkReadTitle({ item, allRead }: { item: Notification; allRead: boolean }) {
   /*
    * P11-05 — the row stops being unread on the click.
    *
@@ -227,7 +275,11 @@ function MarkReadTitle({ item }: { item: Notification }) {
    * a plain span, so the button that was just pressed becomes the thing it
    * pressed toward.
    */
+  /* Its own optimism for a single click, plus the table's for "mark all" —
+     either one is enough to turn this into a plain title. */
   const [read, markRead] = useOptimistic(Boolean(item.read_at));
+
+  if (allRead) return <span className="text-sm">{item.title}</span>;
 
   if (read) {
     return <span className="text-sm">{item.title}</span>;

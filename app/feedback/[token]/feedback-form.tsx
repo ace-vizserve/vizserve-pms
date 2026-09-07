@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { Check } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -25,11 +25,20 @@ export function FeedbackForm({ token }: { token: string }) {
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
+  /*
+   * P11-05 — sending is predicted; "Thank you" is not. Same rule as the approval
+   * page beside it: a client should never be told their rating is recorded when
+   * it is still in flight.
+   */
+  const [sending, setSending] = useOptimistic(false);
+
   function submit() {
     if (rating === null) return;
     setError(null);
 
     startTransition(async () => {
+      setSending(true);
+
       const result = await submitFeedback(token, { rating, comment: comment.trim() || undefined });
 
       if (!result.ok) {
@@ -39,6 +48,14 @@ export function FeedbackForm({ token }: { token: string }) {
 
       setDone(true);
     });
+  }
+
+  if (sending) {
+    return (
+      <p aria-live="polite" className="text-center text-sm text-foreground-muted">
+        Sending your feedback…
+      </p>
+    );
   }
 
   if (done) {

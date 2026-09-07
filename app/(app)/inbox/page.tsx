@@ -2,16 +2,16 @@ import type { Metadata } from "next";
 import { revalidatePath } from "next/cache";
 import Link from "next/link";
 
-import { Bell, CheckCheck, SearchX } from "lucide-react";
+import { Bell, SearchX } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 
+import { buttonVariants } from "@/components/ui/button";
 import { EmptyState } from "@/components/empty-state";
 import { ListSearch } from "@/components/list-search";
 import { PageShell } from "@/components/page-shell";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
-import { Button, buttonVariants } from "@/components/ui/button";
 import { isNotificationType, isReadFilter, type ReadFilter } from "@/lib/notifications";
 import { ilikeAnyOf } from "@/lib/search";
 import { InboxFilters } from "./inbox-filters";
@@ -177,17 +177,6 @@ export default async function InboxPage({
     // title, a line of context and a timestamp, and constraining it just wasted
     // two thirds of a wide screen and made the list taller than it needed to be.
     <PageShell>
-      {/* Marking all read while a search is active would silently clear
-                rows the person cannot see, so the control goes away — searching
-                is a reading task, not a triage one. */}
-      {unreadCount > 0 && !term ? (
-        <form className="ml-auto" action={markAllRead}>
-          <Button type="submit" size="sm">
-            <CheckCheck />
-            Mark all read
-          </Button>
-        </form>
-      ) : null}
 
       {/*
         A PLAIN toolbar. This used to be sticky, and it was wrong in three ways
@@ -202,7 +191,15 @@ export default async function InboxPage({
         stationary toolbar cannot go out of register with a header it does not
         touch.
       */}
+      {/* ⚠️ "Mark all read" MOVED INTO THE TABLE (P11-05). It has to live where
+          the rows do: one optimistic value covers the button and all forty rows,
+          and a button that hid itself from out here would leave them bold.
+
+          Still absent while a search is active — marking all read would silently
+          clear rows the person cannot see, so nothing is passed and no control
+          renders. Searching is a reading task, not a triage one. */}
       <InboxTable
+        markAllAction={unreadCount > 0 && !term ? markAllRead : undefined}
         toolbar={
           <>
             <ListSearch
