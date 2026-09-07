@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useTransition } from "react";
+import { useEffect, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -288,6 +288,20 @@ export function TaskSurface({
   const [overrideReason, setOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * P11-05 — the PIC and QA names change when you press Save.
+   *
+   * ⚠️ THE OPTIMISTIC VALUE IS THE NAME, NOT THE ID. `picName` and `qaName` are
+   * what the panel renders; the ids are what the form holds. Predicting the id
+   * would repaint nothing, which is the shape of optimism that looks broken —
+   * the control updates and the thing beside it does not.
+   *
+   * The names are resolved from `people`, the same list the Select offers, so a
+   * chosen person always has one.
+   */
+  const [shownPic, setShownPic] = useOptimistic(picName);
+  const [shownQa, setShownQa] = useOptimistic(qaName);
+
   const [reassignOpen, setReassignOpen] = useState(false);
   const [reassigning, startReassign] = useTransition();
   const [pic, setPic] = useState(assigneeId ?? NONE);
@@ -346,17 +360,26 @@ export function TaskSurface({
 
   function saveReassign() {
     setReassignError(null);
+    // Closed first: the panel below carries the new names from here on.
+    setReassignOpen(false);
+
     startReassign(async () => {
+      const nameOf = (id: string) =>
+        id === NONE ? null : (candidates.find((row) => row.id === id)?.full_name ?? null);
+      setShownPic(nameOf(pic));
+      setShownQa(nameOf(qa));
+
       const result = await reassignTask(taskId, {
         assignee_id: pic === NONE ? null : pic,
         qa_assignee_id: qa === NONE ? null : qa,
       });
       if (!result.ok) {
+        // React puts both names back; reopening shows the error.
         setReassignError(result.error ?? "That did not go through.");
+        setReassignOpen(true);
         return;
       }
       toast.success("Reassigned");
-      setReassignOpen(false);
     });
   }
 
@@ -552,12 +575,12 @@ export function TaskSurface({
               </>
             ) : null}
 
-            <Prop label="PIC">{person(picName, "Unassigned")}</Prop>
+            <Prop label="PIC">{person(shownPic, "Unassigned")}</Prop>
 
             {/* NO QA ROW ON PERSONAL WORK. It is closed by the person who made
                 it (P7-01) — naming a reviewer with no part in it is worse than
                 saying nothing. */}
-            {category === "personal" ? null : <Prop label="QA">{person(qaName, "Not set")}</Prop>}
+            {category === "personal" ? null : <Prop label="QA">{person(shownQa, "Not set")}</Prop>}
 
             <Prop label="Dates">{dates}</Prop>
 

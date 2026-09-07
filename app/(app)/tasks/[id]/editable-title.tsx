@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -37,7 +37,16 @@ export function EditableTitle({
   /** The same test as the rest of the card: on the task, or leading it. */
   canEdit: boolean;
 }) {
-  const [pending, startTransition] = useTransition();
+  /*
+   * P11-05 — the heading changes on save, not a round trip later.
+   *
+   * ⚠️ THE OLD ROLLBACK WAS WRITING BACK SOMETHING THAT HAD NEVER CHANGED. Its
+   * comment claimed "the heading on screen already shows the new value", but the
+   * heading rendered `title` — the prop — so nothing on screen had moved and
+   * `setDraft(title)` restored an input nobody could see. Now the heading really
+   * does show it, and React puts it back by itself if the server refuses.
+   */
+  const [shownTitle, setShownTitle] = useOptimistic(title);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -64,27 +73,31 @@ export function EditableTitle({
       return;
     }
 
+    // Closed FIRST: the heading carries the new name from here on, and leaving
+    // the input open would show the same words twice.
+    setEditing(false);
+
     startTransition(async () => {
+      setShownTitle(next);
+
       const result = await updateTaskField(taskId, { title: next });
 
       if (!result.ok) {
-        // The heading on screen already shows the new value. Putting the old one
-        // back is the whole contract here.
+        // React drops the optimistic heading on its own. The draft goes back so
+        // reopening the editor does not offer a name the server refused.
         setDraft(title);
-        setEditing(false);
         toast.error(result.error);
         return;
       }
 
       toast.success("Renamed");
-      setEditing(false);
     });
   }
 
   if (!editing) {
     return (
       <h1 className="group/title flex min-w-0 items-center gap-1.5 text-xl font-semibold tracking-tight">
-        <span className="min-w-0 wrap-break-word">{title}</span>
+        <span className="min-w-0 wrap-break-word">{shownTitle}</span>
 
         {canEdit ? (
           <button
@@ -93,7 +106,7 @@ export function EditableTitle({
               setDraft(title);
               setEditing(true);
             }}
-            aria-label={`Rename ${title}`}
+            aria-label={`Rename ${shownTitle}`}
             title="Rename"
             className={cn(
               "inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground",
@@ -115,7 +128,6 @@ export function EditableTitle({
     <input
       ref={inputRef}
       value={draft}
-      disabled={pending}
       aria-label="Task name"
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}

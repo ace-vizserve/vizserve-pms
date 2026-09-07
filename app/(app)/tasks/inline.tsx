@@ -337,7 +337,7 @@ export function InlineDate({
   /** Overdue styling, decided by the caller — it knows whether the task is live. */
   emphasis?: boolean;
 }) {
-  const { patch, pending } = usePatch(taskId);
+  const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(value);
 
@@ -359,7 +359,6 @@ export function InlineDate({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label={shown ? `${label} ${formatDate(shown)}. Change it.` : `Set a ${label.toLowerCase()}`}
-        disabled={pending}
         className={cn(
           "rounded-sm px-1 py-0.5 text-left tabular-nums",
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -376,7 +375,6 @@ export function InlineDate({
             mode="single"
             autoFocus
             aria-label={label}
-            disabled={pending}
             selected={shown ? (parseDateOnly(shown) ?? undefined) : undefined}
             defaultMonth={shown ? (parseDateOnly(shown) ?? undefined) : undefined}
             onSelect={(date) => date && commit(toDateString(date))}
@@ -387,7 +385,6 @@ export function InlineDate({
             <Button
               size="icon"
               variant="ghost"
-              disabled={pending}
               aria-label={`Clear the ${label.toLowerCase()}`}
               onClick={() => commit("")}
             >
@@ -415,7 +412,7 @@ export function InlineEstimate({
   taskId: string;
   minutes: number | null;
 }) {
-  const { patch, pending } = usePatch(taskId);
+  const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(minutes);
   const [raw, setRaw] = useState(minutes === null ? "" : formatCellDuration(minutes));
@@ -462,7 +459,6 @@ export function InlineEstimate({
     >
       <PopoverTrigger
         aria-label={shown === null ? "Set an estimate" : `Estimate ${formatCellDuration(shown)}. Change it.`}
-        disabled={pending}
         className={cn(
           "rounded-sm px-1 py-0.5 tabular-nums text-muted-foreground",
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -477,7 +473,6 @@ export function InlineEstimate({
           <Input
             autoFocus
             value={raw}
-            disabled={pending}
             placeholder="2h 30m"
             aria-label="Estimate"
             aria-invalid={error ? true : undefined}
