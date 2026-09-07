@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -46,9 +45,15 @@ import { ComposerCard, type Assignable } from "./task-composer";
  * about the state of the database.
  */
 
-/** Shared: run a patch, report it, and roll the field back if it was refused. */
+/**
+ * Shared: run a patch, report it, and roll the field back if it was refused.
+ *
+ * ⚠️ NO `router.refresh()`. `updateTaskField` calls `refresh(taskId)` itself,
+ * so the fresh RSC payload already comes back WITH the action's response — the
+ * client call was a second fetch of a route the server had just re-rendered, and
+ * it is what made changing a priority feel slower than it is.
+ */
 function usePatch(taskId: string) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   function patch(
@@ -67,7 +72,6 @@ function usePatch(taskId: string) {
       }
 
       if (success) toast.success(success);
-      router.refresh();
     });
   }
 
@@ -228,7 +232,7 @@ export function InlinePriority({
   value: TaskPriority | null;
   iconOnly?: boolean;
 }) {
-  const { patch, pending } = usePatch(taskId);
+  const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(value);
 
@@ -250,7 +254,6 @@ export function InlinePriority({
       <PopoverTrigger
         aria-label={shown ? `Priority: ${TASK_PRIORITY_LABELS[shown]}. Change it.` : "Set a priority"}
         title="Priority"
-        disabled={pending}
         className={cn(
           iconOnly ? ICON_BUTTON : "rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-60",
@@ -271,6 +274,9 @@ export function InlinePriority({
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-44 p-1">
+        {/* One form around the menu; every row is a submit carrying its
+            own formAction. React gives each its own transition. */}
+        <form>
         {/* Highest first, unlike TASK_PRIORITIES itself — that constant is
             declared low→high because Postgres compares enums by declaration
             order, and a person reading a picker scans from the most severe
@@ -278,9 +284,8 @@ export function InlinePriority({
         {[...TASK_PRIORITIES].reverse().map((option) => (
           <button
             key={option}
-            type="button"
-            disabled={pending}
-            onClick={() => choose(option)}
+            type="submit"
+            formAction={() => choose(option)}
             className={cn(MENU_ROW, shown === option && "font-semibold")}
           >
             <Flag className={cn("size-3.5 shrink-0", FLAG_TONE[option])} aria-hidden />
@@ -292,15 +297,15 @@ export function InlinePriority({
         {/* Only offered once there is something to clear. */}
         {shown !== null ? (
           <button
-            type="button"
-            disabled={pending}
-            onClick={() => choose(null)}
+            type="submit"
+            formAction={() => choose(null)}
             className={cn(MENU_ROW, "text-muted-foreground")}
           >
             <Ban className="size-3.5 shrink-0" aria-hidden />
             Clear
           </button>
         ) : null}
+        </form>
       </PopoverContent>
     </Popover>
   );
@@ -512,7 +517,7 @@ export function InlineList({
   value: string | null;
   lists: { id: string; name: string }[];
 }) {
-  const { patch, pending } = usePatch(taskId);
+  const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   const [shown, setShown] = useState(value);
 
@@ -537,17 +542,16 @@ export function InlineList({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label={label ? `List: ${label}. Change it.` : "File this under a list"}
-        disabled={pending}
         className={VALUE_BUTTON}
       >
         {label ?? <span className="text-muted-foreground">No list</span>}
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-56 p-1">
+        <form>
         <button
-          type="button"
-          disabled={pending}
-          onClick={() => choose(null)}
+          type="submit"
+          formAction={() => choose(null)}
           className={cn(MENU_ROW, "text-muted-foreground")}
         >
           No list
@@ -557,15 +561,15 @@ export function InlineList({
         {lists.map((list) => (
           <button
             key={list.id}
-            type="button"
-            disabled={pending}
-            onClick={() => choose(list.id)}
+            type="submit"
+            formAction={() => choose(list.id)}
             className={cn(MENU_ROW, shown === list.id && "font-semibold")}
           >
             <span className="min-w-0 flex-1 truncate">{list.name}</span>
             {shown === list.id ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
           </button>
         ))}
+        </form>
       </PopoverContent>
     </Popover>
   );
