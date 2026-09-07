@@ -22,6 +22,7 @@ import {
   TASK_STATUS_LABELS,
   createPersonalTaskSchema,
   createTaskSchema,
+  extraAssigneeIdsSchema,
   listSchema,
   overridePayloadSchema,
   taskCommentSchema,
@@ -451,6 +452,12 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
        */
       assignee_id: z.uuid().nullable().default(null),
       /**
+       * P7-13 — the other people on it, which the composer collects with a
+       * second chip beside the owner. Same schema as the dialog uses, so the
+       * bound and the duplicate check cannot differ between the two.
+       */
+      extra_assignee_ids: extraAssigneeIdsSchema,
+      /**
        * The stage the group or column this was typed into represents.
        *
        * Defaults to `INITIAL_TASK_STATUS`, so an omitted stage costs no second
@@ -587,6 +594,14 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
     priority: values.priority,
     start_date: values.start_date,
     estimate_minutes: values.estimate_minutes,
+    /*
+     * THE CALLER IS FILTERED OUT HERE, not in `insertTask`, because this is the
+     * one surface where the owner may be nobody. `assignable` excludes you, so
+     * a null `assignee_id` means "mine" and routes to `create_personal_task` —
+     * which files the task against the caller without ever naming them in
+     * `values.assignee_id`. The shared filter cannot see that; this can.
+     */
+    extra_assignee_ids: values.extra_assignee_ids.filter((id) => id !== context.userId),
   });
 
   if (!created.ok) {
@@ -922,9 +937,26 @@ async function insertTask(
 
   const taskId = (created.data as { task_id: string }).task_id;
 
+  /*
+   * THE OWNER IS DROPPED FROM THE EXTRAS, SILENTLY AND ON PURPOSE.
+   *
+   * `vizserve_pms_create_task` already puts `assignee_id` on the join table, so
+   * naming that person again is not a mistake to report — it is the same
+   * request twice, and the second one would come back as a unique-violation
+   * sentence about a row the user never asked for. Every picker in the app shows
+   * somebody already on a task as ticked rather than hiding them, so a UI that
+   * sends the owner in both fields is a UI behaving normally.
+   */
+  const extra_assignee_ids = values.extra_assignee_ids?.filter(
+    (id) => id !== values.assignee_id,
+  );
+
   // The start date, the estimate and the other people, written after the row
   // exists — none of them is a parameter of either create function.
-  const extras = await writeCreationExtras(supabase, taskId, values);
+  const extras = await writeCreationExtras(supabase, taskId, {
+    ...values,
+    extra_assignee_ids,
+  });
   if (!extras.ok) return { ok: false, error: extras.error, taskId };
 
   return { ok: true, taskId };

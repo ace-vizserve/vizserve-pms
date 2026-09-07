@@ -29,6 +29,7 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 
 import type { TaskPriority } from "@/lib/schemas/tasks";
 
+import { PeoplePicker } from "./assignees";
 import { createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
@@ -155,6 +156,15 @@ function TaskForm({
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState<string>(NONE);
   const [qaAssigneeId, setQaAssigneeId] = useState<string>(NONE);
+  /**
+   * P7-13 — everyone else on the task.
+   *
+   * Separate from the person in charge above and not a multi-select version of
+   * it: one of these is the name the task is FILED under and the other is who is
+   * doing the work. Collapsing them is what makes "assigned to the team" mean
+   * assigned to nobody.
+   */
+  const [extraAssigneeIds, setExtraAssigneeIds] = useState<string[]>([]);
   const [dueDate, setDueDate] = useState("");
   const [startDate, setStartDate] = useState("");
   const [estimate, setEstimate] = useState<number | null>(null);
@@ -193,6 +203,18 @@ function TaskForm({
   const departmentItems = Object.fromEntries(
     departments.map((department) => [department.id, department.name]),
   );
+  /**
+   * The person in charge is not offered as somebody to ALSO add — the create
+   * function already puts them on the join table. Shown-but-ticked is the right
+   * shape for a picker on a task that exists (see `AssigneePicker`); on a form
+   * where that person is chosen two controls up, listing them again is just a
+   * second way to say the same thing.
+   */
+  const otherPeople = useMemo(
+    () => candidates.filter((person) => person.id !== assigneeId),
+    [candidates, assigneeId],
+  );
+
   const peopleItems = Object.fromEntries(
     candidates.map((person) => [person.id, person.full_name]),
   );
@@ -209,6 +231,7 @@ function TaskForm({
     // stale id the server will reject.
     setAssigneeId(NONE);
     setQaAssigneeId(NONE);
+    setExtraAssigneeIds([]);
     setListId(NONE);
   }
 
@@ -222,6 +245,10 @@ function TaskForm({
         description,
         assignee_id: assigneeId === NONE ? null : assigneeId,
         qa_assignee_id: qaAssigneeId === NONE ? null : qaAssigneeId,
+        // Added one at a time after the row exists — `create_task` takes one
+        // assignee and `vizserve_pms_add_task_assignee` is the only way into
+        // the join table.
+        extra_assignee_ids: extraAssigneeIds,
         due_date: dueDate,
         start_date: startDate,
         list_id: listId === NONE ? null : listId,
@@ -322,7 +349,14 @@ function TaskForm({
             <Select
               items={assigneeItems}
               value={assigneeId}
-              onValueChange={(value) => value !== null && setAssigneeId(value)}
+              onValueChange={(value) => {
+                if (value === null) return;
+                setAssigneeId(value);
+                // Promoting somebody already on the list to person in charge
+                // takes them off it — they are on the task either way, and
+                // leaving them in both places would show their monogram twice.
+                setExtraAssigneeIds((current) => current.filter((id) => id !== value));
+              }}
             >
               <SelectTrigger id="assignee">
                 <SelectValue />
@@ -361,6 +395,27 @@ function TaskForm({
               </SelectContent>
             </Select>
           </div>
+        </div>
+
+        {/* P7-13. Its own row rather than a third column, because it is not a
+            third dropdown — it holds any number of people and needs the width to
+            say so. */}
+        <div className="space-y-2">
+          <Label htmlFor="also-working">Also working on it</Label>
+          <PeoplePicker
+            value={extraAssigneeIds}
+            candidates={otherPeople}
+            onChange={setExtraAssigneeIds}
+            disabled={pending || candidates.length === 0}
+            triggerClassName="flex h-10 w-full items-center gap-2 rounded-md border bg-card grade-raised px-3 text-sm shadow-raised hover:bg-accent/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60"
+          />
+          <p className="text-xs text-muted-foreground">
+            {/* Said here as well as in the picker's own footer: this is where
+                somebody decides it, and the consequence should not be one click
+                further in. */}
+            Optional. Everyone added can see the task, edit it, log time against it and move it —
+            the person in charge stays the one name it is filed under.
+          </p>
         </div>
 
         {departmentLists.length > 0 ? (
