@@ -656,25 +656,42 @@ export default async function DashboardPage() {
         <StatTiles supabase={supabase} context={context} isApprover={isApprover} myTasks={myTasksPromise} />
       </Suspense>
 
-      <div id="needs-you" className="scroll-mt-4">
-        <Suspense
-          fallback={
-            <Streaming
-              label="Loading the things that need you…"
-              className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
-            >
-              <Skeleton className="h-4 w-28" aria-hidden />
-              <div className="space-y-2.5" aria-hidden>
-                <Skeleton className="h-4 w-full" />
-                <Skeleton className="h-4 w-5/6" />
-                <Skeleton className="h-4 w-2/3" />
-              </div>
-            </Streaming>
-          }
-        >
+      {/*
+        ⚠️ EVERYTHING BELOW THIS IS INSIDE THE BOUNDARY, AND THAT IS THE WHOLE
+        POINT. "Needs you" is the one section on this page whose height cannot be
+        guessed — `NEEDS_YOU_LIMIT` is 8 and the fallback draws 3, so when it
+        lands it can grow by five rows and shove the two cards under it down the
+        page. Sibling boundaries resolve independently and push each other
+        around; a nested one waits for the section above to be in place, so the
+        page settles from the top down.
+
+        The work still runs in parallel — `needsYou` and `punchState` were both
+        started well above this. Nesting changes when things are REVEALED, not
+        when they are fetched.
+
+        Nothing else on this page needs it: the greeting, the timesheet strip and
+        the stat tiles all have fallbacks the same size as their content, which is
+        what `components/skeletons.tsx` exists to enforce. Reserved space and
+        nesting solve the same problem, and reserved space is free.
+      */}
+      <Suspense
+        fallback={
+          <Streaming
+            label="Loading the things that need you…"
+            className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+          >
+            <Skeleton className="h-4 w-28" aria-hidden />
+            <div className="space-y-2.5" aria-hidden>
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-4 w-2/3" />
+            </div>
+          </Streaming>
+        }
+      >
+        <div id="needs-you" className="scroll-mt-4">
           <NeedsYouSection needsYou={needsYou} myTasks={myTasksPromise} />
-        </Suspense>
-      </div>
+        </div>
 
       {/* I4. Behind the role, and the numbers are read from the same table
           `/timesheet/team` reads — the band links there rather than growing its
@@ -741,6 +758,7 @@ export default async function DashboardPage() {
           </Link>
         </CardContent>
       </Card>
+      </Suspense>
     </PageShell>
   );
 }
