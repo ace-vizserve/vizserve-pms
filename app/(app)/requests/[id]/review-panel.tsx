@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { AlertTriangle, ChevronRight, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -160,12 +160,30 @@ export function ReviewPanel({
 
   const dateMoved = Boolean(targetDate) && approvedDate !== targetDate;
 
+  /*
+   * P11-05 — the panel says which way it went, on the click.
+   *
+   * ⚠️ IT NAMES THE DECISION, NOT THE OUTCOME. Approving here does not simply
+   * flip a status: `vizserve_pms_approve_request` creates a task, mails the PIC
+   * and mails the client, and the sentence in the toast below reports all three.
+   * Predicting any of that would be inventing facts about work that has not
+   * happened. What is certain is which button was pressed.
+   *
+   * The whole review form is replaced by it, because the alternative is a live
+   * Approve button sitting under a request that has already been approved.
+   */
+  const [taken, setTaken] = useOptimistic<"approved" | "returned" | "rejected" | null>(null);
+
   function run(payload: Record<string, unknown>) {
     setFormError(null);
+
     startTransition(async () => {
+      setTaken(payload.decision as "approved" | "returned" | "rejected");
+
       const result = await decideOnRequest(requestId, payload);
 
       if (!result.ok) {
+        // React puts the form back, carrying the reason.
         setFormError(result.error);
         return;
       }
@@ -249,6 +267,26 @@ export function ReviewPanel({
 
   function decideNegative() {
     run({ decision: mode, reason });
+  }
+
+  if (taken) {
+    /* ⚠️ THE WHOLE FORM GOES, not just the buttons. The alternative is a live
+       Approve sitting under a request that has already been approved, which is
+       an invitation to press it twice. */
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>Your decision</CardTitle>
+          <CardDescription className="text-xs" aria-live="polite">
+            {taken === "approved"
+              ? "Approving — creating the task and emailing the PIC and the client."
+              : taken === "returned"
+                ? "Returning — emailing the requester your reason."
+                : "Rejecting — emailing the requester your reason."}
+          </CardDescription>
+        </CardHeader>
+      </Card>
+    );
   }
 
   return (

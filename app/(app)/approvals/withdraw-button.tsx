@@ -1,7 +1,7 @@
 "use client";
 
 import { Undo2 } from "lucide-react";
-import { startTransition, useActionState, useState } from "react";
+import { startTransition, useActionState, useOptimistic, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -33,6 +33,21 @@ import { withdrawInternalRequest } from "./actions";
  */
 export function WithdrawButton({ requestId }: { requestId: string }) {
   const [open, setOpen] = useState(false);
+  /*
+   * P11-05 — the button answers on the click.
+   *
+   * ⚠️ IT REPLACES ITSELF RATHER THAN PREDICTING THE PAGE. The status pill,
+   * the stage rail and the whole "waiting on" paragraph are rendered by the
+   * server component around this one, and there is no honest way to reach up
+   * and repaint them from here. What is certain is that the request is being
+   * withdrawn and this control is finished — so it says so, and the page catches
+   * up with the action's revalidation.
+   *
+   * The dialog closes with it. Leaving a modal up over a decision already taken
+   * reads as the button not having worked.
+   */
+  const [withdrawing, setWithdrawing] = useOptimistic(false);
+
   const [, dispatch, pending] = useActionState(async () => {
       const result = await withdrawInternalRequest(requestId);
 
@@ -50,10 +65,16 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Undo2 className="size-3.5" aria-hidden />
-        Withdraw
-      </Button>
+      {withdrawing ? (
+        <p aria-live="polite" className="text-xs text-muted-foreground">
+          Withdrawing…
+        </p>
+      ) : (
+        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+          <Undo2 className="size-3.5" aria-hidden />
+          Withdraw
+        </Button>
+      )}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent>
@@ -71,7 +92,15 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
             </Button>
             {/* A form action rather than an onClick: React gives it its own
                 transition, and the confirm still works with JS loading. */}
-            <form action={() => startTransition(() => dispatch())}>
+            <form
+              action={() =>
+                startTransition(() => {
+                  setWithdrawing(true);
+                  setOpen(false);
+                  dispatch();
+                })
+              }
+            >
               <Button type="submit" variant="destructive" disabled={pending}>
                 {pending ? "Withdrawing…" : "Withdraw"}
               </Button>

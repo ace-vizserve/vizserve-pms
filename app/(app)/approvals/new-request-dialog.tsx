@@ -492,11 +492,28 @@ export function NewRequestDialog({
                 correction_time: String(formData.get("correction_time") ?? ""),
               };
 
+    /*
+     * P11-05 — the dialog closes on the click.
+     *
+     * ⚠️ SAFE HERE BECAUSE THE FORM DOES NOT UNMOUNT ON CLOSE, unlike
+     * `new-task-dialog`. Every field is still mounted and still filled in, so a
+     * refusal reopens onto exactly what was typed — which matters more on this
+     * form than on most: a leave request with three relievers and a task
+     * assigned to each is a minute of work to re-enter.
+     *
+     * The request itself is NOT predicted. It lands in a queue rendered by a
+     * server component elsewhere on the page, and the stage it opens at depends
+     * on the leave type (P9-03) — a placeholder row would have to guess that and
+     * would guess wrong for vacation.
+     */
+    setOpen(false);
+
     startTransition(async () => {
       const result = await submitInternalRequest(payload);
 
       if (!result.ok) {
         setErrors(result.fieldErrors ?? {});
+        setOpen(true);
         toast.error(result.error);
         return;
       }
@@ -509,7 +526,6 @@ export function NewRequestDialog({
           ? "Request submitted. Your relievers have been asked to confirm."
           : "Request submitted. Your department lead has been notified.",
       );
-      setOpen(false);
       setErrors({});
       setRelievers([EMPTY_RELIEVER]);
       setTurnoverConfirmed(false);
