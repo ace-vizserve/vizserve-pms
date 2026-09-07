@@ -749,30 +749,7 @@ export const taskPatchSchema = z
 
 export type TaskPatchInput = z.infer<typeof taskPatchSchema>;
 
-/**
- * P7-13 — everybody on the task BESIDES the accountable owner.
- *
- * ⚠️ `assignee_id` AND `vizserve_pms_task_assignees` ARE NOT THE SAME THING, and
- * the split is what stops "assigned to the team" meaning assigned to nobody. The
- * column is the ONE person answerable; the join table is everyone doing the
- * work. A task with four people still has exactly one name against it.
- *
- * The join table has no INSERT policy — `vizserve_pms_add_task_assignee` is the
- * only way in, and it re-checks that the person is an active member of the
- * TASK'S department and that the caller may add them. So this list is a
- * proposal: the shape is validated here, the right to act on it is not.
- *
- * Ten is not a rule from anywhere, it is a bound. A task naming eleven people is
- * a list of tasks, and an unbounded array here is one sequential RPC per entry.
- */
-export const extraAssigneeIdsSchema = z
-  .array(z.uuid())
-  .max(10, "That is a project, not a task — name ten people at most.")
-  .refine((ids) => new Set(ids).size === ids.length, "Somebody is on that list twice.")
-  .default([]);
-
 export const createTaskSchema = z.object({
-  extra_assignee_ids: extraAssigneeIdsSchema,
   department_id: z.uuid("Choose the department this belongs to."),
   title: z.string().trim().min(1, "A task needs a title.").max(300),
   description: richTextSchema({ max: LONG_PROSE_MAX }).default(""),

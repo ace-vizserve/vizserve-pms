@@ -25,7 +25,6 @@ import {
 import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
-import { PeoplePicker } from "./assignees";
 import { quickAddTask } from "./actions";
 
 /**
@@ -58,8 +57,6 @@ export type Assignable = { id: string; full_name: string };
 type Draft = {
   title: string;
   assigneeId: string | null;
-  /** P7-13 — everyone else on it. See `WithField` at the foot of this file. */
-  extraAssigneeIds: string[];
   priority: TaskPriority | null;
   startDate: string;
   dueDate: string;
@@ -69,7 +66,6 @@ type Draft = {
 const EMPTY: Draft = {
   title: "",
   assigneeId: null,
-  extraAssigneeIds: [],
   priority: null,
   startDate: "",
   dueDate: "",
@@ -107,26 +103,6 @@ function useComposer({
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
-  /*
-   * CHANGING WHO OWNS IT ALSO TIDIES THE LIST OF EVERYONE ELSE, and both halves
-   * of that matter.
-   *
-   * Back to "Myself" EMPTIES it. `WithField` is not rendered in that state — a
-   * personal task is one person's own work — so names collected against a
-   * colleague would otherwise be carried along invisibly and sent with a task
-   * whose form never showed them.
-   *
-   * Picking somebody already on the list takes them OFF it. They are on the task
-   * either way, and leaving them in both places would draw their monogram twice.
-   */
-  function setAssignee(next: string | null) {
-    setDraft((current) => ({
-      ...current,
-      assigneeId: next,
-      extraAssigneeIds: next === null ? [] : current.extraAssigneeIds.filter((id) => id !== next),
-    }));
-  }
-
   function submit() {
     const title = draft.title.trim();
     if (!title) return;
@@ -136,7 +112,6 @@ function useComposer({
         title,
         status,
         assignee_id: draft.assigneeId,
-        extra_assignee_ids: draft.extraAssigneeIds,
         priority: draft.priority,
         start_date: draft.startDate,
         due_date: draft.dueDate,
@@ -162,7 +137,7 @@ function useComposer({
     });
   }
 
-  return { draft, set, setAssignee, submit, pending };
+  return { draft, set, submit, pending };
 }
 
 /** Enter saves, Escape abandons — in every field, not only the title. */
@@ -201,7 +176,7 @@ export function ComposerRow({
   assignable: Assignable[];
   onCancel: () => void;
 }) {
-  const { draft, set, setAssignee, submit, pending } = useComposer({ status, parentId, onDone: undefined });
+  const { draft, set, submit, pending } = useComposer({ status, parentId, onDone: undefined });
   const onKeyDown = keys(submit, onCancel);
 
   return (
@@ -263,23 +238,12 @@ export function ComposerRow({
       <TableCell className="hidden lg:table-cell text-2xs text-foreground-faint">—</TableCell>
 
       <TableCell className="hidden md:table-cell text-muted-foreground">
-        {/* Two chips in one column, so they wrap rather than stacking into a
-            taller row than every other cell. */}
-        <div className="flex flex-wrap items-center gap-1">
-          <AssigneeField
-            value={draft.assigneeId}
-            people={assignable}
-            disabled={pending}
-            onChange={setAssignee}
-          />
-          <WithField
-            value={draft.extraAssigneeIds}
-            owner={draft.assigneeId}
-            people={assignable}
-            disabled={pending}
-            onChange={(next) => set("extraAssigneeIds", next)}
-          />
-        </div>
+        <AssigneeField
+          value={draft.assigneeId}
+          people={assignable}
+          disabled={pending}
+          onChange={(next) => set("assigneeId", next)}
+        />
       </TableCell>
 
       <TableCell className="hidden lg:table-cell">
@@ -366,7 +330,7 @@ export function ComposerCard({
   assignable: Assignable[];
   onCancel: () => void;
 }) {
-  const { draft, set, setAssignee, submit, pending } = useComposer({ status, parentId });
+  const { draft, set, submit, pending } = useComposer({ status, parentId });
   const onKeyDown = keys(submit, onCancel);
 
   return (
@@ -392,14 +356,7 @@ export function ComposerCard({
           value={draft.assigneeId}
           people={assignable}
           disabled={pending}
-          onChange={setAssignee}
-        />
-        <WithField
-          value={draft.extraAssigneeIds}
-          owner={draft.assigneeId}
-          people={assignable}
-          disabled={pending}
-          onChange={(next) => set("extraAssigneeIds", next)}
+          onChange={(next) => set("assigneeId", next)}
         />
         <DateField
           value={draft.startDate}
@@ -570,51 +527,6 @@ function AssigneeField({
         )}
       </PopoverContent>
     </Popover>
-  );
-}
-
-/**
- * P7-13 — everyone else on the task, in the composer.
- *
- * ⚠️ IT IS NOT RENDERED UNTIL AN OWNER IS CHOSEN, and that is a rule about what
- * the two RPCs mean rather than a layout preference. `assignable` excludes you,
- * so a null owner means "Myself" and routes to `create_personal_task`, which
- * sets `is_personal = true` on a column outside the UPDATE grant — it can never
- * be changed again. A personal task with four other people on it is a
- * contradiction the database would happily store, so the control that would
- * create one is simply not offered. "Also working on it" has nothing to be in
- * addition to until somebody owns the work.
- *
- * `setAssignee` in the hook clears the list on the way back to Myself, so
- * nothing collected here can be sent invisibly once this disappears.
- */
-function WithField({
-  value,
-  owner,
-  people,
-  disabled,
-  onChange,
-}: {
-  value: string[];
-  /** The chosen person in charge. Null is "Myself" — see above. */
-  owner: string | null;
-  people: Assignable[];
-  disabled?: boolean;
-  onChange: (next: string[]) => void;
-}) {
-  if (owner === null) return null;
-
-  return (
-    <PeoplePicker
-      value={value}
-      // The owner is already on the task; offering them here is a second way to
-      // say the same thing.
-      candidates={people.filter((person) => person.id !== owner)}
-      onChange={onChange}
-      disabled={disabled}
-      placeholder="With"
-      triggerClassName={CHIP}
-    />
   );
 }
 
