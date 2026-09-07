@@ -102,3 +102,83 @@ export function CardSkeleton({ lines = 4 }: { lines?: number }) {
     </div>
   );
 }
+
+/*
+ * ⚠️ THE TWO BELOW ARE FOR `<Suspense>`, NOT FOR `loading.tsx`, and the
+ * accessibility note at the top of this file DOES NOT REACH THEM.
+ *
+ * `loading.tsx` is announced by the ROUTER — that is why everything above is
+ * `aria-hidden`. A Suspense fallback rendered *inside* a page is announced by
+ * nothing at all, so the caller wraps these in a `role="status"` region with an
+ * accessible label. The visual bars stay `aria-hidden` (twenty grey rectangles
+ * enumerated one by one is not a loading message); the label is what speaks.
+ *
+ * Both shapes are lifted from the `loading.tsx` that already draws them, so the
+ * router's placeholder and the page's stream into the same layout and neither
+ * one jumps on the way to the other.
+ */
+
+/**
+ * The task list's stage groups — `app/(app)/tasks/loading.tsx`'s shape.
+ *
+ * The row counts descend so the placeholder reads as a grouped list rather than
+ * as three identical panels; they are the same `[3, 2, 1]` the router-level
+ * skeleton uses, deliberately, so the two are indistinguishable.
+ */
+export function TaskStatusGroupSkeleton({ groups = [3, 2, 1] }: { groups?: number[] }) {
+  return (
+    <div className="flex flex-col gap-3" aria-hidden>
+      {groups.map((rows, index) => (
+        <div key={index} className="overflow-hidden rounded-lg border bg-card shadow-raised-lg">
+          <div className="flex items-center gap-2 border-b bg-muted px-2 py-2">
+            <Skeleton className="size-4 rounded-sm" />
+            <Skeleton className="h-7 w-36 rounded-md" />
+          </div>
+          <div className="divide-y">
+            {Array.from({ length: rows }, (_, row) => (
+              <div key={row} className="flex items-center gap-4 px-3.5 py-3.5">
+                <Skeleton className="h-4 w-1/3" />
+                <Skeleton className="hidden h-4 w-24 md:block" />
+                <Skeleton className="ml-auto h-4 w-20" />
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/**
+ * The board's columns — `app/(app)/tasks/board/loading.tsx`'s shape.
+ *
+ * ⚠️ A FRAGMENT, NOT A WRAPPER. These slot straight into the board's own
+ * `flex … gap-3` scroller row, beside the pending-request column, so a wrapping
+ * div would make the whole set one flex item and collapse the gaps.
+ *
+ * Descending card counts, so the placeholder reads as a board rather than as
+ * six identical bars — and six of them, the same number the router-level
+ * skeleton draws, so a navigation and an in-page stream look the same.
+ */
+export function BoardColumnSkeleton({ columns = 6 }: { columns?: number }) {
+  return (
+    <>
+      {Array.from({ length: columns }, (_, index) => (
+        <div
+          key={index}
+          aria-hidden
+          // ⚠️ w-64 MATCHES `BoardColumn` in app/(app)/tasks/board/page.tsx.
+          // It read w-72 and every one of the six columns jumped 32px left
+          // when the real board arrived — the exact movement a skeleton is
+          // for. Change one and change the other.
+          className="flex h-full w-64 shrink-0 flex-col gap-2 rounded-lg border bg-muted p-2"
+        >
+          <Skeleton className="h-7 w-32 rounded-md" />
+          {Array.from({ length: Math.max(1, 4 - index) }, (_, card) => (
+            <Skeleton key={card} className="h-20 w-full rounded-md" />
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}

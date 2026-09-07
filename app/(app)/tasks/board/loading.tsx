@@ -19,7 +19,8 @@ export default function Loading() {
           {Array.from({ length: 6 }, (_, index) => (
             <div
               key={index}
-              className="flex h-full w-72 shrink-0 flex-col gap-2 rounded-lg border bg-muted p-2"
+              // w-64, matching `BoardColumn`. See the note in skeletons.tsx.
+              className="flex h-full w-64 shrink-0 flex-col gap-2 rounded-lg border bg-muted p-2"
             >
               <Skeleton className="h-7 w-32 rounded-md" />
               {/* Descending card counts, so the placeholder reads as a board

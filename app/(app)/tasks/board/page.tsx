@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { CalendarDays, Link2, ListTree } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -6,6 +7,7 @@ import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
+import { BoardColumnSkeleton } from "@/components/skeletons";
 import {
   TaskCategoryBadge,
   TaskPriorityBadge,
@@ -17,6 +19,7 @@ import {
   canAdminDepartment,
   realtimeDepartmentFilter,
   requireAuthContext,
+  type AuthContext,
 } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
@@ -93,13 +96,272 @@ function initials(name: string): string {
   );
 }
 
+type BoardSearchParams = { view?: string; kind?: string; list?: string; done?: string };
+
+type Scope = "all" | "mine" | "qa";
+type Kind = "all" | "internal" | "client";
+
+/**
+ * ⚠️ THIS FUNCTION AWAITS NOTHING THAT COSTS A ROUND TRIP.
+ *
+ * The board's frame is entirely static — `BOARD_COLUMNS` is `TASK_STATUSES`, a
+ * compile-time constant — so the toolbar, the drag hint, the sideways scroller
+ * and the fade all have everything they need before a query is issued. Only the
+ * per-column count and the cards themselves depend on data, and they sit behind
+ * the one boundary below.
+ *
+ * The reads are fired here, before the JSX is returned, so they are in flight
+ * while the browser paints the chrome. The boundaries decide who WAITS on them,
+ * not when they start.
+ */
 export default async function TaskBoardPage({
   searchParams,
 }: {
-  searchParams: Promise<{ view?: string; kind?: string; list?: string; done?: string }>;
+  searchParams: Promise<BoardSearchParams>;
 }) {
   const context = await requireAuthContext();
   const params = await searchParams;
+
+  /*
+   * ONE LIST, and without this the sidebar and the board were two structures
+   * that never met.
+   *
+   * The project tree links every list to `?list=<id>`, the list view honoured
+   * it, and the board did not read the parameter at all — so a list had exactly
+   * one shape available to it, and switching to the board silently widened the
+   * page to every task in the department while the URL still claimed a list.
+   * That is the same "a control that claims a filter it does not apply" trap the
+   * `kind` note below records, one parameter along.
+   *
+   * Now that the Tasks nav group is gone (lib/navigation.ts) and a list is
+   * reached only through the tree, this is what makes Board a VIEW of that list
+   * rather than a different destination.
+   */
+  const listId = params.list ?? null;
+
+  /*
+   * The client/internal split, which the toolbar has been CARRYING here since it
+   * was built and the board ignored.
+   *
+   * `VIEWS` in toolbar.tsx lists `kind` among the parameters that survive the
+   * switch from list to board, so a filtered list produced a URL saying
+   * `?kind=internal` on a board that showed everything — a control that claims a
+   * filter it does not apply, which is trap 4's shape in the UI rather than in
+   * SQL. Same one-column test as the list, and the same one `taskCategory` uses.
+   */
+  const kind: Kind = params.kind === "internal" || params.kind === "client" ? params.kind : "all";
+
+  /* Read here rather than twice below: the pending column and the card query
+     both need the same answer to "which scope is this". */
+  const scope: Scope = params.view === "mine" || params.view === "qa" ? params.view : "all";
+
+  return (
+    <PageShell className="h-[calc(100svh-3.5rem)] min-h-0 gap-3 overflow-hidden">
+      {/*
+        P8-03 — the board is the screen this matters most on, because it is
+        the one people leave open. A colleague moving a card, or a Gate 1
+        approval creating a task, now redraws it within a moment instead of
+        on the next navigation.
+
+        Renders nothing, and patches nothing into the columns: the ping
+        triggers `router.refresh()` and the whole board is re-queried under
+        RLS. That is why a card can never appear here that the policy would
+        have refused — the payload is thrown away unread.
+      */}
+      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+
+      {/* No <h1> — the breadcrumb is the page label. Now that a board can be a
+          view of ONE list, the crumb has to name it, or two lists' boards are
+          the same page with different cards on it and nothing on screen says
+          which one you opened. `BreadcrumbLabel` clears itself on unmount, so
+          leaving the list takes the name with it.
+
+          The sentence below stays because it is the rule for DRAGGING: internal
+          work goes anywhere, client work follows its gates, and a column that
+          cannot take the card dims rather than accepting it and springing back
+          (P7-20).
+
+          Its own boundary, with NO fallback and no announcement: it renders
+          null and only sets a context value, so there is nothing to hold a
+          place for — and one row by primary key must not queue behind the
+          board's own reads the way it did when it shared their batch. */}
+      {listId ? (
+        <Suspense fallback={null}>
+          <BoardCrumb listId={listId} />
+        </Suspense>
+      ) : null}
+
+      {/* Zero queries: the scope tabs and the drag rule are on screen before a
+          single card has been read. */}
+      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
+        <TaskToolbar view="board" />
+        <p className="min-w-0 text-xs text-muted-foreground">
+          Drag a card by its handle, or use the status control. Internal work goes to any stage; client work follows its gates.
+        </p>
+
+      </div>
+
+      {/*
+        The sideways scroller. `min-w-0` is what stops a flex item sizing itself
+        to its own content and widening the page instead of scrolling; the
+        negative margin with matching padding keeps the focus ring on the first
+        card from being shaved off by the scroll box's own edge.
+      */}
+      <BoardDnd>
+      {/*
+        ⚠️ THE FADE IS AN AFFORDANCE, NOT DECORATION.
+
+        Six live columns at w-64 need roughly 1600px and a laptop with the
+        sidebar open has about 1360px, so at least one stage is off the right
+        edge on most screens. Reported as "the board doesn't show all stages" —
+        which is what a horizontal scroller with no visible edge looks like.
+
+        `relative` on the wrapper and a gradient pinned to the right, above the
+        scroller and `pointer-events-none` so it cannot swallow a drag. It is
+        drawn unconditionally rather than only when scrollable: knowing whether
+        there is overflow needs a client component measuring on resize, and a
+        16px wash over the last column's own padding costs nothing when there is
+        nothing to scroll to.
+      */}
+      <div className="relative min-h-0 min-w-0 flex-1">
+      <div className="-mx-1 h-full min-h-0 min-w-0 overflow-x-auto overflow-y-hidden px-1 pb-1">
+        <div className="flex h-full min-w-max items-stretch gap-3">
+          {/* Before every stage, and deliberately not one of them: nothing in
+              it has a status yet. It is not a `BoardColumn` either — that is a
+              drop target, and approving needs a PIC, a QA reviewer and a list
+              that a drag cannot express. Renders nothing for a member.
+
+              ⚠️ ITS OWN BOUNDARY, WITH A `null` FALLBACK, and it is the one
+              streaming region here that says nothing while it loads. It renders
+              nothing at all on most loads — a member has no readable requests
+              and a lead's queue is usually empty — so there is no width to
+              reserve, and a polite "loading" that resolves to silence is worse
+              than saying nothing. It also must not be held behind the card
+              query: this column is the reason somebody opened the board on a
+              morning when three requests are waiting. */}
+          <Suspense fallback={null}>
+            <PendingColumn listId={listId} kind={kind} scope={scope} />
+          </Suspense>
+
+          {/*
+            THE CARDS, AND EVERYTHING THAT COSTS A QUERY.
+
+            One boundary around the whole column strip rather than one per
+            column: the count in each heading comes from the same rows the cards
+            do, so a per-column boundary would be eight fallbacks that all
+            resolve on the same round trip — eight places for the layout to
+            twitch instead of one.
+
+            The fallback is the shape `app/(app)/tasks/board/loading.tsx`
+            already draws, so a navigation into the board and an in-page refresh
+            of it look the same; and it is a FRAGMENT, so its columns sit beside
+            the pending column in this flex row rather than inside a wrapper
+            that would collapse the gaps.
+
+            ⚠️ `role="status"` on an `sr-only` line, not `aria-hidden` on the
+            lot. `loading.tsx` is announced by the ROUTER; a Suspense fallback
+            inside a page is announced by nothing at all. The grey bars stay
+            hidden — a screen reader enumerating twenty rectangles is not a
+            loading message — and the label is what speaks. `sr-only` is
+            absolutely positioned, so it takes no space in this flex row.
+          */}
+          <Suspense
+            fallback={
+              <>
+                <span role="status" aria-busy="true" className="sr-only">
+                  Loading the board…
+                </span>
+                <BoardColumnSkeleton />
+              </>
+            }>
+            <BoardColumns context={context} params={params} listId={listId} kind={kind} />
+          </Suspense>
+        </div>
+      </div>
+
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent"
+      />
+      </div>
+      </BoardDnd>
+    </PageShell>
+  );
+}
+
+/**
+ * The open list's name for the breadcrumb.
+ *
+ * Just the name, and only when there is one to fetch. The board has no list
+ * picker to populate — this is purely so the page can say which list you are
+ * looking at, now that a board can be a view of one.
+ */
+async function BoardCrumb({ listId }: { listId: string }) {
+  const supabase = await createClient();
+  const { data: openList } = await supabase
+    .from("vizserve_pms_lists")
+    .select("name")
+    .eq("id", listId)
+    .maybeSingle();
+
+  return openList ? <BreadcrumbLabel value={openList.name} /> : null;
+}
+
+/**
+ * P7-26 — the requests that have not been decided yet, as the first column.
+ *
+ * This note has said two different things and both still hold. It was awaited
+ * on its own so that a failure here could not stop the board rendering — still
+ * true, because `loadPendingRequests` returns [] on its own errors rather than
+ * throwing (lib/pending-requests-server.ts). Then it moved into the card batch
+ * to save the round trip that separate await cost — also still true, because
+ * sibling boundaries render concurrently and this read starts alongside the
+ * card query rather than after it.
+ *
+ * What it no longer does is FINISH alongside the cards. It is one indexed read
+ * against a small table and it paints as soon as it lands.
+ *
+ * The board has no status or priority filter to honour, so the only task-only
+ * filter it can carry is none — `hasTaskOnlyFilter` stays false.
+ */
+async function PendingColumn({
+  listId,
+  kind,
+  scope,
+}: {
+  listId: string | null;
+  kind: Kind;
+  scope: Scope;
+}) {
+  const pendingRequests = await loadPendingRequests({ listId, kind, scope });
+
+  return <PendingRequestColumn requests={pendingRequests} />;
+}
+
+/**
+ * Every column, its count and its cards.
+ *
+ * Split out of the page purely so it can stream: the query, its filters and
+ * every derivation below are the same lines in the same order they were in when
+ * they lived in `TaskBoardPage`. The only thing they lost was the ability to
+ * hold the toolbar, the drag hint and the scroller off the screen while they
+ * ran.
+ *
+ * `listId` and `kind` are read on the page rather than here because the pending
+ * column needs the same two, and two readings of "what does `?kind=` mean" is
+ * exactly one too many.
+ */
+async function BoardColumns({
+  context,
+  params,
+  listId,
+  kind,
+}: {
+  context: AuthContext;
+  params: BoardSearchParams;
+  listId: string | null;
+  kind: Kind;
+}) {
   const supabase = await createClient();
 
   let query = supabase
@@ -134,27 +396,15 @@ export default async function TaskBoardPage({
    * for so truncation is DETECTABLE without a second count query — the same
    * trick the DTR list uses, and for the same reason: a board that quietly
    * shows twenty of forty is a board somebody counts off.
+   *
+   * ⚠️ IT IS A COMPILE-TIME CONSTANT, which is why the page above can draw the
+   * whole frame before this component has a single row: the columns and their
+   * headings are known, and only the count and the cards are not.
    */
   const BOARD_COLUMNS = TASK_STATUSES;
 
   query = query.not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)");
 
-  /*
-   * ONE LIST, and without this the sidebar and the board were two structures
-   * that never met.
-   *
-   * The project tree links every list to `?list=<id>`, the list view honoured
-   * it, and the board did not read the parameter at all — so a list had exactly
-   * one shape available to it, and switching to the board silently widened the
-   * page to every task in the department while the URL still claimed a list.
-   * That is the same "a control that claims a filter it does not apply" trap the
-   * `kind` note below records, one parameter along.
-   *
-   * Now that the Tasks nav group is gone (lib/navigation.ts) and a list is
-   * reached only through the tree, this is what makes Board a VIEW of that list
-   * rather than a different destination.
-   */
-  const listId = params.list ?? null;
   if (listId) query = query.eq("list_id", listId);
 
   // The same three scopes the toolbar offers on both views. The board used to
@@ -167,17 +417,6 @@ export default async function TaskBoardPage({
     query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
   }
 
-  /*
-   * The client/internal split, which the toolbar has been CARRYING here since it
-   * was built and the board ignored.
-   *
-   * `VIEWS` in toolbar.tsx lists `kind` among the parameters that survive the
-   * switch from list to board, so a filtered list produced a URL saying
-   * `?kind=internal` on a board that showed everything — a control that claims a
-   * filter it does not apply, which is trap 4's shape in the UI rather than in
-   * SQL. Same one-column test as the list, and the same one `taskCategory` uses.
-   */
-  const kind = params.kind === "internal" || params.kind === "client" ? params.kind : "all";
   if (kind === "client") query = query.not("request_id", "is", null);
   if (kind === "internal") query = query.is("request_id", null);
 
@@ -191,83 +430,57 @@ export default async function TaskBoardPage({
    * before it asked for a single card. Everything independent now goes out
    * together; the only read still left serial is the subtask query at the
    * bottom, which genuinely needs the parent ids these rows produce.
+   *
+   * The pending requests have since left this batch for a boundary of their own
+   * — see `PendingColumn`. They still start at the same moment, because sibling
+   * boundaries render concurrently; they simply no longer have to land before
+   * the first card is drawn.
    */
-  const [
-    joinedTaskIdSet,
-    pendingRequests,
-    { data: tasks },
-    { data: people },
-    { data: openList },
-    { data: finishedTasks },
-  ] = await Promise.all([
-    /**
-     * P7-13 / P7-43 — the tasks this person is on without being named in
-     * `assignee_id`, for `seat()`.
-     *
-     * ⚠️ P9-05 took the id-LIST caller away: "Mine" was widened by spreading
-     * these into a PostgREST filter, which broke at 444 of them. That is the
-     * `is_mine` computed column now. Only the per-row membership test is left,
-     * and it never leaves the server.
-     */
-    fetchJoinedTaskIdSet(context.userId),
+  const [joinedTaskIdSet, { data: tasks }, { data: people }, { data: finishedTasks }] =
+    await Promise.all([
+      /**
+       * P7-13 / P7-43 — the tasks this person is on without being named in
+       * `assignee_id`, for `seat()`.
+       *
+       * ⚠️ P9-05 took the id-LIST caller away: "Mine" was widened by spreading
+       * these into a PostgREST filter, which broke at 444 of them. That is the
+       * `is_mine` computed column now. Only the per-row membership test is left,
+       * and it never leaves the server.
+       */
+      fetchJoinedTaskIdSet(context.userId),
 
-    /*
-     * P7-26 — the requests that have not been decided yet, as the first column.
-     *
-     * IN the batch now, and this note used to say the opposite: it was awaited
-     * on its own so that a failure here could not stop the board rendering.
-     * That goal is unchanged and still met — `loadPendingRequests` returns []
-     * on its own errors rather than throwing (lib/pending-requests-server.ts),
-     * so it cannot reject this `Promise.all` any more than it could reject its
-     * own `await`. What the separate await actually bought was a round trip.
-     *
-     * The board has no status or priority filter to honour, so the only
-     * task-only filter it can carry is none — `hasTaskOnlyFilter` stays false.
-     */
-    loadPendingRequests({
-      listId,
-      kind,
-      scope: params.view === "mine" || params.view === "qa" ? params.view : "all",
-    }),
+      query,
+      supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
+      /*
+       * Finished work, as its own bounded read.
+       *
+       * A SEPARATE QUERY rather than relaxing the filter above, because the two
+       * want opposite things. Live work is ordered by due date and unbounded —
+       * there is only ever so much of it. Finished work is ordered by RECENCY and
+       * capped: what closed this week is worth a glance, what closed in March is
+       * what the list view and its filters are for.
+       *
+       * Carries the same list/scope/kind filters as the board, so the columns
+       * agree with the ones beside them.
+       */
+      (() => {
+        let done = supabase
+          .from("vizserve_pms_tasks")
+          .select(
+            "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
+          )
+          .in("status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
+          .order("updated_at", { ascending: false })
+          .limit(FINISHED_PER_COLUMN * 2 + 1);
 
-    query,
-    supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
-    // Just the name, and only when there is one to fetch. The board has no list
-    // picker to populate — this is purely so the page can say which list you are
-    // looking at, now that a board can be a view of one.
-    listId
-      ? supabase.from("vizserve_pms_lists").select("name").eq("id", listId).maybeSingle()
-      : Promise.resolve({ data: null }),
-    /*
-     * Finished work, as its own bounded read.
-     *
-     * A SEPARATE QUERY rather than relaxing the filter above, because the two
-     * want opposite things. Live work is ordered by due date and unbounded —
-     * there is only ever so much of it. Finished work is ordered by RECENCY and
-     * capped: what closed this week is worth a glance, what closed in March is
-     * what the list view and its filters are for.
-     *
-     * Carries the same list/scope/kind filters as the board, so the columns
-     * agree with the ones beside them.
-     */
-    (() => {
-      let done = supabase
-        .from("vizserve_pms_tasks")
-        .select(
-          "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
-        )
-        .in("status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
-        .order("updated_at", { ascending: false })
-        .limit(FINISHED_PER_COLUMN * 2 + 1);
-
-      if (listId) done = done.eq("list_id", listId);
-      if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
-      if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
-      if (kind === "client") done = done.not("request_id", "is", null);
-      if (kind === "internal") done = done.is("request_id", null);
-      return done;
-    })(),
-  ]);
+        if (listId) done = done.eq("list_id", listId);
+        if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
+        if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
+        if (kind === "client") done = done.not("request_id", "is", null);
+        if (kind === "internal") done = done.is("request_id", null);
+        return done;
+      })(),
+    ]);
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
 
@@ -430,423 +643,350 @@ export default async function TaskBoardPage({
   }
 
   return (
-    <PageShell className="h-[calc(100svh-3.5rem)] min-h-0 gap-3 overflow-hidden">
-      {/*
-        P8-03 — the board is the screen this matters most on, because it is
-        the one people leave open. A colleague moving a card, or a Gate 1
-        approval creating a task, now redraws it within a moment instead of
-        on the next navigation.
+    <>
+      {BOARD_COLUMNS.map((status) => {
+        const column = byStatus.get(status) ?? [];
 
-        Renders nothing, and patches nothing into the columns: the ping
-        triggers `router.refresh()` and the whole board is re-queried under
-        RLS. That is why a card can never appear here that the policy would
-        have refused — the payload is thrown away unread.
-      */}
-      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+        return (
+          <BoardColumn
+            key={status}
+            status={status}
+            // The LABEL, never the enum — a screen reader announcing
+            // "FOR_CLIENT_APPROVAL column" is reading a database value out
+            // loud (§6).
+            aria-label={`${TASK_STATUS_LABELS[status]} column`}
+            className={cn(
+              // FLAT, per the elevation rule: a column is a place, not a
+              // control. Its fill and hairline tell it apart, and the cards
+              // inside are the only things carrying a lift.
+              "flex h-full w-64 shrink-0 flex-col rounded-lg border",
+              // The wash is the status' own tone, thinned so a white card
+              // still reads as raised on it. It comes from status-badge.tsx
+              // because that file is the only place a status is allowed to
+              // become a colour.
+              taskStatusSurface(status),
+            )}>
+            {/*
+              The status chip IS the column heading — same component, same
+              tone map as every other status in the app, so a column and a
+              card badge cannot drift into disagreeing about what colour
+              "For QA" is. It takes the stage glyph rather than the dot and
+              sets in caps, because a heading and an inline note should not
+              read as the same object.
+            */}
+            <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2.5">
+              <TaskStatusBadge status={status} icon className="uppercase tracking-[0.03em]" />
+              <span className="font-mono text-2xs font-semibold tabular-nums text-muted-foreground">
+                {column.length}
+              </span>
+            </div>
 
-      {/* No <h1> — the breadcrumb is the page label. Now that a board can be a
-          view of ONE list, the crumb has to name it, or two lists' boards are
-          the same page with different cards on it and nothing on screen says
-          which one you opened. `BreadcrumbLabel` clears itself on unmount, so
-          leaving the list takes the name with it.
+            {/*
+              Each column scrolls on its own. `min-h-0` is the flex escape
+              hatch again: without it the list refuses to shrink below its
+              content and the overflow never engages.
+            */}
+            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
+              {column.length === 0 ? (
+                <p className="px-1 py-6 text-center text-xs text-muted-foreground">
+                  {status === INITIAL_TASK_STATUS
+                    ? "Nothing waiting to be picked up."
+                    : isTerminal(status)
+                      ? // A finished column is empty because nothing has
+                        // finished, not because work has not reached it —
+                        // "work reaches this stage from the one before" is
+                        // true of the pipeline and false of an archive.
+                        "Nothing finished this way yet."
+                      : "Nothing here yet. Work reaches this stage from the one before it."}
+                </p>
+              ) : (
+                column.map((task) => {
+                  const late = isOverdue(task.due_date);
+                  const subtasks = subtaskCount.get(task.id) ?? 0;
+                  const bars = progress.get(task.id);
+                  const pic = task.assignee_id ? nameOf.get(task.assignee_id) : null;
+                  const qa = task.qa_assignee_id ? nameOf.get(task.qa_assignee_id) : null;
 
-          The sentence below stays because it is the rule for DRAGGING: internal
-          work goes anywhere, client work follows its gates, and a column that
-          cannot take the card dims rather than accepting it and springing back
-          (P7-20). */}
-      {openList ? <BreadcrumbLabel value={openList.name} /> : null}
+                  return (
+                    /*
+                      A DIV, not a Link, and the title carries the href.
 
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
-        <TaskToolbar view="board" />
-        <p className="min-w-0 text-xs text-muted-foreground">
-          Drag a card by its handle, or use the status control. Internal work goes to any stage; client work follows its gates.
-        </p>
+                      K3 put a status control, a rename and a subtask add on
+                      this card, and an interactive control inside an anchor
+                      is invalid HTML that swallows its own clicks: the
+                      anchor wins and the popover never opens. So the
+                      whole-card link is gone and the title is the
+                      affordance.
+                    */
+                    <BoardTaskGroup
+                      key={task.id}
+                      count={subtasks}
+                      label={task.title}
+                      parent={
+                    <BoardCard
+                      taskId={task.id}
+                      title={task.title}
+                      status={task.status}
+                      // P7-20. The SAME function the status dropdown uses,
+                      // which mirrors `vizserve_pms_transition_task`. The
+                      // board does not get an opinion of its own about what
+                      // is legal — that would be a fourth copy of the rules.
+                      allowed={availableTransitions(task.status, seat(task), task).map(
+                        (transition) => transition.to,
+                      )}
+                      className={cn(
+                        "group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg",
+                        // P7-27. Client work carries an accented edge, so a
+                        // column of cards says which ones have somebody
+                        // outside waiting without anybody reading a word.
+                        taskCategoryEdge(taskCategory(task)),
+                      )}>
+                      <div className="flex items-start gap-1.5">
+                        <Link
+                          href={`/tasks/${task.id}`}
+                          className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium hover:underline">
+                          {task.title}
+                        </Link>
 
-      </div>
-
-      {/*
-        The sideways scroller. `min-w-0` is what stops a flex item sizing itself
-        to its own content and widening the page instead of scrolling; the
-        negative margin with matching padding keeps the focus ring on the first
-        card from being shaved off by the scroll box's own edge.
-      */}
-      <BoardDnd>
-      {/*
-        ⚠️ THE FADE IS AN AFFORDANCE, NOT DECORATION.
-
-        Six live columns at w-64 need roughly 1600px and a laptop with the
-        sidebar open has about 1360px, so at least one stage is off the right
-        edge on most screens. Reported as "the board doesn't show all stages" —
-        which is what a horizontal scroller with no visible edge looks like.
-
-        `relative` on the wrapper and a gradient pinned to the right, above the
-        scroller and `pointer-events-none` so it cannot swallow a drag. It is
-        drawn unconditionally rather than only when scrollable: knowing whether
-        there is overflow needs a client component measuring on resize, and a
-        16px wash over the last column's own padding costs nothing when there is
-        nothing to scroll to.
-      */}
-      <div className="relative min-h-0 min-w-0 flex-1">
-      <div className="-mx-1 h-full min-h-0 min-w-0 overflow-x-auto overflow-y-hidden px-1 pb-1">
-        <div className="flex h-full min-w-max items-stretch gap-3">
-          {/* Before every stage, and deliberately not one of them: nothing in
-              it has a status yet. It is not a `BoardColumn` either — that is a
-              drop target, and approving needs a PIC, a QA reviewer and a list
-              that a drag cannot express. Renders nothing for a member. */}
-          <PendingRequestColumn requests={pendingRequests} />
-
-          {BOARD_COLUMNS.map((status) => {
-            const column = byStatus.get(status) ?? [];
-
-            return (
-              <BoardColumn
-                key={status}
-                status={status}
-                // The LABEL, never the enum — a screen reader announcing
-                // "FOR_CLIENT_APPROVAL column" is reading a database value out
-                // loud (§6).
-                aria-label={`${TASK_STATUS_LABELS[status]} column`}
-                className={cn(
-                  // FLAT, per the elevation rule: a column is a place, not a
-                  // control. Its fill and hairline tell it apart, and the cards
-                  // inside are the only things carrying a lift.
-                  "flex h-full w-64 shrink-0 flex-col rounded-lg border",
-                  // The wash is the status' own tone, thinned so a white card
-                  // still reads as raised on it. It comes from status-badge.tsx
-                  // because that file is the only place a status is allowed to
-                  // become a colour.
-                  taskStatusSurface(status),
-                )}>
-                {/*
-                  The status chip IS the column heading — same component, same
-                  tone map as every other status in the app, so a column and a
-                  card badge cannot drift into disagreeing about what colour
-                  "For QA" is. It takes the stage glyph rather than the dot and
-                  sets in caps, because a heading and an inline note should not
-                  read as the same object.
-                */}
-                <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2.5">
-                  <TaskStatusBadge status={status} icon className="uppercase tracking-[0.03em]" />
-                  <span className="font-mono text-2xs font-semibold tabular-nums text-muted-foreground">
-                    {column.length}
-                  </span>
-                </div>
-
-                {/*
-                  Each column scrolls on its own. `min-h-0` is the flex escape
-                  hatch again: without it the list refuses to shrink below its
-                  content and the overflow never engages.
-                */}
-                <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-                  {column.length === 0 ? (
-                    <p className="px-1 py-6 text-center text-xs text-muted-foreground">
-                      {status === INITIAL_TASK_STATUS
-                        ? "Nothing waiting to be picked up."
-                        : isTerminal(status)
-                          ? // A finished column is empty because nothing has
-                            // finished, not because work has not reached it —
-                            // "work reaches this stage from the one before" is
-                            // true of the pipeline and false of an archive.
-                            "Nothing finished this way yet."
-                          : "Nothing here yet. Work reaches this stage from the one before it."}
-                    </p>
-                  ) : (
-                    column.map((task) => {
-                      const late = isOverdue(task.due_date);
-                      const subtasks = subtaskCount.get(task.id) ?? 0;
-                      const bars = progress.get(task.id);
-                      const pic = task.assignee_id ? nameOf.get(task.assignee_id) : null;
-                      const qa = task.qa_assignee_id ? nameOf.get(task.qa_assignee_id) : null;
-
-                      return (
-                        /*
-                          A DIV, not a Link, and the title carries the href.
-
-                          K3 put a status control, a rename and a subtask add on
-                          this card, and an interactive control inside an anchor
-                          is invalid HTML that swallows its own clicks: the
-                          anchor wins and the popover never opens. So the
-                          whole-card link is gone and the title is the
-                          affordance.
-                        */
-                        <BoardTaskGroup
-                          key={task.id}
-                          count={subtasks}
-                          label={task.title}
-                          parent={
-                        <BoardCard
+                        <TaskRowActions
                           taskId={task.id}
                           title={task.title}
-                          status={task.status}
-                          // P7-20. The SAME function the status dropdown uses,
-                          // which mirrors `vizserve_pms_transition_task`. The
-                          // board does not get an opinion of its own about what
-                          // is legal — that would be a fourth copy of the rules.
-                          allowed={availableTransitions(task.status, seat(task), task).map(
-                            (transition) => transition.to,
-                          )}
-                          className={cn(
-                            "group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg",
-                            // P7-27. Client work carries an accented edge, so a
-                            // column of cards says which ones have somebody
-                            // outside waiting without anybody reading a word.
-                            taskCategoryEdge(taskCategory(task)),
-                          )}>
-                          <div className="flex items-start gap-1.5">
-                            <Link
-                              href={`/tasks/${task.id}`}
-                              className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium hover:underline">
-                              {task.title}
-                            </Link>
+                          priority={task.priority as TaskPriority | null}
+                          assignable={assignable}
+                          deletable={canDelete(task)}>
+                          {/* The glyph, not the chip: this card sits IN the
+                              column whose heading is its status. */}
+                          <TaskStatusSelect
+                            taskId={task.id}
+                            status={task.status}
+                            viewer={seat(task)}
+                            task={task}
+                            resolutionMissing={isRichTextEmpty(task.resolution)}
+                            variant="compact"
+                            align="end"
+                          />
+                        </TaskRowActions>
+                      </div>
 
-                            <TaskRowActions
-                              taskId={task.id}
-                              title={task.title}
-                              priority={task.priority as TaskPriority | null}
-                              assignable={assignable}
-                              deletable={canDelete(task)}>
-                              {/* The glyph, not the chip: this card sits IN the
-                                  column whose heading is its status. */}
-                              <TaskStatusSelect
-                                taskId={task.id}
-                                status={task.status}
-                                viewer={seat(task)}
-                                task={task}
-                                resolutionMissing={isRichTextEmpty(task.resolution)}
-                                variant="compact"
-                                align="end"
-                              />
-                            </TaskRowActions>
-                          </div>
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {/* P7-27 — WHICH KIND OF WORK THIS IS, which the
+                            board did not say at all. The list has said it
+                            since P7-01 and the board never did, so the same
+                            card meant two different things depending on
+                            which view you opened it from. Client work is the
+                            only category that takes an accent. */}
+                        <TaskCategoryBadge
+                          category={taskCategory(task)}
+                          className="h-5 px-1.5"
+                        />
+                        {/* Renders nothing when unranked, which is most
+                            tasks: a mark carried by everything marks
+                            nothing. Read-only here, because the hover
+                            strip's flag is where it changes and one field
+                            does not get two controls on one card. */}
+                        <TaskPriorityBadge priority={task.priority as TaskPriority | null} className="h-5 px-1.5" />
 
-                          <span className="flex flex-wrap items-center gap-1.5">
-                            {/* P7-27 — WHICH KIND OF WORK THIS IS, which the
-                                board did not say at all. The list has said it
-                                since P7-01 and the board never did, so the same
-                                card meant two different things depending on
-                                which view you opened it from. Client work is the
-                                only category that takes an accent. */}
-                            <TaskCategoryBadge
-                              category={taskCategory(task)}
-                              className="h-5 px-1.5"
-                            />
-                            {/* Renders nothing when unranked, which is most
-                                tasks: a mark carried by everything marks
-                                nothing. Read-only here, because the hover
-                                strip's flag is where it changes and one field
-                                does not get two controls on one card. */}
-                            <TaskPriorityBadge priority={task.priority as TaskPriority | null} className="h-5 px-1.5" />
+                        {/* PIC and QA, in that order. The second assignee is
+                            the thing this product turns on, so a board that
+                            showed only the PIC would be hiding half of who
+                            is on the hook. */}
+                        {pic ? <Avatar name={pic} title={`PIC ${pic}`} /> : null}
+                        {qa ? <Avatar name={qa} title={`QA ${qa}`} tone="qa" /> : null}
+                        {!pic && !qa ? <span className="text-2xs text-muted-foreground">Unassigned</span> : null}
 
-                            {/* PIC and QA, in that order. The second assignee is
-                                the thing this product turns on, so a board that
-                                showed only the PIC would be hiding half of who
-                                is on the hook. */}
-                            {pic ? <Avatar name={pic} title={`PIC ${pic}`} /> : null}
-                            {qa ? <Avatar name={qa} title={`QA ${qa}`} tone="qa" /> : null}
-                            {!pic && !qa ? <span className="text-2xs text-muted-foreground">Unassigned</span> : null}
-
-                            {task.due_date ? (
-                              <span
-                                className={cn(
-                                  // A bordered chip rather than loose text, so
-                                  // the date reads as one object beside the
-                                  // avatars instead of a second line of prose.
-                                  "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-2xs tabular-nums",
-                                  late
-                                    ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
-                                    : "border-border bg-muted text-muted-foreground",
-                                )}>
-                                <CalendarDays className="size-3.5 shrink-0" aria-hidden />
-                                {task.start_date
-                                  ? `${formatDate(task.start_date)} – ${formatDate(task.due_date)}`
-                                  : formatDate(task.due_date)}
-                                {/* Never colour alone. */}
-                                {late ? " · overdue" : null}
-                              </span>
-                            ) : null}
-
-                            {task.output_link ? (
-                              <Link2 className="size-3.5 text-foreground-faint" aria-label="Has an output link" />
-                            ) : null}
+                        {task.due_date ? (
+                          <span
+                            className={cn(
+                              // A bordered chip rather than loose text, so
+                              // the date reads as one object beside the
+                              // avatars instead of a second line of prose.
+                              "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-2xs tabular-nums",
+                              late
+                                ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
+                                : "border-border bg-muted text-muted-foreground",
+                            )}>
+                            <CalendarDays className="size-3.5 shrink-0" aria-hidden />
+                            {task.start_date
+                              ? `${formatDate(task.start_date)} – ${formatDate(task.due_date)}`
+                              : formatDate(task.due_date)}
+                            {/* Never colour alone. */}
+                            {late ? " · overdue" : null}
                           </span>
+                        ) : null}
 
-                          {/* Its own line under a rule, as on the reference
-                              board: a subtask count is about the task's shape,
-                              not about who or when. */}
-                          {/*
-                            THE COUNT AND THE RATIO COME FROM DIFFERENT QUERIES,
-                            deliberately. `subtasks` counts the children still
-                            live on this board; `bars` counts every child,
-                            including the finished ones the board excludes by
-                            design. The ratio needs the second, so it is
-                            preferred — the count is the fallback for a parent
-                            whose children the policy did not return.
-                          */}
-                          {bars ? (
-                            <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
-                              <ListTree className="size-3.5 shrink-0" aria-hidden />
-                              <SubtaskProgress done={bars.done} total={bars.total} />
-                            </span>
-                          ) : subtasks > 0 ? (
-                            <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
-                              <ListTree className="size-3.5 shrink-0" aria-hidden />
-                              {subtasks} {subtasks === 1 ? "subtask" : "subtasks"}
-                            </span>
-                          ) : null}
-                        </BoardCard>
-                          }>
-                          {(childrenByParent.get(task.id) ?? []).map((child) => {
-                            const childPic = child.assignee_id ? nameOf.get(child.assignee_id) : null;
-                            const childLate = isOverdue(child.due_date);
+                        {task.output_link ? (
+                          <Link2 className="size-3.5 text-foreground-faint" aria-label="Has an output link" />
+                        ) : null}
+                      </span>
 
-                            return (
-                              /*
-                                A SUBTASK CARD, and deliberately not a `BoardCard`.
-                                No drag handle: its stage follows the work it
-                                belongs to, and dragging one into another column
-                                is the exact move the nesting exists to prevent.
-                                It keeps its status control, because finishing one
-                                is a real thing to do — and finishing it is what
-                                takes it out of here.
+                      {/* Its own line under a rule, as on the reference
+                          board: a subtask count is about the task's shape,
+                          not about who or when. */}
+                      {/*
+                        THE COUNT AND THE RATIO COME FROM DIFFERENT QUERIES,
+                        deliberately. `subtasks` counts the children still
+                        live on this board; `bars` counts every child,
+                        including the finished ones the board excludes by
+                        design. The ratio needs the second, so it is
+                        preferred — the count is the fallback for a parent
+                        whose children the policy did not return.
+                      */}
+                      {bars ? (
+                        <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
+                          <ListTree className="size-3.5 shrink-0" aria-hidden />
+                          <SubtaskProgress done={bars.done} total={bars.total} />
+                        </span>
+                      ) : subtasks > 0 ? (
+                        <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
+                          <ListTree className="size-3.5 shrink-0" aria-hidden />
+                          {subtasks} {subtasks === 1 ? "subtask" : "subtasks"}
+                        </span>
+                      ) : null}
+                    </BoardCard>
+                      }>
+                      {(childrenByParent.get(task.id) ?? []).map((child) => {
+                        const childPic = child.assignee_id ? nameOf.get(child.assignee_id) : null;
+                        const childLate = isOverdue(child.due_date);
 
-                                ⚠️ IT USED TO BE A TITLE AND A GLYPH, which made a
-                                subtask read as a label rather than as work. It is
-                                a task: it has an owner, a date and a priority
-                                exactly as its parent does, and the one view that
-                                folds it under its parent was the only one showing
-                                none of them.
+                        return (
+                          /*
+                            A SUBTASK CARD, and deliberately not a `BoardCard`.
+                            No drag handle: its stage follows the work it
+                            belongs to, and dragging one into another column
+                            is the exact move the nesting exists to prevent.
+                            It keeps its status control, because finishing one
+                            is a real thing to do — and finishing it is what
+                            takes it out of here.
 
-                                The second line is the parent's, minus the two
-                                things a child cannot say differently. No category
-                                badge — a subtask carries no `request_id` of its
-                                own, so it would read "Internal" directly beneath
-                                a parent marked "Client". No QA avatar — this is
-                                always internal work, which needs no reviewer
-                                (P7-13a).
-                              */
-                              <div
-                                key={child.id}
-                                className="group/task flex flex-col gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
-                                <div className="flex items-start gap-1.5">
-                                  <Link
-                                    href={`/tasks/${child.id}`}
-                                    className="line-clamp-2 min-w-0 flex-1 text-2xs leading-snug hover:underline">
-                                    {child.title}
-                                  </Link>
+                            ⚠️ IT USED TO BE A TITLE AND A GLYPH, which made a
+                            subtask read as a label rather than as work. It is
+                            a task: it has an owner, a date and a priority
+                            exactly as its parent does, and the one view that
+                            folds it under its parent was the only one showing
+                            none of them.
 
-                                  {/* The same hover strip the parent carries, so
-                                      a subtask can be renamed, re-flagged and
-                                      deleted where it lives. Without it the only
-                                      way to rename one was to open it. */}
-                                  <TaskRowActions
-                                    taskId={child.id}
-                                    title={child.title}
-                                    priority={child.priority as TaskPriority | null}
-                                    assignable={assignable}
-                                    deletable={canDelete(child)}>
-                                    <TaskStatusSelect
-                                      taskId={child.id}
-                                      status={child.status}
-                                      viewer={seat(child)}
-                                      task={child}
-                                      resolutionMissing={isRichTextEmpty(child.resolution)}
-                                      variant="compact"
-                                      align="end"
-                                    />
-                                  </TaskRowActions>
-                                </div>
+                            The second line is the parent's, minus the two
+                            things a child cannot say differently. No category
+                            badge — a subtask carries no `request_id` of its
+                            own, so it would read "Internal" directly beneath
+                            a parent marked "Client". No QA avatar — this is
+                            always internal work, which needs no reviewer
+                            (P7-13a).
+                          */
+                          <div
+                            key={child.id}
+                            className="group/task flex flex-col gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
+                            <div className="flex items-start gap-1.5">
+                              <Link
+                                href={`/tasks/${child.id}`}
+                                className="line-clamp-2 min-w-0 flex-1 text-2xs leading-snug hover:underline">
+                                {child.title}
+                              </Link>
 
-                                {/* Drawn only when there is something to say. A
-                                    subtask with no owner, date or priority keeps
-                                    the single line it had. */}
-                                {childPic || child.due_date || child.priority ? (
-                                  <span className="flex flex-wrap items-center gap-1.5">
-                                    <TaskPriorityBadge
-                                      priority={child.priority as TaskPriority | null}
-                                      className="h-4.5 px-1"
-                                    />
-                                    {childPic ? <Avatar name={childPic} title={`PIC ${childPic}`} /> : null}
-                                    {child.due_date ? (
-                                      <span
-                                        className={cn(
-                                          "inline-flex items-center gap-1 rounded-sm border px-1 py-0.5 text-2xs tabular-nums",
-                                          childLate
-                                            ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
-                                            : "border-border bg-muted text-muted-foreground",
-                                        )}>
-                                        <CalendarDays className="size-3 shrink-0" aria-hidden />
-                                        {child.start_date
-                                          ? `${formatDate(child.start_date)} – ${formatDate(child.due_date)}`
-                                          : formatDate(child.due_date)}
-                                        {/* Never colour alone. */}
-                                        {childLate ? " · overdue" : null}
-                                      </span>
-                                    ) : null}
+                              {/* The same hover strip the parent carries, so
+                                  a subtask can be renamed, re-flagged and
+                                  deleted where it lives. Without it the only
+                                  way to rename one was to open it. */}
+                              <TaskRowActions
+                                taskId={child.id}
+                                title={child.title}
+                                priority={child.priority as TaskPriority | null}
+                                assignable={assignable}
+                                deletable={canDelete(child)}>
+                                <TaskStatusSelect
+                                  taskId={child.id}
+                                  status={child.status}
+                                  viewer={seat(child)}
+                                  task={child}
+                                  resolutionMissing={isRichTextEmpty(child.resolution)}
+                                  variant="compact"
+                                  align="end"
+                                />
+                              </TaskRowActions>
+                            </div>
+
+                            {/* Drawn only when there is something to say. A
+                                subtask with no owner, date or priority keeps
+                                the single line it had. */}
+                            {childPic || child.due_date || child.priority ? (
+                              <span className="flex flex-wrap items-center gap-1.5">
+                                <TaskPriorityBadge
+                                  priority={child.priority as TaskPriority | null}
+                                  className="h-4.5 px-1"
+                                />
+                                {childPic ? <Avatar name={childPic} title={`PIC ${childPic}`} /> : null}
+                                {child.due_date ? (
+                                  <span
+                                    className={cn(
+                                      "inline-flex items-center gap-1 rounded-sm border px-1 py-0.5 text-2xs tabular-nums",
+                                      childLate
+                                        ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
+                                        : "border-border bg-muted text-muted-foreground",
+                                    )}>
+                                    <CalendarDays className="size-3 shrink-0" aria-hidden />
+                                    {child.start_date
+                                      ? `${formatDate(child.start_date)} – ${formatDate(child.due_date)}`
+                                      : formatDate(child.due_date)}
+                                    {/* Never colour alone. */}
+                                    {childLate ? " · overdue" : null}
                                   </span>
                                 ) : null}
-                              </div>
-                            );
-                          })}
-                        </BoardTaskGroup>
-                      );
-                    })
-                  )}
-                </div>
+                              </span>
+                            ) : null}
+                          </div>
+                        );
+                      })}
+                    </BoardTaskGroup>
+                  );
+                })
+              )}
+            </div>
 
-                {/*
-                  ⚠️ THE CAP, STATED. A finished column shows the most recent
-                  `FINISHED_PER_COLUMN` and no more — and a column that quietly
-                  shows twelve of forty is a column somebody counts off once and
-                  then stops trusting. The list view is where the rest lives,
-                  because it has the filters and the sorting for it.
-                */}
-                {truncated.get(status) ? (
-                  <Link
-                    href={`/tasks?status=${status}`}
-                    className="block border-t px-2.5 py-2 text-center text-2xs text-muted-foreground hover:text-foreground"
-                  >
-                    Showing the {FINISHED_PER_COLUMN} most recent — see all in the list
-                  </Link>
-                ) : null}
+            {/*
+              ⚠️ THE CAP, STATED. A finished column shows the most recent
+              `FINISHED_PER_COLUMN` and no more — and a column that quietly
+              shows twelve of forty is a column somebody counts off once and
+              then stops trusting. The list view is where the rest lives,
+              because it has the filters and the sorting for it.
+            */}
+            {truncated.get(status) ? (
+              <Link
+                href={`/tasks?status=${status}`}
+                className="block border-t px-2.5 py-2 text-center text-2xs text-muted-foreground hover:text-foreground"
+              >
+                Showing the {FINISHED_PER_COLUMN} most recent — see all in the list
+              </Link>
+            ) : null}
 
-                {/* Renders nothing at all for a member — creating work for other
-                    people is a Team Leader decision, and the button settles that
-                    for itself rather than the board guessing at the role. */}
-                {/*
-                  EVERY column but one, reversed from first-only on 19 Aug — this
-                  is the board's half of the same change. A card dragged between
-                  columns is still not a thing (see the note at the top of this
-                  file), but typing a task straight into the column it belongs in
-                  is, and for internal work the move it implies is always legal.
+            {/* Renders nothing at all for a member — creating work for other
+                people is a Team Leader decision, and the button settles that
+                for itself rather than the board guessing at the role. */}
+            {/*
+              EVERY column but one, reversed from first-only on 19 Aug — this
+              is the board's half of the same change. A card dragged between
+              columns is still not a thing (see the note at the top of this
+              file), but typing a task straight into the column it belongs in
+              is, and for internal work the move it implies is always legal.
 
-                  `FOR_CLIENT_APPROVAL` is dropped: a task with no client that
-                  landed there could never be finished or moved back.
+              `FOR_CLIENT_APPROVAL` is dropped: a task with no client that
+              landed there could never be finished or moved back.
 
-                  ⚠️ THE TWO TERMINAL COLUMNS ARE DROPPED TOO, and that note used
-                  to read "they are not drawn on this board at all". They are
-                  now. Typing a new task straight into Completed would be
-                  creating work that is already over — the composer creates at
-                  the status of its column, and there is no honest reading of
-                  that one.
-                */}
-                {status === "FOR_CLIENT_APPROVAL" || isTerminal(status) ? null : (
-                  <>
-                    <BoardComposer status={status} assignable={assignable} />
-                  </>
-                )}
-              </BoardColumn>
-            );
-          })}
-        </div>
-      </div>
-
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent"
-      />
-      </div>
-      </BoardDnd>
-    </PageShell>
+              ⚠️ THE TWO TERMINAL COLUMNS ARE DROPPED TOO, and that note used
+              to read "they are not drawn on this board at all". They are
+              now. Typing a new task straight into Completed would be
+              creating work that is already over — the composer creates at
+              the status of its column, and there is no honest reading of
+              that one.
+            */}
+            {status === "FOR_CLIENT_APPROVAL" || isTerminal(status) ? null : (
+              <>
+                <BoardComposer status={status} assignable={assignable} />
+              </>
+            )}
+          </BoardColumn>
+        );
+      })}
+    </>
   );
 }
 

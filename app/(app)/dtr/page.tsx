@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { Clock } from "lucide-react";
@@ -34,6 +35,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { QueryError } from "@/components/query-error";
 import { DtrToolbar } from "./dtr-toolbar";
 import { PunchPanel } from "./punch-panel";
+import { TableSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata: Metadata = { title: "DTR" };
 
@@ -43,89 +46,73 @@ export const metadata: Metadata = { title: "DTR" };
  */
 const DTR_PAGE_SIZE = 500;
 
-/**
- * P5-04 — the daily time record.
+/*
+ * P7-65 — THE SORT ALLOWLIST.
  *
- * "Default view nyan, pag-click, is yung list view lang ng mga time in, time
- * out" (Amier, 19:10). A list of days, not a calendar and not a chart — this is
- * the screen someone opens to check whether yesterday recorded properly.
- *
- * SCOPE IS RLS'S JOB. This query carries no department filter and no
- * `user_id = me` clause: the policy returns your own rows plus your team's if
- * you lead one. Restating that here would imply the policy is optional, and
- * would drift from it the first time either changed.
+ * `?sort=` is user input, so it picks a LITERAL column here rather than being
+ * interpolated into `.order()`. The range is capped at `DTR_PAGE_SIZE + 1`,
+ * which is exactly why the table sets `urlSort` and lets Postgres order:
+ * sorting the truncated page in the browser would claim an ordering of days
+ * it never received.
  */
-export default async function DtrPage({
-  searchParams,
+const DTR_SORTS = ["date", "in", "out"] as const;
+type DtrSort = (typeof DTR_SORTS)[number];
+/*
+ * The order applied when the URL asks for none. Newest day first — a record is
+ * read backwards from the most recent day, which is what this screen is opened
+ * for. `dtr-table.tsx` passes the same pair to `DataTable` as `defaultSort`,
+ * and that is the only reason its header can draw an arrow for an order nobody
+ * put in the query string. One fact stated on either side of the wire: change
+ * one and change the other, or the header goes back to lying.
+ */
+const DTR_DEFAULT_SORT = { sort: "date", ascending: false } as const;
+
+const DTR_ORDER: Record<DtrSort, string> = {
+  date: "work_date",
+  in: "time_in",
+  out: "time_out",
+};
+
+/**
+ * THE READS BEHIND THE TABLE AND THE TOTALS, pulled out so the rail can paint
+ * without them.
+ *
+ * Nothing here changed except where it lives. The punch panel is the thing
+ * people open this page to CLICK, and it was waiting on a five-hundred-row read
+ * it shares nothing with — so the queries feeding the table and the summary
+ * moved into one loader, and the two places that render them became
+ * `<Suspense>` boundaries fed by ONE promise.
+ *
+ * ⚠️ ONE PROMISE, AWAITED TWICE, AND THAT IS DELIBERATE. The summary in the
+ * rail and the table in the right column are built from the same rows, and a
+ * second boundary running its own copy of these queries would double the cost
+ * of the page in order to make it feel faster. `loadDtrView` is an async
+ * function, so what it returns is a real promise — awaited twice it resolves
+ * twice and queries once. A raw PostgREST builder does NOT behave that way: its
+ * `.then()` fires a fresh request every time it is called, which is why
+ * `peoplePromise` below is wrapped in `Promise.resolve` before it is shared.
+ */
+async function loadDtrView({
+  supabase,
+  from,
+  to,
+  selectedUser,
+  dtrSort,
+  dtrAscending,
+  rangeInverted,
+  people: peoplePromise,
 }: {
-  searchParams: Promise<{ from?: string; to?: string; user?: string; sort?: string; dir?: string }>;
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  from: string;
+  to: string;
+  selectedUser: string | null;
+  dtrSort: DtrSort;
+  dtrAscending: boolean;
+  rangeInverted: boolean;
+  /** The rail's own query, shared rather than repeated — `nameOf` needs it. */
+  people: Promise<{ data: { id: string; full_name: string }[] | null }>;
 }) {
-  const context = await requireAuthContext();
-  const params = await searchParams;
-  const supabase = await createClient();
-
-  /*
-   * P7-65 — THE SORT ALLOWLIST.
-   *
-   * `?sort=` is user input, so it picks a LITERAL column here rather than being
-   * interpolated into `.order()`. The range is capped at `DTR_PAGE_SIZE + 1`,
-   * which is exactly why the table sets `urlSort` and lets Postgres order:
-   * sorting the truncated page in the browser would claim an ordering of days
-   * it never received.
-   */
-  const DTR_SORTS = ["date", "in", "out"] as const;
-  type DtrSort = (typeof DTR_SORTS)[number];
-  /*
-   * The order applied when the URL asks for none. Newest day first — a record is
-   * read backwards from the most recent day, which is what this screen is opened
-   * for. `dtr-table.tsx` passes the same pair to `DataTable` as `defaultSort`,
-   * and that is the only reason its header can draw an arrow for an order nobody
-   * put in the query string. One fact stated on either side of the wire: change
-   * one and change the other, or the header goes back to lying.
-   */
-  const DTR_DEFAULT_SORT = { sort: "date", ascending: false } as const;
-
-  /* `undefined` when the URL named no sort we recognise, and that distinction is
-     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
-     collapsed into `dtrSort` below. */
-  const requestedSort: DtrSort | undefined = (DTR_SORTS as readonly string[]).includes(
-    params.sort ?? "",
-  )
-    ? (params.sort as DtrSort)
-    : undefined;
-  const dtrSort: DtrSort = requestedSort ?? DTR_DEFAULT_SORT.sort;
-  const DTR_ORDER: Record<DtrSort, string> = {
-    date: "work_date",
-    in: "time_in",
-    out: "time_out",
-  };
-  /* ONE SOURCE FOR THE DIRECTION. An explicit sort obeys `?dir=` — ascending
-     unless it says otherwise, which is why the table leaves `asc` out of the URL
-     — and no explicit sort takes the default's. Deriving the direction from the
-     COLUMN NAME, as this did (`dtrSort !== "date"`), meant a click on Date wrote
-     `?sort=date` with no `dir`, the header drew ascending and Postgres returned
-     descending: the arrow and the rows disagreed, and Date could not be read
-     oldest-first at all. */
-  const dtrAscending = requestedSort ? params.dir !== "desc" : DTR_DEFAULT_SORT.ascending;
-
-  const today = todayInAppZone();
-  // Default to the last 30 days rather than the calendar month: on the 1st, a
-  // month-to-date view is one row and looks broken.
-  const from = params.from ?? addDays(today, -29)!;
-  const to = params.to ?? today;
-  const selectedUser = params.user ?? null;
-
-  // A range that runs backwards matches nothing, and "nothing" is exactly what
-  // an honestly empty record looks like — so the page has to say which it is.
-  // `dtrExportSchema` already refuses `to < from`; this is the screen catching
-  // up with the export rather than quietly disagreeing with it.
-  const rangeInverted = from > to;
-
-  const isLead = roleAtLeast(context.role, "team_leader");
-
-  const [punchState, entriesResult, leaveResult, peopleResult, requestsResult, settings] =
-    await Promise.all([
-    loadPunchState(context.userId),
+  const [entriesResult, leaveResult, requestsResult, settings, peopleResult] = await Promise.all([
     (() => {
       // ONE MORE THAN WE RENDER.
       //
@@ -206,17 +193,6 @@ export default async function DtrPage({
       return query;
     })(),
 
-    // The picker only makes sense for someone who can see more than themselves.
-    // Reads through the same RLS as the list, so it cannot offer a person whose
-    // rows would then come back empty.
-    isLead
-      ? supabase
-          .from("vizserve_pms_users")
-          .select("id, full_name")
-          .eq("is_active", true)
-          .order("full_name")
-      : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
-
     /*
      * P7-40 — THE REQUESTS ATTACHED TO THESE DAYS.
      *
@@ -252,6 +228,8 @@ export default async function DtrPage({
     })(),
 
     loadAppSettings(),
+
+    peoplePromise,
   ]);
 
   const fetched = (entriesResult.data ?? []) as unknown as PunchRow[];
@@ -260,7 +238,6 @@ export default async function DtrPage({
   const punchRows = truncated ? fetched.slice(0, DTR_PAGE_SIZE) : fetched;
 
   const people = peopleResult.data ?? [];
-  const showPerson = isLead && !selectedUser;
   const nameOf = new Map(people.map((row) => [row.id, row.full_name] as const));
 
   type LeaveRequestRow = {
@@ -440,6 +417,388 @@ export default async function DtrPage({
   // the average below divides by days that closed — a day off is neither.
   const leaveDayCount = leaveEntries.length;
 
+  return {
+    // The whole result objects, not just their rows: the empty state and the
+    // rail both read `.error`, and renaming them on the way out would be the
+    // one edit in this move that changed what is on screen.
+    entriesResult,
+    leaveResult,
+    entries,
+    punchEntries,
+    truncated,
+    totalMinutes,
+    averageMinutes,
+    stillOpen,
+    leaveDayCount,
+  };
+}
+
+type DtrView = Awaited<ReturnType<typeof loadDtrView>>;
+
+/**
+ * ⚠️ A SUSPENSE FALLBACK IS ANNOUNCED BY NOBODY.
+ *
+ * `components/skeletons.tsx` hides its skeletons from assistive technology, and
+ * the reason it gives is specific to `loading.tsx`: the ROUTER announces that
+ * navigation, so a second announcement would interrupt it. Nothing announces a
+ * boundary that streams inside a page which has already rendered — so these
+ * fallbacks are `role="status"` regions carrying `aria-busy` and a label, and
+ * only the grey bars inside them are `aria-hidden`. The label names which part
+ * of the page is still coming, because two of them are on screen at once.
+ */
+function DtrSummaryFallback() {
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      className="rounded-lg border bg-card grade-surface p-3 shadow-raised-lg"
+    >
+      <span className="sr-only">Loading the totals for this range…</span>
+      <div className="grid grid-cols-2 gap-x-3 gap-y-2.5" aria-hidden>
+        {Array.from({ length: 4 }, (_, index) => (
+          <div key={index} className="space-y-1.5">
+            <Skeleton className="h-2.5 w-16" />
+            <Skeleton className="h-4 w-12" />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function DtrTableFallback() {
+  return (
+    <div role="status" aria-busy="true" className="lg:min-h-0">
+      <span className="sr-only">Loading the time record…</span>
+      <TableSkeleton columns={5} rows={8} />
+    </div>
+  );
+}
+
+/** The rail's warnings and totals. Everything above them is already on screen. */
+async function DtrRailSummary({ view }: { view: Promise<DtrView> }) {
+  const {
+    truncated,
+    leaveResult,
+    entries,
+    punchEntries,
+    totalMinutes,
+    averageMinutes,
+    stillOpen,
+    leaveDayCount,
+  } = await view;
+
+  return (
+    <>
+      {/* Said before the numbers, not after them. Somebody reading a total
+          that covers only part of the range needs to know that before they
+          act on it — and the CSV export is not capped, so the export and
+          this screen will disagree until the range is narrowed. */}
+      {truncated ? (
+        <p
+          role="status"
+          className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
+        >
+          More than {DTR_PAGE_SIZE} records match this range, so the list and the totals below
+          cover only the most recent {DTR_PAGE_SIZE}. Narrow the dates, or pick one person, to
+          see the rest. Export gives you the whole range.
+        </p>
+      ) : null}
+
+      {/* Said out loud rather than swallowed. A failed leave query renders
+          as a record with no leave in it, which is indistinguishable from
+          nobody having taken any — the exact "data ?? [] reads as empty"
+          trap that hid the broken embed on this page for months. */}
+      {leaveResult.error ? (
+        <p
+          role="status"
+          className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
+        >
+          Approved leave could not be loaded, so days away are not shown below. The punch
+          records are unaffected.
+        </p>
+      ) : null}
+
+      {/* What fills the rest of the rail. The table already totals itself in
+          a footer row, but that footer is at the bottom of thirty rows —
+          which is no use to the person who opened this page to find out how
+          many hours the range came to. Same number, read without scrolling.
+
+          Only when there is something to summarise: four dashes under an
+          empty table is furniture, not information. */}
+      {entries.length > 0 ? (
+        <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
+          <div>
+            <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Records</dt>
+            {/* Punch records only. The leave rows below are days in the
+                list but not days at work, and adding them here would
+                overstate the figure people read as attendance. */}
+            <dd className="mt-0.5 text-sm font-semibold tabular-nums">
+              {punchEntries.length}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+              {truncated ? "Total shown" : "Total"}
+            </dt>
+            <dd className="mt-0.5 text-sm font-semibold tabular-nums">
+              {formatDuration(totalMinutes)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Average</dt>
+            <dd className="mt-0.5 text-sm font-semibold tabular-nums">
+              {formatDuration(averageMinutes)}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+              Still open
+            </dt>
+            {/* Stated in words as well as colour — a warning-coloured number
+                is not a status on its own. */}
+            <dd
+              className={
+                stillOpen > 0
+                  ? "mt-0.5 text-sm font-semibold tabular-nums text-warning"
+                  : "mt-0.5 text-sm font-semibold tabular-nums"
+              }
+            >
+              {stillOpen}
+              {stillOpen > 0 ? <span className="sr-only"> days not timed out</span> : null}
+            </dd>
+          </div>
+
+          {/* Only when there is leave in the range. A permanent "0" here
+              would be a stat that is furniture on most weeks. */}
+          {leaveDayCount > 0 ? (
+            <div>
+              <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
+                On leave
+              </dt>
+              <dd className="mt-0.5 text-sm font-semibold tabular-nums text-info">
+                {leaveDayCount}
+                <span className="sr-only"> approved days away with no punch</span>
+              </dd>
+            </div>
+          ) : null}
+        </dl>
+      ) : null}
+    </>
+  );
+}
+
+/** The right column, and the five-hundred-row read that is the point of the split. */
+async function DtrTableSection({
+  view,
+  viewerId,
+  showPerson,
+  from,
+  to,
+  selectedUser,
+  rangeInverted,
+}: {
+  view: Promise<DtrView>;
+  viewerId: string;
+  showPerson: boolean;
+  from: string;
+  to: string;
+  selectedUser: string | null;
+  rangeInverted: boolean;
+}) {
+  const { entriesResult, entries, truncated, totalMinutes } = await view;
+
+  return (
+    <DtrTable
+      // The card fills the row and the rows scroll inside it, so five
+      // hundred days of DTR never make the page itself longer.
+      //
+      // ⚠️ `[&>div:last-child]`, NOT `[&>div]`, AND THAT ONE WORD IS THE
+      // WHOLE BUG THIS COMMENT USED TO DESCRIBE WRONGLY.
+      //
+      // It said "`[&>div]` is DataTableShell's inner scroller". The shell
+      // has TWO direct div children whenever there is a controls strip:
+      // the strip itself, and the `overflow-x-auto` scroller holding the
+      // table. `[&>div]` matched both — so the TOOLBAR got `h-full` and
+      // filled the card, and the table was pushed out of a container that
+      // is `overflow-hidden`. The result was a DTR showing its Columns
+      // button and nothing else, at `lg` and up, with the rows present in
+      // the DOM and no error anywhere to explain it.
+      //
+      // `:last-child` is the scroller in both cases — the strip is
+      // conditional (`hasStrip`), so when it is absent the scroller is
+      // still the last child and still the only one.
+      //
+      // The scroller already handles the horizontal axis, which is why the
+      // vertical one belongs on it rather than in a second scroll
+      // container nested inside.
+      //
+      // The header sticks to the top of that scroller. `bg-background` and
+      // the inset shadow rather than a border: a sticky `th` keeps its own
+      // background but a `border-b` declared on the `tr` does not travel
+      // with it, so the rule under the headings vanishes on first scroll.
+      //
+      // `[&_table]:h-full` ONLY when empty — it stretches the table to the
+      // card so the empty state centres in it. Left on with rows present it
+      // would stretch the ROWS instead, and a three-row range would render
+      // as three 200px-tall bands.
+      className={`[&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 lg:h-full lg:min-h-0 lg:[&>div:last-child]:h-full lg:[&>div:last-child]:overflow-y-auto lg:[&_thead_th]:sticky lg:[&_thead_th]:top-0 lg:[&_thead_th]:z-10 lg:[&_thead_th]:bg-background lg:[&_thead_th]:shadow-[inset_0_-1px_0_var(--border)] ${
+        entries.length === 0 ? "lg:[&_table]:h-full" : ""
+      }`}
+      rows={entries}
+      viewerId={viewerId}
+      showPerson={showPerson}
+      empty={
+        entriesResult.error ? (
+          <QueryError what="your time record" message={entriesResult.error.message} />
+        ) : 
+        rangeInverted ? (
+          // Deliberately NOT swapped behind their back. Silently answering a
+          // different question than the one asked is how somebody ends up
+          // trusting a range they never set.
+          <EmptyState
+            className="py-10"
+            icon={<Clock />}
+            title="That range runs backwards"
+            description={`From is ${formatDate(from)} and To is ${formatDate(to)}, so no day can fall inside it. This is not an empty record — swap the two dates to see what is there.`}
+            action={
+              <Link
+                href={`/dtr?from=${to}&to=${from}${selectedUser ? `&user=${selectedUser}` : ""}`}
+                className={buttonVariants({ variant: "outline", size: "sm" })}
+              >
+                Swap the dates
+              </Link>
+            }
+          />
+        ) : (
+        <EmptyState
+          // No min-height of its own any more. The table above is stretched
+          // to the card while the list is empty, and TableCell's
+          // `align-middle` does the centring — which cannot drift out of
+          // step with the layout the way a hardcoded viewport figure did.
+          className="py-10"
+          icon={<Clock />}
+          title="No entries in this range"
+          description="Days with no punch have no row at all, apart from approved leave, which is listed. Widen the date range first — if a day is genuinely missing that should not be, raise the correction from here."
+          action={
+            // F. It carries `from`, the first day of the range being looked
+            // at, because that is the only day this screen can name — an
+            // empty range has no row to take a date off. The dialog opens on
+            // it and the person changes it if they meant another day, which
+            // is still one field instead of four steps.
+            <Link
+              href={`/approvals?type=NO_TIME_IN&date=${from}`}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
+            >
+              Raise a No Time-In request
+            </Link>
+          }
+        />
+        )
+      }
+      totalLabel={truncated ? `Total of the first ${DTR_PAGE_SIZE} shown` : "Total in range"}
+      totalMinutes={totalMinutes}
+    />
+  );
+}
+
+/**
+ * P5-04 — the daily time record.
+ *
+ * "Default view nyan, pag-click, is yung list view lang ng mga time in, time
+ * out" (Amier, 19:10). A list of days, not a calendar and not a chart — this is
+ * the screen someone opens to check whether yesterday recorded properly.
+ *
+ * SCOPE IS RLS'S JOB. This query carries no department filter and no
+ * `user_id = me` clause: the policy returns your own rows plus your team's if
+ * you lead one. Restating that here would imply the policy is optional, and
+ * would drift from it the first time either changed.
+ */
+export default async function DtrPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ from?: string; to?: string; user?: string; sort?: string; dir?: string }>;
+}) {
+  const context = await requireAuthContext();
+  const params = await searchParams;
+  const supabase = await createClient();
+
+  /* `undefined` when the URL named no sort we recognise, and that distinction is
+     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
+     collapsed into `dtrSort` below. */
+  const requestedSort: DtrSort | undefined = (DTR_SORTS as readonly string[]).includes(
+    params.sort ?? "",
+  )
+    ? (params.sort as DtrSort)
+    : undefined;
+  const dtrSort: DtrSort = requestedSort ?? DTR_DEFAULT_SORT.sort;
+  /* ONE SOURCE FOR THE DIRECTION. An explicit sort obeys `?dir=` — ascending
+     unless it says otherwise, which is why the table leaves `asc` out of the URL
+     — and no explicit sort takes the default's. Deriving the direction from the
+     COLUMN NAME, as this did (`dtrSort !== "date"`), meant a click on Date wrote
+     `?sort=date` with no `dir`, the header drew ascending and Postgres returned
+     descending: the arrow and the rows disagreed, and Date could not be read
+     oldest-first at all. */
+  const dtrAscending = requestedSort ? params.dir !== "desc" : DTR_DEFAULT_SORT.ascending;
+
+  const today = todayInAppZone();
+  // Default to the last 30 days rather than the calendar month: on the 1st, a
+  // month-to-date view is one row and looks broken.
+  const from = params.from ?? addDays(today, -29)!;
+  const to = params.to ?? today;
+  const selectedUser = params.user ?? null;
+
+  // A range that runs backwards matches nothing, and "nothing" is exactly what
+  // an honestly empty record looks like — so the page has to say which it is.
+  // `dtrExportSchema` already refuses `to < from`; this is the screen catching
+  // up with the export rather than quietly disagreeing with it.
+  const rangeInverted = from > to;
+
+  const isLead = roleAtLeast(context.role, "team_leader");
+
+  // The picker only makes sense for someone who can see more than themselves.
+  // Reads through the same RLS as the list, so it cannot offer a person whose
+  // rows would then come back empty.
+  //
+  // ⚠️ `Promise.resolve`, NOT the builder on its own. TWO things read this
+  // list — the toolbar's picker, and `nameOf` inside `loadDtrView` — and a
+  // PostgREST builder fires a fresh request on every `.then()`, so sharing the
+  // raw builder would have run the query twice. Wrapping it once assimilates
+  // the thenable into a real promise: resolved twice, queried once.
+  const peoplePromise: Promise<{ data: { id: string; full_name: string }[] | null }> =
+    Promise.resolve(
+      isLead
+        ? supabase
+            .from("vizserve_pms_users")
+            .select("id, full_name")
+            .eq("is_active", true)
+            .order("full_name")
+        : { data: [] as { id: string; full_name: string }[] },
+    );
+
+  /* STARTED BEFORE ANYTHING IS AWAITED. The table's reads and the rail's reads
+     are in flight together, exactly as they were inside the one `Promise.all`
+     this replaced — the only difference is that the punch panel and the filters
+     no longer wait for the table's half to come back. */
+  const view = loadDtrView({
+    supabase,
+    from,
+    to,
+    selectedUser,
+    dtrSort,
+    dtrAscending,
+    rangeInverted,
+    people: peoplePromise,
+  });
+
+  const [punchState, peopleResult] = await Promise.all([
+    loadPunchState(context.userId),
+    peoplePromise,
+  ]);
+
+  const people = peopleResult.data ?? [];
+  const showPerson = isLead && !selectedUser;
+
   /**
    * F — whose record is this row?
    *
@@ -450,7 +809,6 @@ export default async function DtrPage({
    * silently raise a request about their own day. Correcting for somebody else
    * is not a thing this system does, and the honest response is to not offer it.
    */
-
 
   return (
     /*
@@ -498,100 +856,9 @@ export default async function DtrPage({
             canExport={isLead}
           />
 
-          {/* Said before the numbers, not after them. Somebody reading a total
-              that covers only part of the range needs to know that before they
-              act on it — and the CSV export is not capped, so the export and
-              this screen will disagree until the range is narrowed. */}
-          {truncated ? (
-            <p
-              role="status"
-              className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
-            >
-              More than {DTR_PAGE_SIZE} records match this range, so the list and the totals below
-              cover only the most recent {DTR_PAGE_SIZE}. Narrow the dates, or pick one person, to
-              see the rest. Export gives you the whole range.
-            </p>
-          ) : null}
-
-          {/* Said out loud rather than swallowed. A failed leave query renders
-              as a record with no leave in it, which is indistinguishable from
-              nobody having taken any — the exact "data ?? [] reads as empty"
-              trap that hid the broken embed on this page for months. */}
-          {leaveResult.error ? (
-            <p
-              role="status"
-              className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
-            >
-              Approved leave could not be loaded, so days away are not shown below. The punch
-              records are unaffected.
-            </p>
-          ) : null}
-
-          {/* What fills the rest of the rail. The table already totals itself in
-              a footer row, but that footer is at the bottom of thirty rows —
-              which is no use to the person who opened this page to find out how
-              many hours the range came to. Same number, read without scrolling.
-
-              Only when there is something to summarise: four dashes under an
-              empty table is furniture, not information. */}
-          {entries.length > 0 ? (
-            <dl className="grid grid-cols-2 gap-x-3 gap-y-2.5 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
-              <div>
-                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Records</dt>
-                {/* Punch records only. The leave rows below are days in the
-                    list but not days at work, and adding them here would
-                    overstate the figure people read as attendance. */}
-                <dd className="mt-0.5 text-sm font-semibold tabular-nums">
-                  {punchEntries.length}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
-                  {truncated ? "Total shown" : "Total"}
-                </dt>
-                <dd className="mt-0.5 text-sm font-semibold tabular-nums">
-                  {formatDuration(totalMinutes)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Average</dt>
-                <dd className="mt-0.5 text-sm font-semibold tabular-nums">
-                  {formatDuration(averageMinutes)}
-                </dd>
-              </div>
-              <div>
-                <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
-                  Still open
-                </dt>
-                {/* Stated in words as well as colour — a warning-coloured number
-                    is not a status on its own. */}
-                <dd
-                  className={
-                    stillOpen > 0
-                      ? "mt-0.5 text-sm font-semibold tabular-nums text-warning"
-                      : "mt-0.5 text-sm font-semibold tabular-nums"
-                  }
-                >
-                  {stillOpen}
-                  {stillOpen > 0 ? <span className="sr-only"> days not timed out</span> : null}
-                </dd>
-              </div>
-
-              {/* Only when there is leave in the range. A permanent "0" here
-                  would be a stat that is furniture on most weeks. */}
-              {leaveDayCount > 0 ? (
-                <div>
-                  <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
-                    On leave
-                  </dt>
-                  <dd className="mt-0.5 text-sm font-semibold tabular-nums text-info">
-                    {leaveDayCount}
-                    <span className="sr-only"> approved days away with no punch</span>
-                  </dd>
-                </div>
-              ) : null}
-            </dl>
-          ) : null}
+          <Suspense fallback={<DtrSummaryFallback />}>
+            <DtrRailSummary view={view} />
+          </Suspense>
 
           {/* Kept from the old page heading. It is not decoration: it is why two
               punches on one day collapse into one row, which is the first thing
@@ -613,96 +880,17 @@ export default async function DtrPage({
             page wanting denser rows does not justify a new API on the shared
             component, and the day a second page wants it, that is the moment
             to add one. */}
-        <DtrTable
-          // The card fills the row and the rows scroll inside it, so five
-          // hundred days of DTR never make the page itself longer.
-          //
-          // ⚠️ `[&>div:last-child]`, NOT `[&>div]`, AND THAT ONE WORD IS THE
-          // WHOLE BUG THIS COMMENT USED TO DESCRIBE WRONGLY.
-          //
-          // It said "`[&>div]` is DataTableShell's inner scroller". The shell
-          // has TWO direct div children whenever there is a controls strip:
-          // the strip itself, and the `overflow-x-auto` scroller holding the
-          // table. `[&>div]` matched both — so the TOOLBAR got `h-full` and
-          // filled the card, and the table was pushed out of a container that
-          // is `overflow-hidden`. The result was a DTR showing its Columns
-          // button and nothing else, at `lg` and up, with the rows present in
-          // the DOM and no error anywhere to explain it.
-          //
-          // `:last-child` is the scroller in both cases — the strip is
-          // conditional (`hasStrip`), so when it is absent the scroller is
-          // still the last child and still the only one.
-          //
-          // The scroller already handles the horizontal axis, which is why the
-          // vertical one belongs on it rather than in a second scroll
-          // container nested inside.
-          //
-          // The header sticks to the top of that scroller. `bg-background` and
-          // the inset shadow rather than a border: a sticky `th` keeps its own
-          // background but a `border-b` declared on the `tr` does not travel
-          // with it, so the rule under the headings vanishes on first scroll.
-          //
-          // `[&_table]:h-full` ONLY when empty — it stretches the table to the
-          // card so the empty state centres in it. Left on with rows present it
-          // would stretch the ROWS instead, and a three-row range would render
-          // as three 200px-tall bands.
-          className={`[&_td]:px-2 [&_td]:py-1 [&_th]:h-8 [&_th]:px-2 lg:h-full lg:min-h-0 lg:[&>div:last-child]:h-full lg:[&>div:last-child]:overflow-y-auto lg:[&_thead_th]:sticky lg:[&_thead_th]:top-0 lg:[&_thead_th]:z-10 lg:[&_thead_th]:bg-background lg:[&_thead_th]:shadow-[inset_0_-1px_0_var(--border)] ${
-            entries.length === 0 ? "lg:[&_table]:h-full" : ""
-          }`}
-          rows={entries}
-          viewerId={context.userId}
-          showPerson={showPerson}
-          empty={
-            entriesResult.error ? (
-              <QueryError what="your time record" message={entriesResult.error.message} />
-            ) : 
-            rangeInverted ? (
-              // Deliberately NOT swapped behind their back. Silently answering a
-              // different question than the one asked is how somebody ends up
-              // trusting a range they never set.
-              <EmptyState
-                className="py-10"
-                icon={<Clock />}
-                title="That range runs backwards"
-                description={`From is ${formatDate(from)} and To is ${formatDate(to)}, so no day can fall inside it. This is not an empty record — swap the two dates to see what is there.`}
-                action={
-                  <Link
-                    href={`/dtr?from=${to}&to=${from}${selectedUser ? `&user=${selectedUser}` : ""}`}
-                    className={buttonVariants({ variant: "outline", size: "sm" })}
-                  >
-                    Swap the dates
-                  </Link>
-                }
-              />
-            ) : (
-            <EmptyState
-              // No min-height of its own any more. The table above is stretched
-              // to the card while the list is empty, and TableCell's
-              // `align-middle` does the centring — which cannot drift out of
-              // step with the layout the way a hardcoded viewport figure did.
-              className="py-10"
-              icon={<Clock />}
-              title="No entries in this range"
-              description="Days with no punch have no row at all, apart from approved leave, which is listed. Widen the date range first — if a day is genuinely missing that should not be, raise the correction from here."
-              action={
-                // F. It carries `from`, the first day of the range being looked
-                // at, because that is the only day this screen can name — an
-                // empty range has no row to take a date off. The dialog opens on
-                // it and the person changes it if they meant another day, which
-                // is still one field instead of four steps.
-                <Link
-                  href={`/approvals?type=NO_TIME_IN&date=${from}`}
-                  className={buttonVariants({ variant: "outline", size: "sm" })}
-                >
-                  Raise a No Time-In request
-                </Link>
-              }
-            />
-            )
-          }
-          totalLabel={truncated ? `Total of the first ${DTR_PAGE_SIZE} shown` : "Total in range"}
-          totalMinutes={totalMinutes}
-        />
+        <Suspense fallback={<DtrTableFallback />}>
+          <DtrTableSection
+            view={view}
+            viewerId={context.userId}
+            showPerson={showPerson}
+            from={from}
+            to={to}
+            selectedUser={selectedUser}
+            rangeInverted={rangeInverted}
+          />
+        </Suspense>
       </div>
     </PageShell>
   );

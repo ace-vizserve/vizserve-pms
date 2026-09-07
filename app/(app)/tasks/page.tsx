@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { ListChecks } from "lucide-react";
 import type { Metadata } from "next";
 
@@ -13,10 +14,12 @@ import {
   canAdminDepartment,
   realtimeDepartmentFilter,
   requireAuthContext,
+  type AuthContext,
 } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { sanitizeRichText } from "@/lib/rich-text-server";
+import type { PendingRequest } from "@/lib/schemas/approvals";
 import {
   isTerminal,
   TASK_PRIORITIES,
@@ -31,6 +34,7 @@ import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
 import { QueryError } from "@/components/query-error";
+import { FilterBarSkeleton, TaskStatusGroupSkeleton } from "@/components/skeletons";
 import { createClient } from "@/utils/supabase/server";
 import type { TaskComment } from "./comment-thread";
 
@@ -80,6 +84,36 @@ function isPriority(value: string | undefined): value is TaskPriority {
 }
 
 /**
+ * Named rather than written inline on the page signature, because the streaming
+ * child below takes the same bag. See `TaskGroups`.
+ */
+type TasksSearchParams = {
+  status?: string;
+  view?: string;
+  list?: string;
+  group?: string;
+  kind?: string;
+  priority?: string;
+  sort?: string;
+  dir?: string;
+};
+
+type View = "all" | "mine" | "qa";
+type Kind = "all" | "internal" | "client";
+
+/*
+ * The two cheap reads, typed as the PROMISES they are passed around as.
+ *
+ * ⚠️ A POSTGREST BUILDER IS A THENABLE, NOT A PROMISE — `.then()` is what fires
+ * the request, so awaiting one builder in two different Suspense children would
+ * issue the same query TWICE. `Promise.resolve()` settles it once and hands
+ * every child the one result. The lists read has three readers below (the
+ * breadcrumb, the filter panel and the row lookups) and is still one query.
+ */
+type ListsResult = { data: { id: string; name: string; group_id: string | null }[] | null };
+type GroupsResult = { data: { id: string; name: string }[] | null };
+
+/**
  * P3-03 / P3-14 — the task list.
  *
  * No department filter in the query, deliberately. RLS already says a member
@@ -110,20 +144,18 @@ function isPriority(value: string | undefined): value is TaskPriority {
  *
  * No <h1>. The shell breadcrumb is the page label, and the toolbar already says
  * which slice of the list you are looking at.
+ *
+ * ⚠️ THIS FUNCTION AWAITS NOTHING THAT COSTS A ROUND TRIP, and that is the shape
+ * of the whole file. It reads the session and the URL, starts the queries and
+ * returns the chrome — so the toolbar, the New Task button and the column menu
+ * are on screen and usable while the ten-query batch is still in flight. Each
+ * `<Suspense>` sits exactly where the data behind it is first read, so a slow
+ * group cannot hold up a fast one.
  */
 export default async function TasksPage({
   searchParams,
 }: {
-  searchParams: Promise<{
-    status?: string;
-    view?: string;
-    list?: string;
-    group?: string;
-    kind?: string;
-    priority?: string;
-    sort?: string;
-    dir?: string;
-  }>;
+  searchParams: Promise<TasksSearchParams>;
 }) {
   const context = await requireAuthContext();
   const params = await searchParams;
@@ -143,7 +175,7 @@ export default async function TasksPage({
    * so nothing here needs the id list at all.
    */
 
-  const view = params.view === "mine" || params.view === "qa" ? params.view : "all";
+  const view: View = params.view === "mine" || params.view === "qa" ? params.view : "all";
 
   /*
    * Client work and internal work are two different jobs and get two different
@@ -157,8 +189,304 @@ export default async function TasksPage({
    * transition rules. `request_id` is the only test needed, and it is the same
    * one `taskCategory` uses.
    */
-  const kind = params.kind === "internal" || params.kind === "client" ? params.kind : "all";
+  const kind: Kind = params.kind === "internal" || params.kind === "client" ? params.kind : "all";
   const priorityFilter = isPriority(params.priority) ? params.priority : null;
+
+  /*
+   * Fired HERE, awaited in three different children.
+   *
+   * These are the two cheap indexed reads the filter panel needs, plus the list
+   * names the rows and the breadcrumb need. Starting them before the JSX is
+   * returned means they are already in flight while the browser paints the
+   * toolbar — the boundaries below decide who WAITS on them, not when they run.
+   */
+  const listsPromise: Promise<ListsResult> = Promise.resolve(
+    supabase
+      .from("vizserve_pms_lists")
+      .select("id, name, group_id")
+      .eq("is_active", true)
+      .order("name"),
+  );
+
+  // P7-18. The reserved folder is offered like any other here — "show me
+  // everything that came through a form" is a filter people want, and it is
+  // the one folder guaranteed to exist.
+  const groupsPromise: Promise<GroupsResult> = Promise.resolve(
+    supabase
+      .from("vizserve_pms_task_groups")
+      .select("id, name")
+      .eq("is_active", true)
+      .order("sort_order")
+      .order("name"),
+  );
+
+  /*
+   * P7-26 — the requests that have not been decided yet.
+   *
+   * This note has now said three different things, and all three are still
+   * true. It was awaited on its own line, because this is an ADDITION to the
+   * page rather than part of it — the task queries decide whether the page
+   * renders at all and this one must not be able to change that. Then it moved
+   * INTO the task batch, to save the round trip the separate await cost.
+   *
+   * It is fired here, before anything is awaited, so it still runs alongside
+   * the task batch exactly as it did inside it, and it still cannot fail the
+   * page: `loadPendingRequests` returns [] on its own errors rather than
+   * throwing (lib/pending-requests-server.ts). What is new is that it no longer
+   * has to FINISH alongside the batch — the queue has its own boundary and
+   * paints the moment it lands, without waiting on ten task queries.
+   *
+   * ⚠️ TWO READERS, ONE CALL. The queue list reads it, and so does the empty
+   * state inside `TaskGroups` — "Nothing approved yet" is a different sentence
+   * from "Nothing here yet" and only the request count tells them apart. This
+   * is a real async function rather than a PostgREST builder, so both children
+   * await the one promise and the query runs once.
+   *
+   * `status` and `priority` are passed as one boolean rather than as values —
+   * the rule is "any task-only filter hides these", and `pendingRequestsApply`
+   * should not have to learn what a status is to express that.
+   */
+  const pendingRequestsPromise = loadPendingRequests({
+    listId: params.list ?? null,
+    kind,
+    scope: view,
+    hasTaskOnlyFilter: Boolean(params.status || priorityFilter || params.group),
+  });
+
+  return (
+    <PageShell>
+      {/*
+        P8-03 — the list refreshes itself when a task in one of this
+        person's departments changes.
+
+        Renders nothing. On a row event it calls `router.refresh()`, which
+        re-runs THIS server component — so every query above runs again
+        under RLS, with the same filters and the same sort, and the rows
+        that come back are the rows a navigation would have produced. No
+        row is patched into client state.
+
+        The scope comes from `realtimeDepartmentFilter`, which is narrower
+        than the SELECT policy on purpose: a task assigned to you in
+        another department is visible here and will not push. See the doc
+        comment there — the failure is a stale row, never a leaked one.
+      */}
+      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+
+      {/* Wraps the toolbar AND the groups: the menu lives in the filter row and
+          the tables it controls are further down, so the provider has to span
+          both.
+
+          ⚠️ IT IS A CLIENT CONTEXT PROVIDER AND IT STAYS OUTSIDE EVERY BOUNDARY
+          BELOW, never inside one. Inside, the fallback-to-content swap would
+          remount it and silently reset which columns you had hidden. */}
+      <TaskColumnsProvider>
+      {/* Which list you are in, in the breadcrumb — the same fix the board
+          carries. Since the Tasks nav group was removed, a list is opened from
+          the project tree and List/Board are two shapes of it, so the page has
+          to name the list rather than leaving the crumb reading "Tasks" over
+          somebody else's work. The name comes from the lists read, which the
+          filter panel and the row lookups also want.
+
+          Only when the id resolves: a stale `?list=` from a bookmark whose list
+          has since been archived should not put an empty label in the crumb.
+
+          Its own boundary, with NO fallback and no announcement: the component
+          renders null and only sets a context value, so there is nothing to
+          hold a place for — and the crumb must not be made to wait behind the
+          ten-query batch that used to supply its name. */}
+      {params.list ? (
+        <Suspense fallback={null}>
+          <ListCrumb listId={params.list} listsPromise={listsPromise} />
+        </Suspense>
+      ) : null}
+
+      {/* Zero queries between here and the first boundary, so this row is in the
+          first flush: the view tabs and New Task are live before a single row
+          has been read. */}
+      <div className="flex flex-wrap items-center gap-2">
+        <TaskToolbar view="list" />
+        <div className="ml-auto">
+          <NewTaskButton />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3">
+        {/*
+          THE FILTER PANEL, WAITING ON ITS OWN TWO QUERIES AND NOTHING ELSE.
+
+          It needs the lists and the folders — two small indexed reads that land
+          long before the task batch does. Behind the same boundary as the
+          groups it would have sat dark for the whole wait, which is exactly the
+          wrong way round: the filter panel is what somebody reaches for when
+          the list is taking too long.
+
+          `fields={2}` is the placeholder `app/(app)/tasks/loading.tsx` already
+          draws, so a navigation and an in-page refresh look identical.
+
+          ⚠️ `role="status"`, and this is the distinction the file-level note in
+          components/skeletons.tsx exists to draw: `loading.tsx` is announced by
+          the ROUTER, and a Suspense fallback inside a page is announced by
+          nothing at all. The grey bars stay `aria-hidden` — enumerating them
+          helps nobody — and the label is what speaks.
+        */}
+        <Suspense
+          fallback={
+            <div role="status" aria-busy="true">
+              <span className="sr-only">Loading filters…</span>
+              <FilterBarSkeleton fields={2} />
+            </div>
+          }>
+          <TaskFiltersSection listsPromise={listsPromise} groupsPromise={groupsPromise} />
+        </Suspense>
+
+        {/* One menu for all eight group tables — see `TaskColumnsProvider`. */}
+        <div className="ml-auto">
+          <TaskColumnsMenu />
+        </div>
+      </div>
+
+      {/*
+        THE QUEUE, ABOVE THE STAGES — and OUTSIDE the empty-state branch below.
+
+        ⚠️ Putting this inside the `rows.length === 0` ternary is the obvious
+        placement and it is wrong: a department with three requests waiting and
+        no tasks yet would render "Nothing here yet" and hide the very thing it
+        is waiting on, which is the exact bug this feature exists to fix.
+
+        Above the stages because a queue is read before the work. "Open" being
+        the first heading on the page while three requests sit unlooked-at is
+        how a request waits a week.
+
+        Renders nothing for a member — `vizserve_pms_requests` is readable only
+        by a lead of the form's department, so the array is empty and the
+        component returns null. No role check here.
+
+        ⚠️ ITS FALLBACK IS `null`, AND IT IS THE ONE STREAMING REGION WITH NO
+        LOADING ANNOUNCEMENT. On most loads it resolves to nothing at all — a
+        member has no readable requests and a lead usually has an empty queue —
+        so a skeleton here would be a block that flashes and then vanishes, and
+        a polite "loading" that resolves to silence is worse than saying
+        nothing. There is no layout to reserve for a region whose ordinary size
+        is zero.
+      */}
+      <Suspense fallback={null}>
+        <PendingRequests pendingRequestsPromise={pendingRequestsPromise} />
+      </Suspense>
+
+      {/*
+        THE SLOW PART, AND THE REASON THE REST OF THE PAGE IS ALREADY ON SCREEN.
+
+        Everything above this line costs at most two indexed reads. Below it are
+        the row query, the people read and the six-query batch against the
+        visible ids — ten in all — and until this boundary existed the toolbar,
+        the filter panel and the queue all waited on the slowest of them.
+
+        ⚠️ `TaskSelectionProvider` IS OUTSIDE THE BOUNDARY, WRAPPING IT, for the
+        same reason `TaskColumnsProvider` is: it is a client context holding
+        which rows are ticked, and inside the boundary the fallback-to-content
+        swap would remount it and clear the selection. It now also spans the
+        empty and error branches, which it did not before — harmless, because
+        `SelectionBar` renders null with nothing selected and neither branch has
+        a checkbox to put anything in it.
+      */}
+      <TaskSelectionProvider>
+        <Suspense
+          fallback={
+            <div role="status" aria-busy="true">
+              <span className="sr-only">Loading tasks…</span>
+              <TaskStatusGroupSkeleton />
+            </div>
+          }>
+          <TaskGroups
+            params={params}
+            context={context}
+            view={view}
+            kind={kind}
+            priorityFilter={priorityFilter}
+            listsPromise={listsPromise}
+            pendingRequestsPromise={pendingRequestsPromise}
+          />
+        </Suspense>
+      </TaskSelectionProvider>
+      </TaskColumnsProvider>
+    </PageShell>
+  );
+}
+
+/**
+ * The breadcrumb's list name, waiting on the lists read alone.
+ *
+ * Renders null either way — `BreadcrumbLabel` only sets a context value — so it
+ * contributes no markup and cannot shift the layout when it resolves.
+ */
+async function ListCrumb({
+  listId,
+  listsPromise,
+}: {
+  listId: string;
+  listsPromise: Promise<ListsResult>;
+}) {
+  const { data: lists } = await listsPromise;
+  const name = (lists ?? []).find((list) => list.id === listId)?.name;
+
+  return name ? <BreadcrumbLabel value={name} /> : null;
+}
+
+/** The filter panel and the two reads that populate it. Nothing else. */
+async function TaskFiltersSection({
+  listsPromise,
+  groupsPromise,
+}: {
+  listsPromise: Promise<ListsResult>;
+  groupsPromise: Promise<GroupsResult>;
+}) {
+  const [{ data: lists }, { data: groups }] = await Promise.all([listsPromise, groupsPromise]);
+
+  return <TaskFilters lists={lists ?? []} groups={groups ?? []} />;
+}
+
+/** The Gate 1 queue, waiting on `loadPendingRequests` and nothing else. */
+async function PendingRequests({
+  pendingRequestsPromise,
+}: {
+  pendingRequestsPromise: Promise<PendingRequest[]>;
+}) {
+  const pendingRequests = await pendingRequestsPromise;
+
+  return <PendingRequestList requests={pendingRequests} />;
+}
+
+/**
+ * The stages, and every query that costs anything.
+ *
+ * Split out of the page purely so it can stream. Nothing about the query, the
+ * filters or the derivations below changed on the way here — they are the same
+ * lines in the same order, and the only thing they lost was the ability to hold
+ * the toolbar off the screen while they ran.
+ *
+ * `view`, `kind` and `priorityFilter` are read on the page rather than here
+ * because the pending-request call needs the same three, and two readings of
+ * "what does `?kind=` mean" is exactly one too many.
+ */
+async function TaskGroups({
+  params,
+  context,
+  view,
+  kind,
+  priorityFilter,
+  listsPromise,
+  pendingRequestsPromise,
+}: {
+  params: TasksSearchParams;
+  context: AuthContext;
+  view: View;
+  kind: Kind;
+  priorityFilter: TaskPriority | null;
+  listsPromise: Promise<ListsResult>;
+  pendingRequestsPromise: Promise<PendingRequest[]>;
+}) {
+  const supabase = await createClient();
+
   /* `undefined` when the URL named no sort we recognise, and that distinction is
      load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
      collapsed into `sort`. */
@@ -180,8 +508,8 @@ export default async function TasksPage({
    * hide every list-less task from the unfiltered board.
    *
    * Resolved in the same round trip rather than by fetching the folder's list
-   * ids first — the lists query below sits in the same `Promise.all` as this
-   * one, so reading it first would make the slow query wait on the fast one.
+   * ids first — the lists query sits in the same `Promise.all` as this one, so
+   * reading it first would make the slow query wait on the fast one.
    */
   const TASK_COLUMNS =
     "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution";
@@ -269,51 +597,16 @@ export default async function TasksPage({
     { data: tasks, error: tasksError },
     { data: people },
     { data: lists },
-    { data: groups },
     pendingRequests,
   ] = await Promise.all([
     query,
     supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
-    supabase
-      .from("vizserve_pms_lists")
-      .select("id, name, group_id")
-      .eq("is_active", true)
-      .order("name"),
-    // P7-18. The reserved folder is offered like any other here — "show me
-    // everything that came through a form" is a filter people want, and it is
-    // the one folder guaranteed to exist.
-    supabase
-      .from("vizserve_pms_task_groups")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("sort_order")
-      .order("name"),
-
-    /*
-     * P7-26 — the requests that have not been decided yet.
-     *
-     * IN this batch, and the note here used to say the opposite: it was awaited
-     * further down, alone, because it is an ADDITION to this page rather than
-     * part of it — the task queries decide whether the page renders at all, and
-     * this one must not be able to change that.
-     *
-     * That is still true and still holds. `loadPendingRequests` returns [] on
-     * its own errors rather than throwing (lib/pending-requests-server.ts), so
-     * it cannot reject this `Promise.all` any more than it could reject its own
-     * `await` — the error posture is unchanged. What the separate await bought
-     * was a round trip after the task reads had already finished, spent on a
-     * query whose every argument was known before the first one started.
-     *
-     * `status` and `priority` are passed as one boolean rather than as values —
-     * the rule is "any task-only filter hides these", and `pendingRequestsApply`
-     * should not have to learn what a status is to express that.
-     */
-    loadPendingRequests({
-      listId: params.list ?? null,
-      kind,
-      scope: view,
-      hasTaskOnlyFilter: Boolean(params.status || priorityFilter || params.group),
-    }),
+    /* Both of these were fired on the page, before this component was rendered.
+       Awaiting them here costs nothing and keeps them in the same wave as the
+       two queries above — they are simply no longer the reason anything else on
+       the page has to wait. */
+    listsPromise,
+    pendingRequestsPromise,
   ]);
 
   /*
@@ -707,166 +1000,103 @@ export default async function TasksPage({
   };
 
 
+  /*
+   * Three messages, because there are three ways of arriving at an empty
+   * screen and only two of them are somebody's fault: a filter that is too
+   * narrow needs loosening, an empty system needs explaining, and a failed
+   * query needs saying out loud rather than being dressed up as either of
+   * the others. Drawing eight empty stage headings in any of those cases
+   * would bury the sentence that actually helps.
+   *
+   * Early returns rather than the nested ternary this used to be — the three
+   * branches are unchanged, but they are now the whole output of a component
+   * instead of one expression inside a page, and a ternary chain that spans a
+   * hundred lines reads worse than three exits.
+   */
+  if (tasksError) return <QueryError what="tasks" message={tasksError.message} />;
+
+  if (rows.length === 0) {
+    return (
+      <div className="rounded-lg border bg-card grade-surface shadow-raised-lg">
+        {isFiltered ? (
+          <EmptyState
+            icon={<ListChecks />}
+            title={
+              view === "qa"
+                ? "Nothing waiting on your review"
+                : view === "mine"
+                  ? "No tasks assigned to you"
+                  : "No tasks match these filters"
+            }
+            description={
+              view === "qa"
+                ? "No work is sitting in QA with you as the reviewer. Switch to All to see the rest of the list."
+                : view === "mine"
+                  ? "Nothing is currently yours to move. Switch to All to see the rest of your department's work."
+                  : "Clear the status, list or priority filter to see the rest of the list."
+            }
+          />
+        ) : (
+          <EmptyState
+            icon={<ListChecks />}
+            title={pendingRequests.length > 0 ? "Nothing approved yet" : "Nothing here yet"}
+            // ⚠️ Two sentences, because this heading can now sit directly
+            // under a list of requests waiting to be approved — and "tasks
+            // appear once a Team Leader approves a request" reads as a
+            // brush-off when the reader IS the team leader and the requests
+            // are on screen above it.
+            description={
+              pendingRequests.length > 0
+                ? "The requests above have not been approved yet. Approving one creates the task and files it in a list."
+                : "Tasks appear once a Team Leader approves a request, or when one is added by hand. Each moves through set stages — the server refuses any step that is not one of them."
+            }
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
-    <PageShell>
-      {/*
-        P8-03 — the list refreshes itself when a task in one of this
-        person's departments changes.
+    <div className="flex flex-col gap-3">
+      {visibleStatuses.map((status) => {
+        const group = grouped.get(status) ?? [];
 
-        Renders nothing. On a row event it calls `router.refresh()`, which
-        re-runs THIS server component — so every query above runs again
-        under RLS, with the same filters and the same sort, and the rows
-        that come back are the rows a navigation would have produced. No
-        row is patched into client state.
-
-        The scope comes from `realtimeDepartmentFilter`, which is narrower
-        than the SELECT policy on purpose: a task assigned to you in
-        another department is visible here and will not push. See the doc
-        comment there — the failure is a stale row, never a leaked one.
-      */}
-      <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
-
-      {/* Wraps the toolbar AND the groups: the menu lives in the filter row and
-          the tables it controls are further down, so the provider has to span
-          both. */}
-      <TaskColumnsProvider>
-      {/* Which list you are in, in the breadcrumb — the same fix the board
-          carries. Since the Tasks nav group was removed, a list is opened from
-          the project tree and List/Board are two shapes of it, so the page has
-          to name the list rather than leaving the crumb reading "Tasks" over
-          somebody else's work. `listName` is already built for the rows below.
-
-          Only when the id resolves: a stale `?list=` from a bookmark whose list
-          has since been archived should not put an empty label in the crumb. */}
-      {params.list && listName.get(params.list) ? (
-        <BreadcrumbLabel value={listName.get(params.list)!} />
-      ) : null}
-
-      <div className="flex flex-wrap items-center gap-2">
-        <TaskToolbar view="list" />
-        <div className="ml-auto">
-          <NewTaskButton />
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3">
-        <TaskFilters lists={lists ?? []} groups={groups ?? []} />
-
-        {/* One menu for all eight group tables — see `TaskColumnsProvider`. */}
-        <div className="ml-auto">
-          <TaskColumnsMenu />
-        </div>
-      </div>
-
-      {/*
-        THE QUEUE, ABOVE THE STAGES — and OUTSIDE the empty-state branch below.
-
-        ⚠️ Putting this inside the `rows.length === 0` ternary is the obvious
-        placement and it is wrong: a department with three requests waiting and
-        no tasks yet would render "Nothing here yet" and hide the very thing it
-        is waiting on, which is the exact bug this feature exists to fix.
-
-        Above the stages because a queue is read before the work. "Open" being
-        the first heading on the page while three requests sit unlooked-at is
-        how a request waits a week.
-
-        Renders nothing for a member — `vizserve_pms_requests` is readable only
-        by a lead of the form's department, so the array is empty and the
-        component returns null. No role check here.
-      */}
-      <PendingRequestList requests={pendingRequests} />
-
-      {/* Three messages, because there are three ways of arriving at an empty
-          screen and only two of them are somebody's fault: a filter that is too
-          narrow needs loosening, an empty system needs explaining, and a failed
-          query needs saying out loud rather than being dressed up as either of
-          the others. Drawing eight empty stage headings in any of those cases
-          would bury the sentence that actually helps. */}
-      {tasksError ? (
-        <QueryError what="tasks" message={tasksError.message} />
-      ) : rows.length === 0 ? (
-        <div className="rounded-lg border bg-card grade-surface shadow-raised-lg">
-          {isFiltered ? (
-            <EmptyState
-              icon={<ListChecks />}
-              title={
-                view === "qa"
-                  ? "Nothing waiting on your review"
-                  : view === "mine"
-                    ? "No tasks assigned to you"
-                    : "No tasks match these filters"
-              }
-              description={
-                view === "qa"
-                  ? "No work is sitting in QA with you as the reviewer. Switch to All to see the rest of the list."
-                  : view === "mine"
-                    ? "Nothing is currently yours to move. Switch to All to see the rest of your department's work."
-                    : "Clear the status, list or priority filter to see the rest of the list."
-              }
+        return (
+          <TaskStatusGroup
+            key={status}
+            status={status}
+            count={group.length}
+            // A stage with nothing in it opens to one line. Closing it by
+            // default would hide the only thing it has to say.
+            defaultOpen>
+            {/*
+              THE TABLE IS ALWAYS RENDERED, even for an empty stage, because
+              the composer is a `<tr>` inside it — a stage with nothing in it
+              is exactly where somebody wants to add the first task, and a
+              paragraph cannot hold a row. The empty sentence moves into the
+              table as its `empty` state.
+            */}
+            <TaskGroupTable
+              group={group}
+              status={status}
+              viewer={viewer}
+              lookups={lookups}
+              assignable={assignable}
             />
-          ) : (
-            <EmptyState
-              icon={<ListChecks />}
-              title={pendingRequests.length > 0 ? "Nothing approved yet" : "Nothing here yet"}
-              // ⚠️ Two sentences, because this heading can now sit directly
-              // under a list of requests waiting to be approved — and "tasks
-              // appear once a Team Leader approves a request" reads as a
-              // brush-off when the reader IS the team leader and the requests
-              // are on screen above it.
-              description={
-                pendingRequests.length > 0
-                  ? "The requests above have not been approved yet. Approving one creates the task and files it in a list."
-                  : "Tasks appear once a Team Leader approves a request, or when one is added by hand. Each moves through set stages — the server refuses any step that is not one of them."
-              }
-            />
-          )}
-        </div>
-      ) : (
-        <TaskSelectionProvider>
-        <div className="flex flex-col gap-3">
-          {visibleStatuses.map((status) => {
-            const group = grouped.get(status) ?? [];
 
-            return (
-              <TaskStatusGroup
-                key={status}
-                status={status}
-                count={group.length}
-                // A stage with nothing in it opens to one line. Closing it by
-                // default would hide the only thing it has to say.
-                defaultOpen>
-                {/*
-                  THE TABLE IS ALWAYS RENDERED, even for an empty stage, because
-                  the composer is a `<tr>` inside it — a stage with nothing in it
-                  is exactly where somebody wants to add the first task, and a
-                  paragraph cannot hold a row. The empty sentence moves into the
-                  table as its `empty` state.
-                */}
-                <TaskGroupTable
-                  group={group}
-                  status={status}
-                  viewer={viewer}
-                  lookups={lookups}
-                  assignable={assignable}
-                />
+            {/*
+              The dialog, under the first heading only.
 
-                {/*
-                  The dialog, under the first heading only.
-
-                  The composer above now covers everything it does except a
-                  description, a list and a QA reviewer — so repeating it under
-                  eight headings would be eight controls that mostly duplicate the
-                  row directly above them. It renders nothing at all for a member
-                  with nobody to assign to, and settles that for itself rather
-                  than the page guessing.
-                */}
-              </TaskStatusGroup>
-            );
-          })}
-        </div>
-        </TaskSelectionProvider>
-      )}
-      </TaskColumnsProvider>
-    </PageShell>
+              The composer above now covers everything it does except a
+              description, a list and a QA reviewer — so repeating it under
+              eight headings would be eight controls that mostly duplicate the
+              row directly above them. It renders nothing at all for a member
+              with nobody to assign to, and settles that for itself rather
+              than the page guessing.
+            */}
+          </TaskStatusGroup>
+        );
+      })}
+    </div>
   );
 }

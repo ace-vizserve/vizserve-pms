@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowRight, Bell, ClipboardCheck, ListChecks, ShieldCheck, Users } from "lucide-react";
@@ -35,6 +36,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { NeedsYou, type NeedsYouRow } from "./needs-you";
 import { TimesheetStrip } from "./timesheet-strip";
 
+import { StatRowSkeleton } from "@/components/skeletons";
+import { Skeleton } from "@/components/ui/skeleton";
 export const metadata: Metadata = { title: "Dashboard" };
 
 /**
@@ -75,92 +78,61 @@ export const metadata: Metadata = { title: "Dashboard" };
  * columns, and they stay inside ONE `Promise.all` — a dashboard that awaits in
  * sequence is the classic way this becomes the slowest page in the app.
  * `loadPunchState` stays first so nothing else can push it behind a slower read.
+ *
+ * P8 — AND NOW IT STREAMS. The eleven reads above are still eleven reads, still
+ * started before anything is awaited and still running in parallel; what changed
+ * is that the PAGE no longer waits for the slowest of them before it renders a
+ * single element. The greeting needs `context.fullName` and nothing else, so it
+ * paints first, and each of the four sections is a `<Suspense>` boundary fed by
+ * its own group. `Promise.all` moved down into those groups rather than being
+ * dropped — awaiting in sequence is still the way this becomes the slowest page
+ * in the app.
+ *
+ * ⚠️ A PROMISE SHARED BETWEEN TWO BOUNDARIES MUST BE A REAL PROMISE. Two
+ * sections read this week's timesheet row, and two read the open-task count, so
+ * those are created ONCE up here and awaited in both places. `loadWeek` is an
+ * async function and returns a real promise; `myTasksPromise` is a PostgREST
+ * builder and is NOT one — its `.then()` fires a fresh request every time it is
+ * called, so it is wrapped in `Promise.resolve`, which assimilates the thenable
+ * exactly once. Sharing the bare builder would have run the query twice and made
+ * the page cost more in order to feel faster.
  */
-export default async function DashboardPage() {
-  const context = await requireAuthContext();
-  const supabase = await createClient();
-  const isApprover = roleAtLeast(context.role, "team_leader");
-  const firstName = context.fullName.trim().split(" ")[0] || "there";
 
-  const today = todayInAppZone();
-  const monday = startOfWeek(today) ?? today;
-  // The seven dates, kept rather than discarded after the last one: `loadScheduledWeek`
-  // needs the whole week, and `days.slice(0, 5)` inside it is the weekend test.
-  const weekDays = weekDates(monday);
-  const weekEnd = weekDays.at(-1)!;
-  const lastMonday = addDays(monday, -7) ?? monday;
-  const lastSunday = addDays(monday, -1) ?? monday;
+/** The shape both task queries above come back as. */
+type TaskLike = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  due_date: string | null;
+  start_date: string | null;
+  request_id: string | null;
+  is_personal: boolean;
+};
 
-  const [
-    punchState,
-    waiting,
-    unread,
-    myTasks,
-    myQa,
-    myWork,
-    qaQueue,
-    thisWeekEntries,
-    thisWeekRow,
-    lastWeek,
-    teamWeeks,
-    waitingRows,
-    schedule,
-  ] = await Promise.all([
-    loadPunchState(context.userId),
-
-    // Three queues, not one — see `countWaitingOnYou`. This tile counted client
-    // requests alone until 18 Aug 2026, so a lead with a full internal queue
-    // and no client work was told they had nothing to do.
-    countWaitingOnYou(supabase, context, isApprover),
-
-    supabase
-      .from("vizserve_pms_notifications")
-      .select("id", { count: "exact", head: true })
-      .is("read_at", null),
-
-    // P3-14 — the member's own live work. "Not finished" rather than a list of
-    // active statuses, so a status added later is counted without anyone
-    // remembering to come back here.
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id", { count: "exact", head: true })
-      .eq("assignee_id", context.userId)
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
-
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id", { count: "exact", head: true })
-      .eq("qa_assignee_id", context.userId)
-      .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
-
-    /*
-     * I2 — the member's own work as ROWS, with both dates.
-     *
-     * `start_date` shipped in P7-06 and the board was its only reader in the
-     * whole app; this is where the column earns its keep. `bucketTask` needs
-     * both, because "I am meant to begin this today" is as much a claim on
-     * somebody's morning as "this is due today".
-     *
-     * Capped generously rather than at NEEDS_YOU_LIMIT: the rows are bucketed
-     * and sorted AFTER this, so a limit of eight here would let eight
-     * far-future tasks crowd out an overdue one.
-     */
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id, title, status, due_date, start_date, request_id, is_personal")
-      .eq("assignee_id", context.userId)
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
-      .order("due_date", { ascending: true, nullsFirst: false })
-      .limit(40),
-
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id, title, status, due_date, start_date, request_id, is_personal")
-      .eq("qa_assignee_id", context.userId)
-      .in("status", ["FOR_QA", "QA_IN_PROGRESS"])
-      .order("due_date", { ascending: true, nullsFirst: false })
-      .limit(10),
-
+/**
+ * I3's four reads — this week's entries and row, last week's pair, and the
+ * schedule behind the target. Two boundaries want them: the strip renders them,
+ * and "Needs you" leads with a RETURNED week, so this is one promise awaited
+ * twice rather than two copies of the same queries.
+ */
+async function loadWeek({
+  supabase,
+  context,
+  monday,
+  weekEnd,
+  lastMonday,
+  lastSunday,
+  weekDays,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  context: Awaited<ReturnType<typeof requireAuthContext>>;
+  monday: string;
+  weekEnd: string;
+  lastMonday: string;
+  lastSunday: string;
+  weekDays: string[];
+}) {
+  const [thisWeekEntries, thisWeekRow, lastWeek, schedule] = await Promise.all([
     // I3. Minutes, summed in TypeScript — the entries policy already scopes this
     // to the caller, so there is no `.eq("user_id", …)` to write.
     supabase
@@ -200,27 +172,6 @@ export default async function DashboardPage() {
     ]),
 
     /*
-     * I4 — the lead's band. THE SAME NUMBERS `/timesheet/team` puts on screen,
-     * read the same way, and the band links there rather than growing its own
-     * version of the grid. Two implementations of "who has submitted this week"
-     * is the same failure as two implementations of the day threshold.
-     *
-     * No department filter: the weeks policy already scopes to the departments
-     * this person leads.
-     */
-    isApprover
-      ? supabase
-          .from("vizserve_pms_timesheet_weeks")
-          .select("user_id, status")
-          .eq("week_start", monday)
-      : Promise.resolve({ data: null }),
-
-    // I2's approval rows. The SAME function `/` uses, so the two pages cannot
-    // disagree about what is in somebody's queue — which they already had once,
-    // when each counted it inline.
-    listWaitingOnYou(supabase, context, isApprover),
-
-    /*
      * P8-05 — what this week was actually supposed to come to, for THIS person.
      *
      * ⚠️ THE STRIP USED TO INVENT THIS. It rendered `STANDARD_DAY_MINUTES * 5`
@@ -245,17 +196,66 @@ export default async function DashboardPage() {
   const lastWeekUnsubmitted =
     (lastWeekEntries.count ?? 0) > 0 && !lastWeekRow.data ? lastMonday : null;
 
-  // ------------------------------------------------------------------ I2
-  type TaskLike = {
-    id: string;
-    title: string;
-    status: TaskStatus;
-    due_date: string | null;
-    start_date: string | null;
-    request_id: string | null;
-    is_personal: boolean;
-  };
+  return { weekMinutes, weekStatus, thisWeekRow, lastWeekUnsubmitted, schedule };
+}
 
+/**
+ * I2's rows. It reads `week` as well as its own three queries, because a
+ * returned week is the row that leads the list.
+ */
+async function loadNeedsYou({
+  supabase,
+  context,
+  isApprover,
+  today,
+  monday,
+  week,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  context: Awaited<ReturnType<typeof requireAuthContext>>;
+  isApprover: boolean;
+  today: string;
+  monday: string;
+  week: ReturnType<typeof loadWeek>;
+}) {
+  const [myWork, qaQueue, waitingRows, { weekStatus }] = await Promise.all([
+    /*
+     * I2 — the member's own work as ROWS, with both dates.
+     *
+     * `start_date` shipped in P7-06 and the board was its only reader in the
+     * whole app; this is where the column earns its keep. `bucketTask` needs
+     * both, because "I am meant to begin this today" is as much a claim on
+     * somebody's morning as "this is due today".
+     *
+     * Capped generously rather than at NEEDS_YOU_LIMIT: the rows are bucketed
+     * and sorted AFTER this, so a limit of eight here would let eight
+     * far-future tasks crowd out an overdue one.
+     */
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id, title, status, due_date, start_date, request_id, is_personal")
+      .eq("assignee_id", context.userId)
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .limit(40),
+
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id, title, status, due_date, start_date, request_id, is_personal")
+      .eq("qa_assignee_id", context.userId)
+      .in("status", ["FOR_QA", "QA_IN_PROGRESS"])
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .limit(10),
+
+    // I2's approval rows. The SAME function `/` uses, so the two pages cannot
+    // disagree about what is in somebody's queue — which they already had once,
+    // when each counted it inline.
+    listWaitingOnYou(supabase, context, isApprover),
+
+    week,
+  ]);
+
+  // ------------------------------------------------------------------ I2
   const rows: (NeedsYouRow & { kindKey: NeedsYouKind })[] = [];
 
   /*
@@ -338,13 +338,276 @@ export default async function DashboardPage() {
   const shown = rows.slice(0, NEEDS_YOU_LIMIT);
   const overflow = Math.max(0, rows.length - NEEDS_YOU_LIMIT);
 
+  return { shown, overflow };
+}
+
+/**
+ * ⚠️ A SUSPENSE FALLBACK IS ANNOUNCED BY NOBODY.
+ *
+ * `components/skeletons.tsx` hides its skeletons from assistive technology and
+ * gives a reason specific to `loading.tsx`: the ROUTER announces that
+ * navigation, so a second announcement would interrupt it. Nothing announces a
+ * boundary streaming inside a page that has already rendered — so each fallback
+ * here is a `role="status"` region carrying `aria-busy` and a label naming the
+ * section, and only the grey bars inside it stay `aria-hidden`. Four of them are
+ * on screen at once, which is why each label says which section it is.
+ */
+function Streaming({
+  label,
+  className,
+  inline = false,
+  children,
+}: {
+  label: string;
+  className?: string;
+  /** A `<span>` rather than a `<div>` — a block element inside a `<p>` is invalid
+      HTML, and the two inline fallbacks here sit inside running text. */
+  inline?: boolean;
+  children: React.ReactNode;
+}) {
+  const Tag = inline ? "span" : "div";
+
+  return (
+    <Tag role="status" aria-busy="true" className={className}>
+      <span className="sr-only">{label}</span>
+      {children}
+    </Tag>
+  );
+}
+
+/**
+ * The inline bar. `Skeleton` renders a `<div>`, which cannot go inside the
+ * greeting's `<p>`, so this is the same three classes on a span.
+ */
+function InlineBar({ className }: { className: string }) {
+  return <span aria-hidden className={cn("inline-block animate-pulse rounded-sm bg-track", className)} />;
+}
+
+/** I3 — the strip, once its four reads land. */
+async function TimesheetStripSection({ week, monday }: { week: ReturnType<typeof loadWeek>; monday: string }) {
+  const { weekStatus, weekMinutes, thisWeekRow, lastWeekUnsubmitted, schedule } = await week;
+
+  return (
+    <TimesheetStrip
+      weekStart={monday}
+      status={weekStatus}
+      minutes={weekMinutes}
+      /* Null when this person is exempt from a schedule, or when one of the
+         four reads behind it failed. Either way the strip states the logged
+         total alone — it does NOT fall back to a number, which is the whole
+         reason the 40 came out. */
+      scheduledWeekMinutes={schedule.scheduledWeek?.minimumMinutes ?? null}
+      decisionReason={thisWeekRow.data?.decision_reason ?? null}
+      lastWeekUnsubmitted={lastWeekUnsubmitted}
+    />
+  );
+}
+
+/** I1 — the tiles, which are the summary of what follows. */
+async function StatTiles({
+  supabase,
+  context,
+  isApprover,
+  myTasks: myTasksPromise,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  context: Awaited<ReturnType<typeof requireAuthContext>>;
+  isApprover: boolean;
+  myTasks: Promise<{ count: number | null }>;
+}) {
+  const [waiting, unread, myQa, myTasks] = await Promise.all([
+    // Three queues, not one — see `countWaitingOnYou`. This tile counted client
+    // requests alone until 18 Aug 2026, so a lead with a full internal queue
+    // and no client work was told they had nothing to do.
+    countWaitingOnYou(supabase, context, isApprover),
+
+    supabase
+      .from("vizserve_pms_notifications")
+      .select("id", { count: "exact", head: true })
+      .is("read_at", null),
+
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("qa_assignee_id", context.userId)
+      .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
+
+    myTasksPromise,
+  ]);
+
+  const showQa = (myQa.count ?? 0) > 0;
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {/* One tile summing three queues, not three tiles. The QA tile below
+          already argues why: a permanent zero teaches people to stop looking,
+          and two of these three are empty most days. The breakdown is in the
+          hint; the link goes to the "Needs you" list on this page, which is the
+          only place all three appear together — sending it to one of the three
+          would make a tile that sums three queues pick a favourite. */}
+      {isApprover ? (
+        <StatTile
+          label="Waiting on you"
+          value={waiting.total}
+          hint={waiting.breakdown || "Nothing awaiting your decision"}
+          icon={<ClipboardCheck />}
+          tone="warning"
+          href="#needs-you"
+          linkLabel="See the queue"
+        />
+      ) : null}
+
+      <StatTile
+        label="My tasks"
+        value={myTasks.count ?? 0}
+        hint="Assigned to you, still open"
+        icon={<ListChecks />}
+        tone="info"
+        href="/tasks?view=mine"
+        linkLabel="Open my tasks"
+      />
+
+      {/* Only shown when there is actually something to review. A permanent
+          zero teaches people to stop looking at the tile. */}
+      {showQa ? (
+        <StatTile
+          label="Waiting on my QA"
+          value={myQa.count ?? 0}
+          hint="Work that needs your review"
+          icon={<ShieldCheck />}
+          tone="info"
+          href="/tasks?view=qa"
+          linkLabel="Open QA queue"
+        />
+      ) : null}
+
+      <StatTile
+        label="Inbox"
+        value={unread.count ?? 0}
+        hint="Unread notifications about your work"
+        icon={<Bell />}
+        href="/inbox"
+        linkLabel="Open inbox"
+      />
+    </div>
+  );
+}
+
+/** I2 — the mixed queue as rows. */
+async function NeedsYouSection({
+  needsYou,
+  myTasks: myTasksPromise,
+}: {
+  needsYou: ReturnType<typeof loadNeedsYou>;
+  myTasks: Promise<{ count: number | null }>;
+}) {
+  const [{ shown, overflow }, myTasks] = await Promise.all([needsYou, myTasksPromise]);
+
+  return (
+    <NeedsYou
+      rows={shown}
+      overflow={overflow}
+      overflowHref="/tasks?view=mine"
+      empty={emptyNeedsYouMessage(myTasks.count ?? 0)}
+    />
+  );
+}
+
+/** The one figure in I4's band that is not already on screen. */
+async function TeamSubmitted({
+  supabase,
+  isApprover,
+  monday,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  isApprover: boolean;
+  monday: string;
+}) {
+  const teamWeeks = await (
+  isApprover
+    ? supabase
+        .from("vizserve_pms_timesheet_weeks")
+        .select("user_id, status")
+        .eq("week_start", monday)
+    : Promise.resolve({ data: null })
+  );
+
   // ------------------------------------------------------------------ I4
   const teamRows = teamWeeks.data ?? [];
   const teamSubmitted = teamRows.filter(
     (row) => row.status === "SUBMITTED" || row.status === "APPROVED",
   ).length;
 
-  const showQa = (myQa.count ?? 0) > 0;
+  return (
+    <>
+      {teamSubmitted} {teamSubmitted === 1 ? "week" : "weeks"} handed in.
+    </>
+  );
+}
+
+/** The punch card's one waiting part. The card and its link are already drawn. */
+async function DashboardPunch({ punchState }: { punchState: ReturnType<typeof loadPunchState> }) {
+  return <PunchPanel initial={await punchState} compact />;
+}
+
+/** The greeting's second line, which cannot be written until the queue is counted. */
+async function GreetingSubtitle({ needsYou }: { needsYou: ReturnType<typeof loadNeedsYou> }) {
+  const { shown } = await needsYou;
+
+  return (
+    <>
+      {shown.length > 0
+        ? "The things waiting on you, most urgent first."
+        : "Nothing is waiting on you right now."}
+    </>
+  );
+}
+
+export default async function DashboardPage() {
+  const context = await requireAuthContext();
+  const supabase = await createClient();
+  const isApprover = roleAtLeast(context.role, "team_leader");
+  const firstName = context.fullName.trim().split(" ")[0] || "there";
+
+  const today = todayInAppZone();
+  const monday = startOfWeek(today) ?? today;
+  // The seven dates, kept rather than discarded after the last one: `loadScheduledWeek`
+  // needs the whole week, and `days.slice(0, 5)` inside it is the weekend test.
+  const weekDays = weekDates(monday);
+  const weekEnd = weekDays.at(-1)!;
+  const lastMonday = addDays(monday, -7) ?? monday;
+  const lastSunday = addDays(monday, -1) ?? monday;
+
+  /* EVERY READ STARTED HERE, BEFORE THE FIRST AWAIT. Below this point the page
+     renders; the sections resolve as their own groups come back. */
+  const punchState = loadPunchState(context.userId);
+
+  // P3-14 — the member's own live work. "Not finished" rather than a list of
+  // active statuses, so a status added later is counted without anyone
+  // remembering to come back here.
+  //
+  // ⚠️ Wrapped, because TWO boundaries read it — the tiles and the empty
+  // message under "Needs you". A PostgREST builder fires a fresh request on
+  // every `.then()`, so sharing the bare builder would run this count twice.
+  const myTasksPromise = Promise.resolve(
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("assignee_id", context.userId)
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
+  );
+
+  const week = loadWeek({
+    supabase,
+    context,
+    monday,
+    weekEnd,
+    lastMonday,
+    lastSunday,
+    weekDays,
+  });
+
+  const needsYou = loadNeedsYou({ supabase, context, isApprover, today, monday, week });
 
   return (
     <PageShell>
@@ -353,87 +616,64 @@ export default async function DashboardPage() {
       <div>
         <h1 className="text-xl font-semibold tracking-tight">Hello, {firstName}</h1>
         <p className="mt-1 text-xs text-muted-foreground">
-          {shown.length > 0
-            ? "The things waiting on you, most urgent first."
-            : "Nothing is waiting on you right now."}
+          <Suspense
+            fallback={
+              <Streaming inline label="Loading what is waiting on you…">
+                <InlineBar className="h-3 w-64 align-middle" />
+              </Streaming>
+            }
+          >
+            <GreetingSubtitle needsYou={needsYou} />
+          </Suspense>
         </p>
       </div>
 
       {/* I3 first, and ABOVE the tiles, because a returned week is the only
           state where a named person has stopped and is waiting on this user. */}
-      <TimesheetStrip
-        weekStart={monday}
-        status={weekStatus}
-        minutes={weekMinutes}
-        /* Null when this person is exempt from a schedule, or when one of the
-           four reads behind it failed. Either way the strip states the logged
-           total alone — it does NOT fall back to a number, which is the whole
-           reason the 40 came out. */
-        scheduledWeekMinutes={schedule.scheduledWeek?.minimumMinutes ?? null}
-        decisionReason={thisWeekRow.data?.decision_reason ?? null}
-        lastWeekUnsubmitted={lastWeekUnsubmitted}
-      />
+      <Suspense
+        fallback={
+          <Streaming
+            label="Loading this week's timesheet…"
+            className="rounded-lg border p-3 grade-surface shadow-raised"
+          >
+            <div className="space-y-2" aria-hidden>
+              <Skeleton className="h-4 w-64" />
+              <Skeleton className="h-3 w-40" />
+            </div>
+          </Streaming>
+        }
+      >
+        <TimesheetStripSection week={week} monday={monday} />
+      </Suspense>
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-        {/* One tile summing three queues, not three tiles. The QA tile below
-            already argues why: a permanent zero teaches people to stop looking,
-            and two of these three are empty most days. The breakdown is in the
-            hint; the link goes to the "Needs you" list on this page, which is the
-            only place all three appear together — sending it to one of the three
-            would make a tile that sums three queues pick a favourite. */}
-        {isApprover ? (
-          <StatTile
-            label="Waiting on you"
-            value={waiting.total}
-            hint={waiting.breakdown || "Nothing awaiting your decision"}
-            icon={<ClipboardCheck />}
-            tone="warning"
-            href="#needs-you"
-            linkLabel="See the queue"
-          />
-        ) : null}
-
-        <StatTile
-          label="My tasks"
-          value={myTasks.count ?? 0}
-          hint="Assigned to you, still open"
-          icon={<ListChecks />}
-          tone="info"
-          href="/tasks?view=mine"
-          linkLabel="Open my tasks"
-        />
-
-        {/* Only shown when there is actually something to review. A permanent
-            zero teaches people to stop looking at the tile. */}
-        {showQa ? (
-          <StatTile
-            label="Waiting on my QA"
-            value={myQa.count ?? 0}
-            hint="Work that needs your review"
-            icon={<ShieldCheck />}
-            tone="info"
-            href="/tasks?view=qa"
-            linkLabel="Open QA queue"
-          />
-        ) : null}
-
-        <StatTile
-          label="Inbox"
-          value={unread.count ?? 0}
-          hint="Unread notifications about your work"
-          icon={<Bell />}
-          href="/inbox"
-          linkLabel="Open inbox"
-        />
-      </div>
+      <Suspense
+        fallback={
+          <Streaming label="Loading your counts…">
+            <StatRowSkeleton tiles={isApprover ? 3 : 2} />
+          </Streaming>
+        }
+      >
+        <StatTiles supabase={supabase} context={context} isApprover={isApprover} myTasks={myTasksPromise} />
+      </Suspense>
 
       <div id="needs-you" className="scroll-mt-4">
-        <NeedsYou
-          rows={shown}
-          overflow={overflow}
-          overflowHref="/tasks?view=mine"
-          empty={emptyNeedsYouMessage(myTasks.count ?? 0)}
-        />
+        <Suspense
+          fallback={
+            <Streaming
+              label="Loading the things that need you…"
+              className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+            >
+              <Skeleton className="h-4 w-28" aria-hidden />
+              <div className="space-y-2.5" aria-hidden>
+                <Skeleton className="h-4 w-full" />
+                <Skeleton className="h-4 w-5/6" />
+                <Skeleton className="h-4 w-2/3" />
+              </div>
+            </Streaming>
+          }
+        >
+          <NeedsYouSection needsYou={needsYou} myTasks={myTasksPromise} />
+        </Suspense>
       </div>
 
       {/* I4. Behind the role, and the numbers are read from the same table
@@ -447,8 +687,16 @@ export default async function DashboardPage() {
               Your department this week
             </CardTitle>
             <CardDescription className="text-xs">
-              {formatWeekRange(monday)} — {teamSubmitted}{" "}
-              {teamSubmitted === 1 ? "week" : "weeks"} handed in.
+              {formatWeekRange(monday)} —{" "}
+              <Suspense
+                fallback={
+                  <Streaming inline label="Counting the weeks handed in…" className="inline-block">
+                    <InlineBar className="h-3 w-32 align-middle" />
+                  </Streaming>
+                }
+              >
+                <TeamSubmitted supabase={supabase} isApprover={isApprover} monday={monday} />
+              </Suspense>
               {/* NOT "n of m", because m is unknowable here without a second
                   query for department headcount — and a denominator that counts
                   people on leave all week would report a shortfall that is not
@@ -476,7 +724,15 @@ export default async function DashboardPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
-          <PunchPanel initial={punchState} compact />
+          <Suspense
+            fallback={
+              <Streaming label="Loading your punch state…">
+                <Skeleton className="h-9 w-32" aria-hidden />
+              </Streaming>
+            }
+          >
+            <DashboardPunch punchState={punchState} />
+          </Suspense>
           <Link
             href="/dtr"
             className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-2")}

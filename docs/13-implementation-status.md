@@ -20,6 +20,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-eight migrations live, **P7-52/P7-53 applied 1 Sep** (HR as a capability + the filterable leave audit — see below), P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
 | **8 — Live board, email transport, owner rung, personal settings** | **In progress.** P8-01 through P8-12 — see the Phase 8 section below. P8-11/P8-12 (personal settings, temporary passwords, clock reminders) ship with a migration that is **not yet applied** |
 | **9 — Leave hand-over and the approval chain** | **Code done, migrations NOT applied.** Four files (`p9_01`…`p9_04`). Relievers, the turn-over confirmation, task coverage, withdrawal, and a two- or three-stage chain for every leave request. `tests/db/relievers.test.ts` has **never been run** — the project in `.env` is live. See the Phase 9 section below |
+| **10 — Performance pass** | **Done, code only — no migration.** Auth round trips removed, request waterfalls collapsed, duplicate reads memoised, 27 Suspense boundaries added, Next 16.2.12 → 16.3.4. No business logic changed. See the Performance pass section below |
 
 `npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
 P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
@@ -1712,3 +1713,94 @@ queues also cost **one query now instead of zero**: being named as somebody's
 reliever is the only thing in this app that puts a decision in front of a
 person with no role at all, and the `isApprover` gate that used to return
 `EMPTY` for them would have hidden it.
+
+---
+
+## Performance pass — P10 (5–7 Sep 2026)
+
+**No business logic changed anywhere in this pass.** Every commit is either a
+query that was issued later than it needed to be, a query that was issued twice,
+or UI that waited on data it did not need. If you are reading this while
+debugging a behaviour difference, it did not come from here — but the last
+section names the two places where the *timing* of a query moved, which is not
+the same as nothing having changed.
+
+Prompted by two articles: the Next.js 16.3 "app-like experiences" post and
+Supabase's own App Router client guide.
+
+### What it bought
+
+| | before | after |
+|---|---|---|
+| Auth round trips per request | 2 × ~173 ms | **0** |
+| Sequential DB waves before a page starts | 7 | **3** |
+| `/tasks/[id]` waves | 5 | **2** |
+| `/requests/[id]` waves | 7 | **3** |
+| `/tasks/board` waves | 4 | **2** |
+| Duplicate reads per dashboard render | 1 | 0 |
+| Public form RPC per visit | 2 | **1** |
+| `<Suspense>` boundaries | 0 | **27** |
+| `loading.tsx` coverage | 22 files | 25 |
+| Warm `next build` | 1m08.7s | **25.9s** |
+
+### The four things worth knowing
+
+1. **`getUser()` → `getClaims()`.** `getUser()` asks the Auth server to resolve
+   the token — measured at a 173 ms median against this project — and it ran
+   TWICE per request, once in the middleware and once in `resolveAuth`.
+   `getClaims()` verifies the ES256 signature locally against the published
+   JWKS. ⚠️ **This requires asymmetric signing keys.** On a symmetric secret it
+   silently falls back to a network call: still correct, no longer free, and
+   nothing will tell you. ⚠️ **Revocation is no longer instant at the middleware
+   gate** — see the long note in `utils/supabase/middleware.ts`. Deactivating a
+   user still bites immediately, because `resolveAuth` reads `is_active` per
+   request; a *token* revocation would not.
+
+2. **A PostgREST builder is a thenable, not a promise.** Calling `.then()` on it
+   fires a fresh HTTP request every time. Sharing one bare builder between two
+   Suspense children silently doubles that query. Every shared builder in this
+   pass is wrapped once in `Promise.resolve(...)`. This is the single easiest
+   way to undo the work here, and it is invisible in tests and in the build.
+
+3. **Nothing variable-length goes in a PostgREST filter.** Established the hard
+   way in P9 — a 444-item `in.(...)` produced a 16,542-character URL and `fetch`
+   failed with no status code — and it is why `is_mine` is a computed column
+   rather than an id list. `tests/unit/task-filters.test.ts` guards it.
+
+4. ⚠️ **Concurrency headroom is now thinner, and the failure is silent.** The
+   shell's peak went 5 → 8 and the per-navigation combined peak went ~14 → ~20,
+   because the sequential waves were accidentally rate-limiting. A previous
+   burst at roughly a dozen produced `TypeError: fetch failed`. Every read
+   degrades to `?? []` or `?? 0`, so the symptom is an **empty sidebar or a
+   zeroed badge, not an error page**. `app/(app)/layout.tsx` carries the full
+   note, what to watch in the dev log, and a six-line split that halves the peak
+   if it recurs.
+
+### Deliberately NOT done
+
+**`cacheComponents` and `'use cache'`**, the two flags behind 16.3's Instant
+Navigations. Every authenticated read in this app is RLS-scoped to `auth.uid()`,
+and caching one across requests is how one person's leave request renders for
+somebody else. That is a correctness risk rather than a performance trade, and
+it is the one part of the 16.3 story that does not transfer to a per-user app.
+If it is ever revisited, it needs a written rule about which reads may carry the
+directive — reference data like leave types and holidays qualify; nothing
+scoped to a user does.
+
+**`optimizePackageImports` for `lucide-react`** — 118 files import it, but it is
+already in Next 16's built-in default list. Adding the config line would be a
+no-op that looks like a fix.
+
+### Two places where the timing of a query moved
+
+Neither changes an answer; both are recorded because "no query runs that did not
+run before" was otherwise held throughout.
+
+- `lib/auth/authorization.ts` — the managed-departments read now fires on the
+  `not_provisioned` / `deactivated` / `no_app_access` denial paths. No denial
+  branch has ever consulted it.
+- `app/(app)/tasks/[id]/page.tsx` — `fetchJoinedTaskIdSet` was previously
+  short-circuited by `||` for a viewer who is the task's PIC, the commonest
+  reader of that page. It is now an unconditional batch member. It is
+  `cache()`d and free in latency terms, but it is one more request on the
+  route that already issues the most.
