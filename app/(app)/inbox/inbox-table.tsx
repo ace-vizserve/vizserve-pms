@@ -234,10 +234,19 @@ function MarkReadTitle({ item }: { item: Notification }) {
   }
 
   return (
-    <form action={() => startTransition(() => {
-      markRead(true);
-      void markNotificationRead(item.id);
-    })}>
+    /* ⚠️ ASYNC AND AWAITED. `void`-ing the call left a SYNCHRONOUS transition
+       that ended immediately, so the optimistic "read" was dropped a frame
+       later and the row only changed when the server payload arrived. See
+       `app/(app)/tasks/transition.tsx` for the full account — the symptom is a
+       toast landing before the screen moves. */
+    <form
+      action={() =>
+        startTransition(async () => {
+          markRead(true);
+          await markNotificationRead(item.id);
+        })
+      }
+    >
       <Button
         type="submit"
         variant="link"

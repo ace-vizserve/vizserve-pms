@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { FolderPlus, Pencil, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -73,6 +73,23 @@ export function ListManager({
   departments: Department[];
   openCounts: Record<string, number>;
 }) {
+  /*
+   * P11-05 — a renamed list carries its new name out of the dialog.
+   *
+   * ⚠️ THE OPTIMISTIC STATE LIVES HERE, NOT IN THE FORM, and it has to: the
+   * form is inside a dialog and the row it changes is behind that dialog. A
+   * `useOptimistic` in the form would repaint nothing anybody can see.
+   *
+   * The patch is partial on purpose — a save can change a name, a description,
+   * whether it is archived and which folder it sits in, and spreading only what
+   * was sent leaves everything else exactly as the server last said it was.
+   */
+  const [shownLists, patchList] = useOptimistic(
+    lists,
+    (state: ListRow[], patch: Partial<ListRow> & { id: string }) =>
+      state.map((row) => (row.id === patch.id ? { ...row, ...patch } : row)),
+  );
+
   const [editingList, setEditingList] = useState<ListRow | null>(null);
   const [listOpen, setListOpen] = useState(false);
   /** P7-25. The folder a new list should start in, when opened from its heading. */
@@ -88,14 +105,14 @@ export function ListManager({
    */
   const listsByGroup = useMemo(() => {
     const buckets = new Map<string, ListRow[]>();
-    for (const list of lists) {
+    for (const list of shownLists) {
       const key = `${list.department_id}:${list.group_id ?? "none"}`;
       const bucket = buckets.get(key) ?? [];
       bucket.push(list);
       buckets.set(key, bucket);
     }
     return buckets;
-  }, [lists]);
+  }, [shownLists]);
 
   /**
    * Folders per department, ORDERED WITH THE SYSTEM ONE LAST.
@@ -168,7 +185,7 @@ export function ListManager({
     );
   }
 
-  const nothingYet = lists.length === 0 && groups.every((group) => group.is_system);
+  const nothingYet = shownLists.length === 0 && groups.every((group) => group.is_system);
 
   return (
     <>
@@ -315,6 +332,7 @@ export function ListManager({
               groups={groups}
               openCount={editingList ? (openCounts[editingList.id] ?? 0) : 0}
               onDone={() => setListOpen(false)}
+              onSaved={patchList}
             />
           ) : null}
         </DialogContent>
@@ -394,6 +412,7 @@ function ListForm({
   groups,
   openCount,
   onDone,
+  onSaved,
 }: {
   list: ListRow | null;
   /**
@@ -409,6 +428,8 @@ function ListForm({
   groups: GroupRow[];
   openCount: number;
   onDone: () => void;
+  /** Reports the saved fields upward, so the row repaints before the round trip. */
+  onSaved?: (patch: Partial<ListRow> & { id: string }) => void;
 }) {
   const [pending, startTransition] = useTransition();
 
@@ -475,6 +496,21 @@ function ListForm({
     setError(null);
 
     startTransition(async () => {
+      /* ⚠️ ONLY AN EDIT CAN BE PREDICTED. A new list has no id yet, and
+         inventing one would put a row on screen that no control could open. */
+      if (list) {
+        onSaved?.({
+          id: list.id,
+          name,
+          description,
+          is_active: isActive,
+          // The field holds a string; the row holds a number. The action coerces
+          // it too — this is the same coercion, one layer up.
+          sort_order: Number(sortOrder) || 0,
+          group_id: groupId === NO_FOLDER ? null : groupId,
+        });
+      }
+
       const result = await saveList(list?.id ?? null, {
         department_id: departmentId,
         name,

@@ -1,7 +1,7 @@
 "use client";
 
 import { Undo2 } from "lucide-react";
-import { startTransition, useActionState, useOptimistic, useState } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -48,20 +48,33 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
    */
   const [withdrawing, setWithdrawing] = useOptimistic(false);
 
-  const [, dispatch, pending] = useActionState(async () => {
+  const [pending, startTransition] = useTransition();
+
+  /*
+   * ⚠️ ASYNC, AND AWAITED INSIDE THE TRANSITION. A synchronous callback ends
+   * the transition as soon as it returns, dropping the optimistic value a frame
+   * after it is set — the symptom is the toast landing before the screen
+   * changes. See `app/(app)/tasks/transition.tsx`.
+   */
+  function withdraw() {
+    startTransition(async () => {
+      setWithdrawing(true);
+      setOpen(false);
+
       const result = await withdrawInternalRequest(requestId);
 
       if (!result.ok) {
+        // React puts the button back. The dialog is NOT reopened: the commonest
+        // failure is somebody having answered seconds ago, and the toast says
+        // so — reopening a confirm for an action that is no longer legal would
+        // be offering it again.
         toast.error(result.error);
-        // Left open. The commonest failure is somebody answering it seconds
-        // ago, and closing the dialog on that message would hide the reason
-        // the button is about to disappear.
         return;
       }
 
       toast.success("Request withdrawn.");
-      setOpen(false);
-    }, undefined);
+    });
+  }
 
   return (
     <>
@@ -92,15 +105,7 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
             </Button>
             {/* A form action rather than an onClick: React gives it its own
                 transition, and the confirm still works with JS loading. */}
-            <form
-              action={() =>
-                startTransition(() => {
-                  setWithdrawing(true);
-                  setOpen(false);
-                  dispatch();
-                })
-              }
-            >
+            <form action={withdraw}>
               <Button type="submit" variant="destructive" disabled={pending}>
                 {pending ? "Withdrawing…" : "Withdraw"}
               </Button>

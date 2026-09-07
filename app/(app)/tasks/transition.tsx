@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useOptimistic, useState } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
 import { toneButtonVariant } from "@/components/status-badge";
@@ -84,29 +84,7 @@ export function useTaskTransition({
    * arriving out of order against the same task would be refused by the state
    * machine and reported as an error the person did not cause.
    */
-  const [, dispatch, pending] = useActionState(
-    async (_previous: void, input: { transition: Transition; comment?: string }) => {
-      await beforeMove?.();
-
-      const result = await transitionTask(taskId, {
-        to_status: input.transition.to,
-        ...(input.comment ? { comment: input.comment } : {}),
-      });
-
-      setActive(null);
-
-      if (!result.ok) {
-        setError(result.error ?? "That did not go through.");
-        return;
-      }
-
-      toast.success(input.transition.label);
-      setPrompt(null);
-      setError(null);
-      onMoved?.();
-    },
-    undefined,
-  );
+  const [pending, startTransition] = useTransition();
 
   /*
    * P11-05 — THE CHIP MOVES WHEN YOU PICK, NOT WHEN THE SERVER ANSWERS.
@@ -162,11 +140,45 @@ export function useTaskTransition({
     setError(null);
     setActive(transition);
 
-    startTransition(() => {
+    /*
+     * ⚠️ THE CALLBACK IS ASYNC AND THE ACTION IS AWAITED INSIDE IT. THAT IS THE
+     * WHOLE REASON THE OPTIMISM WORKS.
+     *
+     * This was `useActionState` with a SYNCHRONOUS callback that called
+     * `dispatch` and returned. A transition ends when its callback finishes, so
+     * that one ended immediately — React dropped the optimistic status a frame
+     * after it was set, and the only thing left to repaint the screen was the
+     * server payload. The visible symptom was exact and is worth recording: THE
+     * TOAST ARRIVED BEFORE THE UI CHANGED, because by then the toast and the new
+     * data were the same event.
+     *
+     * Awaiting inside the transition keeps it pending for the whole round trip,
+     * which is what holds `shownStatus` and the moved row on screen until the
+     * real ones arrive to replace them.
+     */
+    startTransition(async () => {
       // The paint: the chip, and the group the row sits in.
       setShownStatus(transition.to);
       moveRow?.({ kind: "move", id: taskId, status: transition.to });
-      dispatch({ transition, comment });
+
+      await beforeMove?.();
+
+      const result = await transitionTask(taskId, {
+        to_status: transition.to,
+        ...(comment ? { comment } : {}),
+      });
+
+      setActive(null);
+
+      if (!result.ok) {
+        setError(result.error ?? "That did not go through.");
+        return;
+      }
+
+      toast.success(transition.label);
+      setPrompt(null);
+      setError(null);
+      onMoved?.();
     });
   }
 

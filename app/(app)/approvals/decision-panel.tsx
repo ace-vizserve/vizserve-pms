@@ -1,6 +1,6 @@
 "use client";
 
-import { startTransition, useActionState, useOptimistic, useState } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -25,16 +25,36 @@ import { decideInternalRequest } from "./actions";
 export function DecisionPanel({ requestId }: { requestId: string }) {
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
   /*
-   * P11-05 — `useActionState`, driven by a form action below.
+   * P11-05 — the panel answers on the click.
    *
-   * The queueing matters less here than on a task list — nobody approves the
-   * same request twice — but the pending flag and the action are now one thing
-   * rather than a transition wrapped around a bare call, and the two buttons
-   * submit a real form.
+   * ⚠️ IT DOES NOT PREDICT THE REQUEST'S NEW STATUS, and that distinction is
+   * the point. A leave request at stage 2 that a lead approves does NOT become
+   * Approved — it moves to stage 3 and waits for a manager (P9-04). Painting
+   * "Approved" here would be a lie on the commonest path through this screen.
+   *
+   * What is certain is that THIS person has now decided, so that is what shows:
+   * the two buttons are replaced by what they chose, and the real status arrives
+   * with the action's revalidation.
    */
-  const [, dispatch, pending] = useActionState(
-    async (_previous: void, decision: "approved" | "rejected") => {
+  const [decided, setDecided] = useOptimistic<"approved" | "rejected" | null>(null);
+
+  /*
+   * ⚠️ ASYNC, AND THE ACTION IS AWAITED INSIDE THE TRANSITION. A synchronous
+   * callback ends the transition the moment it returns, which drops the
+   * optimistic value a frame after it is set — and the visible symptom is the
+   * TOAST ARRIVING BEFORE ANYTHING ON SCREEN CHANGES, because by then the toast
+   * and the server payload are the same event. See the longer note in
+   * `app/(app)/tasks/transition.tsx`.
+   */
+  function decide(decision: "approved" | "rejected") {
+    setError(null);
+
+    startTransition(async () => {
+      setDecided(decision);
+
       const result = await decideInternalRequest(requestId, {
         decision,
         reason: reason.trim() || undefined,
@@ -53,29 +73,6 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
           ? "Approved. The DTR record has been corrected."
           : `Request ${result.data.status.toLowerCase()}.`,
       );
-    },
-    undefined,
-  );
-
-  /*
-   * P11-05 — the panel answers on the click.
-   *
-   * ⚠️ IT DOES NOT PREDICT THE REQUEST'S NEW STATUS, and that distinction is
-   * the point. A leave request at stage 2 that a lead approves does NOT become
-   * Approved — it moves to stage 3 and waits for a manager (P9-04). Painting
-   * "Approved" here would be a lie on the commonest path through this screen.
-   *
-   * What is certain is that THIS person has now decided, so that is what shows:
-   * the two buttons are replaced by what they chose, and the real status arrives
-   * with the action's revalidation a moment later.
-   */
-  const [decided, setDecided] = useOptimistic<"approved" | "rejected" | null>(null);
-
-  function decide(decision: "approved" | "rejected") {
-    setError(null);
-    startTransition(() => {
-      setDecided(decision);
-      dispatch(decision);
     });
   }
 
