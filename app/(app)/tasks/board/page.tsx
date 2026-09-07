@@ -44,6 +44,7 @@ import { TaskStatusSelect } from "../status-select";
 import { PendingRequestColumn } from "../pending-requests";
 import { TaskToolbar } from "../toolbar";
 import { BoardCard, BoardColumn, BoardDnd, BoardTaskGroup } from "./board-dnd";
+import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 
 export const metadata: Metadata = { title: "Board" };
 
@@ -742,11 +743,13 @@ async function BoardColumns({
                         taskCategoryEdge(taskCategory(task)),
                       )}>
                       <div className="flex items-start gap-1.5">
-                        <Link
+                        {/* See the note in tasks-table: a board column is the
+                            same problem, one card at a time. */}
+                        <HoverPrefetchLink
                           href={`/tasks/${task.id}`}
                           className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium hover:underline">
                           {task.title}
-                        </Link>
+                        </HoverPrefetchLink>
 
                         <TaskRowActions
                           taskId={task.id}
@@ -877,11 +880,11 @@ async function BoardColumns({
                             key={child.id}
                             className="group/task flex flex-col gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
                             <div className="flex items-start gap-1.5">
-                              <Link
+                              <HoverPrefetchLink
                                 href={`/tasks/${child.id}`}
                                 className="line-clamp-2 min-w-0 flex-1 text-2xs leading-snug hover:underline">
                                 {child.title}
-                              </Link>
+                              </HoverPrefetchLink>
 
                               {/* The same hover strip the parent carries, so
                                   a subtask can be renamed, re-flagged and

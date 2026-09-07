@@ -44,6 +44,7 @@ import {
 import { LatestCommentCell } from "./latest-comment-cell";
 import { TaskSelectAll, TaskSelectCheckbox } from "./task-selection";
 import { TaskStatusSelect } from "./status-select";
+import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 
 /**
  * P7-64 - the task list's columns, in a client component.
@@ -422,7 +423,10 @@ export function TaskGroupTable({
               */}
               <TaskStatusGlyph status={task.status} />
 
-              <Link
+              {/* Hover-prefetched, not viewport-prefetched: a department's
+                  list runs to hundreds of rows and the default would fetch a
+                  detail page for every one on screen. */}
+              <HoverPrefetchLink
                 href={`/tasks/${task.id}`}
                 className={cn(
                   "truncate hover:underline",
@@ -432,7 +436,7 @@ export function TaskGroupTable({
                 )}
               >
                 {task.title}
-              </Link>
+              </HoverPrefetchLink>
 
               {/* Renders nothing when unranked, which is most tasks. A "None"
                   chip on every row would mark everything, and a mark carried by
