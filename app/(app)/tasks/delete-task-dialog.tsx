@@ -169,12 +169,14 @@ export function DeleteTaskDialog({
           </div>
 
           <DialogFooter>
+            <form id="delete-task" action={confirm} className="hidden" />
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
               Cancel
             </Button>
             <Button
               variant="destructive"
-              onClick={confirm}
+              type="submit"
+              form="delete-task"
               loading={pending}
               // Disabled until the impact is known: a confirm that can be pressed
               // before the dialog knows what it destroys is only pretending to ask.

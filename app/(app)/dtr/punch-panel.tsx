@@ -187,15 +187,24 @@ export function PunchPanel({
 
       {/* One control, not two. Which action is available is a fact about the
           record, so showing both and disabling one just invites the question. */}
-      {!timeIn ? (
-        <Button className="w-full" loading={pending} onClick={() => run("in")}>
-          Time in
-        </Button>
-      ) : (
-        <Button className="w-full" variant="outline" loading={pending} onClick={() => run("out")}>
-          {timeOut ? "Update time out" : "Time out"}
-        </Button>
-      )}
+      {/* ⚠️ A FORM ACTION, BUT STILL NOT OPTIMISTIC. The punch goes through a
+          real form so React owns the transition and the button works before
+          this route's JavaScript has loaded — which on a clock-in screen is
+          worth having. What has NOT changed is the panel showing only what the
+          server recorded: a DTR that says "timed in" because a button was
+          pressed, while the server captured nothing, is worse than a slow one.
+          The form is about how the action is invoked, not about predicting it. */}
+      <form action={() => run(timeIn ? "out" : "in")}>
+        {!timeIn ? (
+          <Button type="submit" className="w-full" loading={pending}>
+            Time in
+          </Button>
+        ) : (
+          <Button type="submit" className="w-full" variant="outline" loading={pending}>
+            {timeOut ? "Update time out" : "Time out"}
+          </Button>
+        )}
+      </form>
 
       {/* Q4's narrow backdating window, surfaced only when it actually applies.
           A date picker that is usually pointless is a date picker people learn
@@ -210,15 +219,17 @@ export function PunchPanel({
             You timed in at {formatAppTime(state.openYesterday.time_in)} and never timed out. If
             that shift ran past midnight, close it against yesterday.
           </p>
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2 bg-background"
-            loading={pending}
-            onClick={() => run("out", state.openYesterday!.work_date)}
-          >
-            Time out for {formatDate(state.openYesterday.work_date)}
-          </Button>
+          <form action={() => run("out", state.openYesterday!.work_date)}>
+            <Button
+              type="submit"
+              size="sm"
+              variant="outline"
+              className="mt-2 bg-background"
+              loading={pending}
+            >
+              Time out for {formatDate(state.openYesterday.work_date)}
+            </Button>
+          </form>
         </div>
       ) : null}
 

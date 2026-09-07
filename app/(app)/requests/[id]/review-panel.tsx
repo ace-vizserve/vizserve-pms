@@ -468,9 +468,18 @@ export function ReviewPanel({
             </CollapsibleContent>
           </Collapsible>
 
+          {/* ⚠️ THE FORMS ARE EMPTY AND OUT OF THE FLOW. Their submit buttons
+              reference them by `form="id"`, which is what lets a form action be
+              used without wrapping a button that sits in a flex row beside
+              others — wrapping would change the row. */}
+          <form id="gate1-approve" action={approve} className="hidden" />
+          <form id="gate1-negative" action={decideNegative} className="hidden" />
+
           {mode === "approve" ? (
             <div className="flex flex-wrap items-center gap-2 border-t pt-4">
-              <Button onClick={approve} loading={pending} disabled={!assigneeId}>
+              {/* Form actions, so React owns the transition and the decision
+                   still submits before this route's JS has loaded. */}
+              <Button type="submit" form="gate1-approve" loading={pending} disabled={!assigneeId}>
                 Approve and create the task
               </Button>
               <Button variant="outline" onClick={() => setMode("returned")} disabled={pending}>
@@ -537,7 +546,8 @@ export function ReviewPanel({
               <div className="flex items-center gap-2">
                 <Button
                   variant={mode === "rejected" ? "destructive" : "default"}
-                  onClick={decideNegative}
+                  type="submit"
+                  form="gate1-negative"
                   loading={pending}
                   // ⚠️ `richTextLength`, NOT `.length`. This is a RichTextEditor,
                   // so `reason` is markup: `<p><strong>no</strong></p>` is 26

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { startTransition, useActionState, useState } from "react";
 import { useRouter } from "next/navigation";
 import { toast } from "@/components/ui/toast";
 
@@ -27,12 +27,16 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
   const router = useRouter();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
-
-  function decide(decision: "approved" | "rejected") {
-    setError(null);
-
-    startTransition(async () => {
+  /*
+   * P11-05 — `useActionState`, driven by a form action below.
+   *
+   * The queueing matters less here than on a task list — nobody approves the
+   * same request twice — but the pending flag and the action are now one thing
+   * rather than a transition wrapped around a bare call, and the two buttons
+   * submit a real form.
+   */
+  const [, dispatch, pending] = useActionState(
+    async (_previous: void, decision: "approved" | "rejected") => {
       const result = await decideInternalRequest(requestId, {
         decision,
         reason: reason.trim() || undefined,
@@ -52,7 +56,13 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
           : `Request ${result.data.status.toLowerCase()}.`,
       );
       router.refresh();
-    });
+    },
+    undefined,
+  );
+
+  function decide(decision: "approved" | "rejected") {
+    setError(null);
+    startTransition(() => dispatch(decision));
   }
 
   return (
@@ -90,19 +100,27 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
           ) : null}
         </div>
 
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <Button className="flex-1" loading={pending} onClick={() => decide("approved")}>
+        {/* ⚠️ ONE FORM, TWO SUBMIT BUTTONS, each with its own `formAction`.
+            React runs a form action in its own transition, which is what the
+            pending state hangs off — and the panel keeps working before the
+            JavaScript for this route has finished loading. */}
+        <form className="flex flex-col gap-2 sm:flex-row">
+          <Button
+            type="submit"
+            className="flex-1"
+            loading={pending}
+            formAction={() => decide("approved")}>
             Approve
           </Button>
           <Button
+            type="submit"
             variant="outline"
             className="flex-1"
             loading={pending}
-            onClick={() => decide("rejected")}
-          >
+            formAction={() => decide("rejected")}>
             Reject
           </Button>
-        </div>
+        </form>
       </CardContent>
     </Card>
   );

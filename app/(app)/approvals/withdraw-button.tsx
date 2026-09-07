@@ -2,7 +2,7 @@
 
 import { Undo2 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { startTransition, useActionState, useState } from "react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -35,10 +35,7 @@ import { withdrawInternalRequest } from "./actions";
 export function WithdrawButton({ requestId }: { requestId: string }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [pending, startTransition] = useTransition();
-
-  function withdraw() {
-    startTransition(async () => {
+  const [, dispatch, pending] = useActionState(async () => {
       const result = await withdrawInternalRequest(requestId);
 
       if (!result.ok) {
@@ -52,8 +49,7 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
       toast.success("Request withdrawn.");
       setOpen(false);
       router.refresh();
-    });
-  }
+    }, undefined);
 
   return (
     <>
@@ -76,9 +72,13 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
             <Button variant="ghost" onClick={() => setOpen(false)} disabled={pending}>
               Keep it
             </Button>
-            <Button variant="destructive" onClick={withdraw} disabled={pending}>
-              {pending ? "Withdrawing…" : "Withdraw"}
-            </Button>
+            {/* A form action rather than an onClick: React gives it its own
+                transition, and the confirm still works with JS loading. */}
+            <form action={() => startTransition(() => dispatch())}>
+              <Button type="submit" variant="destructive" disabled={pending}>
+                {pending ? "Withdrawing…" : "Withdraw"}
+              </Button>
+            </form>
           </DialogFooter>
         </DialogContent>
       </Dialog>

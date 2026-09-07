@@ -250,7 +250,11 @@ export function AssigneePicker({
           </div>
         </div>
 
-        <div className="max-h-72 overflow-y-auto py-1">
+        {/* ⚠️ ONE FORM AROUND THE WHOLE LIST. Every row is a submit button
+            carrying its own `formAction`, so add and remove are real form
+            actions with React owning the transition — without a form per row
+            inside a scrolling list. */}
+        <form className="max-h-72 overflow-y-auto py-1">
           {assigned.length > 0 ? (
             <>
               <p className={GROUP}>Assignees</p>
@@ -269,9 +273,9 @@ export function AssigneePicker({
                     <span className="shrink-0 text-2xs text-muted-foreground">PIC</span>
                   ) : (
                     <button
-                      type="button"
+                      type="submit"
                       disabled={pending}
-                      onClick={() =>
+                      formAction={() =>
                         run(
                           () => removeTaskAssignee(taskId, person.id),
                           `${person.full_name} is no longer on this task`,
@@ -302,9 +306,9 @@ export function AssigneePicker({
             available.map((person) => (
               <button
                 key={person.id}
-                type="button"
+                type="submit"
                 disabled={pending}
-                onClick={() =>
+                formAction={() =>
                   run(
                     () => addTaskAssignee(taskId, person.id),
                     `${person.full_name} added to this task`,
@@ -318,7 +322,7 @@ export function AssigneePicker({
               </button>
             ))
           )}
-        </div>
+        </form>
 
         <p className="border-t px-3 py-2 text-2xs text-muted-foreground">
           {/* Said plainly, because "anyone can move it" is a real change in who
