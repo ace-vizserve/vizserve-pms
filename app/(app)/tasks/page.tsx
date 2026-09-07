@@ -1,6 +1,7 @@
 import { Suspense } from "react";
 import { ListChecks } from "lucide-react";
 import type { Metadata } from "next";
+import { redirect } from "next/navigation";
 
 import {
   TaskColumnsMenu,
@@ -159,6 +160,34 @@ export default async function TasksPage({
 }) {
   const context = await requireAuthContext();
   const params = await searchParams;
+
+  /*
+   * ⚠️ THE BARE ROUTE NO LONGER RENDERS ANYTHING. It sends you to the list tree.
+   *
+   * `/tasks` with no list listed EVERY task the reader could see — for a lead,
+   * a whole department, thousands of rows spread across every list — under a
+   * heading that promised precisely that and helped with nothing. Work here is
+   * organised by list, and the flat dump was a different product wearing the
+   * same route.
+   *
+   * Amier, 7 Sep: "the all tasks page should not be existing as its confusing,
+   * task viewing should be by list only". The "All tasks" entry in the sidebar
+   * went with it — see `components/app-shell/nav-projects.tsx`.
+   *
+   * ⚠️ THE TWO CROSS-LIST VIEWS SURVIVE, AND DELETING THEM WOULD BREAK FIVE
+   * LINKS. "What is on me" and "what am I reviewing" are questions no single
+   * list can answer, and `/dashboard` and `/` both link to them — the stat
+   * tiles, the Needs-you overflow, the QA tile. So `?view=mine` and `?view=qa`
+   * still render, and only the unfiltered entry point is gone.
+   *
+   * A REDIRECT RATHER THAN A DELETED FILE, deliberately: every `?list=` link in
+   * the tree, every `router.refresh()` after a mutation and every bookmark
+   * still resolves here. Removing the route would break all of them.
+   */
+  if (!params.list && params.view !== "mine" && params.view !== "qa") {
+    redirect("/tasks/lists");
+  }
+
   const supabase = await createClient();
 
   /*

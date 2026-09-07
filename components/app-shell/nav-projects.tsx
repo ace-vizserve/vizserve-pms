@@ -187,18 +187,25 @@ export function NavProjects({
             in the tree below and lighting both would be the two-places-at-once
             bug that nesting the timesheet routes fixed.
           */}
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              isActive={onTaskView && !activeList}
-              tooltip="Every task you can see"
-              // Same rule as a list row: keep the shape, drop the list.
-              render={<Link href={pathname === "/tasks/board" ? "/tasks/board" : "/tasks"} />}
-            >
-              <ListChecks />
-              <span>All tasks</span>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
+          {/*
+            "ALL TASKS" IS GONE, and its absence is the point.
 
+            It listed every task the reader could see — for a lead, the whole
+            department, thousands of rows across every list — under a heading
+            that promised exactly that and helped with nothing. Work here is
+            organised by list; a flat dump of all of it is a different product.
+
+            Amier, 7 Sep: "the all tasks page should not be existing as its
+            confusing, task viewing should be by list only".
+
+            The ROUTE still exists and is not dead. `/tasks?list=<id>` is every
+            row in the tree below, and `/tasks?view=mine` / `?view=qa` are the
+            two genuinely cross-list questions — "what is on me" and "what am I
+            reviewing" — which the dashboard and the home page both link to and
+            which no single list can answer. Only the bare, unfiltered entry
+            point is gone: `app/(app)/tasks/page.tsx` now sends it to the list
+            tree instead of rendering everything.
+          */}
           {spaces.map((space) => (
             <SpaceNode
               key={space.departmentId}
