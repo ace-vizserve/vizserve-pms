@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, CopyPlus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -149,12 +149,30 @@ export function BalancesGrid({
   };
 
   /** Cells whose value differs from what the server sent. */
+  /*
+   * P11-05 — SAVE STOPS SAYING "4 CHANGES" THE MOMENT YOU PRESS IT.
+   *
+   * ⚠️ THE CELLS WERE ALREADY OPTIMISTIC AND THAT WAS THE CONFUSING PART. Every
+   * input renders `draft`, so a typed number never went anywhere — but the Save
+   * button reads `changedKeys`, which compares the draft against the SERVER's
+   * allocations. So after saving, the numbers looked right while the button
+   * still offered to save them, for the length of a round trip.
+   *
+   * The comparison now runs against an optimistic copy, patched with exactly
+   * what was sent. React reverts it if the write is refused and the button comes
+   * back, which is the correct outcome: there really are unsaved changes then.
+   */
+  const [shownAllocations, markSaved] = useOptimistic(
+    allocations,
+    (state: Record<string, number>, saved: Record<string, number>) => ({ ...state, ...saved }),
+  );
+
   const changedKeys = useMemo(
     () =>
       Object.keys(draft).filter(
-        (key) => draft[key] !== cellValue(allocations[key]),
+        (key) => draft[key] !== cellValue(shownAllocations[key]),
       ),
-    [draft, allocations],
+    [draft, shownAllocations],
   );
 
   function setCell(key: string, value: string) {
@@ -227,6 +245,17 @@ export function BalancesGrid({
     }));
 
     startTransition(async () => {
+      // Exactly what is being sent, keyed as the grid keys it.
+      const saved: Record<string, number> = {};
+      for (const person of payload) {
+        for (const allocation of person.allocations) {
+          saved[`${person.user_id}:${allocation.leave_type_id}`] = Number(
+            allocation.days_allocated,
+          );
+        }
+      }
+      markSaved(saved);
+
       const result = await setLeaveAllocationsBulk(payload);
 
       if (!result.ok) {
@@ -260,7 +289,7 @@ export function BalancesGrid({
    * progress; the cell still shows the live figure, so nothing on screen lies.
    */
   function savedRowTotal(person: BalancePerson): number {
-    return sumAllocations(person, (key) => cellValue(allocations[key]));
+    return sumAllocations(person, (key) => cellValue(shownAllocations[key]));
   }
 
   /* One piece of arithmetic behind both, so the printed total and the sorted

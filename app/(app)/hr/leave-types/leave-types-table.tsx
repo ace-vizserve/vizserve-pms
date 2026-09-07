@@ -1,7 +1,7 @@
 "use client";
 
 import { EyeOff, Pencil, Plus, UserCheck } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
 import { DataTable, type Column } from "@/components/data-table";
@@ -103,6 +103,24 @@ function draftFrom(type: LeaveTypeRow | null): Draft {
 
 export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
   const [pending, startTransition] = useTransition();
+
+  /*
+   * P11-05 — the row updates when Save is pressed.
+   *
+   * ⚠️ THE EDITOR AND THE TABLE ARE THE SAME COMPONENT HERE, unlike events and
+   * holidays, so the optimistic state has nowhere else to be. It is still the
+   * TABLE'S state rather than the draft's: the draft is what somebody is typing,
+   * and this is what the table currently believes.
+   *
+   * Creating is not predicted. `code` is immutable once a type exists (P7-12)
+   * and a row with no id cannot be edited afterwards, so a placeholder would be
+   * a row nobody could correct.
+   */
+  const [shownTypes, patchType] = useOptimistic(
+    types,
+    (state: LeaveTypeRow[], patch: Partial<LeaveTypeRow> & { id: string }) =>
+      state.map((row) => (row.id === patch.id ? { ...row, ...patch } : row)),
+  );
   const [draft, setDraft] = useState<Draft | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
@@ -126,7 +144,31 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
       requires_reliever: draft.requires_reliever,
     };
 
+    // Closed first: the row behind carries the change from here on.
+    const editing = draft;
+    if (editing.id) setDraft(null);
+
     startTransition(async () => {
+      // The draft holds sort_order as a string; the row holds a number. The
+      // action coerces it too — this is the same coercion, one layer up.
+      /*
+       * The draft carries the FORM's types — `sort_order` as a string and
+       * `applies_to_gender` as the sentinel `ANY_GENDER` — and the row carries
+       * the database's. Narrowed here rather than loosening the row type, which
+       * would let the sentinel leak into a column that has no such value.
+       */
+      if (editing.id) {
+        patchType({
+          id: editing.id,
+          label: payload.label,
+          is_active: payload.is_active,
+          calendar_visibility: payload.calendar_visibility,
+          requires_reliever: payload.requires_reliever,
+          sort_order: Number(payload.sort_order) || 0,
+          applies_to_gender: payload.applies_to_gender as Gender | null,
+        });
+      }
+
       const result = draft.id
         ? await updateLeaveType({ ...payload, id: draft.id })
         : await createLeaveType({ ...payload, code: draft.code });
@@ -231,7 +273,7 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
 
       <DataTable
         columns={columns}
-        rows={types}
+        rows={shownTypes}
         getRowKey={(row) => row.id}
         rowClassName={(row) => (row.is_active ? undefined : "opacity-60")}
         empty="No leave types yet."
