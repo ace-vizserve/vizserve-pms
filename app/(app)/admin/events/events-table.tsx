@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { CalendarDays, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -75,6 +75,26 @@ export function EventsTable({
   year: number;
   currentYear: number;
 }) {
+  /*
+   * P11-05 — the calendar row moves when you save, and goes when you delete.
+   *
+   * ⚠️ THE OPTIMISTIC STATE IS HERE, NOT IN THE FORM. The form lives inside a
+   * dialog and the row it changes is behind that dialog, so a `useOptimistic`
+   * down there would repaint something nobody can see. Same reasoning as
+   * `tasks/lists/list-manager`.
+   *
+   * A partial patch on edit, a filter on delete. Creating is NOT predicted — a
+   * new event has no id, and a row that no control can open is worse than a
+   * moment's wait.
+   */
+  const [shownEvents, patchEvents] = useOptimistic(
+    events,
+    (state: EventRecord[], change: { remove: string } | (Partial<EventRecord> & { id: string })) =>
+      "remove" in change
+        ? state.filter((row) => row.id !== change.remove)
+        : state.map((row) => (row.id === change.id ? { ...row, ...change } : row)),
+  );
+
   const [editing, setEditing] = useState<EventRecord | undefined>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [removing, setRemoving] = useState<EventRecord | undefined>();
@@ -90,16 +110,22 @@ export function EventsTable({
   function confirmDelete() {
     if (!removing) return;
 
+    // Closed first: a confirm left over a row that has already gone reads as
+    // the delete not having worked.
+    const going = removing;
+    setRemoving(undefined);
+
     startDelete(async () => {
-      const result = await deleteEvent({ id: removing.id });
+      patchEvents({ remove: going.id });
+
+      const result = await deleteEvent({ id: going.id });
 
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
 
-      toast.success(`${removing.title} removed from the calendar.`);
-      setRemoving(undefined);
+      toast.success(`${going.title} removed from the calendar.`);
     });
   }
 
@@ -231,7 +257,7 @@ export function EventsTable({
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
-        rows={events}
+        rows={shownEvents}
         getRowKey={(event) => event.id}
         empty={
           <EmptyState
@@ -252,6 +278,7 @@ export function EventsTable({
         year={year}
         open={editorOpen}
         onOpenChange={setEditorOpen}
+        onSaved={patchEvents}
       />
 
       <Dialog
@@ -297,12 +324,15 @@ function EventEditor({
   year,
   open,
   onOpenChange,
+  onSaved,
 }: {
   event?: EventRecord;
   departments: Department[];
   year: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Reports the saved fields to the table, so the row moves before the trip. */
+  onSaved: (patch: Partial<EventRecord> & { id: string }) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -318,6 +348,7 @@ function EventEditor({
             departments={departments}
             year={year}
             onDone={() => onOpenChange(false)}
+            onSaved={onSaved}
           />
         ) : null}
       </DialogContent>
@@ -330,11 +361,13 @@ function EventForm({
   departments,
   year,
   onDone,
+  onSaved,
 }: {
   event?: EventRecord;
   departments: Department[];
   year: number;
   onDone: () => void;
+  onSaved: (patch: Partial<EventRecord> & { id: string }) => void;
 }) {
   const [pending, startTransition] = useTransition();
 
@@ -373,6 +406,9 @@ function EventForm({
     };
 
     startTransition(async () => {
+      // Only an EDIT can be predicted; a new event has no id yet.
+      if (event) onSaved({ ...payload, id: event.id });
+
       const result = event
         ? await updateEvent({ ...payload, id: event.id })
         : await createEvent(payload);

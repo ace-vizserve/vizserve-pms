@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { CalendarOff, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -61,6 +61,24 @@ export function HolidaysTable({
   /** Manila's year, from the server. Decides which years read as closed. */
   currentYear: number;
 }) {
+  /*
+   * P11-05 — the row renames on save and goes on delete.
+   *
+   * ⚠️ KEYED ON `holiday_date`, NOT ON AN ID, and that IS the schema: the date
+   * is the primary key and `renameHoliday` cannot change it — moving a wrongly
+   * entered date is a delete and an add, because that is what it is. So a rename
+   * can be predicted and a re-dating cannot be.
+   */
+  const [shownHolidays, patchHolidays] = useOptimistic(
+    holidays,
+    (state: Holiday[], change: { remove: string } | { holiday_date: string; name: string }) =>
+      "remove" in change
+        ? state.filter((row) => row.holiday_date !== change.remove)
+        : state.map((row) =>
+            row.holiday_date === change.holiday_date ? { ...row, name: change.name } : row,
+          ),
+  );
+
   const [editing, setEditing] = useState<Holiday | undefined>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [removing, setRemoving] = useState<Holiday | undefined>();
@@ -86,16 +104,22 @@ export function HolidaysTable({
   function confirmDelete() {
     if (!removing) return;
 
+    // Closed first: a confirm over a row that has gone reads as the delete not
+    // having worked.
+    const going = removing;
+    setRemoving(undefined);
+
     startDelete(async () => {
-      const result = await deleteHoliday({ holiday_date: removing.holiday_date });
+      patchHolidays({ remove: going.holiday_date });
+
+      const result = await deleteHoliday({ holiday_date: going.holiday_date });
 
       if (!result.ok) {
         toast.error(result.error);
         return;
       }
 
-      toast.success(`${removing.name} removed from the calendar.`);
-      setRemoving(undefined);
+      toast.success(`${going.name} removed from the calendar.`);
     });
   }
 
@@ -230,7 +254,7 @@ export function HolidaysTable({
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
         columns={columns}
-        rows={holidays}
+        rows={shownHolidays}
         getRowKey={(holiday) => holiday.holiday_date}
         empty={
           <EmptyState
@@ -251,6 +275,7 @@ export function HolidaysTable({
         currentYear={currentYear}
         open={editorOpen}
         onOpenChange={setEditorOpen}
+        onSaved={patchHolidays}
       />
 
       <Dialog
@@ -299,6 +324,7 @@ function HolidayEditor({
   currentYear,
   open,
   onOpenChange,
+  onSaved,
 }: {
   /** Absent for create. */
   holiday?: Holiday;
@@ -306,6 +332,8 @@ function HolidayEditor({
   currentYear: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Reports a rename to the table, so the row changes before the round trip. */
+  onSaved: (patch: { holiday_date: string; name: string }) => void;
 }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -322,6 +350,7 @@ function HolidayEditor({
             year={year}
             currentYear={currentYear}
             onDone={() => onOpenChange(false)}
+            onSaved={onSaved}
           />
         ) : null}
       </DialogContent>
@@ -334,11 +363,13 @@ function HolidayForm({
   year,
   currentYear,
   onDone,
+  onSaved,
 }: {
   holiday?: Holiday;
   year: number;
   currentYear: number;
   onDone: () => void;
+  onSaved: (patch: { holiday_date: string; name: string }) => void;
 }) {
   const [pending, startTransition] = useTransition();
 
@@ -354,6 +385,9 @@ function HolidayForm({
     setFieldErrors({});
 
     startTransition(async () => {
+      // Only a RENAME can be predicted — a new holiday's row does not exist yet.
+      if (holiday) onSaved({ holiday_date: holiday.holiday_date, name });
+
       const result = holiday
         ? // The date is not sent as editable — see `updateHolidaySchema`. Moving
           // a wrongly-entered date is a delete and an add, because that is what
