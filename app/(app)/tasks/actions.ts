@@ -1235,9 +1235,24 @@ export async function saveList(
   listId: string | null,
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
-  // P8-01c. Was `requireRole("team_leader")` — see `/tasks/lists` for why a
-  // rank floor cannot express who shapes a department any more.
-  const context = await requireDepartmentShape();
+  /*
+   * P11-03 — CREATING A LIST AND RENAMING ONE ARE NOT THE SAME ACT.
+   *
+   * This was `requireDepartmentShape()` for both, which threw "This area is for
+   * team leaders and department admins." at a plain member before RLS was ever
+   * consulted — so widening the policy on `vizserve_pms_lists` would have
+   * changed nothing on its own.
+   *
+   * Creating still needs a shaper: a new list reshapes the project tree for
+   * everybody in the department. Editing one does not, and a colleague who
+   * spots a typo in a list name should fix it.
+   *
+   * ⚠️ THE MEMBER PATH IS NOT UNGUARDED — it is guarded by RLS instead of by a
+   * rank. `p11_03` admits an active member of THAT list's department and nobody
+   * else, and the update is audited by trigger. What is removed here is the
+   * app-layer floor that made the policy unreachable, not the policy.
+   */
+  const context = listId === null ? await requireDepartmentShape() : await requireAuthContextOrThrow();
 
   const parsed = listSchema.safeParse(input);
   if (!parsed.success) {
