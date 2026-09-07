@@ -458,9 +458,23 @@ function ListRow({ list, activeList }: { list: ProjectList; activeList: string |
 
   return (
     <SidebarMenuSubItem>
+      {/*
+        ⚠️ `prefetch` — THE ONE PLACE IN THIS APP IT EARNS ITS REQUEST.
+        A visible <Link> already prefetches its route's SHELL, but one shell is
+        shared by every link to `/tasks`, so it cannot include anything that
+        depends on `?list=`. `prefetch` resolves the searchParams too, which is
+        exactly what this link differs by — every one of these points at the same
+        route with a different list.
+
+        ⚠️ NOT ON TASK ROWS, and that is the discipline. A visible
+        `prefetch` hits the server as it scrolls into view, so putting it on
+        a list of fifty rows is fifty requests to render one page. The project
+        tree is bounded by how many lists a department has, and it is the
+        navigation people use dozens of times an hour.
+      */}
       <SidebarMenuSubButton
         isActive={list.id === activeList}
-        render={<Link href={`${base}?list=${list.id}`} />}
+        render={<Link href={`${base}?list=${list.id}`} prefetch />}
       >
         <ListChecks className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate">{list.name}</span>
