@@ -2,7 +2,6 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { CalendarDays, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -76,7 +75,6 @@ export function EventsTable({
   year: number;
   currentYear: number;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState<EventRecord | undefined>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [removing, setRemoving] = useState<EventRecord | undefined>();
@@ -102,7 +100,6 @@ export function EventsTable({
 
       toast.success(`${removing.title} removed from the calendar.`);
       setRemoving(undefined);
-      router.refresh();
     });
   }
 
@@ -339,7 +336,6 @@ function EventForm({
   year: number;
   onDone: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [title, setTitle] = useState(event?.title ?? "");
@@ -389,7 +385,6 @@ function EventForm({
 
       toast.success(event ? "Event updated" : "Event added");
       onDone();
-      router.refresh();
     });
   }
 

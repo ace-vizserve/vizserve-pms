@@ -8,7 +8,6 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { useRouter } from "next/navigation";
 import { Trash2, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -158,7 +157,6 @@ function SelectionBar({
   picked: Map<string, string>;
   onClear: () => void;
 }) {
-  const router = useRouter();
   const [confirming, setConfirming] = useState(false);
   const [pending, startDelete] = useTransition();
 
@@ -191,7 +189,6 @@ function SelectionBar({
 
       setConfirming(false);
       onClear();
-      router.refresh();
     });
   }
 

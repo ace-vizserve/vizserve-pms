@@ -71,7 +71,6 @@ export function PasswordForm({
        * /change-password from a cached layout that still believes the flag is
        * set — a loop that looks exactly like the change having failed.
        */
-      router.refresh();
       if (onChanged === "home") router.push("/");
     });
   }

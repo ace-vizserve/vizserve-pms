@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -192,7 +191,6 @@ function UserForm({
   /** P8-11. See `UserEditor`. */
   onIssued: (issued: { email: string; password: string }) => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [email, setEmail] = useState(user?.email ?? "");
@@ -493,7 +491,6 @@ function UserForm({
             `${user ? "Details saved" : "User created"}, but the leave allocation did not: ${allocationResult.error}`,
           );
           setFieldErrors(allocationResult.fieldErrors ?? {});
-          router.refresh();
           return;
         }
       }
@@ -509,7 +506,6 @@ function UserForm({
       else toast.success(user ? "User updated" : "User created");
 
       onDone();
-      router.refresh();
     });
   }
 

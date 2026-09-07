@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Check, Search, UserPlus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -130,7 +129,6 @@ export function AssigneePicker({
   showPic?: boolean;
   align?: "start" | "center" | "end";
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -164,7 +162,6 @@ export function AssigneePicker({
         return;
       }
       toast.success(success);
-      router.refresh();
     });
   }
 

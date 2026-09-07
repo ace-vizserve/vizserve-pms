@@ -2,7 +2,6 @@
 
 import { Fragment, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Check, ChevronRight, Clock, Undo2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -874,7 +873,6 @@ function PunchedVsLogged({
  * resubmitting; that is what returning means.
  */
 function WeekDecision({ row, loggedMinutes }: { row: TeamRow; loggedMinutes: number }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [returning, setReturning] = useState(false);
   const [reason, setReason] = useState("");
@@ -895,7 +893,6 @@ function WeekDecision({ row, loggedMinutes }: { row: TeamRow; loggedMinutes: num
       );
       setReturning(false);
       setReason("");
-      router.refresh();
     });
   }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, ChevronRight, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -100,7 +99,6 @@ export function ReviewPanel({
    */
   clientFolderId: string | null;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [assigneeId, setAssigneeId] = useState<string>("");
@@ -180,7 +178,6 @@ export function ReviewPanel({
             ? "Returned. The requester has been emailed the reason."
             : "Rejected. The requester has been emailed the reason.",
       );
-      router.refresh();
     });
   }
 

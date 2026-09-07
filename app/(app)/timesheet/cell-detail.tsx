@@ -1,7 +1,6 @@
 "use client";
 
 import { AlignLeft, Clock, MessageSquareText, Plus, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useRef, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
@@ -222,7 +221,6 @@ function EntryRow({
   selected: boolean;
   onEdit: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const span =
@@ -272,7 +270,6 @@ function EntryRow({
                 toast.error(result.error);
                 return;
               }
-              router.refresh();
             })
           }>
           <Trash2 />
@@ -365,7 +362,6 @@ function EntryForm({
   canCancel: boolean;
   onDone: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const durationRef = useRef<HTMLInputElement>(null);
 
@@ -418,7 +414,6 @@ function EntryForm({
       }
 
       onDone();
-      router.refresh();
     });
   }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Pencil } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -38,7 +37,6 @@ export function EditableTitle({
   /** The same test as the rest of the card: on the task, or leading it. */
   canEdit: boolean;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -80,7 +78,6 @@ export function EditableTitle({
 
       toast.success("Renamed");
       setEditing(false);
-      router.refresh();
     });
   }
 

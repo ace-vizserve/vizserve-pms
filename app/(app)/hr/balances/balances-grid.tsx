@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { ChevronLeft, ChevronRight, CopyPlus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -78,7 +77,6 @@ export function BalancesGrid({
   departments: { id: string; name: string }[];
   allocations: Record<string, number>;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [department, setDepartment] = useState<string>(ALL_DEPARTMENTS);
   const [query, setQuery] = useState("");
@@ -239,7 +237,6 @@ export function BalancesGrid({
       toast.success(
         `Saved ${result.data.saved} ${result.data.saved === 1 ? "person" : "people"}.`,
       );
-      router.refresh();
     });
   }
 

@@ -3,7 +3,6 @@
 import { toast } from "@/components/ui/toast";
 import { ChevronsUpDown, Plus, X } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -339,7 +338,6 @@ export function NewRequestDialog({
    */
   isAdmin?: boolean;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(Boolean(prefill?.openOnMount));
   const [type, setType] = useState<InternalRequestType>(prefill?.type ?? "LEAVE");
   const [errors, setErrors] = useState<Record<string, string[]>>({});
@@ -515,7 +513,6 @@ export function NewRequestDialog({
       setErrors({});
       setRelievers([EMPTY_RELIEVER]);
       setTurnoverConfirmed(false);
-      router.refresh();
     });
   }
 

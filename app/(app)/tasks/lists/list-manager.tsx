@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { FolderPlus, Pencil, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -411,7 +410,6 @@ function ListForm({
   openCount: number;
   onDone: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [name, setName] = useState(list?.name ?? "");
@@ -493,7 +491,6 @@ function ListForm({
 
       toast.success(list ? "List saved" : "List created");
       onDone();
-      router.refresh();
     });
   }
 
@@ -668,7 +665,6 @@ function GroupForm({
   listCount: number;
   onDone: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [name, setName] = useState(group?.name ?? "");
@@ -702,7 +698,6 @@ function GroupForm({
 
       toast.success(group ? "Folder saved" : "Folder created");
       onDone();
-      router.refresh();
     });
   }
 

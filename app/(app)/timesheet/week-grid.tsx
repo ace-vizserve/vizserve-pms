@@ -14,7 +14,6 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 
 import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
@@ -854,7 +853,6 @@ function EntryRow({
   tasks: PickableTask[];
   locked: boolean;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [draft, setDraft] = useState<EntryDraft>(() => ({
@@ -917,7 +915,6 @@ function EntryRow({
         return;
       }
 
-      router.refresh();
     });
   }
 
@@ -1006,7 +1003,6 @@ function EntryRow({
             today={today}
             tasks={tasks}
             pending={pending}
-            onChanged={() => router.refresh()}
           />
         )}
       </td>
@@ -1050,7 +1046,6 @@ function EntryMenu({
   today,
   tasks,
   pending,
-  onChanged,
 }: {
   entry: CellEntry;
   taskId: string;
@@ -1060,7 +1055,6 @@ function EntryMenu({
   today: string;
   tasks: PickableTask[];
   pending: boolean;
-  onChanged: () => void;
 }) {
   const [working, startTransition] = useTransition();
 
@@ -1083,7 +1077,8 @@ function EntryMenu({
         return;
       }
 
-      onChanged();
+      // Nothing to call back to: `saveTimesheetEntry` revalidates /timesheet
+      // itself, so the grid repaints from the action's own response.
     });
   }
 
@@ -1148,7 +1143,7 @@ function EntryMenu({
                 toast.error(result.error);
                 return;
               }
-              onChanged();
+              // `deleteTimeEntry` revalidates /timesheet itself.
             })
           }>
           <Trash2 />
@@ -1188,7 +1183,6 @@ function TimeCell({
   locked: boolean;
   onEmptied: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
@@ -1331,7 +1325,6 @@ function TimeCell({
       setSaved(true);
 
       if (plan.kind === "delete") onEmptied();
-      router.refresh();
     });
   }
 

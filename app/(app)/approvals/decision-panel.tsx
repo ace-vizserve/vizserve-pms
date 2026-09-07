@@ -1,7 +1,6 @@
 "use client";
 
 import { startTransition, useActionState, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -24,7 +23,6 @@ import { decideInternalRequest } from "./actions";
  * to get a box.
  */
 export function DecisionPanel({ requestId }: { requestId: string }) {
-  const router = useRouter();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   /*
@@ -55,7 +53,6 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
           ? "Approved. The DTR record has been corrected."
           : `Request ${result.data.status.toLowerCase()}.`,
       );
-      router.refresh();
     },
     undefined,
   );

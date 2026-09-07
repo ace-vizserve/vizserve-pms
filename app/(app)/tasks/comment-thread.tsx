@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -144,7 +143,6 @@ export function CommentThread({
   /** The composer above the feed — it belongs at the end you are reading from. */
   composerFirst?: boolean;
 }) {
-  const router = useRouter();
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
@@ -165,7 +163,6 @@ export function CommentThread({
       // Cleared only on success. A comment the server refused stays in the box
       // rather than being lost to a toast nobody can copy out of.
       setBody("");
-      router.refresh();
     });
   }
 
@@ -183,7 +180,6 @@ export function CommentThread({
 
       setEditing(null);
       setDraft("");
-      router.refresh();
     });
   }
 
@@ -196,7 +192,6 @@ export function CommentThread({
         return;
       }
 
-      router.refresh();
     });
   }
 

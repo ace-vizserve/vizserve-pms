@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, useSyncExternalStore, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Bell, BellOff, Play, Trash2, Upload } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -133,7 +132,6 @@ function LeadField({
 }
 
 export function RemindersForm(props: RemindersFormProps) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [uploading, startUpload] = useTransition();
 
@@ -191,7 +189,6 @@ export function RemindersForm(props: RemindersFormProps) {
       }
 
       toast.success("Saved.");
-      router.refresh();
     });
   }
 
@@ -242,7 +239,6 @@ export function RemindersForm(props: RemindersFormProps) {
       }
 
       toast.success(`"${result.data.filename}" is now your reminder sound.`);
-      router.refresh();
     });
   }
 
@@ -254,7 +250,6 @@ export function RemindersForm(props: RemindersFormProps) {
         return;
       }
       toast.success("Back to the VizServe chime.");
-      router.refresh();
     });
   }
 

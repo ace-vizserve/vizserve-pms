@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -86,7 +85,6 @@ export function NewPersonalTaskDialog({
   departmentId: string | null;
   trigger?: "toolbar" | "column" | "row";
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
   const [estimate, setEstimate] = useState<number | null>(null);
@@ -189,7 +187,6 @@ export function NewPersonalTaskDialog({
       );
       setOpen(false);
       reset();
-      router.refresh();
     });
   }
 

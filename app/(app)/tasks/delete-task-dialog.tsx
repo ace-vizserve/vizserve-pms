@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -49,7 +48,6 @@ export function DeleteTaskDialog({
   /** A custom trigger. Defaults to a ghost trash button. */
   render?: (open: () => void) => React.ReactNode;
 }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [impact, setImpact] = useState<TaskDeleteImpact | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +78,6 @@ export function DeleteTaskDialog({
       toast.success("Task deleted");
       setOpen(false);
       onDeleted?.();
-      router.refresh();
     });
   }
 

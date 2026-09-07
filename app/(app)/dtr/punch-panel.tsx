@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -51,7 +50,6 @@ export function PunchPanel({
   initial: PunchState;
   compact?: boolean;
 }) {
-  const router = useRouter();
   const [state, setState] = useState(initial);
   const [pending, startTransition] = useTransition();
   const [offSchedule, setOffSchedule] = useState<{
@@ -115,8 +113,7 @@ export function PunchPanel({
        * Fire-and-forget, and NOT awaited: the off-schedule dialog below must
        * open on the punch that just happened, not after a network round trip.
        */
-      if (punched.captured) router.refresh();
-
+      if (punched.captured)
       // ⚠️ ONLY ON A PUNCH THAT WAS ACTUALLY CAPTURED, and only for today.
       //
       // `captured: false` means the server kept an earlier time-in and ignored

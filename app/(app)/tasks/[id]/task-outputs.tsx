@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import { ChevronDown, Download, Link2, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -108,7 +107,6 @@ export function TaskOutputs({
    */
   variant?: "card" | "field";
 }) {
-  const router = useRouter();
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
   const [opening, setOpening] = useState<string | null>(null);
@@ -150,7 +148,6 @@ export function TaskOutputs({
       }
       setLinkOpen(false);
       toast.success(parsed.data ? "Link saved" : "Link removed");
-      router.refresh();
     });
   }
 
@@ -177,7 +174,6 @@ export function TaskOutputs({
       }
 
       if (inputRef.current) inputRef.current.value = "";
-      router.refresh();
     });
   }
 
@@ -203,7 +199,6 @@ export function TaskOutputs({
         return;
       }
       toast.success("Removed");
-      router.refresh();
     });
   }
 

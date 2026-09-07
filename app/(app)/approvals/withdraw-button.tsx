@@ -1,7 +1,6 @@
 "use client";
 
 import { Undo2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { startTransition, useActionState, useState } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -33,7 +32,6 @@ import { withdrawInternalRequest } from "./actions";
  * in a client component is a suggestion.
  */
 export function WithdrawButton({ requestId }: { requestId: string }) {
-  const router = useRouter();
   const [open, setOpen] = useState(false);
   const [, dispatch, pending] = useActionState(async () => {
       const result = await withdrawInternalRequest(requestId);
@@ -48,7 +46,6 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
 
       toast.success("Request withdrawn.");
       setOpen(false);
-      router.refresh();
     }, undefined);
 
   return (

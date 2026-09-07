@@ -1,7 +1,6 @@
 "use client";
 
 import { EyeOff, Pencil, Plus, UserCheck } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
@@ -103,7 +102,6 @@ function draftFrom(type: LeaveTypeRow | null): Draft {
 }
 
 export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [draft, setDraft] = useState<Draft | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
@@ -141,7 +139,6 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
 
       toast.success(draft.id ? "Leave type updated." : "Leave type added.");
       setDraft(null);
-      router.refresh();
     });
   }
 

@@ -1,7 +1,6 @@
 "use client";
 
 import { zodResolver } from "@hookform/resolvers/zod";
-import { useRouter } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 import { useForm, type Resolver } from "react-hook-form";
 import { toast } from "@/components/ui/toast";
@@ -82,7 +81,6 @@ export function InternalSettings({
   audience: FormAudience;
   hasSubmissions?: boolean;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -233,7 +231,6 @@ export function InternalSettings({
       const result = await updateFormSettings(formId, values);
       if (!result.ok) return showErrors(result.error, result.fieldErrors);
       toast.success("Settings saved");
-      router.refresh();
     });
   });
 

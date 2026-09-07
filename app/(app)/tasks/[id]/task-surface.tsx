@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useTransition } from "react";
-import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -255,7 +254,6 @@ export function TaskSurface({
   subtasks?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
-  const router = useRouter();
   /**
    * P7-55. `moving`, not `pending`, and it covers ONLY the status moves and the
    * override — transitions that must disable each other, because two in flight
@@ -334,7 +332,6 @@ export function TaskSurface({
       toast.success(success);
       setOverrideOpen(false);
       setOverrideReason("");
-      router.refresh();
     });
   }
 
@@ -360,7 +357,6 @@ export function TaskSurface({
       }
       toast.success("Reassigned");
       setReassignOpen(false);
-      router.refresh();
     });
   }
 

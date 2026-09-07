@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -81,7 +81,6 @@ function useComposer({
   parentId: string | null;
   onDone?: () => void;
 }) {
-  const router = useRouter();
   /*
    * ⚠️ THE LIST COMES FROM THE URL, not from a prop threaded through six files.
    *
@@ -133,7 +132,6 @@ function useComposer({
       // something people do in runs of five.
       setDraft(EMPTY);
       onDone?.();
-      router.refresh();
     });
   }
 

@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { CalendarOff, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -62,7 +61,6 @@ export function HolidaysTable({
   /** Manila's year, from the server. Decides which years read as closed. */
   currentYear: number;
 }) {
-  const router = useRouter();
   const [editing, setEditing] = useState<Holiday | undefined>();
   const [editorOpen, setEditorOpen] = useState(false);
   const [removing, setRemoving] = useState<Holiday | undefined>();
@@ -98,7 +96,6 @@ export function HolidaysTable({
 
       toast.success(`${removing.name} removed from the calendar.`);
       setRemoving(undefined);
-      router.refresh();
     });
   }
 
@@ -343,7 +340,6 @@ function HolidayForm({
   currentYear: number;
   onDone: () => void;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   // Seeded to the first of the year being viewed, so adding January's holidays
@@ -373,7 +369,6 @@ function HolidayForm({
 
       toast.success(holiday ? "Holiday renamed" : "Holiday added");
       onDone();
-      router.refresh();
     });
   }
 

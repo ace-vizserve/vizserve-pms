@@ -243,7 +243,6 @@ export function ClientFormSettings({
         const result = await updateFormSettings(formId, values);
         if (!result.ok) return showErrors(result.error, result.fieldErrors);
         toast.success("Settings saved");
-        router.refresh();
         return;
       }
 

@@ -2,7 +2,6 @@
 
 import * as React from "react";
 import { createContext, useContext, useState, useTransition, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
 import {
   DndContext,
   DragOverlay,
@@ -59,7 +58,6 @@ type DragState = {
 const BoardDragContext = createContext<DragState>({ allowed: null });
 
 export function BoardDnd({ children }: { children: ReactNode }) {
-  const router = useRouter();
   const [allowed, setAllowed] = useState<string[] | null>(null);
   const [dragging, setDragging] = useState<{ id: string; title: string } | null>(null);
   const [, startMove] = useTransition();
@@ -118,11 +116,9 @@ export function BoardDnd({ children }: { children: ReactNode }) {
         // Nothing to roll back: the card never moved in the DOM. The server is
         // the only thing that decides where it sits, and `router.refresh()`
         // below re-reads it.
-        router.refresh();
         return;
       }
 
-      router.refresh();
     });
   }
 
