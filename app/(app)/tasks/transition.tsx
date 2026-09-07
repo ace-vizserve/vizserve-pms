@@ -16,7 +16,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { isRichTextEmpty } from "@/lib/rich-text";
-import { useOptimisticMove } from "./task-status-groups";
+import { useOptimisticMove } from "./optimistic-move";
 import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/tasks";
 
 import { transitionTask } from "./actions";

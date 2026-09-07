@@ -1,8 +1,10 @@
 "use client";
 
-import { createContext, useContext, useMemo, useOptimistic } from "react";
+import { useMemo, useOptimistic } from "react";
 
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
+
+import { OptimisticMoveContext, type OptimisticMove } from "./optimistic-move";
 
 import { TaskStatusGroup } from "./status-group";
 import { TaskGroupTable, type ListRow, type TaskLookups, type Viewer } from "./tasks-table";
@@ -33,21 +35,6 @@ import { TaskGroupTable, type ListRow, type TaskLookups, type Viewer } from "./t
  * code — the row simply returns to the group the server still says it is in.
  */
 
-type Move = { id: string; status: VizservePmsTaskStatus };
-
-/**
- * How a status control tells the list it has moved.
- *
- * Null outside this provider, which is the normal case for the task DETAIL page
- * and the board — both render the same control with no groups around it, and a
- * missing context must not be a crash.
- */
-const MoveContext = createContext<((move: Move) => void) | null>(null);
-
-export function useOptimisticMove() {
-  return useContext(MoveContext);
-}
-
 export function TaskStatusGroups({
   groups,
   visibleStatuses,
@@ -67,7 +54,7 @@ export function TaskStatusGroups({
     [groups, visibleStatuses],
   );
 
-  const [rows, applyMove] = useOptimistic(flat, (state: ListRow[], move: Move) =>
+  const [rows, applyMove] = useOptimistic(flat, (state: ListRow[], move: OptimisticMove) =>
     state.map((row) => (row.id === move.id ? { ...row, status: move.status } : row)),
   );
 
@@ -80,7 +67,7 @@ export function TaskStatusGroups({
   }, [rows, visibleStatuses]);
 
   return (
-    <MoveContext value={applyMove}>
+    <OptimisticMoveContext value={applyMove}>
       <div className="flex flex-col gap-3">
         {visibleStatuses.map((status) => {
           const group = grouped.get(status) ?? [];
@@ -112,6 +99,6 @@ export function TaskStatusGroups({
           );
         })}
       </div>
-    </MoveContext>
+    </OptimisticMoveContext>
   );
 }
