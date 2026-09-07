@@ -528,7 +528,8 @@ function EventForm({
         <Button variant="ghost" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button onClick={submit} loading={pending}>
+        <form id="save-event" action={submit} className="hidden" />
+        <Button type="submit" form="save-event" loading={pending}>
           {event ? "Save changes" : "Add event"}
         </Button>
       </DialogFooter>

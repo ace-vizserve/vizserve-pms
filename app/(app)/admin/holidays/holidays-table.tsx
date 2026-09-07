@@ -452,7 +452,8 @@ function HolidayForm({
         <Button variant="ghost" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button onClick={submit} loading={pending}>
+        <form id="save-holiday" action={submit} className="hidden" />
+        <Button type="submit" form="save-holiday" loading={pending}>
           {holiday ? "Save name" : "Add holiday"}
         </Button>
       </DialogFooter>

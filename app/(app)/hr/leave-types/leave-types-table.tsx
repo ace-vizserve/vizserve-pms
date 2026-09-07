@@ -390,7 +390,8 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
             <Button variant="ghost" onClick={() => setDraft(null)} disabled={pending}>
               Cancel
             </Button>
-            <Button onClick={submit} disabled={pending}>
+            <form id="save-leave-type" action={submit} className="hidden" />
+            <Button type="submit" form="save-leave-type" disabled={pending}>
               {pending ? "Saving…" : "Save"}
             </Button>
           </DialogFooter>

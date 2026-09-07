@@ -93,9 +93,12 @@ export function FeedbackForm({ token }: { token: string }) {
         />
       </div>
 
-      <Button onClick={submit} loading={pending} disabled={rating === null}>
+      {/* Same reasoning as the approval page: a client, one shot, no account. */}
+      <form action={submit}>
+      <Button type="submit" loading={pending} disabled={rating === null}>
         Send feedback
       </Button>
+      </form>
 
       {error ? (
         <p

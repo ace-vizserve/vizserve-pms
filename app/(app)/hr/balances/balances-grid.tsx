@@ -543,9 +543,11 @@ export function BalancesGrid({
             "nothing to do yet"; it becomes the primary the moment a cell
             changes, which is the moment it means something.
           */}
+          <form id="save-balances" action={save} className="hidden" />
           <Button
+            type="submit"
+            form="save-balances"
             variant={changedKeys.length === 0 ? "outline" : "default"}
-            onClick={save}
             loading={pending}
             disabled={changedKeys.length === 0}
           >

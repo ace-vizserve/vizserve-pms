@@ -126,7 +126,18 @@ export function ApprovalForm({
           </div>
 
           <div className="mt-5 flex flex-wrap gap-2">
-            <Button onClick={() => submit("APPROVED")} loading={pending}>
+            {/* ⚠️ A FORM ACTION MATTERS MOST HERE. The reader is a CLIENT: no
+                account, one shot, often a phone on a bad connection, and this
+                button carries the whole value of Gate 3. A form action still
+                submits while the page's JavaScript is loading; an onClick
+                handler does not exist until it has. */}
+            <form id="approve-deliverable" action={() => submit("APPROVED")} className="hidden" />
+            <form
+              id="request-changes"
+              action={() => submit("REVISION_REQUESTED")}
+              className="hidden"
+            />
+            <Button type="submit" form="approve-deliverable" loading={pending}>
               <Check />
               Approve
             </Button>
@@ -160,7 +171,8 @@ export function ApprovalForm({
 
           <div className="mt-4 flex flex-wrap gap-2">
             <Button
-              onClick={() => submit("REVISION_REQUESTED")}
+              type="submit"
+              form="request-changes"
               loading={pending}
               disabled={comment.trim().length < CLIENT_REVISION_MIN}
             >

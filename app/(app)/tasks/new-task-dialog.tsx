@@ -402,7 +402,13 @@ function TaskForm({
         <Button variant="ghost" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button onClick={submit} loading={pending} disabled={title.trim().length === 0}>
+        <form id="create-task" action={submit} className="hidden" />
+        <Button
+          type="submit"
+          form="create-task"
+          loading={pending}
+          disabled={title.trim().length === 0}
+        >
           Create task
         </Button>
       </DialogFooter>

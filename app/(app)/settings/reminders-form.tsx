@@ -436,7 +436,10 @@ export function RemindersForm(props: RemindersFormProps) {
       </div>
 
       <div className="border-t pt-4">
-        <Button type="button" loading={pending} onClick={save}>
+        {/* The form is empty and out of the flow: this button sits in a row
+            beside others, and wrapping it would change the row. */}
+        <form id="save-reminders" action={save} className="hidden" />
+        <Button type="submit" form="save-reminders" loading={pending}>
           Save
         </Button>
       </div>

@@ -640,7 +640,13 @@ function ListForm({
         <Button variant="ghost" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button onClick={submit} loading={pending} disabled={name.trim().length === 0}>
+        <form id="save-list" action={submit} className="hidden" />
+        <Button
+          type="submit"
+          form="save-list"
+          loading={pending}
+          disabled={name.trim().length === 0}
+        >
           {list ? "Save" : "Create list"}
         </Button>
       </DialogFooter>
@@ -806,7 +812,13 @@ function GroupForm({
         <Button variant="ghost" onClick={onDone} disabled={pending}>
           Cancel
         </Button>
-        <Button onClick={submit} loading={pending} disabled={name.trim().length === 0}>
+        <form id="save-folder" action={submit} className="hidden" />
+        <Button
+          type="submit"
+          form="save-folder"
+          loading={pending}
+          disabled={name.trim().length === 0}
+        >
           {group ? "Save" : "Create folder"}
         </Button>
       </DialogFooter>
