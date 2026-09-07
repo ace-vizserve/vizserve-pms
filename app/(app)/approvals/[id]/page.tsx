@@ -16,13 +16,14 @@ import {
   internalRequestLabel,
   isTimeCorrectionType,
 } from "@/lib/schemas/internal-requests";
-import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
+import { StageTrack, metaDate, metaLine, type Step } from "@/components/stage-track";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { RichText } from "@/components/ui/rich-text";
 import {
+  ApprovalDecisionBadge,
   InternalStatusBadge,
   InternalTypeBadge,
   TimesheetWeekBadge,
@@ -42,6 +43,28 @@ import { WithdrawButton } from "../withdraw-button";
  * FK arriving later, and the failure takes the whole query rather than the
  * column. Naming it costs nothing now and cannot break then.
  */
+/**
+ * One signature on the chain: who, when, and what they wrote.
+ *
+ * ⚠️ THE EMBED CONSTRAINT IS NAMED, for the reason spelled out on
+ * `RelieverRow` below — `vizserve_pms_approvals` has one FK to
+ * `vizserve_pms_users` today, and a second one arriving later turns an
+ * unqualified embed into a PGRST201 that takes the whole query rather than the
+ * column.
+ *
+ * `full_name` is nullable because the NAME is scoped separately from the row.
+ * A reader may be entitled to the decision and not to the person — see
+ * `metaLine`, which drops whichever half is missing rather than rendering a
+ * stray separator.
+ */
+type DecisionRow = {
+  decision: "approved" | "returned" | "rejected";
+  reason: string | null;
+  created_at: string;
+  approver_id: string;
+  vizserve_pms_users: { full_name: string } | null;
+};
+
 type RelieverRow = {
   id: string;
   reliever_id: string;
@@ -169,7 +192,8 @@ export default async function InternalRequestPage({ params }: { params: Promise<
    * ternary below is untouched: no query runs that did not run before, and on
    * a request with no affected weeks the slot is still the same inert literal.
    */
-  const [{ data: weekRows, error: weeksError }, { data: relieverRows }] = await Promise.all([
+  const [{ data: weekRows, error: weeksError }, { data: relieverRows }, { data: decisionRows }] =
+    await Promise.all([
     affectedWeeks.length > 0
       ? supabase
           .from("vizserve_pms_timesheet_weeks")
@@ -197,6 +221,35 @@ export default async function InternalRequestPage({ params }: { params: Promise<
       )
       .eq("request_id", id)
       .order("created_at", { ascending: true }),
+
+    /*
+     * P11-01 — WHO SIGNED, WHEN, AND WHAT THEY WROTE.
+     *
+     * ⚠️ THIS TABLE HAS BEEN WRITTEN SINCE PHASE 5 AND READ BY NOTHING. Every
+     * stage-2 and stage-3 decision on every internal request is in here with its
+     * reason, and no screen has ever shown one. The stage rail could only manage
+     * a role and an adverb — "Team leader · Done" — so a manager was asked for a
+     * final signature on a decision they could not see.
+     *
+     * `reviewed_by` / `reviewed_at` on the request are NOT an alternative:
+     * `vizserve_pms_decide_internal_request` writes them only on the terminal
+     * transition (p9_04), so while a request sits at stage 3 they are still
+     * null. The intermediate history exists here or nowhere.
+     *
+     * Readable at all only since `p11_01`, which widened the P2-00 policy — it
+     * scoped rows to the approver themselves or a lead of the deciding
+     * DEPARTMENT, and that department is the requester's, so a manager who leads
+     * none got zero rows. The name embed needs the same migration's users
+     * policy.
+     */
+    supabase
+      .from("vizserve_pms_approvals")
+      .select(
+        "decision, reason, created_at, approver_id, vizserve_pms_users!vizserve_pms_approvals_approver_id_fkey(full_name)",
+      )
+      .eq("entity_type", "internal_request")
+      .eq("entity_id", id)
+      .order("created_at", { ascending: true }),
   ]);
 
   const weekStatus = new Map(
@@ -204,6 +257,95 @@ export default async function InternalRequestPage({ params }: { params: Promise<
   );
 
   const relievers = (relieverRows ?? []) as unknown as RelieverRow[];
+  const decisions = (decisionRows ?? []) as unknown as DecisionRow[];
+
+  /*
+   * WHICH DECISION BELONGS TO WHICH STAGE, and the answer is their ORDER.
+   *
+   * ⚠️ `vizserve_pms_approvals` HAS NO STAGE COLUMN, and it should not grow one
+   * — P2-00 keeps it generic on purpose so timesheet weeks and client requests
+   * share it. What makes position sufficient is that the engine writes exactly
+   * one row per stage, in order: stage 2 calls `record_decision` and advances,
+   * stage 3 calls it again and closes. Stage 1 writes none at all — a reliever's
+   * answer lives on their own row, and is read above.
+   *
+   * A rejection is terminal at every stage (p9_04), so there can never be a
+   * third row, and never a second one on a request that was refused at stage 2.
+   */
+  const stageDecision = (stage: 2 | 3) => decisions[stage - 2] ?? null;
+
+  /** The name only resolves for readers the `p11_01` users policy admits. */
+  const decidedBy = (row: DecisionRow | null) => row?.vizserve_pms_users?.full_name ?? null;
+
+  /*
+   * THE RAIL. One stop per stage this request actually has.
+   *
+   * ⚠️ STAGE 1 IS DRAWN ONLY WHEN THERE ARE RELIEVERS. Non-reliever leave opens
+   * at stage 2 and never had a hand-over stage, so a greyed-out "Relievers" step
+   * would invent one and report the request as further from done than it is —
+   * the same failure `GateTrack` warns about for a Gate 3 on internal work.
+   *
+   * ⚠️ `meta` IS ONE SHORT LINE, so it carries WHO and WHEN and never the
+   * reason. A rejection reason is a paragraph somebody wrote; putting it here
+   * would either truncate it or wreck the rail. The reasons are listed below
+   * instead — the same split the task page makes between its track and its
+   * history card: "where is this" and "what happened to it" are two questions.
+   */
+  const chainSteps: Step[] = ([1, 2, 3] as const)
+    .filter((stage) => stage > 1 || relievers.length > 0)
+    .map((stage) => {
+      const label = APPROVAL_STAGE_NAMES[stage];
+      const current = request.approval_stage === stage;
+      // Terminal statuses stop the chain wherever it stood, so "past" is only
+      // meaningful while it is still moving.
+      const past = request.status === "APPROVED" || (request.approval_stage ?? 0) > stage;
+
+      if (request.status === "WITHDRAWN" && current) {
+        return { label, state: "pending", meta: "Withdrawn before this" };
+      }
+
+      if (stage === 1) {
+        const declined = relievers.find((row) => row.decision === "rejected") ?? null;
+        if (declined) {
+          return {
+            label,
+            state: "attention",
+            meta: metaLine(
+              "Declined",
+              metaDate(declined.decided_at),
+              declined.vizserve_pms_users?.full_name,
+            ),
+          };
+        }
+        const answered = relievers.filter((row) => row.decision !== null).length;
+        return {
+          label,
+          state: past ? "done" : current ? "current" : "pending",
+          // A count, not names: the names are spelled out in full underneath,
+          // and three of them do not fit on a rail.
+          meta: past
+            ? `All ${relievers.length} accepted`
+            : current
+              ? `${answered} of ${relievers.length} answered`
+              : null,
+        };
+      }
+
+      const row = stageDecision(stage);
+
+      if (request.status === "REJECTED" && current) {
+        return {
+          label,
+          state: "attention",
+          meta: metaLine("Rejected", metaDate(row?.created_at), decidedBy(row)),
+        };
+      }
+      if (past) {
+        return { label, state: "done", meta: metaLine(metaDate(row?.created_at), decidedBy(row)) };
+      }
+      return { label, state: current ? "current" : "pending", meta: current ? "Waiting" : null };
+    });
+
 
   /*
    * ⚠️ P9-04 — DECIDING IS NO LONGER A QUESTION ABOUT YOUR ROLE.
@@ -434,46 +576,54 @@ export default async function InternalRequestPage({ params }: { params: Promise<
             <CardTitle className="text-sm">Approval</CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* The stage list. Only the stages this request actually has —
-                non-reliever leave opens at 2 and never had a reliever stage, so
-                drawing an empty "Relievers" step for it would invent one. */}
-            <ol className="space-y-2 text-xs">
-              {([1, 2, 3] as const)
-                .filter((stage) => stage > 1 || relievers.length > 0)
-                .map((stage) => {
-                  const current = request.approval_stage === stage;
-                  // Terminal statuses stop the chain wherever it stood, so
-                  // "past" is only meaningful while it is still moving.
-                  const past =
-                    request.status === "APPROVED" || (request.approval_stage ?? 0) > stage;
-                  return (
-                    <li key={stage} className="flex items-baseline gap-2">
-                      {/* State is never conveyed by colour alone — every step
-                          carries the word for where it stands. */}
-                      <span
-                        className={cn(
-                          "min-w-24 font-medium",
-                          current && "text-foreground",
-                          !current && "text-muted-foreground",
-                        )}
-                      >
-                        {APPROVAL_STAGE_NAMES[stage]}
+            {/* ⚠️ `StageTrack`, THE SAME COMPONENT THE TASK PAGE DRAWS ITS GATES
+                WITH. This used to be a hand-rolled `<ol>` that could show a role
+                and one of five adverbs — "Team leader · Done" — with nowhere to
+                put a name or a date. The shared rail has a `meta` slot, four
+                marker states with distinct shapes, and an `sr-only` word for
+                each, so none of this is carried by colour. */}
+            <StageTrack steps={chainSteps} className="p-0" />
+
+            {/*
+              WHAT EACH SIGNATORY WROTE.
+
+              ⚠️ THE RAIL ANSWERS "WHERE IS THIS"; THIS ANSWERS "WHAT HAPPENED".
+              Keeping them apart is deliberate and is the same split the task
+              page makes between `GateTrack` and its History card. A reason is a
+              paragraph; a rail is one line per stop. Merging them truncates the
+              first or wrecks the second.
+
+              Shown to everyone who can read the request, reasons included — the
+              audience rule `p11_01` encodes. The requester needs the reason most
+              of all: a rejection with no visible cause gets refiled unchanged
+              and refused again.
+            */}
+            {decisions.length > 0 ? (
+              <div className="space-y-2 border-t pt-3">
+                <p className="text-xs font-medium">Decisions</p>
+                {decisions.map((row) => (
+                  <div key={row.created_at} className="space-y-1 rounded-md border p-3 text-xs">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <span className="font-medium">
+                        {/* A reader entitled to the decision may not be entitled
+                            to the person. Saying so beats an empty space that
+                            reads as a rendering fault. */}
+                        {row.vizserve_pms_users?.full_name ?? "Somebody outside your scope"}
                       </span>
-                      <span className="text-muted-foreground">
-                        {request.status === "REJECTED" && current
-                          ? "Rejected here"
-                          : request.status === "WITHDRAWN" && current
-                            ? "Withdrawn before this"
-                            : past
-                              ? "Done"
-                              : current
-                                ? "Waiting"
-                                : "Not yet"}
+                      <span className="flex items-center gap-2">
+                        <ApprovalDecisionBadge decision={row.decision} />
+                        <span className="text-muted-foreground">
+                          {formatDateTime(row.created_at)}
+                        </span>
                       </span>
-                    </li>
-                  );
-                })}
-            </ol>
+                    </div>
+                    {row.reason ? (
+                      <RichText html={row.reason} className="text-muted-foreground" />
+                    ) : null}
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {relievers.length > 0 ? (
               <div className="space-y-2 border-t pt-3">
@@ -484,13 +634,26 @@ export default async function InternalRequestPage({ params }: { params: Promise<
                       <span className="font-medium">
                         {row.vizserve_pms_users?.full_name ?? "A colleague"}
                       </span>
-                      <span className="text-muted-foreground">
-                        {row.decision === "approved"
-                          ? `Accepted ${formatDate(row.decided_at)}`
-                          : row.decision === "rejected"
-                            ? `Declined ${formatDate(row.decided_at)}`
-                            : "Not answered yet"}
-                      </span>
+                      {/* ⚠️ `ApprovalDecisionBadge`, NOT TWO HAND-WRITTEN WORDS.
+                          It has existed since P2-00 with a per-decision icon and
+                          was used only by the client-request page, while this
+                          one rendered the strings "Accepted" and "Declined" — a
+                          status told by wording alone, in the one file whose
+                          header insists every status carries its chip.
+                          `formatDateTime`, not `formatDate`, because the rest of
+                          this page gives the time of day and a hand-over that
+                          landed at 16:55 is not the same fact as one that landed
+                          at 09:00. */}
+                      {row.decision ? (
+                        <span className="flex items-center gap-2">
+                          <ApprovalDecisionBadge decision={row.decision} />
+                          <span className="text-muted-foreground">
+                            {formatDateTime(row.decided_at)}
+                          </span>
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">Not answered yet</span>
+                      )}
                     </div>
                     <ul className="list-inside list-disc text-muted-foreground">
                       {row.vizserve_pms_internal_request_reliever_tasks.map((link) => (

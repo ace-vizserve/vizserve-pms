@@ -1,7 +1,4 @@
-import { Check, Circle, CircleAlert, CircleDot } from "lucide-react";
-import type { LucideIcon } from "lucide-react";
-
-import { formatDate } from "@/lib/dates";
+import { StageTrack, metaDate, metaLine, type Step } from "@/components/stage-track";
 import type { VizservePmsClientDecision } from "@/lib/database.types";
 import {
   TASK_STATUS_LABELS,
@@ -9,7 +6,6 @@ import {
   type TaskCategory,
   type TaskStatus,
 } from "@/lib/schemas/tasks";
-import { cn } from "@/lib/utils";
 
 /**
  * P7-28 / P7-57 — the three gates, as a track across the top of the page.
@@ -39,15 +35,6 @@ import { cn } from "@/lib/utils";
  * happened, and the one thing the PIC most needs to know.
  */
 
-type StepState = "done" | "current" | "pending" | "attention";
-
-type Step = {
-  label: string;
-  state: StepState;
-  /** Date, person, or what the client said. One short line. */
-  meta?: string | null;
-};
-
 type RequestGate = {
   submittedAt: string | null;
   /**
@@ -69,51 +56,6 @@ type ClientDecision = {
   approverName: string | null;
 };
 
-const MARKER: Record<
-  StepState,
-  { icon: LucideIcon; className: string; word: string; pulse?: string }
-> = {
-  // Shape as well as colour, in all four: greyscale has to separate them (§5.5),
-  // and a tick, a filled dot, an empty ring and an alert do.
-  //
-  // `pulse` is the FOURTH carrier and it is only ever on the LIVE stage — the
-  // one place on the page where something is still moving. It is decoration
-  // over three carriers that already work without it, and the utility itself
-  // sits behind `prefers-reduced-motion`, so it can vanish entirely and the
-  // track still reads. Its tint is named per state: a brand-blue halo on
-  // `attention` would report a client asking for changes in the same colour as
-  // ordinary progress.
-  // A FILLED green disc, not an outline tick. The outline read as a hairline
-  // at 16px and a passed gate has to be obvious from across the header.
-  // A RAISED green chip, not an outline tick and not a flat disc. Depth is
-  // outward (§1.5): its own fill, the `grade-chip` wash for a lit top edge and
-  // `shadow-raised` under it, so a passed gate sits ON the header rather than
-  // being painted onto it — and reads as green from across the page, which a
-  // 1px outline at 16px did not.
-  done: {
-    icon: Check,
-    className: "border border-success bg-success grade-chip text-background shadow-raised",
-    word: "done",
-  },
-  current: {
-    icon: CircleDot,
-    className: "text-primary",
-    word: "now",
-    pulse: "pulse-now",
-  },
-  pending: {
-    icon: Circle,
-    className: "text-foreground-faint",
-    word: "still to come",
-  },
-  attention: {
-    icon: CircleAlert,
-    className: "text-warning",
-    word: "needs attention",
-    pulse: "pulse-now [--pulse-tint:var(--warning)]",
-  },
-};
-
 export function GateTrack(props: {
   status: TaskStatus;
   category: TaskCategory;
@@ -126,85 +68,7 @@ export function GateTrack(props: {
   /** Gate 3 — the client's most recent answer, where they have given one. */
   decision: ClientDecision | null;
 }) {
-  const steps = buildSteps(props);
-
-  return (
-    /*
-      HORIZONTAL, ACROSS THE TOP, AND ABOVE BOTH COLUMNS.
-
-      It used to be a vertical rail stacked on top of the history trail inside
-      one card, and the two are different questions drawn as one object: this is
-      a ROUTE with fixed stops, ordered by the pipeline, and the trail under it
-      is a LOG ordered by time, newest first. A pipeline sitting directly above a
-      reverse-chronological list made the first look like the beginning of the
-      second.
-
-      It is up here because "how far along is this" is a header fact — it belongs
-      beside the status chip and the button that moves it, not three cards down
-      the right-hand rail.
-
-      Vertical again below `sm`: five stops with two lines of meta each cannot be
-      laid side by side in 390px without either truncating the labels or scrolling
-      the page sideways, and §9 forbids the second.
-    */
-    <ol className="flex flex-col gap-2.5 p-3 sm:flex-row sm:flex-wrap sm:items-start sm:gap-y-3">
-      {steps.map((step, index) => {
-        const marker = MARKER[step.state];
-        const Icon = marker.icon;
-
-        return (
-          <li
-            key={step.label}
-            className={cn(
-              "flex min-w-0 items-start gap-2.5",
-              // Only the connectors stretch, so the free width falls BETWEEN
-              // stops rather than being shared out inside their labels.
-              index === 0 ? "sm:flex-none" : "sm:flex-1",
-            )}>
-            {index > 0 ? (
-              <span
-                aria-hidden
-                className={cn(
-                  "mt-[9px] hidden h-0.5 min-w-4 flex-1 rounded-full sm:block",
-                  // Filled only where the work has actually passed.
-                  step.state === "done" || steps[index - 1].state === "done"
-                    ? "bg-success"
-                    : "bg-border",
-                )}
-              />
-            ) : null}
-
-            {/* The halo needs a box to ring, and an icon glyph is not one —
-                the ring inherits this span's radius and size, so it stays
-                circular against a circular marker at any type scale. */}
-            <span
-              className={cn(
-                "mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full",
-                marker.className,
-                marker.pulse,
-              )}>
-              <Icon className={cn(step.state === "done" ? "size-2.5" : "size-4")} aria-hidden />
-            </span>
-
-            <div className="min-w-0">
-              <p
-                className={cn(
-                  "text-xs leading-tight font-semibold",
-                  step.state === "pending" ? "font-medium text-muted-foreground" : null,
-                )}>
-                {step.label}
-                {/* The marker is a colour and a shape; this is the word. */}
-                <span className="sr-only"> — {marker.word}</span>
-              </p>
-              {step.meta ? (
-                <p className="text-2xs wrap-break-word text-muted-foreground">{step.meta}</p>
-              ) : null}
-            </div>
-          </li>
-        );
-      })}
-    </ol>
-  );
+  return <StageTrack steps={buildSteps(props)} />;
 }
 
 /**
@@ -383,6 +247,5 @@ function line(
   name: string | null | undefined,
   prefix?: string,
 ): string | null {
-  const parts = [prefix, when ? formatDate(when.slice(0, 10)) : null, name].filter(Boolean);
-  return parts.length > 0 ? parts.join(" · ") : null;
+  return metaLine(prefix, metaDate(when), name);
 }

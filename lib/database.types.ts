@@ -2116,6 +2116,19 @@ export type Database = {
         Returns: boolean;
       };
       /**
+       * P11-01. True when this person has decided on an internal request the
+       * caller may read. Backs the `vizserve_pms_users` SELECT policy that lets
+       * an approval timeline print a name instead of a role.
+       *
+       * ⚠️ HAND-ADDED, like every entry near it: regenerating this file needs
+       * `db:start` and Docker. If it and the migration disagree, the migration
+       * wins.
+       */
+      vizserve_pms_decided_on_readable_internal_request: {
+        Args: { p_user_id: string };
+        Returns: boolean;
+      };
+      /**
        * P8-01. True for any owner, and for a department admin asked about their
        * OWN department. The department-scoped sibling of `is_admin()`, which is
        * company-wide — the names are close and the scopes are opposite.
