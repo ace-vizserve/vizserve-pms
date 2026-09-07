@@ -10,6 +10,7 @@ import {
   type TaskRow,
 } from "./tasks-table";
 import { isTaskStatus } from "@/components/status-badge";
+import { Reveal, RevealFallback } from "@/components/ui/reveal";
 import { TaskStatusGroups } from "./task-status-groups";
 import {
   canAdminDepartment,
@@ -419,13 +420,19 @@ export default async function TasksPage({
         a checkbox to put anything in it.
       */}
       <TaskSelectionProvider>
+        {/* P11-05 — the skeleton yields to the list rather than being replaced
+            by it. This is the busiest boundary in the app: it re-resolves on
+            every filter, every list switch and every status change. */}
         <Suspense
           fallback={
-            <div role="status" aria-busy="true">
-              <span className="sr-only">Loading tasks…</span>
-              <TaskStatusGroupSkeleton />
-            </div>
+            <RevealFallback>
+              <div role="status" aria-busy="true">
+                <span className="sr-only">Loading tasks…</span>
+                <TaskStatusGroupSkeleton />
+              </div>
+            </RevealFallback>
           }>
+          <Reveal>
           <TaskGroups
             params={params}
             context={context}
@@ -435,6 +442,7 @@ export default async function TasksPage({
             listsPromise={listsPromise}
             pendingRequestsPromise={pendingRequestsPromise}
           />
+          </Reveal>
         </Suspense>
       </TaskSelectionProvider>
       </TaskColumnsProvider>

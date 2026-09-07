@@ -31,6 +31,7 @@ import {
 import type { NavGroup, NavItem } from "@/lib/navigation";
 import { NavIcon } from "./nav-icon";
 import { NavProjects, type ProjectSpace } from "./nav-projects";
+import { LinkPending } from "./link-pending";
 import { NavUser } from "./nav-user";
 
 export type SidebarSection = { group: NavGroup; items: NavItem[] };
@@ -328,6 +329,10 @@ function NavSection({
               >
                 <NavIcon name={item.icon} />
                 <span>{item.label}</span>
+                {/* Says the click landed, on the slow navigations where
+                    `loading.tsx` has not been prefetched yet. Invisible under
+                    100ms — see `.link-pending` in globals.css. */}
+                <LinkPending />
               </SidebarMenuButton>
 
               {/* Sibling of the button, not a child: SidebarMenuBadge is

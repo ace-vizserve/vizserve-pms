@@ -826,3 +826,106 @@
     font-weight: 650;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   P11-05 — View Transitions.
+
+   React's `<ViewTransition>` drives these; the classes below are what it puts on
+   the browser's transition pseudo-elements. Activated by Transitions, Suspense
+   and useDeferredValue — never by a plain setState — which is why every one of
+   them fires on something this app already does: a navigation, a form action, a
+   boundary resolving.
+
+   ⚠️ NO CONFIG AND NO `react@canary` INSTALL. The App Router already runs a
+   React canary, so `import { ViewTransition } from "react"` resolves at build
+   time even though the installed `react` package is 19.2.4 stable. Checking the
+   installed package says nothing about it — that mistake cost an hour.
+
+   ⚠️ EVERY PARTICIPANT CARRIES `default="none"`. Without it a named
+   `<ViewTransition>` animates on EVERY transition anywhere on the page, so a
+   status change would crossfade the sidebar. The prop is not decoration.
+   -------------------------------------------------------------------------- */
+
+/* Asymmetric on purpose: old content leaves fast so it stops competing for
+   attention, new content arrives more gently so there is time to register it.
+   The enter fade waits out the exit rather than crossing it. */
+@keyframes vt-fade {
+  from {
+    opacity: 0;
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
+@keyframes vt-slide-y {
+  from {
+    transform: translateY(10px);
+  }
+  to {
+    transform: none;
+  }
+}
+
+::view-transition-old(.reveal-out) {
+  animation:
+    150ms ease-out both vt-fade reverse,
+    150ms ease-out both vt-slide-y reverse;
+}
+
+::view-transition-new(.reveal-in) {
+  animation:
+    210ms ease-in 150ms both vt-fade,
+    var(--motion-duration-fast) ease-in both vt-slide-y;
+}
+
+/* ⚠️ THE OVERLAY EATS CLICKS UNLESS TOLD NOT TO. While a transition runs,
+   `::view-transition` sits over the page and captures pointer events, so a
+   second click during the animation is simply lost — on a task list somebody is
+   working down, that is the difference between fast and broken. */
+::view-transition {
+  pointer-events: none;
+}
+
+/* §1.7 — all motion respects this, and view transitions are the most likely of
+   any to trigger motion sensitivity because they move real content across the
+   viewport. Turned off, the swap is instant, which is the browser default. */
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-old(*),
+  ::view-transition-new(*),
+  ::view-transition-group(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   P11-05 — `useLinkStatus`, debounced in CSS rather than in JavaScript.
+
+   The dot exists for the case `loading.tsx` cannot cover: on a slow connection
+   the route's own loading state may not have been prefetched yet, so a click
+   produces nothing at all until the server answers.
+
+   ⚠️ IT STARTS INVISIBLE AND FADES IN AFTER 100ms. Most navigations here finish
+   well inside that, and a dot that appears and disappears in 80ms reads as a
+   rendering fault rather than as feedback. Conditional rendering cannot express
+   "only if this takes a while"; an animation delay can.
+   -------------------------------------------------------------------------- */
+@keyframes link-pending-in {
+  to {
+    opacity: 0.6;
+  }
+}
+
+.link-pending {
+  opacity: 0;
+  animation: link-pending-in 120ms ease-out 100ms forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .link-pending {
+    animation-duration: 1ms;
+  }
+}

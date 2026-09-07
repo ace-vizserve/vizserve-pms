@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import Link from "next/link";
+
+import { LinkPending } from "./link-pending";
 import { usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronRight, Folder, ListChecks, Plus } from "lucide-react";
 
@@ -478,6 +480,7 @@ function ListRow({ list, activeList }: { list: ProjectList; activeList: string |
       >
         <ListChecks className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate">{list.name}</span>
+        <LinkPending />
         <FolderCounts pending={list.pendingRequests} open={list.openTasks} />
       </SidebarMenuSubButton>
 
