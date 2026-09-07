@@ -206,8 +206,13 @@ export function TaskStatusSelect({
           setOpen(next);
           if (!next) setQuery("");
         }}>
+        {/* ⚠️ NOT DISABLED WHILE A MOVE IS IN FLIGHT, and that reverses what was
+            here. `disabled={pending}` killed the control for the whole round
+            trip — so the chip repainted instantly and then the thing you had just
+            used went dead in your hand, which reads as slower than no optimism
+            at all. The optimistic value is already the answer; there is nothing
+            left to protect. */}
         <PopoverTrigger
-          disabled={pending}
           title={
             variant === "compact"
               ? `Move — currently ${TASK_STATUS_LABELS[move.shownStatus]}`
