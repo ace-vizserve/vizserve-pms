@@ -30,6 +30,7 @@ import type { TaskPriority } from "@/lib/schemas/tasks";
 import { createPersonalTask, createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
+import { FieldError } from "@/components/ui/field-error";
 
 /**
  * P7-01 / P7-14 — a member creates work.
@@ -380,11 +381,3 @@ const MINE = "__mine__";
  */
 const NO_LIST = "__none__";
 
-function FieldError({ messages }: { messages?: string[] }) {
-  if (!messages?.length) return null;
-  return (
-    <p role="alert" className="text-xs text-destructive">
-      {messages[0]}
-    </p>
-  );
-}

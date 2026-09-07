@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { requireAuthContextOrThrow } from "@/lib/auth/authorization";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
@@ -12,6 +11,7 @@ import {
 } from "@/lib/schemas/internal-requests";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import { createClient } from "@/utils/supabase/server";
+import { flattenIssues, readableError } from "@/lib/action-result";
 
 /**
  * P5-06 / P5-08 — internal request submission and decisions.
@@ -23,27 +23,10 @@ import { createClient } from "@/utils/supabase/server";
  * engine has been bypassed and that is the bug.
  */
 
-export type ActionResult<T = void> =
-  { ok: true; data: T } | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
-
-function readableError(error: { message?: string } | null): string {
-  const raw = error?.message ?? "";
-  return (
-    raw
-      .replace(/^.*?(?:ERROR|error):\s*/i, "")
-      .replace(/\s*CONTEXT:[\s\S]*$/, "")
-      .trim() || "That did not go through. Try again."
-  );
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 function refresh(id?: string) {
   revalidatePath("/approvals");

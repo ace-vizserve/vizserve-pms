@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { requireAuthContextOrThrow } from "@/lib/auth/authorization";
 import { decimalHours, formatAppTime, workedMinutes } from "@/lib/dates";
@@ -13,6 +12,7 @@ import {
 } from "@/lib/leave";
 import { dtrExportSchema, punchSchema, type PunchResult } from "@/lib/schemas/dtr";
 import { createClient } from "@/utils/supabase/server";
+import { flattenIssues, readableError } from "@/lib/action-result";
 
 /**
  * P5-02 / P5-11 — DTR mutations and the payroll export.
@@ -24,28 +24,10 @@ import { createClient } from "@/utils/supabase/server";
  * second path to keep in step.
  */
 
-export type ActionResult<T = void> =
-  { ok: true; data: T } | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
-
-/** Postgres raises a sentence; PostgREST wraps it. Show the sentence. */
-function readableError(error: { message?: string } | null): string {
-  const raw = error?.message ?? "";
-  return (
-    raw
-      .replace(/^.*?(?:ERROR|error):\s*/i, "")
-      .replace(/\s*CONTEXT:[\s\S]*$/, "")
-      .trim() || "That did not go through. Try again."
-  );
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 // ---------------------------------------------------------------------------
 // P5-02 — punch

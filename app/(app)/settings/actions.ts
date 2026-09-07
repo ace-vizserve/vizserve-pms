@@ -2,7 +2,6 @@
 
 import { revalidatePath } from "next/cache";
 import { createClient as createStandaloneClient } from "@supabase/supabase-js";
-import { z } from "zod";
 
 import { getAuthContext, loadMustChangePassword } from "@/lib/auth/authorization";
 import { sniffMatchesDeclaredType, safeStorageName, formatBytes } from "@/lib/attachments";
@@ -16,6 +15,7 @@ import { changeOwnPasswordSchema, forcedPasswordChangeSchema } from "@/lib/schem
 import { userPreferencesSchema } from "@/lib/schemas/preferences";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
+import { flattenIssues } from "@/lib/action-result";
 
 /**
  * P8-11 / P8-12 — the actions behind a person's own settings screen.
@@ -29,18 +29,10 @@ import { createClient } from "@/utils/supabase/server";
  * `/admin/users` screen where it belongs.
  */
 
-export type ActionResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 /**
  * ⚠️ A CLIENT THAT HOLDS NO COOKIES, used only to ASK GoTrue whether a password

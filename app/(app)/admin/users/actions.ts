@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { APP_ACCESS_KEY, requireRole } from "@/lib/auth/authorization";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
@@ -13,6 +12,7 @@ import {
 } from "@/lib/schemas/users";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
+import { flattenIssues } from "@/lib/action-result";
 
 /**
  * P0-04 — user administration.
@@ -28,18 +28,10 @@ import { createClient } from "@/utils/supabase/server";
  * `createAdminClient()` does so AFTER `requireRole`.
  */
 
-export type ActionResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 /** The shape written to the audit log. Enough to answer "who had what, when". */
 type AuditableProfile = {

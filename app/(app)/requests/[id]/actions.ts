@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 
 import { formatDate } from "@/lib/dates";
-import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
@@ -20,6 +19,7 @@ import {
 import { richTextToPlainText } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import { createClient } from "@/utils/supabase/server";
+import { flattenIssues, readableError } from "@/lib/action-result";
 
 /**
  * Gate 1 — the Team Leader decision (P2-07 / P2-08 / P2-09).
@@ -37,33 +37,15 @@ import { createClient } from "@/utils/supabase/server";
  * the database is the copy that a direct API call cannot skip.
  */
 
-export type ActionResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 /**
  * Postgres raises a sentence; PostgREST wraps it. Unwrap it rather than showing
  * "Edge Function returned a non-2xx" to a Team Leader.
  */
-function readableError(error: { message?: string; details?: string } | null): string {
-  const raw = error?.message ?? "";
-  if (!raw) return "That did not go through. Try again.";
-
-  // Our own raises are already written for a human; Postgres prefixes are not.
-  return raw
-    .replace(/^.*?(?:ERROR|error):\s*/i, "")
-    .replace(/\s*CONTEXT:[\s\S]*$/, "")
-    .trim() || "That did not go through. Try again.";
-}
 
 export async function decideOnRequest(
   requestId: string,

@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import {
   assertDepartmentShape,
@@ -35,6 +34,7 @@ import { reconcileFormSchema, optionsFromRow, type FormFieldRow } from "@/lib/fo
 import type { FieldType } from "@/lib/schemas/forms";
 
 import { countFormSubmissions } from "./submission-count";
+import { flattenIssues } from "@/lib/action-result";
 
 /**
  * P1-03 / P1-04 — form builder and settings mutations.
@@ -45,17 +45,10 @@ import { countFormSubmissions } from "./submission-count";
  * enough (D15).
  */
 
-export type ActionResult<T = void> =
-  { ok: true; data: T } | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 /** Postgres unique_violation — surfaced as a field error, not a 500. */
 function isUniqueViolation(error: { code?: string } | null) {

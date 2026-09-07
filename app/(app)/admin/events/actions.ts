@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/authorization";
 import {
@@ -10,6 +9,7 @@ import {
   updateEventSchema,
 } from "@/lib/schemas/events";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { flattenIssues } from "@/lib/action-result";
 
 /**
  * P7-46 — calendar events.
@@ -28,18 +28,10 @@ import { createAdminClient } from "@/utils/supabase/admin";
  * here and why the delete confirmation is a plain one.
  */
 
-export type ActionResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 /**
  * Both screens this touches.

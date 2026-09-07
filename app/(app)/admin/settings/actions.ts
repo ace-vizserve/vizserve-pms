@@ -1,11 +1,11 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { z } from "zod";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { appSettingsSchema } from "@/lib/schemas/settings";
 import { createAdminClient } from "@/utils/supabase/admin";
+import { flattenIssues } from "@/lib/action-result";
 
 /**
  * P7-37 — the company-wide settings.
@@ -25,9 +25,10 @@ import { createAdminClient } from "@/utils/supabase/admin";
  * start flagging everybody" has to be answerable.
  */
 
-export type ActionResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 /**
  * The audit log's `entity_id` is `uuid NOT NULL`, and the settings row's key is
@@ -39,15 +40,6 @@ export type ActionResult<T = void> =
  * the writer and anybody later reading the log back.
  */
 const SETTINGS_AUDIT_ID = "00000000-0000-0000-0000-000000000000";
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
 
 export async function updateAppSettings(input: unknown): Promise<ActionResult> {
   const context = await requireRole("owner");

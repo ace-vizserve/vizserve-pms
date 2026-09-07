@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils";
 import { submitInternalRequest } from "./actions";
 import { CharacterCount } from "@/components/ui/character-count";
 import { INTERNAL_REASON_MAX, INTERNAL_REASON_MIN } from "@/lib/schemas/internal-requests";
+import { FieldError } from "@/components/ui/field-error";
 
 /**
  * Only what the picker needs. The server page selects the active ones, in order.
@@ -250,14 +251,6 @@ function RelieverTaskPicker({
  * revalidated here. The zod schema and the Postgres CHECK constraints are the
  * two authorities; a third copy in the browser is the one that drifts.
  */
-function FieldError({ messages }: { messages?: string[] }) {
-  if (!messages?.length) return null;
-  return (
-    <p role="alert" className="text-xs text-destructive">
-      {messages[0]}
-    </p>
-  );
-}
 
 export function NewRequestDialog({
   leaveTypes = [],

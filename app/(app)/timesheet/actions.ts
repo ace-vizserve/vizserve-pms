@@ -16,6 +16,7 @@ import {
   type LoggableTask,
 } from "@/lib/timesheet-tasks-server";
 import { createClient } from "@/utils/supabase/server";
+import { flattenIssues, readableError as sharedReadableError } from "@/lib/action-result";
 
 /**
  * P6-02 — timesheet mutations.
@@ -28,27 +29,25 @@ import { createClient } from "@/utils/supabase/server";
  * route around it.
  */
 
-export type ActionResult<T = void> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
+// Re-exported because components import the type from the action file they
+// call, and moving the definition should not move 40 import statements.
+import type { ActionResult } from "@/lib/action-result";
+export type { ActionResult };
 
 /** Postgres raises a sentence; PostgREST wraps it. Show the sentence. */
+/**
+ * The shared reader, plus the one case that is specific to this table.
+ *
+ * A policy that refuses an INSERT surfaces as 42501 with PostgREST's own wording
+ * about row-level security, which tells the person nothing they can act on.
+ * There are only three ways to fail this policy, and naming them is more use
+ * than the code.
+ *
+ * ⚠️ THIS IS THE REASON THE SHARED HELPER TAKES `{ message?: string }` AND
+ * NOTHING ELSE. Pushing the 42501 sentence down into `lib/action-result.ts`
+ * would put timesheet wording in front of every other table's policy refusal.
+ */
 function readableError(error: { message?: string; code?: string } | null): string {
-  const raw = error?.message ?? "";
-
-  // A policy that refuses an INSERT surfaces as 42501 with PostgREST's own
-  // wording about row-level security, which tells the person nothing they can
-  // act on. There are only three ways to fail this policy, and naming them is
-  // more use than the code.
   if (error?.code === "42501") {
     return (
       "You can only log time against a task you are on, for a day that has happened, " +
@@ -56,12 +55,7 @@ function readableError(error: { message?: string; code?: string } | null): strin
     );
   }
 
-  return (
-    raw
-      .replace(/^.*?(?:ERROR|error):\s*/i, "")
-      .replace(/\s*CONTEXT:[\s\S]*$/, "")
-      .trim() || "That did not go through. Try again."
-  );
+  return sharedReadableError(error);
 }
 
 /**

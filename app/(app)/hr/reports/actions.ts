@@ -1,6 +1,5 @@
 "use server";
 
-import { z } from "zod";
 
 import {
   canDoHr,
@@ -20,6 +19,7 @@ import {
 } from "@/lib/reports/leave-report";
 import { leaveReportFilterSchema } from "@/lib/schemas/leave-report";
 import { createClient } from "@/utils/supabase/server";
+import { flattenIssues } from "@/lib/action-result";
 
 /**
  * P7-53 — the leave audit export. ONE action, three call sites.
@@ -43,15 +43,6 @@ import { createClient } from "@/utils/supabase/server";
 export type ExportResult =
   | { ok: true; data: { filename: string; base64: string } }
   | { ok: false; error: string; fieldErrors?: Record<string, string[]> };
-
-function flattenIssues(error: z.ZodError): Record<string, string[]> {
-  const fieldErrors: Record<string, string[]> = {};
-  for (const issue of error.issues) {
-    const key = String(issue.path[0] ?? "form");
-    (fieldErrors[key] ??= []).push(issue.message);
-  }
-  return fieldErrors;
-}
 
 /**
  * What this caller could see, in the words that go on the page.
