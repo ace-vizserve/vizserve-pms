@@ -23,11 +23,20 @@ import { sileo, Toaster as SileoToaster, type SileoPosition } from "sileo";
  *
  * What NO CALL SITE may pass: sileo's `fill`, `roundness`, `icon`, `styles` and
  * `autopilot`. Per-call visual overrides are how a toast system ends up with
- * fourteen looks; those decisions are made once — `fill` and `roundness` in
- * `<Toaster>` below, and everything else as plain CSS on sileo's own
- * `data-sileo-*` attributes in `app/globals.css`. The `styles` classNames it
- * offers were tried and abandoned: they reached the DOM, but Tailwind never
- * emitted the utilities, so the elements carried classes that styled nothing.
+ * fourteen looks; those decisions are made once, in `<Toaster>` below.
+ *
+ * ⚠️ THE APP NO LONGER RETARGETS sileo's INTERNALS. `app/globals.css` carried a
+ * ~310-line block mapping every `data-sileo-*` part onto this system's tokens —
+ * the state-tinted surface, the stroke, the three drop shadows, the badge chip
+ * and every line of type, all of it `!important` to win against a stylesheet
+ * sileo injects from JavaScript at mount. It is gone. The toast is a plain black
+ * card now, and its entire appearance is the four lines passed below.
+ *
+ * That block is not to be rebuilt piecemeal. It existed because sileo ships no
+ * theming contract beyond a handful of variables, and fighting that from a
+ * stylesheet is what produced 310 lines of `!important` in the first place.
+ * Anything the four lines below cannot express is a reason to reconsider the
+ * library, not to reopen that file.
  */
 
 /** Everything a call site may pass. Mirrors what `sonner` accepted, minus what nothing used. */
@@ -94,80 +103,6 @@ export const toast = Object.assign(
 const POSITION: SileoPosition = "top-center";
 
 /**
- * ⚠️ `fill` IS AN SVG ATTRIBUTE, NOT A CSS BACKGROUND, and that is what makes
- * the raised surface possible rather than what prevents it.
- *
- * sileo draws the toast as a filtered SVG shape — that is what the gooey morph
- * actually is — and passes `fill` straight through to the path's `fill`
- * attribute. So it takes an SVG PAINT value. `linear-gradient(...)` is CSS
- * syntax and was silently ignored (that shipped once, and the toast fell back
- * to flat white); `url(#id)` is the SVG spelling of the same idea, and it works.
- *
- * §1.5 says a raised object is lighter at the top, where the light is. That is
- * `--gradient-raised`, and `<ToastSurfaceDefs>` below is it, expressed as the
- * `<linearGradient>` an SVG can actually use. The hairline is a real `stroke`
- * on the same path — see `app/globals.css`.
- */
-const SURFACE_LIGHT = "url(#vizserve-toast-surface-light)";
-const SURFACE_DARK = "url(#vizserve-toast-surface-dark)";
-
-/**
- * The two gradients the surface paints with.
- *
- * ⚠️ IT MUST BE IN THE DOCUMENT FOR `url(#id)` TO RESOLVE, and it has to be
- * OUTSIDE sileo's own tree — sileo unmounts a toast when it exits, and a
- * gradient living inside one would take the definition with it, leaving any
- * toast still on screen painted with nothing. So it renders here, once, beside
- * the Toaster and independent of whether any toast exists.
- *
- * Both are declared always, not switched on the theme: an `id` that appears and
- * disappears is an `id` a mid-animation repaint can miss.
- *
- * ⚠️ THE STOPS ARE `--gradient-RAISED`, NOT `--gradient-surface`, and the
- * difference is the whole point. `--gradient-surface` is #ffffff → #fafcfd —
- * a panel, near-white, and on a white card it is invisible. `--gradient-raised`
- * is #fdfeff → #f1f5f9: its bottom stop is properly grey, so the shape reads as
- * a lit object sitting ON the page rather than as a hole cut in it. A toast is
- * the most raised thing in the product; it takes the raised gradient.
- *
- * Restated as literals because SVG `stop-color` cannot read a CSS custom
- * property that is redefined per theme — it resolves against THIS element, not
- * against the toast, so a token would always give the light value. ⚠️ IF THOSE
- * GRADIENTS CHANGE, THESE CHANGE; they are the only duplicated colours here.
- *
- * `aria-hidden` and zero-sized: it draws nothing, it only defines.
- */
-function ToastSurfaceDefs() {
-  return (
-    <svg width="0" height="0" aria-hidden focusable="false" style={{ position: "absolute" }}>
-      <defs>
-        {/* x1/y1 → x2/y2 top-to-bottom. The default is LEFT to right, which
-            would light the wrong edge. */}
-        <linearGradient id="vizserve-toast-surface-light" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#fdfeff" />
-          <stop offset="100%" stopColor="#f1f5f9" />
-        </linearGradient>
-        <linearGradient id="vizserve-toast-surface-dark" x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="#252b37" />
-          <stop offset="100%" stopColor="#1c212b" />
-        </linearGradient>
-      </defs>
-    </svg>
-  );
-}
-
-/**
- * Between `--radius-lg` (10) and `--radius-xl` (14), picked by eye.
- *
- * A toast is an overlay, so it takes an overlay radius rather than sileo's
- * stock capsule — the collapsed pill was the one shape in the product that
- * belonged to no other component. It is not a token because it is not a value
- * anything else in the system uses: the shape here is 40px tall collapsed, and
- * the radius that reads right on it is not the one that reads right on a card.
- */
-const ROUNDNESS = 12;
-
-/**
  * Mounted once, in the root layout, INSIDE `ThemeProvider`.
  *
  * ⚠️ THE THEME IS PASSED EXPLICITLY RATHER THAN LEFT ON "system". This app
@@ -178,25 +113,33 @@ const ROUNDNESS = 12;
  * `resolvedTheme` is undefined until after hydration, which is why it falls
  * back to "system" rather than to "light": on the first paint the OS guess is
  * right far more often than a coin flip, and it is corrected within a frame.
- * The FILL has no such fallback available — it names one gradient, not a media
- * query — so it follows `resolvedTheme` directly and is simply the light one
- * until the theme resolves. A toast cannot fire that early.
+ *
+ * The FILL does not depend on any of that. It is black in both themes — which is
+ * the point of a black toast: on the light app it is the highest-contrast thing
+ * on the page, and on the dark app it still separates from `--background`
+ * (#12151C) by its border and its lift rather than by its tone. So the theme
+ * prop steers only sileo's own internals, and the card reads the same either way.
  */
 export function Toaster() {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === "dark";
 
   return (
-    <>
-      <ToastSurfaceDefs />
-      <SileoToaster
-        position={POSITION}
-        theme={dark ? "dark" : resolvedTheme === "light" ? "light" : "system"}
-        options={{
-          fill: dark ? SURFACE_DARK : SURFACE_LIGHT,
-          roundness: ROUNDNESS,
-        }}
-      />
-    </>
+    <SileoToaster
+      position={POSITION}
+      theme={dark ? "dark" : resolvedTheme === "light" ? "light" : "system"}
+      options={{
+        fill: "black",
+        // ⚠️ THESE TWO CLASSES MUST STAY WRITTEN OUT AS LITERALS HERE. Tailwind
+        // emits a utility only when its scanner sees the string in source, so
+        // building either one (`text-white/${n}`, or a name assembled in a
+        // helper) makes the class reach the DOM while styling nothing — which
+        // is exactly how the earlier `styles` attempt failed.
+        styles: {
+          title: "text-white!",
+          description: "text-white/75!",
+        },
+      }}
+    />
   );
 }
