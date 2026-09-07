@@ -306,7 +306,8 @@ export default async function TasksPage({
       <div className="flex flex-wrap items-center gap-2">
         <TaskToolbar view="list" />
         <div className="ml-auto">
-          <NewTaskButton />
+          {/* The list being read, so a task made here lands in it. */}
+          <NewTaskButton listId={params.list ?? null} />
         </div>
       </div>
 

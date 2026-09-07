@@ -62,12 +62,19 @@ import { PriorityPicker } from "./priority-picker";
  */
 export function NewPersonalTaskDialog({
   lists,
+  defaultListId = null,
   colleagues,
   departmentId,
   trigger = "toolbar",
 }: {
   /** The member's own department's lists. Optional — a task needs no list. */
   lists: { id: string; name: string }[];
+  /**
+   * The list the reader is already filtered to, from `?list=`. Pre-selected so
+   * a task created while looking at a list lands IN that list — see the note in
+   * `new-task-button.tsx` for the bug this fixes.
+   */
+  defaultListId?: string | null;
   /**
    * Active people in the member's own department, THEMSELVES EXCLUDED — "me" is
    * the default rather than an entry in the list, because picking yourself and
@@ -91,7 +98,17 @@ export function NewPersonalTaskDialog({
    * Select would emit its own hidden input from a `name`; one field emitted
    * twice is one `FormData.get()` silently taking whichever came first.
    */
-  const [listId, setListId] = useState(NO_LIST);
+  /*
+   * ⚠️ ONLY IF IT IS ACTUALLY ONE OF THE OPTIONS. `?list=` is a URL somebody
+   * can type, and a member's own department may not contain it —
+   * `vizserve_pms_create_personal_task` RAISES on a list belonging to another
+   * department, so pre-selecting one blindly would turn a mistyped URL into a
+   * dialog that cannot be submitted at all. Falling back to "No list" keeps a
+   * bad parameter to a missing convenience rather than a broken form.
+   */
+  const [listId, setListId] = useState(
+    defaultListId && lists.some((list) => list.id === defaultListId) ? defaultListId : NO_LIST,
+  );
   /*
    * P7-56 — the notes are a rich-text editor now, which has no form value of
    * its own, so it joins the controlled-state-plus-hidden-input arrangement

@@ -34,8 +34,24 @@ import { NewTaskDialog } from "./new-task-dialog";
  */
 export async function NewTaskButton({
   trigger = "toolbar",
+  listId = null,
 }: {
   trigger?: "toolbar" | "column" | "row";
+  /**
+   * The list the reader is ALREADY looking at, from `?list=` on /tasks and
+   * /tasks/board.
+   *
+   * ⚠️ WITHOUT THIS THE DIALOG DEFAULTS TO "No list" AND THE TASK VANISHES.
+   * Somebody filtered to a list, pressed New task, typed a title and pressed
+   * save — and the task was filed with `list_id = NULL`, so it could not appear
+   * in the list they were staring at. It looked exactly like the save had
+   * failed. It had not; the task was in the unfiled pile.
+   *
+   * Passed down as a DEFAULT, not a lock: the picker still renders and the list
+   * is still changeable, because "new task in the list I am reading" is the
+   * common case and not the only one.
+   */
+  listId?: string | null;
 } = {}) {
   const context = await requireAuthContext();
   const supabase = await createClient();
@@ -89,6 +105,7 @@ export async function NewTaskButton({
         colleagues={colleagues ?? []}
         departmentId={myDepartment}
         trigger={trigger}
+        defaultListId={listId}
       />
     );
 
@@ -133,6 +150,7 @@ export async function NewTaskButton({
       people={people ?? []}
       lists={lists ?? []}
       defaultDepartmentId={allowed[0]!.id}
+      defaultListId={listId}
       trigger={trigger}
     />
   );

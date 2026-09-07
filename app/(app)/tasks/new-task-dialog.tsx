@@ -90,12 +90,19 @@ export function NewTaskDialog({
   people,
   lists,
   defaultDepartmentId,
+  defaultListId = null,
   trigger = "toolbar",
 }: {
   departments: Department[];
   people: Person[];
   lists: List[];
   defaultDepartmentId: string;
+  /**
+   * The list the reader is already filtered to, from `?list=`. See the note in
+   * `new-task-button.tsx`: without it a task created while looking at a list
+   * was filed unlisted, and simply did not appear where it was made.
+   */
+  defaultListId?: string | null;
   trigger?: "toolbar" | "column" | "row";
 }) {
   const [open, setOpen] = useState(false);
@@ -116,6 +123,7 @@ export function NewTaskDialog({
             people={people}
             lists={lists}
             defaultDepartmentId={defaultDepartmentId}
+            defaultListId={defaultListId}
             onDone={() => setOpen(false)}
           />
         ) : null}
@@ -129,12 +137,14 @@ function TaskForm({
   people,
   lists,
   defaultDepartmentId,
+  defaultListId = null,
   onDone,
 }: {
   departments: Department[];
   people: Person[];
   lists: List[];
   defaultDepartmentId: string;
+  defaultListId?: string | null;
   onDone: () => void;
 }) {
   const router = useRouter();
@@ -148,7 +158,15 @@ function TaskForm({
   const [dueDate, setDueDate] = useState("");
   const [startDate, setStartDate] = useState("");
   const [estimate, setEstimate] = useState<number | null>(null);
-  const [listId, setListId] = useState<string>(NONE);
+  /*
+   * Seeded from `?list=`, but ONLY when it is genuinely one of the options. A
+   * URL is something somebody can type, and a lead reads lists across every
+   * department they lead — so an id that is not in `lists` falls back to NONE
+   * rather than pre-selecting something the server would refuse.
+   */
+  const [listId, setListId] = useState<string>(
+    defaultListId && lists.some((list) => list.id === defaultListId) ? defaultListId : NONE,
+  );
   const [priority, setPriority] = useState<TaskPriority | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
