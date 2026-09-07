@@ -60,6 +60,18 @@ export function TaskStatusGroups({
     }
 
     /*
+     * A deleted row goes now.
+     *
+     * ⚠️ THE GROUP COUNT FOLLOWS BY ITSELF, because the heading counts what is
+     * in the bucket rather than holding its own number. That is the whole
+     * argument for bucketing here instead of on the server: one array is the
+     * source of the rows AND of the count beside them, so they cannot disagree.
+     */
+    if (move.kind === "remove") {
+      return state.filter((row) => row.id !== move.id);
+    }
+
+    /*
      * A row for a task that does not exist yet.
      *
      * ⚠️ IT CARRIES ONLY WHAT WAS TYPED. Everything else — the assignee's

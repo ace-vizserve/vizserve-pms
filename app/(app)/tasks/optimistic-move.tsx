@@ -29,7 +29,8 @@ import type { VizservePmsTaskStatus } from "@/lib/database.types";
  */
 export type OptimisticMove =
   | { kind: "move"; id: string; status: VizservePmsTaskStatus }
-  | { kind: "add"; title: string; status: VizservePmsTaskStatus };
+  | { kind: "add"; title: string; status: VizservePmsTaskStatus }
+  | { kind: "remove"; id: string };
 
 /** Null wherever the control renders with no groups around it — the task detail page and the board. */
 export const OptimisticMoveContext = createContext<((move: OptimisticMove) => void) | null>(null);

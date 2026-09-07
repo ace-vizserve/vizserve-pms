@@ -215,6 +215,29 @@ function TaskForm({
   function submit() {
     setFormError(null);
 
+    /*
+     * P11-05 — THE DIALOG CLOSES ON THE CLICK, WHICH IS THE ONLY THING WORTH
+     * PREDICTING HERE.
+     *
+     * ⚠️ THE NEW ROW CANNOT BE. This dialog navigates to `/tasks/<id>` and the
+     * id comes from the server, so there is no row to draw and nowhere to draw
+     * it — the toolbar sits outside the status groups, where `useOptimisticMove`
+     * is null. Painting a placeholder that cannot be opened would be worse than
+     * the wait.
+     *
+     * ⚠️ AND CLOSING EARLY IS NOT AVAILABLE EITHER, which is worth writing down
+     * because it looks like the obvious move. `<DialogContent>` renders
+     * `{open ? <TaskForm/> : null}`, so `onDone()` UNMOUNTS this component —
+     * every field, and the error handler below with them. A refusal would then
+     * have nowhere to put its message and nothing to restore, and the person
+     * would lose eight filled-in fields to a toast.
+     *
+     * So this one keeps its spinner and its disabled Create button. That is the
+     * honest state: the work really is still in flight and there is nothing
+     * truthful to show instead. Lifting the form's state above the dialog would
+     * make early closing safe, and that is the change to make if this ever
+     * matters more than the eight fields do.
+     */
     startTransition(async () => {
       const result = await createTask({
         department_id: departmentId,

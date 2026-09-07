@@ -158,6 +158,12 @@ export function NewPersonalTaskDialog({
       estimate_minutes: estimate,
     };
 
+    // P11-05. Closed on the click; reopened below if the server refuses. The
+    // row itself arrives with the action's revalidation — this dialog is
+    // rendered from the toolbar, outside the status groups, so there is no
+    // optimistic list here to add it to.
+    setOpen(false);
+
     startTransition(async () => {
       const result = forSomebodyElse
         ? await createTask({
@@ -175,7 +181,9 @@ export function NewPersonalTaskDialog({
         : await createPersonalTask(common);
 
       if (!result.ok) {
+        // Back, with the fields as they were and the messages under them.
         setErrors(result.fieldErrors ?? {});
+        setOpen(true);
         toast.error(result.error);
         return;
       }
@@ -185,7 +193,6 @@ export function NewPersonalTaskDialog({
           ? `Assigned to ${colleagues.find((person) => person.id === assignee)?.full_name ?? "them"}.`
           : "Added to your tasks.",
       );
-      setOpen(false);
       reset();
     });
   }

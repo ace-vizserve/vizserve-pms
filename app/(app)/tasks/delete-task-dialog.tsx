@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+
+import { useOptimisticMove } from "./optimistic-move";
 import { Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -66,17 +68,33 @@ export function DeleteTaskDialog({
     });
   }
 
+  /*
+   * P11-05 — the row goes on confirm.
+   *
+   * Null on the task DETAIL page, where deleting navigates away and there is no
+   * list to remove anything from. Optional by construction rather than by check.
+   */
+  const removeRow = useOptimisticMove();
+
   function confirm() {
     setError(null);
+
+    // Closed first: the dialog is modal, and leaving it up over a row that has
+    // already gone reads as the delete not having worked.
+    setOpen(false);
+
     startDelete(async () => {
+      removeRow?.({ kind: "remove", id: taskId });
+
       const result = await deleteTask(taskId);
       if (!result.ok) {
+        // React brings the row back; the dialog reopens carrying the reason.
         setError(result.error);
+        setOpen(true);
         return;
       }
 
       toast.success("Task deleted");
-      setOpen(false);
       onDeleted?.();
     });
   }
