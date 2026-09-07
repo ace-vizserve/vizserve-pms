@@ -20,12 +20,14 @@ npm run test -- <file>   # single test file
 npm run verify           # metadata guard + typecheck + lint + test
 
 npm run check:metadata   # CI guard: fails if user_metadata is read in the auth path
-npm run seed             # create the 16 test accounts (needs SUPABASE_SECRET_KEY)
+npm run seed             # the 16 test accounts — REFUSES a database with real users in it
 npm run diagnose:login   # separates the 4 "cannot log in" failure modes
 
 npm run db:push          # apply migrations to the linked project
 npm run db:types         # regenerate lib/database.types.ts (needs db:start + Docker)
 ```
+
+**`tests/db/*` will not run without `SUPABASE_TEST_URL`, `SUPABASE_TEST_PUBLISHABLE_KEY` and `SUPABASE_TEST_SECRET_KEY`, and it refuses outright if they name the same project as the app.** Those eighteen files WRITE. Until 7 Sep 2026 they read the app's own URL, so every `npm run verify` ran them against the live project and left 12,378 orphaned approval rows behind — `scripts/cleanup-test-residue.sql` is the record. Unset, all 18 skip and say why, which is the state on this machine: `verify` is green on 1,499 unit tests and the db suite is currently proving nothing. Point them at `npm run db:start` or a scratch project to change that.
 
 **Port 3000 is occupied by the HFSE SIS app on this machine.** Use `PORT=3177 npm run dev`. This bites silently — a request to `localhost:3000` returns SIS's login page, which also says "Welcome back", so a smoke test can appear to pass while testing the wrong application entirely.
 

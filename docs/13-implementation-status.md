@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 1 September 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 7 September 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -19,13 +19,36 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). **P7-44 rebuilt the entry editor on 25 Aug** — see below. P6-04/06/07/08/09 not begun |
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-eight migrations live, **P7-52/P7-53 applied 1 Sep** (HR as a capability + the filterable leave audit — see below), P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
 | **8 — Live board, email transport, owner rung, personal settings** | **In progress.** P8-01 through P8-12 — see the Phase 8 section below. P8-11/P8-12 (personal settings, temporary passwords, clock reminders) ship with a migration that is **not yet applied** |
-| **9 — Leave hand-over and the approval chain** | **Code done, migrations NOT applied.** Four files (`p9_01`…`p9_04`). Relievers, the turn-over confirmation, task coverage, withdrawal, and a two- or three-stage chain for every leave request. `tests/db/relievers.test.ts` has **never been run** — the project in `.env` is live. See the Phase 9 section below |
+| **9 — Leave hand-over and the approval chain** | **Done. All eight migrations applied** (`p9_01`…`p9_08`), 5–7 Sep. Relievers, the turn-over confirmation, task coverage, withdrawal, and a two- or three-stage chain for every leave request. `tests/db/relievers.test.ts` still has **never been run** — see the Phase 9 section below |
 | **10 — Performance pass** | **Done, code only — no migration.** Auth round trips removed, request waterfalls collapsed, duplicate reads memoised, 27 Suspense boundaries added, Next 16.2.12 → 16.3.4. No business logic changed. See the Performance pass section below |
 
-`npm run verify` is green: **747 passed, 2 skipped, 0 failures** (20 Aug, after
-P7-31). The 2 skips are still the opt-in email deliverability tests. Unit tests
-are at 366 across 19 files; `tests/db` is 381 across 18. Lint reports **0 errors
-and 4 warnings**, all pre-existing and all in the orphaned `supabase/middleware.ts`.
+`npm run verify` is green: **1,499 passed, 389 skipped, 0 failures** (7 Sep).
+Lint reports **0 errors and 7 warnings**, all pre-existing.
+
+⚠️ **THE 389 SKIPS ARE THE WHOLE OF `tests/db`, AND THAT IS THE NEW SAFE
+DEFAULT — read the note below before treating it as a regression.** Until 7 Sep
+`tests/db/helpers.ts` read `NEXT_PUBLIC_SUPABASE_URL`, so the suite pointed
+wherever the app pointed, and the app has pointed at the LIVE project since
+18 Aug. Eighteen writing test files therefore ran against production on every
+verify, and `vizserve_pms_approvals` has no foreign key to what it references —
+so each run left approval rows behind pointing at requests its own cleanup had
+deleted. **12,378 orphaned rows were removed by hand on 5 Sep**
+(`scripts/cleanup-test-residue.sql` is the record). Phase 6 reports turnaround
+FROM that table, so they were a wrong answer waiting to be reported, not clutter.
+
+The suite now reads `SUPABASE_TEST_URL` / `SUPABASE_TEST_PUBLISHABLE_KEY` /
+`SUPABASE_TEST_SECRET_KEY` and nothing else, and REFUSES — with a message, not a
+silent skip — if those name the same project as the app. Renaming alone would not
+have been enough: the obvious way to configure new variables is to copy the old
+values across, which restores the bug with fresh names. Unset, every file skips
+and says why, which is what a fresh checkout and CI get.
+
+**So the db suite is currently proving nothing on this machine**, and will keep
+proving nothing until somebody points those three at `npm run db:start` or a
+scratch project. That is a real gap, deliberately preferred to the alternative.
+`scripts/seed.mjs` gained a guard of its own kind — it counts users whose address
+is not `@example.com` and refuses if there are any; `seed-team.mjs` is untouched,
+because production is where that one belongs.
 
 The 19 Aug run — **562 passed, 2 skipped**, with 7 lint warnings — closed one
 long-standing gap and found two pre-existing failures:
@@ -1578,7 +1601,12 @@ All surfaced while investigating "I cannot see my logged time".
 
 ## Phase 9 — leave hand-over and the approval chain (4 Sep 2026)
 
-**Code done. None of the four migrations has been applied.** Amier, 4 Sep.
+**Done. All eight migrations applied, 5–7 Sep 2026.**
+
+⚠️ THIS SECTION SAID "none of the four migrations has been applied" UNTIL 7 SEP,
+three days after they were. That is the failure this document exists to prevent,
+so it is worth naming: the row above is the first thing anybody reads before
+deciding whether a feature is there, and it told them relievers were not.
 
 Two changes that landed together, and the first is the one most likely to
 surprise somebody:
@@ -1604,6 +1632,10 @@ internal request type.
 | `20260905091000_p9_02_withdrawn_status.sql` | `WITHDRAWN`, and nothing else | **Must commit before p9_03** — Postgres refuses a new enum value in the transaction that adds it |
 | `20260905092000_p9_03_submit_and_withdraw.sql` | Submit takes relievers and sets the stage; withdraw | **Drops the 11-arg submit and regrants the 13.** Skip that and every internal request form breaks at once with a PostgREST overload ambiguity |
 | `20260905093000_p9_04_decide_chain.sql` | The chain-aware decide, `may_decide_internal_stage`, one clause in the P2-00 engine, the manager read policy | Applying p9_03 without this leaves leave at stage 2 decided in one step — degraded, not broken |
+| `20260905094000_p9_05_is_mine.sql` | `is_mine` as a PostgREST computed column, replacing `mineFilter` | See point 5 |
+| `20260905095000_p9_06_is_mine_cost.sql` | Makes it SECURITY DEFINER with the one EXISTS inlined | **Measured: 1,970 ms → 199 ms** on the tasks list. p9_05 alone is correct and slow |
+| `20260905096000_p9_07_turnover_is_a_rule.sql` | The turn-over confirmation as a deferred constraint trigger, INSERT-only | The front end will be bypassed; this is the copy that cannot be |
+| `20260907090000_p9_08_manager_can_see_the_handover.sql` | Widens `may_read_internal_request` with a stage-3 manager clause, adds `is_stage3_subject` and a users SELECT policy | **Found by audit, not by a test.** Without it a manager reaches stage 3 and cannot open the request they are being asked to decide |
 
 ### What the design deliberately is not
 
@@ -1693,14 +1725,14 @@ There is one code path for both shapes.
 
 ### What is owed
 
-- **All four migrations.** Apply in filename order; p9_02 in its own statement.
-- **`tests/db/relievers.test.ts` has never been run.** It writes — submits
-  requests, names relievers, hands tasks over — and the project in `.env` is
-  live. It needs a scratch project or `supabase db start`.
+- **`tests/db/relievers.test.ts` has never been run**, and it is the only part of
+  Phase 9 with no automated proof behind it. It writes — submits requests, names
+  relievers, hands tasks over — so it needs `SUPABASE_TEST_*` pointed at a
+  scratch project or at `npm run db:start`. Everything the chain does has been
+  exercised by hand instead, which is not the same thing.
 - `tests/unit/relievers.test.ts` (13), `tests/unit/task-filters.test.ts` (9)
   and the extended `tests/unit/approvals-queue.test.ts` (18) pass.
-- **Two more migrations**: `20260905094000_p9_05_is_mine.sql` and
-  `20260905095000_p9_06_is_mine_cost.sql` — see point 5. Both applied.
+- Nothing else. All eight migrations are applied.
 
 ### The one behaviour change to watch for on the screens
 
@@ -1804,3 +1836,82 @@ run before" was otherwise held throughout.
   reader of that page. It is now an unconditional batch member. It is
   `cache()`d and free in latency terms, but it is one more request on the
   route that already issues the most.
+
+---
+
+## Tasks — creation, consolidated (7 Sep 2026)
+
+Three fixes to one surface, in the order they were found. All code, no migration.
+
+### The bug that started it
+
+**A task typed inline was filed nowhere.** `quickAddTask` passed
+`p_list_id: null` hardcoded to both create RPCs and had no `list_id` in its
+schema at all. The task WAS created and the toast said so — it simply did not
+appear in the list it had been typed into, because it was not in that list. It
+read as a save that had silently failed, which is the worst shape a bug can
+take: nothing to search the logs for.
+
+The cause was duplication. `createTask`, `createPersonalTask` and `quickAddTask`
+each assembled their own arguments for the same two functions — three call sites
+naming the same eight parameters, two of them right.
+
+### `insertTask`, and why not "make quickAddTask call createTask"
+
+The obvious repair is for the inline path to call the dialog's action. It is
+wrong: `createTask` requires a `department_id` and a non-null `assignee_id`,
+neither of which the composer has — it derives a department from the person, and
+a null assignee is how it says "mine". Both exported actions also refresh and
+dispatch mail on the way out, which `quickAddTask` cannot afford: it still has
+nesting and a status transition to make.
+
+So the shared thing is the PAYLOAD, not the action. `insertTask` names each RPC
+parameter once and switches on `department_id: null` for personal work.
+Sanitising the description, deciding whether to send mail, and choosing when to
+revalidate all stay with each caller, because all three genuinely differ. Two
+RPC call sites are left in the codebase and both are inside that helper.
+
+### Required fields
+
+`priority`, `start_date` and `due_date` are now required on all three creation
+paths, and `assignee_id` on the two dialogs. Every surface already COLLECTED
+them — only the schemas said optional, which is why most rows had no priority
+and the priority column could not sort by a value almost nothing had.
+
+⚠️ **`assignee_id` stays optional on the inline composer, deliberately.**
+`assignable` excludes you, so there `null` IS how "mine" is expressed — it is
+what routes to `create_personal_task`. Requiring it would make a personal task
+impossible to add inline. If that picker ever grows an explicit "Me" option,
+this becomes required there too. `taskPatchSchema` is untouched: editing an
+existing task is still field by field.
+
+### Several people, from the moment the task is created
+
+P7-13's join table has been applied since 18 Aug and no creation form ever wrote
+to it. `writeCreationExtras` took `extra_assignee_ids`, but no schema parsed the
+field and no UI sent it — the parameter was dead at both ends.
+
+`PeoplePicker` in `app/(app)/tasks/assignees.tsx` is the controlled sibling of
+`AssigneePicker`: same monograms, same search, same footer sentence saying that
+everyone added can see, edit, log time against and move the task. Two components
+rather than a `mode` prop — "commit on every click" and "collect a draft" share
+their looks and nothing else.
+
+⚠️ **The composer's `With` chip is not rendered until an owner is chosen.**
+A null owner routes to `create_personal_task`, which sets `is_personal` on a
+column outside the UPDATE grant — it can never be changed afterwards. A personal
+task with four other people on it is a contradiction the database would store
+happily, so the control that would create one is not offered. Returning to
+"Myself" clears the list, so nothing collected can be sent invisibly.
+
+Personal tasks are deliberately left without it. The person in charge is filtered
+out of the candidates on both surfaces and dropped again in `insertTask` — a UI
+sending the same person in both fields is a UI behaving normally, not an error
+worth a sentence about a unique violation.
+
+### `/tasks` is no longer a page
+
+The all-tasks route was confusing beside a Projects tree that is also tasks, so
+`/tasks` with no `?list=` redirects to `/tasks/lists` and it is out of the nav.
+Task viewing is by list. The route file remains because `?list=` is the filtered
+view every list link points at.
