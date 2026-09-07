@@ -10,6 +10,8 @@ import { Textarea } from "@/components/ui/textarea";
 
 import { FeedbackForm } from "../../feedback/[token]/feedback-form";
 import { submitClientDecision } from "./actions";
+import { CharacterCount } from "@/components/ui/character-count";
+import { CLIENT_REVISION_MIN } from "@/lib/schemas/client-approval";
 
 /**
  * P4-04 — the decision half of the client page.
@@ -146,6 +148,10 @@ export function ApprovalForm({
               placeholder="e.g. The date on the poster says 12 August — it should be 21 August. Everything else is great."
               aria-label="What needs changing"
             />
+            {/* ⚠️ A CLIENT READS THIS ONE. They get one shot, they have no
+                account, and the button below was simply dead until they had
+                typed ten characters — with nothing on screen saying so. */}
+            <CharacterCount value={comment} min={CLIENT_REVISION_MIN} />
             <p className="text-xs text-muted-foreground">
               This goes straight to the person who did the work, word for word. Be as specific as
               you can and they can turn it around quickly.
@@ -156,7 +162,7 @@ export function ApprovalForm({
             <Button
               onClick={() => submit("REVISION_REQUESTED")}
               loading={pending}
-              disabled={comment.trim().length < 10}
+              disabled={comment.trim().length < CLIENT_REVISION_MIN}
             >
               Send back for changes
             </Button>

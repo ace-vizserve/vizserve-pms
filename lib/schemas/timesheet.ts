@@ -552,6 +552,10 @@ export function isWeekLocked(status: TimesheetWeekStatus | null): boolean {
  * opposite subset of the same engine's decisions, which is the clearest proof
  * that the engine stayed generic.
  */
+/** Named so the team grid and this schema cannot drift apart. */
+export const WEEK_RETURN_REASON_MIN = 5;
+export const WEEK_RETURN_REASON_MAX = 2000;
+
 export const timesheetWeekDecisionSchema = z.discriminatedUnion("decision", [
   z.object({ decision: z.literal("approved"), reason: z.string().trim().max(2000).optional() }),
   z.object({
@@ -559,8 +563,11 @@ export const timesheetWeekDecisionSchema = z.discriminatedUnion("decision", [
     reason: z
       .string()
       .trim()
-      .min(5, "Say what needs fixing — a week sent back with no reason cannot be acted on.")
-      .max(2000, "Keep it under 2000 characters."),
+      .min(
+        WEEK_RETURN_REASON_MIN,
+        "Say what needs fixing — a week sent back with no reason cannot be acted on.",
+      )
+      .max(WEEK_RETURN_REASON_MAX, "Keep it under 2000 characters."),
   }),
 ]);
 

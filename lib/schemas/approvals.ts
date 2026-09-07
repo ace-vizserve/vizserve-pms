@@ -63,9 +63,13 @@ export const APPROVAL_DECISION_LABELS: Record<ApprovalDecision, string> = {
  * `lib/schemas/rich-text.ts` opens with a warning about exactly this failure.
  * This field was the one that did not follow it.
  */
+/** The floor and cap, named so the screen and the schema cannot drift apart. */
+export const DECISION_REASON_MIN = 10;
+export const DECISION_REASON_MAX = 2000;
+
 export const decisionReasonSchema = richTextSchema({
-  min: 10,
-  max: 2000,
+  min: DECISION_REASON_MIN,
+  max: DECISION_REASON_MAX,
   requiredMessage: "Give the requester something they can act on — at least a sentence.",
   tooLongMessage: "Keep it under 2000 characters.",
 });

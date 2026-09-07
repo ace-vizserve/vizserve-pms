@@ -26,6 +26,8 @@ import {
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { formatDate, isOverdue } from "@/lib/dates";
 import { richTextLength } from "@/lib/rich-text";
+import { CharacterCount } from "@/components/ui/character-count";
+import { DECISION_REASON_MAX, DECISION_REASON_MIN } from "@/lib/schemas/approvals";
 import type { CapacityRow } from "@/lib/schemas/approvals";
 
 import { saveList } from "../../tasks/actions";
@@ -507,6 +509,12 @@ export function ReviewPanel({
                       : "e.g. This needs video production, which is outside what this team does."
                   }
                 />
+                <CharacterCount
+                  value={reason}
+                  min={DECISION_REASON_MIN}
+                  max={DECISION_REASON_MAX}
+                  rich
+                />
                 <p className="text-xs text-muted-foreground">
                   {/* ⚠️ Still true, and the reason this field flattens rather
                       than sending markup: the email escapes every value it
@@ -536,7 +544,7 @@ export function ReviewPanel({
                   // characters of it and 2 of prose. Counting raw let a
                   // two-letter refusal through to a client with no other
                   // channel, and the schema counted the same tags until 7 Sep.
-                  disabled={richTextLength(reason) < 10}
+                  disabled={richTextLength(reason) < DECISION_REASON_MIN}
                 >
                   {mode === "returned" ? "Return to requester" : "Reject this request"}
                 </Button>

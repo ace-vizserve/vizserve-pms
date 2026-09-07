@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { CharacterCount } from "@/components/ui/character-count";
+import { INTERNAL_REASON_MAX } from "@/lib/schemas/internal-requests";
 import { decideInternalRequest } from "./actions";
 
 /**
@@ -75,6 +77,12 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
             placeholder="Why you are approving or rejecting."
             minHeight="min-h-20"
           />
+          {/* ⚠️ THE CAP ONLY, NO FLOOR. The label already says "(required to
+              reject)", and this same box is OPTIONAL when approving — a
+              permanent "at least 5 characters" under it would be a demand the
+              approve path never makes. The floor is enforced server-side and
+              surfaces as the error below. */}
+          <CharacterCount value={reason} max={INTERNAL_REASON_MAX} rich />
           {error ? (
             <p id="decision-error" role="alert" className="text-xs text-destructive">
               {error}

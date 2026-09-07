@@ -86,12 +86,15 @@ export const clientApproveSchema = z.object({
   approver_name: approverNameSchema,
 });
 
+/** Named so the public form and this schema cannot drift apart. */
+export const CLIENT_REVISION_MIN = 10;
+
 export const clientRevisionSchema = z.object({
   decision: z.literal("REVISION_REQUESTED"),
   comment: z
     .string()
     .trim()
-    .min(10, "Tell us what needs changing — the team works from this directly."),
+    .min(CLIENT_REVISION_MIN, "Tell us what needs changing — the team works from this directly."),
   approver_name: approverNameSchema,
 });
 

@@ -25,6 +25,8 @@ import {
 import { cn } from "@/lib/utils";
 
 import { decideTimesheetWeek } from "../actions";
+import { CharacterCount } from "@/components/ui/character-count";
+import { WEEK_RETURN_REASON_MAX, WEEK_RETURN_REASON_MIN } from "@/lib/schemas/timesheet";
 
 /** One time entry, as a reviewer reads it: how long, when in the day, what for. */
 export type TeamEntry = {
@@ -938,14 +940,20 @@ function WeekDecision({ row, loggedMinutes }: { row: TeamRow; loggedMinutes: num
               aria-label={`Why ${row.name}'s week is going back`}
               className="text-xs"
             />
+            <CharacterCount
+              value={reason}
+              min={WEEK_RETURN_REASON_MIN}
+              max={WEEK_RETURN_REASON_MAX}
+            />
             <div className="flex gap-1.5">
               {/* The engine enforces the reason on `returned` too; disabling
-                  here just saves the round trip. */}
+                  here just saves the round trip — and the count above is what
+                  says why the button is dead until it is not. */}
               <Button
                 size="sm"
                 variant="outline"
                 loading={pending}
-                disabled={reason.trim().length < 5}
+                disabled={reason.trim().length < WEEK_RETURN_REASON_MIN}
                 onClick={() => decide({ decision: "returned", reason: reason.trim() })}
               >
                 Send back

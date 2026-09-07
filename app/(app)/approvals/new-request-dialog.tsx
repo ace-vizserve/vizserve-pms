@@ -43,6 +43,8 @@ import { formatDays } from "@/lib/schemas/leave-balances";
 import { toMinutes } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 import { submitInternalRequest } from "./actions";
+import { CharacterCount } from "@/components/ui/character-count";
+import { INTERNAL_REASON_MAX, INTERNAL_REASON_MIN } from "@/lib/schemas/internal-requests";
 
 /**
  * Only what the picker needs. The server page selects the active ones, in order.
@@ -1057,6 +1059,12 @@ export function NewRequestDialog({
                     ? "What needed the extra hours."
                     : "What happened, briefly."
               }
+            />
+            <CharacterCount
+              value={reason}
+              min={INTERNAL_REASON_MIN}
+              max={INTERNAL_REASON_MAX}
+              rich
             />
             <FieldError messages={errors.reason} />
           </div>

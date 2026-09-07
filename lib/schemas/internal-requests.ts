@@ -118,9 +118,13 @@ export function isTimeCorrectionType(value: string): value is TimeCorrectionType
  * enough context. The floor exists to block "." and an empty submit, not to
  * demand an essay from someone with flu.
  */
+/** Named so the dialogs and these schemas cannot drift apart. */
+export const INTERNAL_REASON_MIN = 5;
+export const INTERNAL_REASON_MAX = 2000;
+
 export const internalReasonSchema = richTextSchema({
-  min: 5,
-  max: 2000,
+  min: INTERNAL_REASON_MIN,
+  max: INTERNAL_REASON_MAX,
   requiredMessage: "Say why, even briefly.",
   tooLongMessage: "Keep it under 2000 characters.",
 });
@@ -446,8 +450,8 @@ export const internalDecisionSchema = z.discriminatedUnion("decision", [
   z.object({
     decision: z.literal("rejected"),
     reason: richTextSchema({
-      min: 5,
-      max: 2000,
+      min: INTERNAL_REASON_MIN,
+      max: INTERNAL_REASON_MAX,
       requiredMessage: "Tell them why — a rejection with no reason is unactionable.",
       tooLongMessage: "Keep it under 2000 characters.",
     }),
