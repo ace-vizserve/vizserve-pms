@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useState, useTransition } from "react";
+import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
 import { toneButtonVariant } from "@/components/status-badge";
@@ -17,7 +17,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { isRichTextEmpty } from "@/lib/rich-text";
-import { transitionTone, type Transition } from "@/lib/schemas/tasks";
+import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/tasks";
 
 import { transitionTask } from "./actions";
 
@@ -38,10 +38,16 @@ export type TaskTransitionState = ReturnType<typeof useTaskTransition>;
 
 export function useTaskTransition({
   taskId,
+  status,
   onMoved,
   beforeMove,
 }: {
   taskId: string;
+  /**
+   * The status the SERVER last confirmed. Only used as the base for the
+   * optimistic value below — nothing here writes it.
+   */
+  status: TaskStatus;
   /** The detail page has local state to reset; a list row only needs the refresh. */
   onMoved?: () => void;
   /**
@@ -70,10 +76,35 @@ export function useTaskTransition({
   const [active, setActive] = useState<Transition | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /*
+   * P11-05 — THE CHIP MOVES WHEN YOU PICK, NOT WHEN THE SERVER ANSWERS.
+   *
+   * This control is on the detail header, every list row and every board card,
+   * which makes it the most-pressed thing in the product. It used to freeze the
+   * dropdown for a full round trip and only then repaint — so the one
+   * interaction people do dozens of times a day was the one that felt slowest.
+   *
+   * ⚠️ `useOptimistic` REVERTS BY ITSELF when the transition ends, which is
+   * exactly why `router.refresh()` STAYS inside the transition below. Next ties
+   * the refresh into the same transition, so the optimistic status holds until
+   * the fresh server value has actually arrived. Take the refresh out and the
+   * chip snaps back to the old status for however long the re-render takes,
+   * which looks like the move failing and then succeeding.
+   *
+   * ⚠️ AND IT REVERTS ON FAILURE FOR FREE. A refused move needs no rollback
+   * code: React drops the optimistic value, the chip returns to what the server
+   * still says, and `error` below is what explains it. That is the half the
+   * hand-rolled `usePatch` in `inline.tsx` has to write out by hand.
+   */
+  const [shownStatus, setShownStatus] = useOptimistic(status);
+
   function commit(transition: Transition, comment?: string) {
     setError(null);
     setActive(transition);
     startTransition(async () => {
+      // Inside the transition, before the await: this is the paint.
+      setShownStatus(transition.to);
+
       await beforeMove?.();
 
       const result = await transitionTask(taskId, {
@@ -121,7 +152,7 @@ export function useTaskTransition({
     return pending && active?.from === transition.from && active?.to === transition.to;
   }
 
-  return { pending, error, prompt, choose, commit, dismiss, isRunning } as const;
+  return { pending, error, prompt, choose, commit, dismiss, isRunning, shownStatus } as const;
 }
 
 /**

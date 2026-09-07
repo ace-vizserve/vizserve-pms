@@ -142,6 +142,7 @@ export function TaskStatusSelect({
 
   const move = useTaskTransition({
     taskId,
+    status,
     beforeMove,
     onMoved: () => {
       setOpen(false);
@@ -208,9 +209,11 @@ export function TaskStatusSelect({
         <PopoverTrigger
           disabled={pending}
           title={
-            variant === "compact" ? `Move — currently ${TASK_STATUS_LABELS[status]}` : undefined
+            variant === "compact"
+              ? `Move — currently ${TASK_STATUS_LABELS[move.shownStatus]}`
+              : undefined
           }
-          aria-label={`Status: ${TASK_STATUS_LABELS[status]}. Change it.`}
+          aria-label={`Status: ${TASK_STATUS_LABELS[move.shownStatus]}. Change it.`}
           className={cn(
             variant === "compact"
               ? cn(
@@ -249,12 +252,21 @@ export function TaskStatusSelect({
               elsewhere on the page — the track above says where the work is, and
               `status-badge.tsx` stays the only place a status maps to a colour.
             */}
-              {TASK_STATUS_LABELS[status]}
+              {TASK_STATUS_LABELS[move.shownStatus]}
               <ChevronDown className="size-3.5 shrink-0 opacity-80" aria-hidden />
             </>
           ) : (
             <>
-              <TaskStatusBadge status={status} />
+              {/* ⚠️ `move.shownStatus`, NOT `status`. This is the one thing on
+                  the page that repaints the instant somebody picks, rather than
+                  a round trip later — see `useOptimistic` in `transition.tsx`.
+
+                  ⚠️ THE LIST BELOW STAYS ON THE REAL `status`, deliberately.
+                  `availableTransitions` decides which moves are LEGAL, and
+                  guessing at legality is how a control offers a move the server
+                  then refuses. Optimism belongs on what is displayed, never on
+                  what is permitted. */}
+              <TaskStatusBadge status={move.shownStatus} />
               {/* The chip alone looks like every other read-only pill in the app.
                 The chevron is the only thing marking this one as a control. */}
               <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />

@@ -73,7 +73,7 @@ export function TaskActions({
   onMoved?: () => void;
   beforeMove?: () => Promise<void>;
 }) {
-  const move = useTaskTransition({ taskId, onMoved, beforeMove });
+  const move = useTaskTransition({ taskId, status, onMoved, beforeMove });
 
   const transitions = availableTransitions(status, viewer, task);
 
