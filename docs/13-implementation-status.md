@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 7 September 2026.** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 7 September 2026 (evening).** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -20,6 +20,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-eight migrations live, **P7-52/P7-53 applied 1 Sep** (HR as a capability + the filterable leave audit — see below), P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
 | **8 — Live board, email transport, owner rung, personal settings** | **In progress.** P8-01 through P8-12 — see the Phase 8 section below. P8-11/P8-12 (personal settings, temporary passwords, clock reminders) ship with a migration that is **not yet applied** |
 | **9 — Leave hand-over and the approval chain** | **Done. All eight migrations applied** (`p9_01`…`p9_08`), 5–7 Sep. Relievers, the turn-over confirmation, task coverage, withdrawal, and a two- or three-stage chain for every leave request. `tests/db/relievers.test.ts` still has **never been run** — see the Phase 9 section below |
+| **11 — The six demo gaps** | **Done. Four migrations applied** (`p11_01`…`p11_04`), 7 Sep. The rename, character counters, the approval timeline, split reminder leads, the SPA pass, and **a reversal of who may edit a task** (P7-14). See the Phase 11 section below |
 | **10 — Performance pass** | **Done, code only — no migration.** Auth round trips removed, request waterfalls collapsed, duplicate reads memoised, 27 Suspense boundaries added, Next 16.2.12 → 16.3.4. No business logic changed. See the Performance pass section below |
 
 `npm run verify` is green: **1,499 passed, 389 skipped, 0 failures** (7 Sep).
@@ -1915,3 +1916,194 @@ The all-tasks route was confusing beside a Projects tree that is also tasks, so
 `/tasks` with no `?list=` redirects to `/tasks/lists` and it is out of the nav.
 Task viewing is by list. The route file remains because `?list=` is the filtered
 view every list link points at.
+
+---
+
+## Phase 11 — the six gaps from the 7 Sep demo
+
+Six things came out of the demo. They are not one kind of problem, so this is six
+pieces of work with little in common, plus one decision that reverses an earlier
+one.
+
+**Four migrations, all applied 7 Sep:**
+
+| File | What |
+|---|---|
+| `20260907100000_p11_01_timeline_readable.sql` | Widens the approvals SELECT policy, adds `decided_on_readable_internal_request` so a timeline can print a name |
+| `20260907110000_p11_02_split_reminder_lead.sql` | `clock_in_lead_minutes` / `clock_out_lead_minutes`, backfilled from the old shared column |
+| `20260907120000_p11_03_department_members_edit_tasks.sql` | The audit trigger, and the task/list UPDATE policies |
+| `20260907130000_p11_04_log_time_follows_editing.sql` | `may_log_time` follows editing |
+
+⚠️ **`reminder_lead_minutes` is still on the table and nothing reads it.** It was
+left in place so the pre-P11 deploy kept working between the paste and the
+release. Drop it once that is confirmed:
+
+```sql
+alter table vizserve_pms_user_preferences drop column reminder_lead_minutes;
+```
+
+### P11-01 · The product is VizServe Team Portal
+
+18 user-visible strings. **The codebase was not renamed and must not be** — the
+repo and npm package are `vizserve-pms`, every table and enum is prefixed
+`vizserve_pms_`, and `APP_ACCESS_KEY` is the literal string `vizserve-pms`
+matched against each user's `app_access` array. Change that one and everybody is
+locked out. Roughly 5,000 structural identifiers against 18 strings a human
+reads; never run a find-and-replace across both.
+
+⚠️ **The EmailJS console still says "VizServe PMS".** Its From Name and template
+copy live in that dashboard, not in this repo, so recipients on that transport
+read the old name until somebody changes it there.
+
+### P11-02 · A real bug behind a UX gap
+
+`decisionReasonSchema` was a plain `z.string().min(10)` on a field fed by a
+`RichTextEditor`, so it counted markup: `<p><strong>no</strong></p>` is 26
+characters and 2 of prose, and it cleared both the schema and the submit gate.
+**A two-letter rejection could reach a client with no other channel.** The same
+defect ran the other way at the cap, refusing a reason well inside 2,000
+characters — the failure nobody reports because it looks like a rule.
+
+`components/ui/character-count.tsx` is the UX half: quiet until it has something
+to say, speaking below the floor and again within a tenth of the cap. Four
+screens had been disabling Submit with nothing saying why.
+
+`lib/action-result.ts` came out of the same pass. `ActionResult` was copy-pasted
+in 13 action files and `flattenIssues` in 14 — and `readableError`, in five of
+them, had already grown **three different implementations**, so the same Postgres
+refusal was worded differently depending on which screen you were on.
+
+### P11-03 · The approval timeline
+
+`vizserve_pms_approvals` had recorded every internal decision **and its reason**
+since Phase 5, and no screen had ever read one. A stage-3 manager saw
+`Relievers Done / Team leader Done / Manager Waiting` and nothing else — a final
+signature asked for on a decision they could not see. `reviewed_by` and
+`reviewed_at` are no help: P9-04 writes them only on the terminal transition.
+
+Two policies blocked it, and the migration widens both under one rule: **if you
+can read the request, you can read its history.** Both defer to
+`may_read_internal_request`, so a future change to who may see a request carries
+its history along.
+
+`components/stage-track.tsx` is `GateTrack`'s presentational half, extracted so
+the task gates and the approval chain draw the same rail. `buildSteps` stayed
+with the task page.
+
+### P11-04 · Two reminder leads
+
+One integer was subtracted from both `work_start` and `work_end`. Both new
+columns are backfilled, so nobody's setting changed. The lead validity check
+moved inside each branch: a row can now be half-sane, and somebody whose
+clock-out lead is corrupt should still be got to work on time.
+
+Best-tested phase here, and it costs nothing to be — the whole feature is a
+browser timer over `dueReminder`, a pure function that writes nothing and leaves
+no record it fired.
+
+### P11-05 · The SPA pass
+
+`cacheComponents` and `partialPrefetching` are on. Every route is a Partial
+Prerender.
+
+⚠️ **`'use cache'` appears nowhere, and adding one is a decision rather than an
+optimisation.** Every authenticated read here is RLS-scoped to `auth.uid()`, and
+caching one across requests renders one person's leave for somebody else. All 40
+prerendered shells were read back after the build: title, progress-bar CSS and a
+skeleton, nothing else.
+
+⚠️ **The sidebar is NOT in the shell.** `(app)/layout.tsx` awaits
+`requireAuthContext()` before rendering anything, and that stays: it is the
+temporary-password wall, the app-access gate and the deactivation check, and
+those redirects must fire before anything paints. Its eight queries did move
+behind a Suspense boundary (`sidebar-panel.tsx`), so the page no longer waits for
+the rail — which matters on every mutation, not only first load, because
+`router.refresh()` re-renders layouts too.
+
+**40 duplicate round trips removed across 28 files.** Every client
+`router.refresh()` that followed an action which had already called
+`revalidatePath` was fetching the same route a second time. ⚠️ That makes each
+action's own `revalidatePath` list **the only thing that repaints** — a route
+missing from it now goes stale instead of being rescued by the second fetch.
+`/tasks/board` was missing and has been added.
+
+**Optimistic updates**, on the writes people do daily:
+
+| Surface | What paints before the server answers |
+|---|---|
+| Task status | The chip **and** the row's status group |
+| Priority, date, estimate, list | Hand-rolled, with rollback (P7-13 era) |
+| Comments | The row, with the box cleared first |
+| Assignees | The picker list and the monogram stack |
+| Timesheet cells | ⚠️ The **parsed** value, never the keystrokes |
+| Inline task creation | The title only |
+
+⚠️ **The timesheet is the subtle one.** `cellCommit` reinterprets input — "1.5"
+becomes 90m — so echoing what was typed would show a figure the server was never
+going to store. `plan.minutes` is what gets written, so it is what gets shown.
+
+⚠️ **The DTR punch is deliberately NOT optimistic.** A clock saying "timed in"
+when the server captured nothing is a payroll problem. It is a form action and it
+lost its duplicate round trip; it does not predict.
+
+Also landed: `<form action>` on 17 write paths, `useActionState` where mutations
+repeat, View Transitions on the `/tasks` boundary, `useLinkStatus` pending dots,
+hover-prefetch on task rows, and one nested Suspense boundary on the dashboard.
+
+⚠️ **`ViewTransition` needs no config and no `react@canary` install** — the App
+Router already runs a React canary. Checking the installed `react` package says
+otherwise and is misleading; that mistake cost an hour here.
+
+### P11-06 · Who may edit a task — a reversal of P7-14
+
+**P7-14's rule is gone.** It admitted the assignee, the QA reviewer, anyone on
+`vizserve_pms_task_assignees`, a covering reliever, and department leads. Its own
+comment set out the choice — *"you may hand this to someone in this department"*
+rather than *"members of this department may edit anything"*. Amier chose the
+second on 7 Sep: a colleague who spots a wrong due date should fix it, not go and
+find whoever the task is filed under.
+
+**Any active member of a task's department may now edit it, and log time against
+it.** Same for renaming a list.
+
+⚠️ **THE AUDIT TRIGGER IS THE CONDITION, AND IT CLOSED A HOLE THAT PREDATED THE
+DECISION.** Permission was granted on the basis that everything is logged — and
+task edits were not. This app had **no audit triggers at all**: every row in
+`vizserve_pms_audit_logs` is written by hand inside an RPC, and `updateTaskField`
+is a direct PostgREST UPDATE. A PIC retitling a task had never left a trace.
+`vizserve_pms_audit_row_update` now covers tasks and lists, logging only the
+columns that changed, with a skip list so it does not double-log what an RPC
+already records better.
+
+What did **not** open:
+
+- **`status`** — outside the column-level UPDATE grant, so no policy can reach
+  it. A status only moves through `vizserve_pms_transition_task`, which keeps
+  *"Only the person in charge can do that"*.
+- **Deleting a task**, and **creating or deleting a list**. Editing is
+  correction; removal is not, and a new list reshapes the tree for the whole
+  department.
+- **DTR, timesheet and internal approvals.** Those are records about a person,
+  and the chain that approves them is the point of the feature.
+
+⚠️ **`may_log_time` is defined by `create or replace` in FOUR files now.** A grep
+finds the oldest (`p6_01`, PIC-or-QA) first, which is how it was misreported
+during this work. `p11_04` is the live one. Re-pasting an older file silently
+reinstates a narrower rule and nothing raises — the only symptom is a 42501 the
+app renders as a sentence about three unrelated rules.
+
+⚠️ **Hours can now be logged against a task somebody was never assigned to.**
+That is the point — it is how an hour of help gets recorded — but it means "time
+logged against this task" and "people assigned to this task" are now different
+questions. **Phase 6 reporting must not treat one as a proxy for the other.**
+
+### What is owed
+
+- **None of this has been verified in a browser by its author.** Typecheck, lint
+  at the 7-warning baseline, 1,523 unit tests and a clean build are the whole of
+  it.
+- `tests/db/timeline.test.ts` is written and has never run, like
+  `relievers.test.ts`, for the same reason: no scratch database.
+- **No end-to-end tests exist anywhere in this app.** That is the layer that
+  would have caught the hardcoded `p_list_id` before a demo. Playwright and
+  Next's `instant()` helper are the shape; both need the scratch project.
