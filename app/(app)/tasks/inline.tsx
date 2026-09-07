@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useOptimistic, useState, useTransition, type ReactNode } from "react";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -54,6 +55,7 @@ import { ComposerCard, type Assignable } from "./task-composer";
  * it is what made changing a priority feel slower than it is.
  */
 function usePatch(taskId: string) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   function patch(
@@ -70,6 +72,17 @@ function usePatch(taskId: string) {
         toast.error(result.error);
         return;
       }
+
+      /*
+       * ⚠️ BACK, AND REMOVING IT IS HALF OF WHY THIS FELT SLOW. The action
+       * revalidates, so on paper this refetches a route the server just
+       * re-rendered. But the action's payload is applied by the router AFTER the
+       * transition ends, and `useOptimistic` reverts the moment it does — so the
+       * value snapped back to the old one and waited for the payload. Tying the
+       * refresh into this transition keeps it pending until the real data is on
+       * screen. The extra request is invisible; the flicker was not.
+       */
+      router.refresh();
 
       if (success) toast.success(success);
     });
@@ -234,17 +247,31 @@ export function InlinePriority({
 }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  const [shown, setShown] = useState(value);
+  /*
+   * ⚠️ `useOptimistic`, NOT `useState`, AND THE REASON IS THE FORM ACTION.
+   *
+   * These rows are `formAction={() => choose(option)}` now, and React runs a
+   * form action inside a TRANSITION. A plain `setState` in a transition is a
+   * deferred update — React holds the old UI until the transition finishes — so
+   * the chip stopped changing on click and only moved when the server answered.
+   * The symptom was exact: the toast arrived first and the chip followed two
+   * seconds later.
+   *
+   * `useOptimistic` is the one hook that renders immediately INSIDE a
+   * transition. That is its whole purpose, and it is why the manual rollback
+   * below is gone: React puts the old value back by itself when the transition
+   * ends, refused or not.
+   */
+  const [shown, setShown] = useOptimistic(value);
 
   function choose(next: TaskPriority | null) {
-    const previous = shown;
     setShown(next);
     setOpen(false);
     patch(
       { priority: next },
       {
         success: next === null ? "Priority cleared" : `Priority: ${TASK_PRIORITY_LABELS[next]}`,
-        onRefused: () => setShown(previous),
+        onRefused: () => {},
       },
     );
   }
@@ -339,10 +366,14 @@ export function InlineDate({
 }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  const [shown, setShown] = useState(value);
+  /*
+   * ⚠️ `useOptimistic`, NOT `useState` — see the note on `InlinePriority`. The
+   * rows here are form actions, and a plain setState inside a transition is a
+   * DEFERRED update: React holds the old UI until the action finishes.
+   */
+  const [shown, setShown] = useOptimistic(value);
 
   function commit(next: string) {
-    const previous = shown;
     // "" from a cleared input means no date. The action turns it into null.
     setShown(next || null);
     setOpen(false);
@@ -350,7 +381,7 @@ export function InlineDate({
       { [field]: next },
       {
         success: next ? `${label} ${formatDate(next)}` : `${label} cleared`,
-        onRefused: () => setShown(previous),
+        onRefused: () => {},
       },
     );
   }
@@ -414,19 +445,23 @@ export function InlineEstimate({
 }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  const [shown, setShown] = useState(minutes);
+  /*
+   * ⚠️ `useOptimistic`, NOT `useState` — see the note on `InlinePriority`. The
+   * rows here are form actions, and a plain setState inside a transition is a
+   * DEFERRED update: React holds the old UI until the action finishes.
+   */
+  const [shown, setShown] = useOptimistic(minutes);
   const [raw, setRaw] = useState(minutes === null ? "" : formatCellDuration(minutes));
   const [error, setError] = useState<string | null>(null);
 
   function commit() {
     const trimmed = raw.trim();
-    const previous = shown;
 
     if (!trimmed) {
       setError(null);
       setShown(null);
       setOpen(false);
-      patch({ estimate_minutes: null }, { success: "Estimate cleared", onRefused: () => setShown(previous) });
+      patch({ estimate_minutes: null }, { success: "Estimate cleared", onRefused: () => {} });
       return;
     }
 
@@ -442,7 +477,7 @@ export function InlineEstimate({
     setOpen(false);
     patch(
       { estimate_minutes: parsed },
-      { success: `Estimate ${formatCellDuration(parsed)}`, onRefused: () => setShown(previous) },
+      { success: `Estimate ${formatCellDuration(parsed)}`, onRefused: () => {} },
     );
   }
 
@@ -514,19 +549,23 @@ export function InlineList({
 }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  const [shown, setShown] = useState(value);
+  /*
+   * ⚠️ `useOptimistic`, NOT `useState` — see the note on `InlinePriority`. The
+   * rows here are form actions, and a plain setState inside a transition is a
+   * DEFERRED update: React holds the old UI until the action finishes.
+   */
+  const [shown, setShown] = useOptimistic(value);
 
   const nameOf = (id: string | null) => lists.find((list) => list.id === id)?.name ?? null;
 
   function choose(next: string | null) {
-    const previous = shown;
     setShown(next);
     setOpen(false);
     patch(
       { list_id: next },
       {
         success: next ? `Filed under ${nameOf(next)}` : "Removed from its list",
-        onRefused: () => setShown(previous),
+        onRefused: () => {},
       },
     );
   }
