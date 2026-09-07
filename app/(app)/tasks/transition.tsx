@@ -165,7 +165,7 @@ export function useTaskTransition({
     startTransition(() => {
       // The paint: the chip, and the group the row sits in.
       setShownStatus(transition.to);
-      moveRow?.({ id: taskId, status: transition.to });
+      moveRow?.({ kind: "move", id: taskId, status: transition.to });
       dispatch({ transition, comment });
     });
   }

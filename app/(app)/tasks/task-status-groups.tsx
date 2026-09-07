@@ -54,9 +54,29 @@ export function TaskStatusGroups({
     [groups, visibleStatuses],
   );
 
-  const [rows, applyMove] = useOptimistic(flat, (state: ListRow[], move: OptimisticMove) =>
-    state.map((row) => (row.id === move.id ? { ...row, status: move.status } : row)),
-  );
+  const [rows, applyMove] = useOptimistic(flat, (state: ListRow[], move: OptimisticMove) => {
+    if (move.kind === "move") {
+      return state.map((row) => (row.id === move.id ? { ...row, status: move.status } : row));
+    }
+
+    /*
+     * A row for a task that does not exist yet.
+     *
+     * ⚠️ IT CARRIES ONLY WHAT WAS TYPED. Everything else — the assignee's
+     * name, the reference, the counts — is resolved server-side and would be a
+     * guess here, so the placeholder shows the title and nothing else rather
+     * than inventing fields that change when the real row lands.
+     */
+    return [
+      ...state,
+      {
+        id: `optimistic-${state.length}`,
+        title: move.title,
+        status: move.status,
+        depth: 0,
+      } as unknown as ListRow,
+    ];
+  });
 
   const grouped = useMemo(() => {
     const buckets = new Map<VizservePmsTaskStatus, ListRow[]>(

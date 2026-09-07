@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
+
+import { useOptimisticMove } from "./optimistic-move";
 import { useSearchParams } from "next/navigation";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -102,11 +104,23 @@ function useComposer({
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
+  /*
+   * P11-05 — the row appears under the heading you typed it into.
+   *
+   * Null on `/tasks/[id]`, where a subtask is added with no status groups
+   * around the composer.
+   */
+  const addRow = useOptimisticMove();
+
   function submit() {
     const title = draft.title.trim();
     if (!title) return;
 
     startTransition(async () => {
+      // Before the await: the placeholder carries the title and nothing else,
+      // because everything else on a task row is resolved server-side.
+      addRow?.({ kind: "add", title, status });
+
       const result = await quickAddTask({
         title,
         status,

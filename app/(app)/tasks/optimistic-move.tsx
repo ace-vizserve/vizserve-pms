@@ -19,7 +19,17 @@ import type { VizservePmsTaskStatus } from "@/lib/database.types";
  * A leaf module cannot be in a cycle. Keep it that way — do not import the
  * table, the control or anything that reaches them from here.
  */
-export type OptimisticMove = { id: string; status: VizservePmsTaskStatus };
+/**
+ * The two things that change which rows a status group holds: a task moving
+ * between them, and a task being created into one.
+ *
+ * A discriminated union rather than two contexts, because they are the same
+ * question — "what does this group contain right now" — and two providers
+ * around the same list is two things to keep in step.
+ */
+export type OptimisticMove =
+  | { kind: "move"; id: string; status: VizservePmsTaskStatus }
+  | { kind: "add"; title: string; status: VizservePmsTaskStatus };
 
 /** Null wherever the control renders with no groups around it — the task detail page and the board. */
 export const OptimisticMoveContext = createContext<((move: OptimisticMove) => void) | null>(null);
