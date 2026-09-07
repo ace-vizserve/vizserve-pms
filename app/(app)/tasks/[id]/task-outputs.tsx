@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState, useTransition } from "react";
+import { useOptimistic, useRef, useState, useTransition } from "react";
 import { ChevronDown, Download, Link2, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -110,6 +110,21 @@ export function TaskOutputs({
   const inputRef = useRef<HTMLInputElement>(null);
   const [pending, startTransition] = useTransition();
   const [opening, setOpening] = useState<string | null>(null);
+
+  /*
+   * P11-05 — TWO OPTIMISTIC VALUES, BECAUSE THIS PANEL HOLDS TWO THINGS.
+   *
+   * The link is one field and predicting it is a string swap. The attachments
+   * are a LIST, and the only prediction worth making there is a removal — the
+   * row vanishes the moment you press it.
+   *
+   * ⚠️ AN UPLOAD IS DELIBERATELY NOT PREDICTED. Its id, size and signed URL
+   * all come from the server, and a placeholder row that cannot be downloaded is
+   * worse than a moment's wait: somebody would click it. Uploads keep their
+   * spinner, which is honest about the bytes still being in flight.
+   */
+  const [shownLink, setShownLink] = useOptimistic(outputLink);
+  const [removed, markRemoved] = useOptimistic<string[], string>([], (state, id) => [...state, id]);
   const [error, setError] = useState<string | null>(null);
 
   /*
@@ -140,13 +155,19 @@ export function TaskOutputs({
       return;
     }
 
+    // Closed first: the panel carries the new link from here on.
+    setLinkOpen(false);
+
     startTransition(async () => {
+      setShownLink(parsed.data);
+
       const result = await updateTaskField(taskId, { output_link: parsed.data });
       if (!result.ok) {
+        // React puts the old link back; reopening shows why.
         setLinkError(result.error ?? "That did not go through.");
+        setLinkOpen(true);
         return;
       }
-      setLinkOpen(false);
       toast.success(parsed.data ? "Link saved" : "Link removed");
     });
   }
@@ -193,6 +214,9 @@ export function TaskOutputs({
 
   function remove(attachment: TaskAttachment) {
     startTransition(async () => {
+      // The row goes now. React brings it back if the server refuses.
+      markRemoved(attachment.id);
+
       const result = await removeTaskAttachment(attachment.id, taskId);
       if (!result.ok) {
         toast.error(result.error);
@@ -247,7 +271,7 @@ export function TaskOutputs({
         </DropdownMenuItem>
         <DropdownMenuItem onClick={openLink}>
           <Link2 />
-          {outputLink ? "Replace the link" : "Paste a link"}
+          {shownLink ? "Replace the link" : "Paste a link"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -267,11 +291,15 @@ export function TaskOutputs({
     </>
   ) : null;
 
-  const showLink = variant === "field" && outputLink.length > 0;
+  const showLink = variant === "field" && shownLink.length > 0;
+
+  /* ⚠️ BOTH THE EMPTY CHECK AND THE LIST READ THIS. Filtering in one place and
+     not the other is how a panel ends up saying "no files" above a file. */
+  const shownAttachments = attachments.filter((row) => !removed.includes(row.id));
 
   const body = (
     <>
-      {attachments.length === 0 && !showLink ? (
+      {shownAttachments.length === 0 && !showLink ? (
         <p className="text-xs text-muted-foreground">{canUpload ? "Nothing here yet." : "None."}</p>
       ) : (
         <ul className="space-y-0.5">
@@ -304,7 +332,7 @@ export function TaskOutputs({
             </li>
           ) : null}
 
-          {attachments.map((attachment) => (
+          {shownAttachments.map((attachment) => (
             <li
               key={attachment.id}
               className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted/50">
