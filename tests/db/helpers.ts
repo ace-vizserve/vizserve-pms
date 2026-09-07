@@ -54,23 +54,72 @@ export const ACCOUNTS = {
 
 export type AccountKey = keyof typeof ACCOUNTS;
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-const secretKey = process.env.SUPABASE_SECRET_KEY;
+/* ---------------------------------------------------------------------------
+ * WHICH DATABASE THIS SUITE IS ALLOWED TO TOUCH.
+ * ---------------------------------------------------------------------------
+ *
+ * ⚠️ THE SUITE READS ITS OWN VARIABLES AND NEVER THE APP'S. That is the entire
+ * mechanism, and it is structural rather than a warning somebody has to
+ * remember.
+ *
+ * It used to read `NEXT_PUBLIC_SUPABASE_URL` — the app's own project. From
+ * 18 Aug to 5 Sep 2026 that project was PRODUCTION, so every `npm run verify`
+ * ran eighteen writing test files against live data. The damage was not
+ * theoretical: `vizserve_pms_approvals` has no foreign key to what it
+ * references (`entity_type` is a plain text discriminator, deliberately, so
+ * Phase 5 could add `internal_request` without touching the table), so every
+ * run left approval rows behind pointing at requests its own cleanup had
+ * deleted. 12,378 orphaned rows were removed by hand on 5 Sep. Phase 6 reports
+ * turnaround FROM that table, so those were not clutter — they were a wrong
+ * answer waiting to be reported. `scripts/cleanup-test-residue.sql` is the
+ * record of the clean-up, and its closing note asked for exactly this fix.
+ *
+ * So: point `SUPABASE_TEST_*` at a scratch project or at `npm run db:start`,
+ * and nothing else will do. Leaving them unset skips the suite, which is the
+ * safe default — it is what a fresh checkout and CI both get.
+ */
+const url = process.env.SUPABASE_TEST_URL;
+const publishableKey = process.env.SUPABASE_TEST_PUBLISHABLE_KEY;
+const secretKey = process.env.SUPABASE_TEST_SECRET_KEY;
+
+/**
+ * The project the APP is pointed at. Read for ONE purpose: to refuse it.
+ *
+ * Renaming the variables is not by itself a guarantee — the obvious way to
+ * "configure" the new ones is to copy the old values across, which restores the
+ * exact bug with a fresh set of names. This makes that copy fail loudly instead.
+ */
+const appUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+
+/** Trailing slash and case are not a different project. */
+function sameProject(a: string | undefined, b: string | undefined): boolean {
+  if (!a || !b) return false;
+  const normalise = (value: string) => value.trim().replace(/\/+$/, "").toLowerCase();
+  return normalise(a) === normalise(b);
+}
+
+const configured = Boolean(url && publishableKey && secretKey);
+const pointedAtTheApp = sameProject(url, appUrl);
 
 /**
  * Whether the scope suite can run at all.
  *
- * The suite skips rather than fails without credentials, so `npm run verify`
- * works on a laptop with no `.env.local`. The reason gets printed — a suite that
- * skips silently reports green while proving nothing, which is worse than red.
+ * The suite skips rather than fails, so `npm run verify` works on a laptop with
+ * no scratch project. The reason gets printed — a suite that skips silently
+ * reports green while proving nothing, which is worse than red.
  */
-export const dbTestsEnabled = Boolean(url && publishableKey && secretKey);
+export const dbTestsEnabled = configured && !pointedAtTheApp;
 
 export const skipReason = dbTestsEnabled
   ? ""
-  : "SKIPPED: set NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY and " +
-    "SUPABASE_SECRET_KEY in .env.local, then run `npm run seed`, to run the scope suite.";
+  : pointedAtTheApp
+    ? "REFUSED: SUPABASE_TEST_URL is the same project as NEXT_PUBLIC_SUPABASE_URL. " +
+      "This suite WRITES — it submits requests, approves them and hands tasks over — " +
+      "and it must never run against the database the app is serving. Point it at a " +
+      "scratch project or at `npm run db:start`."
+    : "SKIPPED: set SUPABASE_TEST_URL, SUPABASE_TEST_PUBLISHABLE_KEY and " +
+      "SUPABASE_TEST_SECRET_KEY (a SCRATCH project — never the one the app is " +
+      "pointed at), then run `npm run seed` against it, to run the scope suite.";
 
 /** Service-role client. Sets up fixtures; never used to make an assertion. */
 export function adminClient(): SupabaseClient<Database> {

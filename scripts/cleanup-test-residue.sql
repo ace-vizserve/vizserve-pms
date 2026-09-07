@@ -197,7 +197,20 @@ union all select 'example_com_accounts', count(*) from vizserve_pms_users where 
 --   requests               0
 --   example_com_accounts   0
 
--- ⚠️ AND THE THING THAT CAUSED ALL OF THIS, which none of the above fixes:
--- `.env` still points `tests/db/*` at the live project. Every future
--- `npm run verify` will start refilling these tables. Point it at a scratch
--- project or `supabase db start` before running the db suite again.
+-- ⚠️ THE THING THAT CAUSED ALL OF THIS IS FIXED — 7 Sep 2026, and it is worth
+-- recording here because this file is the only place the incident is written
+-- down in full.
+--
+-- The cause was that `tests/db/helpers.ts` read NEXT_PUBLIC_SUPABASE_URL: the
+-- suite pointed wherever the APP pointed, and the app has pointed at the live
+-- project since 18 Aug. It now reads SUPABASE_TEST_URL /
+-- SUPABASE_TEST_PUBLISHABLE_KEY / SUPABASE_TEST_SECRET_KEY and NOTHING ELSE,
+-- and it refuses outright — with a message, not a skip — if those name the same
+-- project as the app. Unset, the suite skips, so a fresh checkout and CI are
+-- safe by default rather than by discipline.
+--
+-- `scripts/seed.mjs` gained its own guard of a different kind: it counts users
+-- whose address is not @example.com and refuses if there are any. A URL check
+-- would not have helped there, because seeding is always aimed at a project
+-- somebody chose on purpose; "does this database have real people in it" is the
+-- question that actually distinguishes the two cases.

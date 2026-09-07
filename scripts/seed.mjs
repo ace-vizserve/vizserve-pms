@@ -184,7 +184,67 @@ async function upsertUser(spec) {
   return authUser.id;
 }
 
+/**
+ * REFUSE TO SEED A DATABASE THAT HAS REAL PEOPLE IN IT.
+ *
+ * ⚠️ THE TEST DOES NOT ASK WHICH URL THIS IS, IT ASKS WHAT IS ALREADY THERE —
+ * and that is the point. A project ref means nothing on its own: the `.env` on
+ * this machine has pointed at a live project since 18 Aug 2026, and a check
+ * against a hard-coded ref goes stale the first time the project changes. "Does
+ * this database contain staff who are not @example.com?" stays true for ever and
+ * needs no maintenance.
+ *
+ * `scripts/seed-team.mjs` is deliberately NOT guarded. That one seeds the real
+ * team and production is exactly where it belongs. This one creates sixteen
+ * accounts at an IANA-reserved domain, and the whole design around them — the
+ * `test.` prefix, the reserved domain, the sender that refuses to mail it —
+ * assumes they are nowhere near live data. A production smoke check asserts
+ * zero @example.com rows exist, so seeding production does not merely add
+ * clutter: it breaks an invariant the app relies on.
+ *
+ * The override exists because a staging project restored from a production dump
+ * is a real thing, and a guard with no way past it gets deleted rather than
+ * respected. It is spelled out in full so it cannot be set by reflex.
+ */
+async function refuseIfLive() {
+  if (env.SEED_I_KNOW_THIS_IS_NOT_PRODUCTION === "1") {
+    console.warn("");
+    console.warn("⚠ Production guard overridden by SEED_I_KNOW_THIS_IS_NOT_PRODUCTION=1.");
+    console.warn("");
+    return;
+  }
+
+  const { count, error } = await supabase
+    .from("vizserve_pms_users")
+    .select("id", { count: "exact", head: true })
+    .not("email", "like", "%@example.com");
+
+  // An empty project has no table yet, and that is the most normal reason to be
+  // running this at all. Failing closed here would block the one case the script
+  // exists for, so an unreadable count is reported and allowed through.
+  if (error) {
+    console.warn(`⚠ Could not check for real users (${error.message}). Continuing.`);
+    return;
+  }
+
+  if ((count ?? 0) > 0) {
+    console.error("");
+    console.error(`✗ REFUSED. ${url}`);
+    console.error(`  already holds ${count} user(s) whose address is not @example.com.`);
+    console.error("");
+    console.error("  That is a database with real people in it. This script seeds sixteen");
+    console.error("  test accounts, and a production smoke check asserts there are none.");
+    console.error("");
+    console.error("  Point .env at a scratch project, or run `npm run db:start` and seed");
+    console.error("  that instead.");
+    console.error("");
+    process.exit(1);
+  }
+}
+
 async function main() {
+  await refuseIfLive();
+
   console.log(`\nSeeding ${USERS.length} test accounts into ${url}\n`);
 
   for (const spec of USERS) {
