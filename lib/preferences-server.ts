@@ -43,7 +43,7 @@ export const loadUserPreferences = cache(async (userId: string): Promise<UserPre
   const { data } = await supabase
     .from("vizserve_pms_user_preferences")
     .select(
-      "clock_in_reminder, clock_out_reminder, reminder_lead_minutes, sound_key, custom_sound_path, sound_volume",
+      "clock_in_reminder, clock_out_reminder, clock_in_lead_minutes, clock_out_lead_minutes, sound_key, custom_sound_path, sound_volume",
     )
     .eq("user_id", userId)
     .maybeSingle();
@@ -70,7 +70,13 @@ export const loadUserPreferences = cache(async (userId: string): Promise<UserPre
   return {
     clockInReminder: data.clock_in_reminder,
     clockOutReminder: data.clock_out_reminder,
-    leadMinutes: data.reminder_lead_minutes,
+    /*
+     * P11-02. `reminder_lead_minutes` is no longer read — the p11_02 migration
+     * backfilled both of these from it and left it in place only so the
+     * pre-P11 deploy kept working. It is dropped in a follow-up.
+     */
+    clockInLeadMinutes: data.clock_in_lead_minutes,
+    clockOutLeadMinutes: data.clock_out_lead_minutes,
     soundKey,
     customSoundPath: soundKey === "custom" ? data.custom_sound_path : null,
     soundVolume: data.sound_volume,

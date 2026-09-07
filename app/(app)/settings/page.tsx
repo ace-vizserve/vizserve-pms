@@ -73,7 +73,8 @@ export default async function SettingsPage() {
           <RemindersForm
             clockInReminder={preferences.clockInReminder}
             clockOutReminder={preferences.clockOutReminder}
-            leadMinutes={preferences.leadMinutes}
+            clockInLeadMinutes={preferences.clockInLeadMinutes}
+            clockOutLeadMinutes={preferences.clockOutLeadMinutes}
             soundKey={preferences.soundKey}
             soundVolume={preferences.soundVolume}
             soundUrl={soundUrl}

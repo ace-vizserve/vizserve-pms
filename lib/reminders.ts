@@ -46,7 +46,16 @@ export type ReminderInput = {
   /** Today's punches. Null means not yet. */
   timeIn: string | null;
   timeOut: string | null;
-  leadMinutes: number;
+  /**
+   * P11-02 — ONE LEAD PER SIDE.
+   *
+   * They used to be a single number subtracted from both ends. Getting ready to
+   * START work takes time and stopping does not, so five minutes before the
+   * shift and one before the end is an ordinary thing to want, and the two
+   * switches below have always been independent anyway.
+   */
+  clockInLeadMinutes: number;
+  clockOutLeadMinutes: number;
   clockIn: boolean;
   clockOut: boolean;
   /**
@@ -117,23 +126,33 @@ export function dueReminder(input: ReminderInput): DueReminder | null {
   const now = clockMinutes(input.nowClock);
   if (now === null) return null;
 
-  // A lead time outside the legal range is a corrupt read, not an instruction.
-  // Falling back would invent a policy; refusing to fire says nothing, which is
-  // the safe half of a feature nobody has to be told about.
-  const lead = Math.trunc(input.leadMinutes);
-  if (!Number.isFinite(lead) || lead < 1) return null;
+  /*
+   * A lead time outside the legal range is a corrupt read, not an instruction.
+   * Falling back would invent a policy; refusing to fire says nothing, which is
+   * the safe half of a feature nobody has to be told about.
+   *
+   * ⚠️ CHECKED PER SIDE, so one bad value silences one reminder rather than
+   * both. A row with a sane clock-in lead and a corrupt clock-out lead should
+   * still get somebody to work on time.
+   */
+  const usable = (minutes: number): number | null => {
+    const lead = Math.trunc(minutes);
+    return Number.isFinite(lead) && lead >= 1 ? lead : null;
+  };
 
   // Rule 3 — the shift in progress wins.
   if (input.clockOut && input.workEnd && input.timeIn && !input.timeOut) {
+    const lead = usable(input.clockOutLeadMinutes);
     const end = clockMinutes(input.workEnd);
-    if (end !== null && now >= end - lead && now < end) {
+    if (lead !== null && end !== null && now >= end - lead && now < end) {
       return { side: "out", scheduled: input.workEnd.slice(0, 5), minutesAway: end - now };
     }
   }
 
   if (input.clockIn && input.workStart && !input.timeIn) {
+    const lead = usable(input.clockInLeadMinutes);
     const start = clockMinutes(input.workStart);
-    if (start !== null && now >= start - lead && now < start) {
+    if (lead !== null && start !== null && now >= start - lead && now < start) {
       return { side: "in", scheduled: input.workStart.slice(0, 5), minutesAway: start - now };
     }
   }

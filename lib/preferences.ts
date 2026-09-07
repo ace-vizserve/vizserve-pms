@@ -74,7 +74,17 @@ export const ALLOWED_SOUND_MIME_TYPES = [
 export type UserPreferences = {
   clockInReminder: boolean;
   clockOutReminder: boolean;
-  leadMinutes: number;
+  /**
+   * P11-02 — TWO LEADS, NOT ONE.
+   *
+   * They were a single `leadMinutes` subtracted from both ends of the day. The
+   * two switches above have always been independent, which is what made the
+   * shared number read as an oversight: getting ready to START work takes time,
+   * stopping does not, so five minutes before the shift and one before the end
+   * is an ordinary thing to want.
+   */
+  clockInLeadMinutes: number;
+  clockOutLeadMinutes: number;
   soundKey: SoundKey;
   /** The storage object path, not a URL. Null unless `soundKey` is `custom`. */
   customSoundPath: string | null;
@@ -86,7 +96,8 @@ export type UserPreferences = {
 export const DEFAULT_USER_PREFERENCES: UserPreferences = {
   clockInReminder: true,
   clockOutReminder: true,
-  leadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
+  clockInLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
+  clockOutLeadMinutes: DEFAULT_REMINDER_LEAD_MINUTES,
   soundKey: "default",
   customSoundPath: null,
   soundVolume: DEFAULT_SOUND_VOLUME,

@@ -23,7 +23,8 @@ const base = {
   workEnd: "18:00",
   timeIn: null as string | null,
   timeOut: null as string | null,
-  leadMinutes: 15,
+  clockInLeadMinutes: 15,
+  clockOutLeadMinutes: 15,
   clockIn: true,
   clockOut: true,
   working: true,
@@ -137,29 +138,29 @@ describe("dueReminder — the silences", () => {
    * person never chose.
    */
   it("says nothing for a lead time below one minute", () => {
-    expect(dueReminder({ ...base, leadMinutes: 0 })).toBeNull();
-    expect(dueReminder({ ...base, leadMinutes: -5 })).toBeNull();
-    expect(dueReminder({ ...base, leadMinutes: Number.NaN })).toBeNull();
+    expect(dueReminder({ ...base, clockInLeadMinutes: 0 })).toBeNull();
+    expect(dueReminder({ ...base, clockInLeadMinutes: -5 })).toBeNull();
+    expect(dueReminder({ ...base, clockInLeadMinutes: Number.NaN })).toBeNull();
   });
 });
 
 describe("dueReminder — the lead-time extremes", () => {
   it("honours a one-minute lead", () => {
-    expect(dueReminder({ ...base, leadMinutes: 1, nowClock: "08:59" })).toEqual({
+    expect(dueReminder({ ...base, clockInLeadMinutes: 1, nowClock: "08:59" })).toEqual({
       side: "in",
       scheduled: "09:00",
       minutesAway: 1,
     });
-    expect(dueReminder({ ...base, leadMinutes: 1, nowClock: "08:58" })).toBeNull();
+    expect(dueReminder({ ...base, clockInLeadMinutes: 1, nowClock: "08:58" })).toBeNull();
   });
 
   it("honours a two-hour lead", () => {
-    expect(dueReminder({ ...base, leadMinutes: 120, nowClock: "07:00" })).toEqual({
+    expect(dueReminder({ ...base, clockInLeadMinutes: 120, nowClock: "07:00" })).toEqual({
       side: "in",
       scheduled: "09:00",
       minutesAway: 120,
     });
-    expect(dueReminder({ ...base, leadMinutes: 120, nowClock: "06:59" })).toBeNull();
+    expect(dueReminder({ ...base, clockInLeadMinutes: 120, nowClock: "06:59" })).toBeNull();
   });
 });
 
@@ -208,5 +209,97 @@ describe("reminderSeenKey", () => {
     expect(reminderSeenKey("u2", "2026-09-04", "in")).not.toBe(
       reminderSeenKey("u1", "2026-09-04", "in"),
     );
+  });
+});
+
+/**
+ * P11-02 — THE TWO LEADS ARE INDEPENDENT.
+ *
+ * They were one number subtracted from both ends of the day. The two switches
+ * have always been separate, which is what made the shared lead read as an
+ * oversight: getting ready to START work takes time and stopping does not, so
+ * five minutes before the shift and one before the end is an ordinary thing to
+ * want.
+ *
+ * The whole feature is a browser timer over this pure function — it writes
+ * nothing, sends nothing and leaves no record that it fired — so these cases are
+ * the entire proof. There is no job to observe and no row to inspect.
+ */
+describe("dueReminder — one lead per side", () => {
+  const split = { ...base, clockInLeadMinutes: 5, clockOutLeadMinutes: 1 };
+
+  it("uses the clock-IN lead for the morning window, not the clock-out one", () => {
+    // 08:55 is inside a 5-minute in-window and would be far outside a 1-minute
+    // one, so this fails if the sides are crossed.
+    expect(dueReminder({ ...split, nowClock: "08:55" })).toEqual({
+      side: "in",
+      scheduled: "09:00",
+      minutesAway: 5,
+    });
+    expect(dueReminder({ ...split, nowClock: "08:54" })).toBeNull();
+  });
+
+  it("uses the clock-OUT lead for the evening window, not the clock-in one", () => {
+    const open = { ...split, timeIn: CLOCKED_IN };
+
+    // 17:59 is inside a 1-minute out-window. 17:55 would be inside a 5-minute
+    // one, so it fires only if the wrong lead is being read.
+    expect(dueReminder({ ...open, nowClock: "17:59" })).toEqual({
+      side: "out",
+      scheduled: "18:00",
+      minutesAway: 1,
+    });
+    expect(dueReminder({ ...open, nowClock: "17:55" })).toBeNull();
+  });
+
+  it("keeps each switch governing its own side", () => {
+    // Clock-in off, clock-out on: the morning is silent even though its lead
+    // would otherwise have fired.
+    expect(dueReminder({ ...split, clockIn: false, nowClock: "08:55" })).toBeNull();
+
+    expect(
+      dueReminder({ ...split, clockOut: false, timeIn: CLOCKED_IN, nowClock: "17:59" }),
+    ).toBeNull();
+  });
+
+  /**
+   * ⚠️ A CORRUPT LEAD SILENCES ONE SIDE, NOT BOTH.
+   *
+   * The check used to run once over a single value, so an out-of-range number
+   * killed the whole reminder. With two columns a row can be half-sane, and
+   * somebody whose clock-out lead is broken should still be got to work on time.
+   */
+  it("silences only the side whose lead is unusable", () => {
+    const brokenOut = { ...base, clockInLeadMinutes: 15, clockOutLeadMinutes: 0 };
+
+    expect(dueReminder({ ...brokenOut, nowClock: "08:45" })).toEqual({
+      side: "in",
+      scheduled: "09:00",
+      minutesAway: 15,
+    });
+    expect(
+      dueReminder({ ...brokenOut, timeIn: CLOCKED_IN, nowClock: "17:45" }),
+    ).toBeNull();
+  });
+
+  it("still refuses a lead that is not a number at all", () => {
+    expect(dueReminder({ ...base, clockInLeadMinutes: Number.NaN })).toBeNull();
+    expect(dueReminder({ ...base, clockInLeadMinutes: -5 })).toBeNull();
+  });
+
+  /**
+   * The precedence rule is unchanged by the split: an open shift wins. Worth
+   * re-asserting with UNEQUAL leads, because that is the arrangement where a
+   * crossed pair could make the in-window look like the winner.
+   */
+  it("still prefers the shift in progress when both could fire", () => {
+    const both = {
+      ...base,
+      clockInLeadMinutes: 120,
+      clockOutLeadMinutes: 120,
+      timeIn: CLOCKED_IN,
+      nowClock: "16:30",
+    };
+    expect(dueReminder(both)?.side).toBe("out");
   });
 });

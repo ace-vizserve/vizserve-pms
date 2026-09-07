@@ -331,6 +331,13 @@ export type Database = {
           user_id: string;
           clock_in_reminder: boolean;
           clock_out_reminder: boolean;
+          /**
+           * P11-02. One lead per side. `reminder_lead_minutes` below is
+           * SUPERSEDED and is kept only until the follow-up migration drops it —
+           * nothing reads it any more.
+           */
+          clock_in_lead_minutes: number;
+          clock_out_lead_minutes: number;
           reminder_lead_minutes: number;
           /**
            * 'default' (the shipped chime) or 'custom'. A text column with a
@@ -352,6 +359,8 @@ export type Database = {
           user_id: string;
           clock_in_reminder?: boolean;
           clock_out_reminder?: boolean;
+          clock_in_lead_minutes?: number;
+          clock_out_lead_minutes?: number;
           reminder_lead_minutes?: number;
           sound_key?: string;
           custom_sound_path?: string | null;
@@ -362,6 +371,8 @@ export type Database = {
           user_id?: string;
           clock_in_reminder?: boolean;
           clock_out_reminder?: boolean;
+          clock_in_lead_minutes?: number;
+          clock_out_lead_minutes?: number;
           reminder_lead_minutes?: number;
           sound_key?: string;
           custom_sound_path?: string | null;

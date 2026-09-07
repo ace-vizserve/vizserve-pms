@@ -31,21 +31,32 @@ import { MAX_REMINDER_LEAD_MINUTES, MIN_REMINDER_LEAD_MINUTES } from "@/lib/pref
  * clears it AND deletes the object. Uploading is choosing; choosing the default
  * is removing. There is no third operation for a form to get wrong.
  */
+const leadMinutes = z
+  .number({ error: "Enter a number of minutes." })
+  .int("Whole minutes only.")
+  .min(
+    MIN_REMINDER_LEAD_MINUTES,
+    "At least one minute. A reminder at the scheduled time is a report, not a warning.",
+  )
+  .max(
+    MAX_REMINDER_LEAD_MINUTES,
+    "Two hours is the ceiling. Further ahead than that and it stops being about this shift.",
+  );
+
 export const userPreferencesSchema = z.object({
   clock_in_reminder: z.boolean(),
   clock_out_reminder: z.boolean(),
 
-  reminder_lead_minutes: z
-    .number({ error: "Enter a number of minutes." })
-    .int("Whole minutes only.")
-    .min(
-      MIN_REMINDER_LEAD_MINUTES,
-      "At least one minute. A reminder at the scheduled time is a report, not a warning.",
-    )
-    .max(
-      MAX_REMINDER_LEAD_MINUTES,
-      "Two hours is the ceiling. Further ahead than that and it stops being about this shift.",
-    ),
+  /*
+   * P11-02 — one lead per side, with identical bounds.
+   *
+   * ⚠️ THE MESSAGES NAME NEITHER SIDE. Both fields share them, and a message
+   * that said "before you clock in" would be wrong under the other input the
+   * moment somebody copied it. The field label says which end of the day this
+   * is; the rule is the same rule.
+   */
+  clock_in_lead_minutes: leadMinutes,
+  clock_out_lead_minutes: leadMinutes,
 
   sound_volume: z
     .number({ error: "Enter a volume." })

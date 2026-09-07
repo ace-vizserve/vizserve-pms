@@ -135,7 +135,8 @@ describe("userPreferencesSchema", () => {
   const valid = {
     clock_in_reminder: true,
     clock_out_reminder: false,
-    reminder_lead_minutes: DEFAULT_REMINDER_LEAD_MINUTES,
+    clock_in_lead_minutes: DEFAULT_REMINDER_LEAD_MINUTES,
+    clock_out_lead_minutes: DEFAULT_REMINDER_LEAD_MINUTES,
     sound_volume: 70,
   };
 
@@ -143,20 +144,45 @@ describe("userPreferencesSchema", () => {
     expect(userPreferencesSchema.safeParse(valid).success).toBe(true);
   });
 
-  it("accepts both ends of the lead-time range and refuses just outside", () => {
-    for (const minutes of [MIN_REMINDER_LEAD_MINUTES, MAX_REMINDER_LEAD_MINUTES]) {
-      expect(
-        userPreferencesSchema.safeParse({ ...valid, reminder_lead_minutes: minutes }).success,
-        String(minutes),
-      ).toBe(true);
-    }
+  /*
+   * P11-02 — the two leads carry the SAME bounds, and both are checked.
+   *
+   * They share one zod definition, so a rule could only ever drift by somebody
+   * pointing one field at a different schema. Asserting both is what would catch
+   * that, and it is two lines.
+   */
+  it("accepts both ends of the lead-time range and refuses just outside, on each side", () => {
+    for (const side of ["clock_in_lead_minutes", "clock_out_lead_minutes"] as const) {
+      for (const minutes of [MIN_REMINDER_LEAD_MINUTES, MAX_REMINDER_LEAD_MINUTES]) {
+        expect(
+          userPreferencesSchema.safeParse({ ...valid, [side]: minutes }).success,
+          `${side} ${minutes}`,
+        ).toBe(true);
+      }
 
-    for (const minutes of [0, -1, MAX_REMINDER_LEAD_MINUTES + 1]) {
-      expect(
-        userPreferencesSchema.safeParse({ ...valid, reminder_lead_minutes: minutes }).success,
-        String(minutes),
-      ).toBe(false);
+      for (const minutes of [0, -1, MAX_REMINDER_LEAD_MINUTES + 1]) {
+        expect(
+          userPreferencesSchema.safeParse({ ...valid, [side]: minutes }).success,
+          `${side} ${minutes}`,
+        ).toBe(false);
+      }
     }
+  });
+
+  it("accepts two DIFFERENT leads — the point of the split", () => {
+    expect(
+      userPreferencesSchema.safeParse({
+        ...valid,
+        clock_in_lead_minutes: 5,
+        clock_out_lead_minutes: 1,
+      }).success,
+    ).toBe(true);
+  });
+
+  it("requires both — neither side falls back to the other", () => {
+    const missingOut: Record<string, unknown> = { ...valid };
+    delete missingOut.clock_out_lead_minutes;
+    expect(userPreferencesSchema.safeParse(missingOut).success).toBe(false);
   });
 
   /**
@@ -166,13 +192,16 @@ describe("userPreferencesSchema", () => {
    * disagree with.
    */
   it("refuses a zero lead time rather than reading it as off", () => {
-    expect(userPreferencesSchema.safeParse({ ...valid, reminder_lead_minutes: 0 }).success).toBe(
+    expect(userPreferencesSchema.safeParse({ ...valid, clock_in_lead_minutes: 0 }).success).toBe(
+      false,
+    );
+    expect(userPreferencesSchema.safeParse({ ...valid, clock_out_lead_minutes: 0 }).success).toBe(
       false,
     );
   });
 
   it("refuses fractional minutes", () => {
-    expect(userPreferencesSchema.safeParse({ ...valid, reminder_lead_minutes: 7.5 }).success).toBe(
+    expect(userPreferencesSchema.safeParse({ ...valid, clock_in_lead_minutes: 7.5 }).success).toBe(
       false,
     );
   });
@@ -222,7 +251,10 @@ describe("preference defaults", () => {
     expect(DEFAULT_USER_PREFERENCES).toEqual({
       clockInReminder: true,
       clockOutReminder: true,
-      leadMinutes: 15,
+      // P11-02 — one per side, both defaulting to the same number, so a person
+      // who has never opened Settings gets exactly the old behaviour.
+      clockInLeadMinutes: 15,
+      clockOutLeadMinutes: 15,
       soundKey: "default",
       customSoundPath: null,
       soundVolume: 70,

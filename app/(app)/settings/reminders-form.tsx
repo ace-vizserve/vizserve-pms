@@ -66,7 +66,8 @@ function notifyPermissionChanged() {
 export type RemindersFormProps = {
   clockInReminder: boolean;
   clockOutReminder: boolean;
-  leadMinutes: number;
+  clockInLeadMinutes: number;
+  clockOutLeadMinutes: number;
   soundKey: SoundKey;
   soundVolume: number;
   /** A signed URL when they have uploaded one. Null for the shipped default. */
@@ -76,6 +77,61 @@ export type RemindersFormProps = {
   workEnd: string | null;
 };
 
+/**
+ * How far ahead one of the two reminders fires.
+ *
+ * ⚠️ DISABLED RATHER THAN HIDDEN when its switch is off. A control that
+ * vanishes takes its value with it as far as the reader is concerned — they
+ * cannot check what it was set to without turning the reminder back on, and the
+ * layout jumps every time a switch is flipped. Greyed out, the number is still
+ * legible and still theirs.
+ *
+ * The bounds are the schema's, which are the CHECK constraint's. `min`/`max` on
+ * the input are a courtesy for the spinner; the sentence under it is what
+ * actually explains a refusal, and it comes from the server.
+ */
+function LeadField({
+  id,
+  value,
+  onChange,
+  errors,
+  disabled,
+}: {
+  id: string;
+  value: string;
+  onChange: (next: string) => void;
+  errors: string[];
+  disabled: boolean;
+}) {
+  return (
+    <div className="space-y-2 pl-0 sm:pl-4">
+      <div className="flex items-center gap-2">
+        <Input
+          id={id}
+          name={id}
+          type="number"
+          inputMode="numeric"
+          min={MIN_REMINDER_LEAD_MINUTES}
+          max={MAX_REMINDER_LEAD_MINUTES}
+          step={1}
+          className="w-24 tabular-nums"
+          value={value}
+          disabled={disabled}
+          onChange={(event) => onChange(event.target.value)}
+          aria-invalid={errors.length > 0}
+          aria-label="Minutes before"
+        />
+        <span className="text-sm text-muted-foreground">minutes before</span>
+      </div>
+      {errors.map((message) => (
+        <p key={message} role="alert" className="text-xs text-destructive">
+          {message}
+        </p>
+      ))}
+    </div>
+  );
+}
+
 export function RemindersForm(props: RemindersFormProps) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
@@ -83,7 +139,8 @@ export function RemindersForm(props: RemindersFormProps) {
 
   const [clockIn, setClockIn] = useState(props.clockInReminder);
   const [clockOut, setClockOut] = useState(props.clockOutReminder);
-  const [lead, setLead] = useState(String(props.leadMinutes));
+  const [inLead, setInLead] = useState(String(props.clockInLeadMinutes));
+  const [outLead, setOutLead] = useState(String(props.clockOutLeadMinutes));
   const [volume, setVolume] = useState(props.soundVolume);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
 
@@ -117,12 +174,13 @@ export function RemindersForm(props: RemindersFormProps) {
       // Number("") is 0, which the schema would reject with the right sentence
       // — but NaN gets there with the same result and without pretending an
       // empty field meant zero.
-      const parsedLead = lead.trim() === "" ? Number.NaN : Number(lead);
+      const parse = (value: string) => (value.trim() === "" ? Number.NaN : Number(value));
 
       const result = await saveReminderPreferences({
         clock_in_reminder: clockIn,
         clock_out_reminder: clockOut,
-        reminder_lead_minutes: parsedLead,
+        clock_in_lead_minutes: parse(inLead),
+        clock_out_lead_minutes: parse(outLead),
         sound_volume: volume,
       });
 
@@ -200,7 +258,8 @@ export function RemindersForm(props: RemindersFormProps) {
     });
   }
 
-  const leadErrors = errors.reminder_lead_minutes ?? [];
+  const inLeadErrors = errors.clock_in_lead_minutes ?? [];
+  const outLeadErrors = errors.clock_out_lead_minutes ?? [];
 
   return (
     <div className="space-y-5">
@@ -241,6 +300,22 @@ export function RemindersForm(props: RemindersFormProps) {
           <Switch id="clock_in_reminder" checked={clockIn} onCheckedChange={setClockIn} />
         </div>
 
+        {/* ⚠️ THE LEAD SITS UNDER ITS OWN SWITCH, not in a third row shared by
+            both. It used to be one number subtracted from both ends of the day,
+            which read as an oversight rather than a decision — getting ready to
+            START work takes time and stopping does not, so five before the shift
+            and one before the end is an ordinary thing to want.
+
+            No "same for both" toggle. That is a third state to reason about and
+            a third way for the two numbers to disagree with what is stored. */}
+        <LeadField
+          id="clock_in_lead_minutes"
+          value={inLead}
+          onChange={setInLead}
+          errors={inLeadErrors}
+          disabled={!clockIn}
+        />
+
         <div className="flex items-start justify-between gap-4">
           <div className="space-y-0.5">
             <Label htmlFor="clock_out_reminder">Before I clock out</Label>
@@ -251,30 +326,14 @@ export function RemindersForm(props: RemindersFormProps) {
           <Switch id="clock_out_reminder" checked={clockOut} onCheckedChange={setClockOut} />
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="reminder_lead_minutes">How far ahead</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="reminder_lead_minutes"
-              name="reminder_lead_minutes"
-              type="number"
-              inputMode="numeric"
-              min={MIN_REMINDER_LEAD_MINUTES}
-              max={MAX_REMINDER_LEAD_MINUTES}
-              step={1}
-              className="w-24 tabular-nums"
-              value={lead}
-              onChange={(event) => setLead(event.target.value)}
-              aria-invalid={leadErrors.length > 0}
-            />
-            <span className="text-sm text-muted-foreground">minutes before</span>
-          </div>
-          {leadErrors.map((message) => (
-            <p key={message} className="text-xs text-destructive">
-              {message}
-            </p>
-          ))}
-        </div>
+        <LeadField
+          id="clock_out_lead_minutes"
+          value={outLead}
+          onChange={setOutLead}
+          errors={outLeadErrors}
+          disabled={!clockOut}
+        />
+
       </div>
 
       {/* --------------------------------------------------------------- Sound */}

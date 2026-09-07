@@ -39,7 +39,8 @@ export type ReminderState = {
   timeOut: string | null;
   approvedOvertimeMinutes: number;
   isWorkingDay: boolean;
-  leadMinutes: number;
+  clockInLeadMinutes: number;
+  clockOutLeadMinutes: number;
   clockInReminder: boolean;
   clockOutReminder: boolean;
   soundUrl: string | null;
@@ -81,7 +82,8 @@ export async function loadReminderState(): Promise<ReminderState | null> {
     timeOut: punch.today?.time_out ?? null,
     approvedOvertimeMinutes: punch.approvedOvertimeMinutes,
     isWorkingDay,
-    leadMinutes: preferences.leadMinutes,
+    clockInLeadMinutes: preferences.clockInLeadMinutes,
+    clockOutLeadMinutes: preferences.clockOutLeadMinutes,
     clockInReminder: preferences.clockInReminder,
     clockOutReminder: preferences.clockOutReminder,
     soundUrl,
