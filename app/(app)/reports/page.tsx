@@ -17,6 +17,18 @@ import { QueryError } from "@/components/query-error";
 import { RequestStatusBadge } from "@/components/status-badge";
 import { StatTile } from "@/components/stat-tile";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  loadClientEngagement,
+  loadFeedback,
+  loadNegotiation,
+  loadTurnaround,
+} from "@/lib/reports-server";
+import {
+  EngagementCard,
+  FeedbackCard,
+  NegotiationCard,
+  TurnaroundCard,
+} from "./metric-cards";
 import { createClient } from "@/utils/supabase/server";
 
 import { BarRow, StageBar, StageLegend } from "./charts";
@@ -92,7 +104,18 @@ export default async function ReportsPage({
    */
   const inverted = from > to;
 
-  const [tasksResult, requestsResult, hoursResult, departmentsResult] = await Promise.all([
+  const period = { from, to };
+
+  const [
+    tasksResult,
+    requestsResult,
+    hoursResult,
+    departmentsResult,
+    turnaround,
+    negotiation,
+    engagement,
+    feedback,
+  ] = await Promise.all([
     /*
      * Tasks CREATED in the period, not tasks touched in it.
      *
@@ -130,6 +153,19 @@ export default async function ReportsPage({
           .lte("work_date", to),
 
     supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+
+    /*
+     * P6-04 / P6-06 / P6-07 — the four metrics P6-05 left out, in the SAME WAVE
+     * as the four above.
+     *
+     * They depend on nothing here — each takes only the period, which has been
+     * in hand since the top of this function — so awaiting them separately would
+     * add four round trips to a page that already has four.
+     */
+    inverted ? null : loadTurnaround(supabase, period),
+    inverted ? null : loadNegotiation(supabase, period),
+    inverted ? null : loadClientEngagement(supabase, period),
+    inverted ? null : loadFeedback(supabase, period),
   ]);
 
   const departmentName = new Map(
@@ -284,6 +320,23 @@ export default async function ReportsPage({
               hint="Time entered against tasks in this period"
               icon={<Clock />}
             />
+          </div>
+
+          {/*
+            P6-04 / P6-06 / P6-07 — the four questions P6-05 could not answer.
+            Two columns from `lg` up: each is a self-contained finding rather
+            than a series to be compared across, so they read as four cards and
+            not as one dashboard.
+
+            Null only on an inverted range, which the branch above already
+            handles — the guards are for the type checker, not for a state a
+            reader can reach.
+          */}
+          <div className="grid gap-3 lg:grid-cols-2">
+            {turnaround ? <TurnaroundCard data={turnaround} /> : null}
+            {negotiation ? <NegotiationCard data={negotiation} /> : null}
+            {engagement ? <EngagementCard data={engagement} /> : null}
+            {feedback ? <FeedbackCard data={feedback} /> : null}
           </div>
 
           <Card size="sm">
