@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { Check, Search, UserPlus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -133,9 +133,28 @@ export function AssigneePicker({
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
+  /*
+   * P11-05 — THE MONOGRAM APPEARS ON THE CLICK.
+   *
+   * Adding somebody used to leave the picker unchanged for a round trip: the row
+   * you had just pressed still sat under "People", so the natural reading was
+   * that the click had missed and the natural response was to press it again.
+   *
+   * Only the OTHERS list is optimistic. The person in charge is `assignee_id`,
+   * a different column changed by a different control (P7-14), and predicting a
+   * reassignment here would draw a rank the data does not claim.
+   */
+  const [shownOthers, applyChange] = useOptimistic(
+    others,
+    (state: Person[], change: { person: Person; add: boolean }) =>
+      change.add
+        ? [...state, change.person]
+        : state.filter((row) => row.id !== change.person.id),
+  );
+
   const onTask = useMemo(
-    () => new Set([pic?.id, ...others.map((person) => person.id)].filter(Boolean) as string[]),
-    [pic, others],
+    () => new Set([pic?.id, ...shownOthers.map((person) => person.id)].filter(Boolean) as string[]),
+    [pic, shownOthers],
   );
 
   const available = useMemo(() => {
@@ -149,13 +168,21 @@ export function AssigneePicker({
     const needle = query.trim().toLowerCase();
     const all = [
       ...(pic ? [{ ...pic, isPic: showPic }] : []),
-      ...others.map((p) => ({ ...p, isPic: false })),
+      ...shownOthers.map((p) => ({ ...p, isPic: false })),
     ];
     return all.filter((person) => !needle || person.full_name.toLowerCase().includes(needle));
-  }, [pic, others, query, showPic]);
+  }, [pic, shownOthers, query, showPic]);
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
+  function run(
+    action: () => Promise<{ ok: boolean; error?: string }>,
+    success: string,
+    change?: { person: Person; add: boolean },
+  ) {
     startTransition(async () => {
+      // Inside the transition, before the await: this is the paint. React drops
+      // it if the action is refused, so there is no rollback to write.
+      if (change) applyChange(change);
+
       const result = await action();
       if (!result.ok) {
         toast.error(result.error ?? "That did not go through.");
@@ -176,7 +203,7 @@ export function AssigneePicker({
           label={showPic ? `${pic.full_name} — person in charge` : pic.full_name}
         />
       ) : null}
-      {others.slice(0, 2).map((person, index) => (
+      {shownOthers.slice(0, 2).map((person, index) => (
         <Monogram
           key={person.id}
           id={person.id}
@@ -185,12 +212,12 @@ export function AssigneePicker({
           className={cn("ring-2 ring-card", pic || index > 0 ? "-ml-1.5" : undefined)}
         />
       ))}
-      {others.length > 2 ? (
+      {shownOthers.length > 2 ? (
         <span className="-ml-1.5 flex size-6 shrink-0 items-center justify-center rounded-full border bg-muted text-2xs font-semibold tabular-nums text-muted-foreground ring-2 ring-card">
-          +{others.length - 2}
+          +{shownOthers.length - 2}
         </span>
       ) : null}
-      {!pic && others.length === 0 ? (
+      {!pic && shownOthers.length === 0 ? (
         <span
           className={cn(
             "flex size-6 shrink-0 items-center justify-center rounded-full border border-dashed text-muted-foreground",
@@ -217,8 +244,8 @@ export function AssigneePicker({
       <PopoverTrigger
         disabled={pending}
         aria-label={
-          pic || others.length
-            ? `Assignees: ${[pic?.full_name, ...others.map((p) => p.full_name)].filter(Boolean).join(", ")}. Change them.`
+          pic || shownOthers.length
+            ? `Assignees: ${[pic?.full_name, ...shownOthers.map((p) => p.full_name)].filter(Boolean).join(", ")}. Change them.`
             : "Unassigned. Add somebody."
         }
         className={cn(
@@ -276,6 +303,7 @@ export function AssigneePicker({
                         run(
                           () => removeTaskAssignee(taskId, person.id),
                           `${person.full_name} is no longer on this task`,
+                          { person, add: false },
                         )
                       }
                       aria-label={`Remove ${person.full_name} from this task`}
@@ -309,6 +337,7 @@ export function AssigneePicker({
                   run(
                     () => addTaskAssignee(taskId, person.id),
                     `${person.full_name} added to this task`,
+                    { person, add: true },
                   )
                 }
                 className={cn(ROW, "hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none")}
