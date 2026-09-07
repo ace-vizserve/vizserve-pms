@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
@@ -62,7 +61,6 @@ export function useTaskTransition({
    */
   beforeMove?: () => Promise<void>;
 }) {
-  const router = useRouter();
   const [pending, startTransition] = useTransition();
   /** Non-null while a comment-requiring move waits for its comment. */
   const [prompt, setPrompt] = useState<Transition | null>(null);
@@ -84,12 +82,19 @@ export function useTaskTransition({
    * dropdown for a full round trip and only then repaint — so the one
    * interaction people do dozens of times a day was the one that felt slowest.
    *
-   * ⚠️ `useOptimistic` REVERTS BY ITSELF when the transition ends, which is
-   * exactly why `router.refresh()` STAYS inside the transition below. Next ties
-   * the refresh into the same transition, so the optimistic status holds until
-   * the fresh server value has actually arrived. Take the refresh out and the
-   * chip snaps back to the old status for however long the re-render takes,
-   * which looks like the move failing and then succeeding.
+   * ⚠️ AND THE OPTIMISM IS THE SMALLER HALF. Painting early hides latency; it
+   * does not remove it, and a move that still takes two round trips is still
+   * slow — it just looks better while it is. `router.refresh()` used to run
+   * after the action and fetch the same route a second time. It is gone: the
+   * Server Action calls `revalidatePath` itself, so the fresh RSC payload comes
+   * back WITH the action's response, inside this transition. One trip, not two,
+   * and the optimistic value holds until the real one arrives because both are
+   * in the same transition.
+   *
+   * ⚠️ THAT MAKES `refresh()` IN `actions.ts` THE ONLY THING THAT REPAINTS.
+   * A route missing from its list now goes stale instead of being quietly
+   * rescued by the second fetch — `/tasks/board` was missing and has been
+   * added.
    *
    * ⚠️ AND IT REVERTS ON FAILURE FOR FREE. A refused move needs no rollback
    * code: React drops the optimistic value, the chip returns to what the server
@@ -123,7 +128,6 @@ export function useTaskTransition({
       setPrompt(null);
       setError(null);
       onMoved?.();
-      router.refresh();
     });
   }
 

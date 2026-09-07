@@ -49,8 +49,24 @@ import { flattenIssues, readableError } from "@/lib/action-result";
 import type { ActionResult } from "@/lib/action-result";
 export type { ActionResult };
 
+/*
+ * ⚠️ EVERY ROUTE THAT SHOWS A TASK HAS TO BE IN HERE, because as of P11-05 this
+ * is the ONLY thing that repaints them. The controls used to call
+ * `router.refresh()` afterwards, which papered over any path missing from this
+ * list at the cost of a second round trip on every mutation.
+ *
+ * `/tasks/board` was the one missing, and it is the one that would have gone
+ * stale first — dragging a card is a task mutation and the board is where you
+ * watch it land.
+ *
+ * `revalidatePath` does NOT execute a route; it marks it stale, and the cost
+ * lands on the next visit. So listing `/` and `/dashboard` here is close to free
+ * and is what stops the badge counts lying after a move.
+ */
 function refresh(taskId?: string) {
   revalidatePath("/tasks");
+  revalidatePath("/tasks/board");
+  revalidatePath("/tasks/lists");
   revalidatePath("/");
   revalidatePath("/dashboard");
   if (taskId) revalidatePath(`/tasks/${taskId}`);
