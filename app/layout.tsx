@@ -37,8 +37,8 @@ const plusJakarta = Plus_Jakarta_Sans({
 
 export const metadata: Metadata = {
   title: {
-    default: "VizServe PMS",
-    template: "%s · VizServe PMS",
+    default: "VizServe Team Portal",
+    template: "%s · VizServe Team Portal",
   },
   description: "VizServe internal operations platform.",
 };

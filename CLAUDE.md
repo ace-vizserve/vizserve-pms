@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this repository is
 
-**VizServe PMS** — an internal ops platform for VizServe, replacing ClickUp and Microsoft Teams Approvals. Next.js app at the repo root, Supabase behind it, planning docs in [docs/](docs/).
+**VizServe Team Portal** — an internal ops platform for VizServe, replacing ClickUp and Microsoft Teams Approvals. Next.js app at the repo root, Supabase behind it, planning docs in [docs/](docs/).
+
+⚠️ **THE PRODUCT WAS RENAMED ON 7 SEP 2026; THE CODEBASE WAS NOT.** Users read "VizServe Team Portal". Everything structural still says PMS and must — the repo and npm package are `vizserve-pms`, every table and enum is prefixed `vizserve_pms_`, the `app_access` key is the literal string `vizserve-pms` (change it and everyone is locked out), and several `localStorage` keys carry it. Roughly 5,000 identifiers against 18 strings a human reads. **Never run a find-and-replace across both.** Older docs below still say "PMS" as the project's name; that is the repo, not the product.
 
 The app was scaffolded on 29 Jul 2026. **Phase 0 and most of Phase 1 are built** — see [docs/13-implementation-status.md](docs/13-implementation-status.md) for exactly what exists, what is stubbed, and what is still owed. Read that before assuming a feature is missing or present.
 

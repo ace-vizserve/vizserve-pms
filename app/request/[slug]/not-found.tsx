@@ -24,7 +24,7 @@ export const metadata: Metadata = { title: "Form unavailable" };
  * ⚠️ NO ACTION BUTTON, deliberately, and this is the one place in the app where
  * that is right. Every other dead end offers a way back; there is nowhere to
  * send this reader. `/` is the staff sign-in, which they have no account for —
- * a button marked "Go to VizServe PMS" would take a client who wanted to submit
+ * a button marked "Go to VizServe Team Portal" would take a client who wanted to submit
  * a job and hand them a login screen. The next step genuinely belongs to the
  * person who sent them the link, so the page says so instead of manufacturing a
  * click.

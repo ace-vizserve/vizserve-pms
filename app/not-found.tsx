@@ -19,7 +19,7 @@ export const metadata: Metadata = { title: "Page not found" };
  *   `notFound()` when `vizserve_pms_get_public_form` returns nothing — a
  *   retired form, an unpublished one, a mistyped slug. Those links live in
  *   client inboxes for months. This is the whole of what they see, they have no
- *   account, no nav and no idea what "VizServe PMS" is, and today they see a
+ *   account, no nav and no idea what "VizServe Team Portal" is, and today they see a
  *   browser-default error page from a company that asked them to fill in a
  *   form. That is the case this page exists for.
  *
@@ -79,7 +79,7 @@ export default function NotFound() {
           for both readers without this page having to work out which it has.
         */}
         <Link href="/" className={buttonVariants({ size: "sm", className: "mt-2" })}>
-          Go to VizServe PMS
+          Go to VizServe Team Portal
         </Link>
       </div>
     </main>

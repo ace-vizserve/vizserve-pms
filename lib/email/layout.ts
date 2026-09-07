@@ -95,7 +95,7 @@ function renderHtml(body: EmailBody): string {
                style="max-width:560px;background:#ffffff;border:1px solid ${BORDER};border-radius:10px;overflow:hidden;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
           <tr>
             <td style="background:${PRIMARY};padding:20px 28px;">
-              <div style="color:#ffffff;font-size:16px;font-weight:700;letter-spacing:.02em;">VizServe PMS</div>
+              <div style="color:#ffffff;font-size:16px;font-weight:700;letter-spacing:.02em;">VizServe Team Portal</div>
             </td>
           </tr>
           <tr>
@@ -116,7 +116,7 @@ function renderHtml(body: EmailBody): string {
           <tr>
             <td style="padding:16px 28px;background:${SURFACE};border-top:1px solid ${BORDER};">
               <p style="margin:0;color:${MUTED};font-size:12px;line-height:1.5;">
-                Sent by VizServe PMS. Everything here is also in your inbox in the app.
+                Sent by VizServe Team Portal. Everything here is also in your inbox in the app.
               </p>
             </td>
           </tr>
@@ -155,6 +155,6 @@ function renderText(body: EmailBody): string {
 
   if (body.footnote) lines.push(body.footnote, "");
 
-  lines.push("— VizServe PMS");
+  lines.push("— VizServe Team Portal");
   return lines.join("\n");
 }

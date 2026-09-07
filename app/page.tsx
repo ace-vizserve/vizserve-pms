@@ -777,7 +777,7 @@ export default async function DashboardPage({
         content.
       */}
       <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-3 border-b bg-panel px-5 shadow-chrome backdrop-blur-md backdrop-saturate-150">
-        <BrandLockup subtitle="Project Management System" className="min-w-0" />
+        <BrandLockup subtitle="Team Portal" className="min-w-0" />
 
         <div className="ml-auto flex shrink-0 items-center gap-2">
           <Link href="/dashboard" className={buttonVariants({ variant: "outline", size: "sm" })}>

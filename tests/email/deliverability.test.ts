@@ -32,7 +32,7 @@ describe.skipIf(!recipient)("P0-11 deliverability", () => {
   it("sends the real template to a real address", async () => {
     const outcome = await sendEmail({
       to: recipient!,
-      subject: "VizServe PMS — deliverability check (P0-11)",
+      subject: "VizServe Team Portal — deliverability check (P0-11)",
       body: {
         preheader: "Confirming transactional email is wired end to end.",
         heading: "Transactional email is working",
@@ -44,7 +44,7 @@ describe.skipIf(!recipient)("P0-11 deliverability", () => {
           { label: "Mode", value: emailMode() },
           { label: "Backlog item", value: "P0-11" },
         ],
-        button: { label: "Open VizServe PMS", path: "/" },
+        button: { label: "Open VizServe Team Portal", path: "/" },
         footnote:
           "Check the sender reputation and the spam score before Phase 4 — one client email is what that whole phase rests on.",
       },

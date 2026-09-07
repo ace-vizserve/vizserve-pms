@@ -5,7 +5,7 @@ import { DEPARTMENTS, adminClient, dbTestsEnabled, signIn, skipReason } from "./
 /**
  * The app access gate.
  *
- * "May this person enter VizServe PMS at all" is a different question from "is
+ * "May this person enter VizServe Team Portal at all" is a different question from "is
  * this token valid". The auth pool is shared with other HFSE systems and Entra
  * SSO admits the whole tenant, so a perfectly good session can belong to
  * somebody who has never been a user of this product.

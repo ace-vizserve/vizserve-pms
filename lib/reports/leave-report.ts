@@ -467,7 +467,7 @@ export function renderLeaveReport(
       `Page ${index + 1} of ${pages.length}`,
       { size: 7.5, align: "right", gray: 0.45 },
     );
-    document.text(MARGIN, A4_HEIGHT - MARGIN + 8, "VizServe PMS — leave audit", {
+    document.text(MARGIN, A4_HEIGHT - MARGIN + 8, "VizServe Team Portal — leave audit", {
       size: 7.5,
       gray: 0.45,
     });
@@ -799,7 +799,7 @@ export function renderLeaveTakenReport(
       `Page ${index + 1} of ${pages.length}`,
       { size: 7.5, align: "right", gray: 0.45 },
     );
-    document.text(MARGIN, A4_HEIGHT - MARGIN + 8, "VizServe PMS — leave taken", {
+    document.text(MARGIN, A4_HEIGHT - MARGIN + 8, "VizServe Team Portal — leave taken", {
       size: 7.5,
       gray: 0.45,
     });

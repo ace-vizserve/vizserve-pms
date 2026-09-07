@@ -143,7 +143,7 @@ export function emailMode(): EmailMode {
 export function emailFrom(): string {
   // Resend rejects an unverified sending domain, so this is required in
   // production and defaulted only so dry-run has something to render.
-  return process.env.EMAIL_FROM ?? "VizServe PMS <onboarding@resend.dev>";
+  return process.env.EMAIL_FROM ?? "VizServe Team Portal <onboarding@resend.dev>";
 }
 
 export function emailReplyTo(): string | undefined {

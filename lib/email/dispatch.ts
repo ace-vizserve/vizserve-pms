@@ -60,7 +60,7 @@ const PRESENTATION: Record<
   },
   status_changed: {
     subject: (title) => title,
-    action: "Open in VizServe PMS",
+    action: "Open in VizServe Team Portal",
   },
   // Ships email-off (P5-05 seeds send_email = false) — the requester is staff
   // with an inbox, and docs/12 reserves email for people who have no other
@@ -162,7 +162,7 @@ export async function dispatchPendingEmails(limit = 50): Promise<DispatchSummary
       button: notification.link_path
         ? { label: presentation.action, path: notification.link_path }
         : undefined,
-      footnote: "This is also in your VizServe PMS inbox.",
+      footnote: "This is also in your VizServe Team Portal inbox.",
     };
 
     const outcome = await sendEmail({

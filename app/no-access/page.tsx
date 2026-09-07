@@ -26,15 +26,15 @@ const MESSAGES: Record<AuthDenial, { heading: string; body: string }> = {
     body: "Sign in to continue.",
   },
   not_provisioned: {
-    heading: "You do not have access to VizServe PMS",
+    heading: "You do not have access to VizServe Team Portal",
     body: "Your sign-in worked, but this account has not been set up in this application. If you think it should be, ask an administrator to add you.",
   },
   deactivated: {
     heading: "This account has been deactivated",
-    body: "Your access to VizServe PMS has been switched off. Your work and history are kept. An administrator can restore it.",
+    body: "Your access to VizServe Team Portal has been switched off. Your work and history are kept. An administrator can restore it.",
   },
   no_app_access: {
-    heading: "You do not have access to VizServe PMS",
+    heading: "You do not have access to VizServe Team Portal",
     body: "This account exists but is not enabled for this application. It may be set up for a different HFSE system. An administrator can grant access.",
   },
 };
@@ -58,7 +58,7 @@ export default async function NoAccessPage({
     <main className="flex min-h-svh flex-col justify-center bg-muted/40 px-4 py-12">
       <div className="mx-auto w-full max-w-md">
         <div className="mb-6 flex justify-center">
-          <BrandLockup subtitle="Project Management System" />
+          <BrandLockup subtitle="Team Portal" />
         </div>
 
         <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 text-center sm:p-8">
@@ -76,7 +76,7 @@ export default async function NoAccessPage({
             {/* An anchor styled as a button, not a Button rendering an anchor —
                 Base UI's Button is a native <button> unless told otherwise. */}
             <a
-              href="mailto:amier.vizbytes@vizserve.hfse.edu.sg?subject=VizServe%20PMS%20access"
+              href="mailto:amier.vizbytes@vizserve.hfse.edu.sg?subject=VizServe%20Team%20Portal%20access"
               className={buttonVariants({ variant: "ghost" })}
             >
               Request access

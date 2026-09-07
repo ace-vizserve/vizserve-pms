@@ -38,7 +38,7 @@ export default async function ChangePasswordPage() {
     <main className="flex min-h-svh flex-col justify-center bg-muted/40 px-4 py-12">
       <div className="mx-auto w-full max-w-sm">
         <div className="mb-6 flex justify-center">
-          <BrandLockup subtitle="Project Management System" />
+          <BrandLockup subtitle="Team Portal" />
         </div>
 
         <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 sm:p-8">

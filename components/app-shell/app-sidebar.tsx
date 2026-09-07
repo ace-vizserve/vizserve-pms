@@ -110,7 +110,7 @@ export function AppSidebar({
                 same rule, and BrandLockup uses that one.
 
                 `alt=""` because the wordmark beside it already names the thing;
-                a screen reader announcing "VizServe VizServe PMS" is worse than
+                a screen reader announcing "VizServe VizServe Team Portal" is worse than
                 one that just reads the text.
               */}
               <span className="flex aspect-square size-8 shrink-0 items-center justify-center rounded-md border border-border bg-white p-1 shadow-raised">
@@ -126,7 +126,7 @@ export function AppSidebar({
               </span>
               <span className="grid flex-1 text-left leading-tight">
                 <span className="truncate text-sm font-semibold tracking-[-0.014em]">
-                  VizServe PMS
+                  VizServe Team Portal
                 </span>
                 <span className="truncate text-xs text-muted-foreground">Operations</span>
               </span>

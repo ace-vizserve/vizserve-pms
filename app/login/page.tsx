@@ -69,13 +69,18 @@ export default async function LoginPage({
               asset is white-only, so the component sits it on `--brand-surface`
               — a token that deliberately does NOT flip with the theme, because
               `--brand` lightens in dark and would drop white on it to ~2.2:1. */}
-          <BrandLockup subtitle="Project Management System" className="justify-center" />
+          {/* NO SUBTITLE HERE, UNLIKE THE OTHER THREE LOCKUPS. The h1 two lines
+              down now says "Welcome to VizServe Team Portal" in full, and a
+              "Team Portal" caption directly above it is the same words twice in
+              40px of vertical space. The other call sites keep theirs because
+              nothing near them names the product. */}
+          <BrandLockup className="justify-center" />
 
           <div className="mt-7 text-center">
             {/* Names the product outright. Port 3000 on this machine also
                 serves an SIS login, and "Welcome back" on both is how a smoke
                 test passes against the wrong app. */}
-            <h1 className="text-xl font-semibold tracking-[-0.022em]">Welcome to VizServe PMS</h1>
+            <h1 className="text-xl font-semibold tracking-[-0.022em]">Welcome to VizServe Team Portal</h1>
             <p className="mt-1.5 text-sm text-foreground-muted">Sign in to access your account</p>
           </div>
 
