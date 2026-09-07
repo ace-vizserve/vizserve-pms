@@ -504,9 +504,9 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
        * had been typed into, because it was not in that list. It read as a save
        * that had silently failed.
        *
-       * THE THIRD COPY IS GONE. All three creation paths now build their
-       * arguments through `insertTask`, which names each RPC parameter once, so
-       * a field can no longer be right in two of them and wrong in the third.
+       * The real repair is for this action to call `createTask` /
+       * `createPersonalTask` rather than duplicate them. Until then this is the
+       * third copy, kept honest.
        */
       list_id: z.uuid().nullable().default(null),
     })
@@ -564,40 +564,42 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
     departmentId = assignee.primary_department_id;
   }
 
-  /*
-   * THE SAME PAYLOAD BUILDER THE TWO DIALOGS USE. This action used to assemble
-   * its own arguments for the same two RPCs, and that third copy is what sent
-   * `p_list_id: null` while the other two sent the list.
-   *
-   * `departmentId` is still resolved above rather than passed in, because this
-   * composer has no department field — it derives one from the person, which is
-   * what makes a department that disagrees with the assignee unrepresentable
-   * rather than merely rejected.
-   */
-  const created = await insertTask(supabase, {
-    department_id: departmentId,
-    title: values.title,
-    // The composer has no rich-text field — a title and Enter is the point of
-    // it — so there is nothing to sanitise.
-    description: "",
-    assignee_id: values.assignee_id,
-    qa_assignee_id: null,
-    due_date: values.due_date,
-    list_id: values.list_id,
-    priority: values.priority,
-    start_date: values.start_date,
-    estimate_minutes: values.estimate_minutes,
-  });
+  const created = departmentId
+    ? await supabase.rpc("vizserve_pms_create_task", {
+        p_department_id: departmentId,
+        p_title: values.title,
+        p_description: "",
+        p_assignee_id: values.assignee_id,
+        p_qa_assignee_id: null,
+        p_due_date: values.due_date || null,
+        // The list the composer was typed into. create_task refuses one outside
+        // the task's own department, so this is a proposal, not an authority.
+        p_list_id: values.list_id,
+        p_priority: values.priority,
+      })
+    : await supabase.rpc("vizserve_pms_create_personal_task", {
+        p_title: values.title,
+        p_description: "",
+        p_due_date: values.due_date || null,
+        // create_personal_task RAISES on a list in another department, so a
+        // stale one surfaces as a sentence rather than filing the task nowhere.
+        p_list_id: values.list_id,
+        p_priority: values.priority,
+      });
 
-  if (!created.ok) {
-    // A `taskId` means the row EXISTS and only the follow-up patch failed, so
-    // the page has to be revalidated or the new task stays invisible. No id
-    // means nothing was written and there is nothing to show.
-    if (created.taskId) refresh();
-    return { ok: false, error: created.error };
+  if (created.error) return { ok: false, error: readableError(created.error) };
+
+  const taskId = (created.data as { task_id: string }).task_id;
+
+  // Neither create function takes a start date or an estimate, so they are a
+  // follow-up patch on the row that now exists — the same helper the dialogs
+  // use, and the same reason (trap 3: widening an applied signature means a drop
+  // and a regrant for two nullable columns).
+  const extras = await writeCreationExtras(supabase, taskId, values);
+  if (!extras.ok) {
+    refresh();
+    return { ok: false, error: extras.error };
   }
-
-  const taskId = created.taskId;
 
   /*
    * P7-09 — nesting, when this was opened from a task's `+`.
@@ -842,95 +844,6 @@ export async function reassignTask(
 // ---------------------------------------------------------------------------
 
 /**
- * ONE PAYLOAD, BUILT ONCE, FOR ALL THREE WAYS OF CREATING A TASK.
- *
- * ⚠️ THIS EXISTS BECAUSE THE THREE WAYS DRIFTED AND IT COST A DEMO MORNING.
- * `createTask`, `createPersonalTask` and `quickAddTask` each assembled their own
- * arguments for the same two RPCs. The inline one passed `p_list_id: null`
- * hardcoded, so every task typed into a list was filed nowhere — created, with a
- * toast saying so, and then absent from the list it was typed into. Three call
- * sites naming the same eight parameters; two of them right.
- *
- * So the parameter names are written down HERE and nowhere else. A field added
- * to task creation is now added in one place, and the question "did I remember
- * to pass it in all three?" stops being askable.
- *
- * ⚠️ `department_id` IS THE SWITCH, AND IT IS NOT COSMETIC. Null means
- * `create_personal_task`, which sets `is_personal = true` on a column outside
- * the UPDATE grant — it can never be changed afterwards. Non-null means
- * `create_task`, which re-reads the caller's own row and refuses a department
- * outside their scope, so passing one here is a proposal and never an authority.
- *
- * ⚠️ IT DOES NOT REFRESH, NOTIFY OR SANITISE. Those differ per caller —
- * `createPersonalTask` deliberately sends no mail because the only person
- * involved pressed the button, and `quickAddTask` has two more writes to make
- * before the page should be revalidated at all. This returns the id and lets the
- * caller finish.
- *
- * `taskId` comes back even when the follow-up patch fails, because by then the
- * row is real. Telling somebody their task does not exist when it does is the
- * worse of the two lies.
- */
-type NewTaskValues = {
-  /** Null files it as personal work. See the warning above. */
-  department_id: string | null;
-  title: string;
-  /** Already sanitised by the caller — this does not touch it. */
-  description: string;
-  assignee_id: string | null;
-  qa_assignee_id: string | null;
-  due_date: string;
-  list_id: string | null;
-  priority: (typeof TASK_PRIORITIES)[number];
-  start_date: string;
-  estimate_minutes: number | null;
-  /** Everybody besides the accountable owner. See `writeCreationExtras`. */
-  extra_assignee_ids?: string[];
-};
-
-async function insertTask(
-  supabase: Awaited<ReturnType<typeof createClient>>,
-  values: NewTaskValues,
-): Promise<
-  { ok: true; taskId: string } | { ok: false; error: string; taskId?: string }
-> {
-  const created = values.department_id
-    ? await supabase.rpc("vizserve_pms_create_task", {
-        p_department_id: values.department_id,
-        p_title: values.title,
-        p_description: values.description,
-        p_assignee_id: values.assignee_id,
-        p_qa_assignee_id: values.qa_assignee_id,
-        p_due_date: values.due_date || null,
-        p_list_id: values.list_id,
-        // ⚠️ P7-11. OPTIONAL to the compiler, because the SQL parameter has a
-        // default — so leaving it out is not a type error, it just files every
-        // task as unranked. `tests/db/tasks.test.ts` is the guard, not tsc.
-        p_priority: values.priority,
-      })
-    : await supabase.rpc("vizserve_pms_create_personal_task", {
-        p_title: values.title,
-        p_description: values.description,
-        p_due_date: values.due_date || null,
-        // create_personal_task RAISES on a list in another department, so a
-        // stale one surfaces as a sentence rather than filing the task nowhere.
-        p_list_id: values.list_id,
-        p_priority: values.priority,
-      });
-
-  if (created.error) return { ok: false, error: readableError(created.error) };
-
-  const taskId = (created.data as { task_id: string }).task_id;
-
-  // The start date, the estimate and the other people, written after the row
-  // exists — none of them is a parameter of either create function.
-  const extras = await writeCreationExtras(supabase, taskId, values);
-  if (!extras.ok) return { ok: false, error: extras.error, taskId };
-
-  return { ok: true, taskId };
-}
-
-/**
  * P7-14 — a member creates work for a colleague in their OWN department.
  *
  * The role gate came off for the same reason it came off `reassignTask`: the
@@ -955,13 +868,24 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
   const values = parsed.data;
   const supabase = await createClient();
 
-  // Every parameter is named in `insertTask` and only there. The rich text is
-  // sanitised on the way in, which is this action's own job — the shared helper
-  // is deliberately given a finished string.
-  const created = await insertTask(supabase, {
-    ...values,
-    description: sanitizeRichText(values.description),
+  const { data, error } = await supabase.rpc("vizserve_pms_create_task", {
+    p_department_id: values.department_id,
+    p_title: values.title,
+    p_description: sanitizeRichText(values.description),
+    p_assignee_id: values.assignee_id,
+    p_qa_assignee_id: values.qa_assignee_id,
+    p_due_date: values.due_date || null,
+    p_list_id: values.list_id,
+    // ⚠️ P7-11. OPTIONAL to the compiler, because the SQL parameter has a
+    // default — so leaving it out is not a type error, it just files every task
+    // as unranked. `tests/db/tasks.test.ts` is the guard, not tsc.
+    p_priority: values.priority,
   });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  const taskId = (data as { task_id: string }).task_id;
+  const extras = await writeCreationExtras(supabase, taskId, values);
 
   dispatchPendingEmailsInBackground();
   refresh();
@@ -969,9 +893,9 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
   // The task EXISTS either way — say which part failed rather than implying
   // nothing happened, which is the same rule `transitionTask` follows when the
   // client email fails after the move committed.
-  if (!created.ok) return { ok: false, error: created.error };
+  if (!extras.ok) return { ok: false, error: extras.error };
 
-  return { ok: true, data: { taskId: created.taskId } };
+  return { ok: true, data: { taskId } };
 }
 
 /**
@@ -1108,36 +1032,29 @@ export async function createPersonalTask(
   const values = parsed.data;
   const supabase = await createClient();
 
-  const created = await insertTask(supabase, {
-    /*
-     * NULL IS THE WHOLE SWITCH. `create_personal_task` reads the department and
-     * the assignee off the caller's own row, which is exactly why neither is in
-     * this schema — a field that cannot be sent is a rule that cannot be bent.
-     * The other two are null for the same reason: personal work has no QA
-     * reviewer and no second name to file it under.
-     */
-    department_id: null,
-    assignee_id: null,
-    qa_assignee_id: null,
-    title: values.title,
-    description: sanitizeRichText(values.description),
-    due_date: values.due_date,
-    list_id: values.list_id,
+  const { data, error } = await supabase.rpc("vizserve_pms_create_personal_task", {
+    p_title: values.title,
+    p_description: sanitizeRichText(values.description),
+    p_due_date: values.due_date || null,
+    p_list_id: values.list_id,
     // P7-11. Present here where department and assignee are not: how urgent
     // your own work is IS yours to decide.
-    priority: values.priority,
-    start_date: values.start_date,
-    estimate_minutes: values.estimate_minutes,
+    p_priority: values.priority,
   });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  const taskId = (data as { task_id: string }).task_id;
+  const extras = await writeCreationExtras(supabase, taskId, values);
 
   // No `dispatchPendingEmailsInBackground` — nothing was sent. The create
   // function deliberately notifies nobody, because the only person involved is
   // the one who just pressed the button.
   refresh();
 
-  if (!created.ok) return { ok: false, error: created.error };
+  if (!extras.ok) return { ok: false, error: extras.error };
 
-  return { ok: true, data: { taskId: created.taskId } };
+  return { ok: true, data: { taskId } };
 }
 
 // ---------------------------------------------------------------------------
