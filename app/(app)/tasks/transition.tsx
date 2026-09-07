@@ -1,6 +1,6 @@
 "use client";
 
-import { useOptimistic, useState, useTransition } from "react";
+import { startTransition, useActionState, useOptimistic, useState } from "react";
 import { toast } from "@/components/ui/toast";
 
 import { toneButtonVariant } from "@/components/status-badge";
@@ -62,7 +62,6 @@ export function useTaskTransition({
    */
   beforeMove?: () => Promise<void>;
 }) {
-  const [pending, startTransition] = useTransition();
   /** Non-null while a comment-requiring move waits for its comment. */
   const [prompt, setPrompt] = useState<Transition | null>(null);
   /**
@@ -74,6 +73,40 @@ export function useTaskTransition({
    */
   const [active, setActive] = useState<Transition | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /*
+   * P11-05 — `useActionState`, THE ARTICLE'S SHAPE FOR REPEATED MUTATIONS.
+   *
+   * This was `useTransition` plus a bare call. `useActionState` gives the same
+   * pending flag and QUEUES: moves dispatched while one is in flight run in
+   * order rather than racing, which matters on a list where somebody clears a
+   * column by moving four rows in four seconds. Two `transitionTask` calls
+   * arriving out of order against the same task would be refused by the state
+   * machine and reported as an error the person did not cause.
+   */
+  const [, dispatch, pending] = useActionState(
+    async (_previous: void, input: { transition: Transition; comment?: string }) => {
+      await beforeMove?.();
+
+      const result = await transitionTask(taskId, {
+        to_status: input.transition.to,
+        ...(input.comment ? { comment: input.comment } : {}),
+      });
+
+      setActive(null);
+
+      if (!result.ok) {
+        setError(result.error ?? "That did not go through.");
+        return;
+      }
+
+      toast.success(input.transition.label);
+      setPrompt(null);
+      setError(null);
+      onMoved?.();
+    },
+    undefined,
+  );
 
   /*
    * P11-05 — THE CHIP MOVES WHEN YOU PICK, NOT WHEN THE SERVER ANSWERS.
@@ -115,33 +148,25 @@ export function useTaskTransition({
    */
   const moveRow = useOptimisticMove();
 
+  /**
+   * The one entry point, whether it came from a form submit or the comment
+   * dialog.
+   *
+   * ⚠️ THE OPTIMISTIC WRITES AND THE DISPATCH ARE IN ONE TRANSITION, and they
+   * have to be. `useOptimistic` shows its value only while the transition that
+   * set it is pending, so setting it outside — or dispatching outside — gives a
+   * chip that flickers to the new status and back before the server has been
+   * asked anything.
+   */
   function commit(transition: Transition, comment?: string) {
     setError(null);
     setActive(transition);
-    startTransition(async () => {
-      // Inside the transition, before the await: this is the paint. Both of
-      // them, so the chip and the row it sits in move together.
+
+    startTransition(() => {
+      // The paint: the chip, and the group the row sits in.
       setShownStatus(transition.to);
       moveRow?.({ id: taskId, status: transition.to });
-
-      await beforeMove?.();
-
-      const result = await transitionTask(taskId, {
-        to_status: transition.to,
-        ...(comment ? { comment } : {}),
-      });
-
-      setActive(null);
-
-      if (!result.ok) {
-        setError(result.error ?? "That did not go through.");
-        return;
-      }
-
-      toast.success(transition.label);
-      setPrompt(null);
-      setError(null);
-      onMoved?.();
+      dispatch({ transition, comment });
     });
   }
 

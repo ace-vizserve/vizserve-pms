@@ -175,7 +175,6 @@ export function TaskStatusSelect({
    * unmounted the moment the popover dismisses, and it dismisses as soon as
    * focus moves into the dialog.
    */
-  const pending = move.pending;
 
   /*
    * Nothing to offer, so nothing to click. An inert dropdown would promise an
@@ -353,16 +352,24 @@ export function TaskStatusSelect({
                     const blocked = transition.requires === "resolution" && resolutionMissing;
 
                     return (
-                      <button
+                      /*
+                       * ⚠️ A REAL FORM ACTION, not an onClick. React runs the
+                       * `action` inside a transition of its own, which is what
+                       * the optimistic status and the optimistic row move both
+                       * need — and it means the row works with JavaScript still
+                       * loading, which a click handler never did.
+                       */
+                      <form
                         key={`${transition.from}-${transition.to}`}
-                        type="button"
-                        disabled={pending || blocked}
-                        onClick={() => {
+                        action={() => {
                           // A comment move opens a DIALOG, so this popover has
                           // to be gone before it does — see the note above.
                           if (transition.requires === "comment") setOpen(false);
                           move.choose(transition);
-                        }}
+                        }}>
+                      <button
+                        type="submit"
+                        disabled={blocked}
                         className={cn(
                           "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
                           "hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none",
@@ -388,6 +395,7 @@ export function TaskStatusSelect({
                           </span>
                         ) : null}
                       </button>
+                      </form>
                     );
                   })}
                 </div>
