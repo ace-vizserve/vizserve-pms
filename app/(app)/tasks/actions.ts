@@ -17,19 +17,19 @@ import {
 import { issueAndSendApproval } from "@/lib/client-approval-server";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
 import {
+  INITIAL_TASK_STATUS,
+  TASK_PRIORITIES,
+  TASK_STATUS_LABELS,
   createPersonalTaskSchema,
   createTaskSchema,
   listSchema,
-  taskGroupSchema,
   overridePayloadSchema,
   taskCommentSchema,
+  taskGroupSchema,
   taskParentSchema,
   taskPatchSchema,
-  taskPrioritySchema,
   taskStatusSchema,
   transitionPayloadSchema,
-  INITIAL_TASK_STATUS,
-  TASK_STATUS_LABELS,
 } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
 
@@ -462,13 +462,21 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
       // path is still a title and Enter — the fields are there for the times
       // somebody already knows the answer and would otherwise have to come back
       // and edit the row four times.
-      priority: taskPrioritySchema.default(null),
-      due_date: z
-        .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-        .default(""),
-      start_date: z
-        .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-        .default(""),
+      /*
+       * REQUIRED, matching the two dialogs. The composer already collects all
+       * of these — priority, both dates and an assignee are fields in it — so
+       * this is validation catching up with the form rather than a new demand
+       * on the person typing.
+       *
+       * ⚠️ `assignee_id` STAYS NULLABLE HERE, and that is not an oversight.
+       * `assignable` excludes the caller, so in this composer NULL IS how "mine"
+       * is expressed — it is what routes to `create_personal_task`. Requiring a
+       * non-null id would make a personal task impossible to add inline. If the
+       * composer ever grows an explicit "Me" option, this becomes required too.
+       */
+      priority: z.enum(TASK_PRIORITIES, { error: "Choose a priority." }),
+      due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a due date."),
+      start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a start date."),
       estimate_minutes: z
         .number()
         .int("Give it in whole minutes.")
@@ -905,32 +913,93 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
 async function writeCreationExtras(
   supabase: Awaited<ReturnType<typeof createClient>>,
   taskId: string,
-  values: { start_date: string; estimate_minutes: number | null },
+  values: {
+    start_date: string;
+    estimate_minutes: number | null;
+    /**
+     * Everybody on the task BESIDES the accountable owner.
+     *
+     * ⚠️ `assignee_id` AND `vizserve_pms_task_assignees` ARE NOT THE SAME
+     * THING, and the split is deliberate (P7-13). The column is the ONE person
+     * answerable for the work; the join table is everyone doing it. A task with
+     * four people still has exactly one name against it, which is what stops
+     * "assigned to the team" meaning assigned to nobody.
+     *
+     * So the create RPCs keep their single `p_assignee_id` and these are added
+     * afterwards, one call each — there is no bulk function, and inventing one
+     * would duplicate the rules `vizserve_pms_add_task_assignee` already
+     * enforces: the person must be an active member of the TASK'S department,
+     * and the caller must be on the task or lead it.
+     */
+    extra_assignee_ids?: string[];
+  },
 ): Promise<{ ok: true } | { ok: false; error: string }> {
-  if (!values.start_date && values.estimate_minutes === null) return { ok: true };
+  const extraAssignees = values.extra_assignee_ids ?? [];
 
-  const { data, error } = await supabase
-    .from("vizserve_pms_tasks")
-    .update({
-      ...(values.start_date ? { start_date: values.start_date } : {}),
-      ...(values.estimate_minutes !== null
-        ? { estimate_minutes: values.estimate_minutes }
-        : {}),
-    })
-    .eq("id", taskId)
-    .select("id");
-
-  if (error) {
-    return { ok: false, error: `The task was created, but ${readableError(error).toLowerCase()}` };
+  if (!values.start_date && values.estimate_minutes === null && extraAssignees.length === 0) {
+    return { ok: true };
   }
-  // Trap 9. Reachable in one real case: a lead files work into a department they
-  // lead but are not a participant in, so `create_task` succeeds inside its
-  // SECURITY DEFINER and the follow-up UPDATE is judged by the policy instead.
-  if (!data || data.length === 0) {
-    return {
-      ok: false,
-      error: "The task was created, but the start date and estimate could not be saved to it.",
-    };
+
+  /*
+   * ⚠️ GUARDED, BECAUSE AN EMPTY PATCH IS NOT A NO-OP. When only people were
+   * added — no start date, no estimate — this used to build `.update({})`,
+   * which PostgREST rejects rather than ignoring. The columns and the people
+   * are two independent writes now and each runs only if it has something.
+   */
+  if (values.start_date || values.estimate_minutes !== null) {
+    const { data, error } = await supabase
+      .from("vizserve_pms_tasks")
+      .update({
+        ...(values.start_date ? { start_date: values.start_date } : {}),
+        ...(values.estimate_minutes !== null
+          ? { estimate_minutes: values.estimate_minutes }
+          : {}),
+      })
+      .eq("id", taskId)
+      .select("id");
+
+    if (error) {
+      return { ok: false, error: `The task was created, but ${readableError(error).toLowerCase()}` };
+    }
+    // Trap 9. Reachable in one real case: a lead files work into a department
+    // they lead but are not a participant in, so `create_task` succeeds inside
+    // its SECURITY DEFINER and the follow-up UPDATE is judged by the policy.
+    if (!data || data.length === 0) {
+      return {
+        ok: false,
+        error: "The task was created, but the start date and estimate could not be saved to it.",
+      };
+    }
+  }
+
+  /*
+   * The additional people, one call each, AFTER the row exists.
+   *
+   * ⚠️ SEQUENTIAL, NOT `Promise.all`. Each call is a separate transaction that
+   * can be refused on its own — somebody deactivated between opening the form
+   * and saving it, somebody in the wrong department — and the message has to
+   * name which one. A parallel batch would report the first rejection and leave
+   * the caller guessing which of four names it meant.
+   *
+   * ⚠️ THE TASK IS ALREADY CREATED BY THIS POINT and is not rolled back. That
+   * is the honest shape: the row is real, the work exists, and one name failed
+   * to attach. Saying so beats discarding a task somebody just typed, and the
+   * assignee can be added from the task page in one click.
+   */
+  for (const userId of extraAssignees) {
+    const { error: assigneeError } = await supabase.rpc("vizserve_pms_add_task_assignee", {
+      p_task_id: taskId,
+      p_user_id: userId,
+    });
+
+    if (assigneeError) {
+      return {
+        ok: false,
+        error: `The task was created, but one of the people could not be added: ${readableError(
+          assigneeError,
+        ).toLowerCase()}`,
+      };
+    }
   }
 
   return { ok: true };

@@ -753,13 +753,18 @@ export const createTaskSchema = z.object({
   department_id: z.uuid("Choose the department this belongs to."),
   title: z.string().trim().min(1, "A task needs a title.").max(300),
   description: richTextSchema({ max: LONG_PROSE_MAX }).default(""),
-  assignee_id: z.uuid().nullable().default(null),
+  /**
+   * REQUIRED. Somebody has to be answerable for the work — a task filed against
+   * nobody is a task nobody picks up. The QA reviewer below stays optional:
+   * internal work moves without one (P7-13a).
+   */
+  assignee_id: z.uuid("Choose who will do this."),
   qa_assignee_id: z.uuid().nullable().default(null),
-  due_date: z
-    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-    .default(""),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a due date."),
   list_id: z.uuid().nullable().default(null),
-  priority: taskPrioritySchema.default(null),
+  // REQUIRED. "Unranked" was the default and it is what made the priority
+  // column decorative — most rows had none, so nothing could be sorted by it.
+  priority: z.enum(TASK_PRIORITIES, { error: "Choose a priority." }),
   /**
    * P7-06 / P7-15 — captured AT CREATION, not left for four edits afterwards.
    *
@@ -768,9 +773,7 @@ export const createTaskSchema = z.object({
    * and it is the honest cost of not changing an applied function's signature —
    * which would mean a drop and a regrant (trap 3) for two nullable columns.
    */
-  start_date: z
-    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-    .default(""),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a start date."),
   estimate_minutes: z
     .number()
     .int("Give it in whole minutes.")
@@ -795,13 +798,13 @@ export type CreateTaskInput = z.infer<typeof createTaskSchema>;
 export const createPersonalTaskSchema = z.object({
   title: z.string().trim().min(1, "What are you working on?").max(300),
   description: richTextSchema({ max: LONG_PROSE_MAX }).default(""),
-  due_date: z
-    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-    .default(""),
+  due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a due date."),
   list_id: z.uuid().nullable().default(null),
   // Present here, unlike `department_id` and `assignee_id`: how urgent your own
   // work is IS yours to decide, which is exactly what those two are not.
-  priority: taskPrioritySchema.default(null),
+  // REQUIRED. "Unranked" was the default and it is what made the priority
+  // column decorative — most rows had none, so nothing could be sorted by it.
+  priority: z.enum(TASK_PRIORITIES, { error: "Choose a priority." }),
   /**
    * P7-06 / P7-15 — captured AT CREATION, not left for four edits afterwards.
    *
@@ -810,9 +813,7 @@ export const createPersonalTaskSchema = z.object({
    * and it is the honest cost of not changing an applied function's signature —
    * which would mean a drop and a regrant (trap 3) for two nullable columns.
    */
-  start_date: z
-    .union([z.literal(""), z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")])
-    .default(""),
+  start_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a start date."),
   estimate_minutes: z
     .number()
     .int("Give it in whole minutes.")
