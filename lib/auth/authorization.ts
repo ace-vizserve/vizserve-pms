@@ -662,6 +662,46 @@ export function canShapeDepartment(context: AuthContext, departmentId: string | 
  * promoted lead is in before somebody maps them to a department, and narrowing
  * it would be this change taking something away.
  */
+/**
+ * P11-07 — "MAY THIS PERSON RESHAPE THIS DEPARTMENT'S LISTS AND FOLDERS?"
+ *
+ * A THIRD PREDICATE RATHER THAN A WIDENING OF `canShapeDepartment`, and the
+ * reason is the one that file's own ⚠️ note gives about `canAccessDepartment`:
+ * widening the existing one would be a single edit instead of this function
+ * plus its call sites, and it would carry along everything else that predicate
+ * gates. `canShapeDepartment` still answers for FORMS, which are a client-facing
+ * contract and stay with leads and the Admin tick.
+ *
+ * The project tree is not that. Amier, 8 Sep: a list is a shelf, not a
+ * permission boundary, and needing a Team Leader to make one is how people end
+ * up keeping their work somewhere else. So this admits a shaper OR anybody who
+ * simply belongs to the department.
+ *
+ * Mirrors the policies in `p11_07`, which is the enforcement. `primary_department_id`
+ * is what this schema means by "a member of a department" everywhere else — the
+ * same test `vizserve_pms_create_task` uses to decide where a member may file
+ * work.
+ */
+export function canManageDepartmentTree(
+  context: AuthContext,
+  departmentId: string | null,
+): boolean {
+  if (canShapeDepartment(context, departmentId)) return true;
+  if (!departmentId) return false;
+  return context.primaryDepartmentId === departmentId;
+}
+
+/**
+ * The page-gate half: does this person have a tree to manage at all?
+ *
+ * Everyone with a department does, which is nearly everyone — the check exists
+ * for the person who has none, where `/tasks/lists` would open on an empty
+ * screen with no department to create anything in.
+ */
+export function canManageAnyDepartmentTree(context: AuthContext): boolean {
+  return canShapeAnyDepartment(context) || context.primaryDepartmentId !== null;
+}
+
 export function canShapeAnyDepartment(context: AuthContext): boolean {
   return (
     roleAtLeast(context.role, "team_leader") ||
@@ -719,6 +759,26 @@ export function assertDepartmentShape(context: AuthContext, departmentId: string
  * department they lead would otherwise get it twice, and the picker would draw
  * two identical options.
  */
+/**
+ * P11-07 — the picker scope that goes with `canManageDepartmentTree`.
+ *
+ * `departmentShapeScope` plus the department the caller BELONGS to, so the
+ * department picker on /tasks/lists offers a member their own team. Without it
+ * the screen opens with an empty Select and a New list button that cannot be
+ * satisfied.
+ */
+export function departmentTreeScope(context: AuthContext): DepartmentPickerScope {
+  const base = departmentShapeScope(context);
+
+  if (base.kind === "all") return base;
+
+  const own = context.primaryDepartmentId;
+  if (!own) return base;
+
+  const ids = base.kind === "some" ? base.ids : [];
+  return { kind: "some", ids: ids.includes(own) ? ids : [...ids, own] };
+}
+
 export function departmentShapeScope(context: AuthContext): DepartmentPickerScope {
   const base = departmentPickerScope(context);
 

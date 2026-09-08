@@ -2,7 +2,12 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
 
-import { departmentShapeScope, requireDepartmentShape } from "@/lib/auth/authorization";
+import {
+  canManageAnyDepartmentTree,
+  departmentTreeScope,
+  ForbiddenError,
+  requireAuthContext,
+} from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 
@@ -31,7 +36,23 @@ export const metadata: Metadata = { title: "Lists" };
  * in two days.
  */
 export default async function ListsPage() {
-  const context = await requireDepartmentShape();
+  /*
+   * P11-07 — WAS `requireDepartmentShape()`, WHICH THREW AT A MEMBER.
+   *
+   * `/tasks` redirects here when it carries no `?list=`, so this gate was not
+   * merely hiding a screen: it was the dead end behind every bare link to the
+   * tasks area. A member following one got "This area is for team leaders and
+   * department admins."
+   *
+   * `p11_07` made the tree the department's, so the gate is now only about
+   * having a department at all — the one case where this page would open on an
+   * empty picker and a New list button that cannot be satisfied. Everything
+   * below is RLS-scoped anyway; this decides whether it is worth rendering.
+   */
+  const context = await requireAuthContext();
+  if (!canManageAnyDepartmentTree(context)) {
+    throw new ForbiddenError("You are not in a department yet, so there is nothing to organise.");
+  }
   const supabase = await createClient();
 
   // All four are RLS-scoped: a TL sees the departments they lead and those
@@ -84,7 +105,7 @@ export default async function ListsPage() {
    * visibility scope, which P8-01 deliberately left alone — see the note on
    * `departmentShapeScope`.
    */
-  const scope = departmentShapeScope(context);
+  const scope = departmentTreeScope(context);
   const allowed =
     scope.kind === "all"
       ? (departments ?? [])

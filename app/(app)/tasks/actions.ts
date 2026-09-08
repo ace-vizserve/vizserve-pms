@@ -4,7 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 
 import {
-  canShapeDepartment,
+  canManageDepartmentTree,
   requireAuthContextOrThrow,
   requireDepartmentShape,
 } from "@/lib/auth/authorization";
@@ -1236,7 +1236,20 @@ export async function saveList(
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
   /*
-   * P11-03 — CREATING A LIST AND RENAMING ONE ARE NOT THE SAME ACT.
+   * P11-07 — THEY ARE THE SAME ACT AGAIN, and the note below is kept because
+   * the bug it describes was only half fixed.
+   *
+   * P11-03 split them: renaming dropped its `requireDepartmentShape()` and
+   * creating kept it. But the `canShapeDepartment` check further down ran on
+   * BOTH branches, so the member path it opened was never reachable — a
+   * colleague renaming a list still got "That department is outside what you
+   * administer." before RLS was consulted. The policy was right; the app layer
+   * overrode it, and nothing failed loudly enough to notice.
+   *
+   * `p11_07` then made the whole tree the department's, so both acts take the
+   * same predicate and there is one gate again.
+   *
+   * ORIGINAL NOTE — P11-03 — CREATING A LIST AND RENAMING ONE ARE NOT THE SAME ACT.
    *
    * This was `requireDepartmentShape()` for both, which threw "This area is for
    * team leaders and department admins." at a plain member before RLS was ever
@@ -1252,7 +1265,7 @@ export async function saveList(
    * else, and the update is audited by trigger. What is removed here is the
    * app-layer floor that made the policy unreachable, not the policy.
    */
-  const context = listId === null ? await requireDepartmentShape() : await requireAuthContextOrThrow();
+  const context = await requireAuthContextOrThrow();
 
   const parsed = listSchema.safeParse(input);
   if (!parsed.success) {
@@ -1264,13 +1277,11 @@ export async function saveList(
   // RLS says the same thing, but saying it here too means the user gets a
   // sentence instead of an empty result they have to interpret.
   //
-  // P8-01c: `canShapeDepartment`, which is "leads it OR holds the Admin tick on
-  // it". The hand-rolled `roleAtLeast(owner) || managedDepartmentIds.includes()`
-  // this replaces was `canAccessDepartment` written out, and that predicate must
-  // NOT be the one asked here — it mirrors `vizserve_pms_manages_department`,
-  // which grants approval authority and is deliberately never widened.
-  if (!canShapeDepartment(context, values.department_id)) {
-    return { ok: false, error: "That department is outside what you administer." };
+  // P11-07: `canManageDepartmentTree` — "shapes it, or belongs to it". NOT
+  // `canShapeDepartment`, which still answers for forms: those are a
+  // client-facing contract and stay with leads and the Admin tick.
+  if (!canManageDepartmentTree(context, values.department_id)) {
+    return { ok: false, error: "That department is not yours to organise." };
   }
 
   const supabase = await createClient();
@@ -1377,9 +1388,11 @@ export async function saveTaskGroup(
   groupId: string | null,
   input: unknown,
 ): Promise<ActionResult<{ id: string }>> {
-  // P8-01c, mirroring `saveList` exactly — two sibling levels that gate
-  // differently for no reason is how people learn to trust neither.
-  const context = await requireDepartmentShape();
+  // P11-07, mirroring `saveList` exactly — two sibling levels that gate
+  // differently for no reason is how people learn to trust neither. A folder is
+  // the shape of the tree and a list is a shelf in it, but both belong to the
+  // department that works in them.
+  const context = await requireAuthContextOrThrow();
 
   const parsed = taskGroupSchema.safeParse(input);
   if (!parsed.success) {
@@ -1392,16 +1405,10 @@ export async function saveTaskGroup(
 
   const values = parsed.data;
 
-  // RLS says the same thing, but saying it here too means the user gets a
-  // sentence instead of an empty result they have to interpret.
-  //
-  // P8-01c: `canShapeDepartment`, which is "leads it OR holds the Admin tick on
-  // it". The hand-rolled `roleAtLeast(owner) || managedDepartmentIds.includes()`
-  // this replaces was `canAccessDepartment` written out, and that predicate must
-  // NOT be the one asked here — it mirrors `vizserve_pms_manages_department`,
-  // which grants approval authority and is deliberately never widened.
-  if (!canShapeDepartment(context, values.department_id)) {
-    return { ok: false, error: "That department is outside what you administer." };
+  // P11-07, and the same predicate `saveList` uses. See the note there for why
+  // this is not `canShapeDepartment`.
+  if (!canManageDepartmentTree(context, values.department_id)) {
+    return { ok: false, error: "That department is not yours to organise." };
   }
 
   const supabase = await createClient();
