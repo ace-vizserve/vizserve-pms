@@ -1022,6 +1022,10 @@ async function TaskGroups({
     deptAdminOf: canAdminDepartment(context, context.primaryDepartmentId)
       ? context.primaryDepartmentId
       : null,
+    /* P11-05 — the department this person BELONGS to, compared against each
+       task's own on the client. Raw, unlike `deptAdminOf` above: this one
+       carries no capability by itself, it is one half of a comparison. */
+    primaryDepartmentId: context.primaryDepartmentId,
   };
 
   const lookups = {

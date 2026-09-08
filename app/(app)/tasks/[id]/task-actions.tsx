@@ -8,8 +8,7 @@ import {
   transitionIntent,
   transitionTone,
   type TaskStatus,
-  type Transition,
-} from "@/lib/schemas/tasks";
+  type Transition, type TaskViewer } from "@/lib/schemas/tasks";
 
 import { TransitionCommentDialog, useTaskTransition } from "../transition";
 
@@ -62,7 +61,7 @@ export function TaskActions({
 }: {
   taskId: string;
   status: TaskStatus;
-  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
+  viewer: TaskViewer;
   task: { request_id: string | null; is_personal: boolean };
   /**
    * The SAVED resolution is empty. The database checks the saved value, so a

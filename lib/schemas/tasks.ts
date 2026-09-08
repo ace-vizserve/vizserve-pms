@@ -436,15 +436,53 @@ export function transitionTone(
 }
 
 /**
+ * WHERE THE VIEWER SITS ON A TASK — the four seats, named once.
+ *
+ * This shape was written out inline in eight places, which is what let the
+ * mirror and the database drift: `vizserve_pms_transition_task` grew a fourth
+ * seat in P11-05 and every one of those eight would have kept compiling while
+ * offering a different set of buttons.
+ *
+ * ⚠️ PRESENTATION ONLY. Hiding a control protects nobody — the same rules are
+ * re-checked in the function, which is the only thing that can change a status
+ * at all. This exists so the buttons on screen match what the server will
+ * accept, not to enforce anything.
+ */
+export type TaskViewer = {
+  /**
+   * Mirrors `v_is_pic`: the `assignee_id` column OR a row in
+   * `vizserve_pms_task_assignees`. Named for the column rather than the rank
+   * because an internal task has no person in charge (P7-43).
+   */
+  isAssignee: boolean;
+  /** The QA seat, and ONLY the column. Being on the task does not confer it. */
+  isQa: boolean;
+  leadsDepartment: boolean;
+  /**
+   * P11-05 — an active member whose primary department is this task's.
+   *
+   * The 7 Sep decision: a task belongs to its DEPARTMENT, not to its PIC. It
+   * carries the PIC seat's moves and NOT the QA seat's — everyone is a member
+   * of their own department, so a QA gate that admitted this would be a gate
+   * everyone walks through on their own work.
+   */
+  inDepartment: boolean;
+  isAdmin: boolean;
+};
+
+/**
  * The moves THIS person can make right now.
  *
  * Presentation only — hiding a button protects nobody, and the same rules are
  * re-checked in `vizserve_pms_transition_task`. A TL leading the department may
  * act in either seat, because they are frequently the QA reviewer themselves.
+ *
+ * P11-05: so may any active member of the task's department, in the PIC seat.
+ * The QA seat stays with the reviewer and the lead — see `TaskViewer`.
  */
 export function availableTransitions(
   status: TaskStatus,
-  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
+  viewer: TaskViewer,
   // Required, not optional. An optional third argument would let every existing
   // call site keep compiling while silently offering buttons the server refuses
   // — the exact failure this mirror exists to prevent.
@@ -469,7 +507,8 @@ export function availableTransitions(
    * because there is no reviewer gate left for it to guard.
    */
   if (category !== "request") {
-    if (!(viewer.isAssignee || viewer.isQa || viewer.leadsDepartment)) return [];
+    if (!(viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment))
+      return [];
 
     return TASK_STATUSES.filter(
       (target) => target !== status && target !== "FOR_CLIENT_APPROVAL",
@@ -487,7 +526,8 @@ export function availableTransitions(
     // A rule written for work without a client cannot be borrowed by work with
     // one — the mirror of the server's own check.
     if (!scopeAllows(transition.appliesTo, category)) return false;
-    if (transition.actor === "pic") return viewer.isAssignee || viewer.leadsDepartment;
+    if (transition.actor === "pic")
+      return viewer.isAssignee || viewer.leadsDepartment || viewer.inDepartment;
     if (transition.actor === "qa") return viewer.isQa || viewer.leadsDepartment;
     // The client and system rows belong to Phase 4's token flow.
     return viewer.isAdmin;
@@ -536,7 +576,7 @@ export function availableTransitions(
  */
 export function nextStep(
   status: TaskStatus,
-  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean },
+  viewer: TaskViewer,
   task: { request_id: string | null; is_personal: boolean },
 ): Transition | null {
   // Nothing follows a finished task. Internal work can legally be reopened

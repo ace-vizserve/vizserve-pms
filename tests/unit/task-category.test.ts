@@ -23,8 +23,15 @@ const CLIENT = { request_id: "0c0ffee0-0000-4000-8000-000000000001", is_personal
 const INTERNAL = { request_id: null, is_personal: false };
 const PERSONAL = { request_id: null, is_personal: true };
 
-const PIC = { isAssignee: true, isQa: false, leadsDepartment: false, isAdmin: false };
-const QA = { isAssignee: false, isQa: true, leadsDepartment: false, isAdmin: false };
+const PIC = { isAssignee: true, isQa: false, leadsDepartment: false, inDepartment: false, isAdmin: false };
+const QA = { isAssignee: false, isQa: true, leadsDepartment: false, inDepartment: false, isAdmin: false };
+/**
+ * P11-05 — a colleague in the task's department, holding no seat on the task.
+ *
+ * The whole point of the seat: this person is not the PIC, is not an assignee
+ * and does not lead anything. Before 8 Sep they got an empty array back.
+ */
+const MEMBER = { isAssignee: false, isQa: false, leadsDepartment: false, inDepartment: true, isAdmin: false };
 
 function targets(transitions: { to: string }[]): string[] {
   return transitions.map((transition) => transition.to).sort();
@@ -106,9 +113,38 @@ describe("availableTransitions — every category has exactly one way to finish"
   });
 
   it("still refuses somebody who holds neither seat", () => {
-    const stranger = { isAssignee: false, isQa: false, leadsDepartment: false, isAdmin: false };
+    const stranger = { isAssignee: false, isQa: false, leadsDepartment: false, inDepartment: false, isAdmin: false };
     expect(availableTransitions("ONGOING", stranger, PERSONAL)).toHaveLength(0);
     expect(availableTransitions("QA_IN_PROGRESS", stranger, INTERNAL)).toHaveLength(0);
+  });
+
+  /*
+   * P11-05 — the department seat. A task belongs to its department, not to its
+   * PIC, so a colleague who is on none of the seats still moves the work.
+   *
+   * `tests/db/tasks.test.ts` is what proves `vizserve_pms_transition_task`
+   * agrees; these prove the mirror draws the same buttons the server accepts,
+   * which is the only reason the mirror exists.
+   */
+  it("lets any member of the department move the department's internal work", () => {
+    expect(targets(availableTransitions("ONGOING", MEMBER, INTERNAL))).toContain("COMPLETED");
+    expect(targets(availableTransitions("OPEN", MEMBER, INTERNAL))).toContain("ONGOING");
+  });
+
+  it("gives the department the PIC seat on client work, one gate at a time", () => {
+    expect(targets(availableTransitions("ONGOING", MEMBER, CLIENT))).toContain("FOR_QA");
+  });
+
+  it("does NOT give the department the QA seat — nobody passes their own work", () => {
+    // The one clause P11-05 deliberately left alone. Everybody is a member of
+    // their own department, so a QA gate that admitted this seat is a gate
+    // every person walks through on the work they just did.
+    expect(targets(availableTransitions("QA_IN_PROGRESS", MEMBER, CLIENT))).not.toContain(
+      "FOR_CLIENT_APPROVAL",
+    );
+    expect(targets(availableTransitions("FOR_QA", MEMBER, CLIENT))).not.toContain(
+      "QA_IN_PROGRESS",
+    );
   });
 });
 
@@ -142,8 +178,8 @@ describe("the transition table itself", () => {
  * the function is choosing between them, never adding to them.
  */
 describe("nextStep", () => {
-  const QA_LEAD = { isAssignee: false, isQa: true, leadsDepartment: true, isAdmin: false };
-  const ADMIN = { isAssignee: true, isQa: true, leadsDepartment: true, isAdmin: true };
+  const QA_LEAD = { isAssignee: false, isQa: true, leadsDepartment: true, inDepartment: false, isAdmin: false };
+  const ADMIN = { isAssignee: true, isQa: true, leadsDepartment: true, inDepartment: false, isAdmin: true };
 
   it("walks client work down the approved flow, one gate at a time", () => {
     expect(nextStep("OPEN", PIC, CLIENT)).toMatchObject({ to: "ONGOING", label: "Start work" });
@@ -227,7 +263,7 @@ describe("nextStep", () => {
   });
 
   it("has nothing to say to somebody holding neither seat", () => {
-    const stranger = { isAssignee: false, isQa: false, leadsDepartment: false, isAdmin: false };
+    const stranger = { isAssignee: false, isQa: false, leadsDepartment: false, inDepartment: false, isAdmin: false };
     for (const task of [CLIENT, INTERNAL, PERSONAL]) {
       expect(nextStep("ONGOING", stranger, task)).toBeNull();
     }
@@ -263,7 +299,7 @@ describe("nextStep — off the category's own path", () => {
     // `vizserve_pms_force_task_status` does not consult the transition table,
     // so a lead can strand work with no client at FOR_CLIENT_APPROVAL. Free
     // movement is the way back and this is the button for it.
-    const lead = { isAssignee: true, isQa: false, leadsDepartment: true, isAdmin: false };
+    const lead = { isAssignee: true, isQa: false, leadsDepartment: true, inDepartment: false, isAdmin: false };
     expect(nextStep("FOR_CLIENT_APPROVAL", lead, INTERNAL)).toMatchObject({ to: "COMPLETED" });
   });
 });
@@ -310,7 +346,7 @@ describe("transitionIntent / transitionTone", () => {
   });
 
   it("never offers a client task two forward moves at once — one primary button", () => {
-    const lead = { isAssignee: true, isQa: true, leadsDepartment: true, isAdmin: false };
+    const lead = { isAssignee: true, isQa: true, leadsDepartment: true, inDepartment: false, isAdmin: false };
 
     for (const status of TASK_STATUSES) {
       const advances = availableTransitions(status, lead, CLIENT).filter(

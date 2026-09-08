@@ -603,6 +603,8 @@ async function BoardColumns({
       leadsDepartment:
         roleAtLeast(context.role, "owner") ||
         context.managedDepartmentIds.includes(task.department_id),
+      // P11-05. Mirrors `v_in_dept` — see `lib/schemas/tasks.ts`.
+      inDepartment: context.primaryDepartmentId === task.department_id,
       isAdmin,
     };
   }

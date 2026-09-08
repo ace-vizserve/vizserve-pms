@@ -229,6 +229,8 @@ export function TaskSurface({
     isAssignee: boolean;
     isQa: boolean;
     leadsDepartment: boolean;
+    /** P11-05 — an active member of this task's department. */
+    inDepartment: boolean;
     isAdmin: boolean;
     /**
      * P8-01c — holds the Admin tick on THIS task's department.
@@ -323,7 +325,10 @@ export function TaskSurface({
   const picItems = { [NONE]: "Unassigned", ...peopleItems };
   const qaItems = { [NONE]: "No QA reviewer", ...peopleItems };
 
-  const canEdit = viewer.isAssignee || viewer.isQa || viewer.leadsDepartment;
+  /* P11-05 / P11-03 — the department edits its own tasks. See `canWork` in
+     `page.tsx` for why the fourth clause was owed. */
+  const canEdit =
+    viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment;
 
   /**
    * Q5's override, widened by P8-01c.
