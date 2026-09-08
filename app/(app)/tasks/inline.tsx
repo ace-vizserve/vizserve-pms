@@ -3,7 +3,7 @@
 import { toast } from "@/components/ui/toast";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useOptimistic, useState, useTransition, type ReactNode } from "react";
+import { useOptimistic, useState, type ReactNode } from "react";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -47,69 +47,42 @@ import { ComposerCard, type Assignable } from "./task-composer";
  */
 
 /**
- * Shared: paint the new value, write it, and let React put it back if refused.
+ * Shared: write one field, report it, and re-read.
  *
- * ⚠️ `paint` IS CALLED INSIDE THIS TRANSITION, AND THAT PLACEMENT IS THE WHOLE
- * FIX. `useOptimistic` shows its value only while the transition THAT SET IT is
- * pending. The callers here are form actions, which React runs in a transition
- * of their own — so a `setShown` in the caller belonged to a transition that
- * ended the moment the caller returned, while the await happened in this one.
- * The value was set and dropped a frame later, which is why the chip did not
- * move until the server answered.
+ * ⚠️ IT OPENS NO TRANSITION, AND THAT IS THE POINT. Every caller is a form
+ * action, and React already runs those in one — so this is simply awaited inside
+ * the caller's own action. Two transitions was the bug: the optimistic value was
+ * set in the form action's and awaited in this one, and `useOptimistic` shows
+ * its value only while the transition THAT SET IT is pending, so it was dropped
+ * a frame later and the chip waited for the server.
  *
- * Passing the setter in, rather than calling it before `patch`, is what puts it
- * in the same transition as the await.
+ * One transition. Set, await, done — all in the caller.
  */
 function usePatch(taskId: string) {
   const router = useRouter();
-  const [pending, startTransition] = useTransition();
 
-  function patch(
+  async function patch(
     field: Record<string, unknown>,
-    {
-      paint,
-      success,
-    }: {
-      /**
-       * The optimistic write. Runs inside the transition, before the await.
-       *
-       * Optional for the one caller with nothing to paint: `InlineTitle` renders
-       * an input, not the title — the row's heading comes from a prop rendered
-       * by the table. ⚠️ SO RENAMING FROM A ROW IS STILL NOT OPTIMISTIC, and
-       * making it so means an optimistic title on the ROW, not here.
-       */
-      paint?: () => void;
-      success?: string;
-    },
+    { success }: { success?: string } = {},
   ) {
-    startTransition(async () => {
-      paint?.();
+    const result = await updateTaskField(taskId, field);
 
-      const result = await updateTaskField(taskId, field);
+    if (!result.ok) {
+      // No rollback to write: React drops the optimistic value when the form
+      // action finishes, and the field goes back to what the server still says.
+      toast.error(result.error);
+      return;
+    }
 
-      if (!result.ok) {
-        // No rollback: React drops the optimistic value when this transition
-        // ends, and the row goes back to what the server still says.
-        toast.error(result.error);
-        return;
-      }
+    // Keeps the action pending until the fresh payload is applied, so the
+    // optimistic value is replaced by the real one rather than blinking back to
+    // the old one in between.
+    router.refresh();
 
-      /*
-       * ⚠️ BACK, AND REMOVING IT IS HALF OF WHY THIS FELT SLOW. The action
-       * revalidates, so on paper this refetches a route the server just
-       * re-rendered. But the action's payload is applied by the router AFTER the
-       * transition ends, and `useOptimistic` reverts the moment it does — so the
-       * value snapped back to the old one and waited for the payload. Tying the
-       * refresh into this transition keeps it pending until the real data is on
-       * screen. The extra request is invisible; the flicker was not.
-       */
-      router.refresh();
-
-      if (success) toast.success(success);
-    });
+    if (success) toast.success(success);
   }
 
-  return { patch, pending };
+  return { patch };
 }
 
 /**
@@ -179,7 +152,7 @@ export function TaskRowActions({
 
 /** Rename in place. The pen opens a one-field popover; Enter commits. */
 export function InlineTitle({ taskId, title }: { taskId: string; title: string }) {
-  const { patch, pending } = usePatch(taskId);
+  const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(title);
 
@@ -204,7 +177,7 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
         setOpen(next);
         if (next) setDraft(title);
       }}>
-      <PopoverTrigger aria-label={`Rename ${title}`} title="Rename" className={ICON_BUTTON} disabled={pending}>
+      <PopoverTrigger aria-label={`Rename ${title}`} title="Rename" className={ICON_BUTTON}>
         <Pencil className="size-3.5" aria-hidden />
       </PopoverTrigger>
 
@@ -213,7 +186,6 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
           <Input
             autoFocus
             value={draft}
-            disabled={pending}
             aria-label="Title"
             onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
@@ -227,7 +199,7 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
               }
             }}
           />
-          <Button size="icon" variant="ghost" onClick={commit} disabled={pending} aria-label="Save">
+          <Button size="icon" variant="ghost" onClick={commit} aria-label="Save">
             <Check />
           </Button>
         </div>
@@ -272,15 +244,12 @@ export function InlinePriority({
    */
   const [shown, setShown] = useOptimistic(value);
 
-  function choose(next: TaskPriority | null) {
+  async function choose(next: TaskPriority | null) {
     setOpen(false);
-    patch(
+    setShown(next);
+    await patch(
       { priority: next },
-      {
-        // Inside the transition that awaits — see `usePatch`.
-        paint: () => setShown(next),
-        success: next === null ? "Priority cleared" : `Priority: ${TASK_PRIORITY_LABELS[next]}`,
-      },
+      { success: next === null ? "Priority cleared" : `Priority: ${TASK_PRIORITY_LABELS[next]}` },
     );
   }
 
@@ -375,15 +344,13 @@ export function InlineDate({
    */
   const [shown, setShown] = useOptimistic(value);
 
-  function commit(next: string) {
+  async function commit(next: string) {
     // "" from a cleared input means no date. The action turns it into null.
     setOpen(false);
-    patch(
+    setShown(next || null);
+    await patch(
       { [field]: next },
-      {
-        paint: () => setShown(next || null),
-        success: next ? `${label} ${formatDate(next)}` : `${label} cleared`,
-      },
+      { success: next ? `${label} ${formatDate(next)}` : `${label} cleared` },
     );
   }
 
@@ -447,13 +414,14 @@ export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: n
   const [raw, setRaw] = useState(minutes === null ? "" : formatCellDuration(minutes));
   const [error, setError] = useState<string | null>(null);
 
-  function commit() {
+  async function commit() {
     const trimmed = raw.trim();
 
     if (!trimmed) {
       setError(null);
       setOpen(false);
-      patch({ estimate_minutes: null }, { paint: () => setShown(null), success: "Estimate cleared" });
+      setShown(null);
+      await patch({ estimate_minutes: null }, { success: "Estimate cleared" });
       return;
     }
 
@@ -466,9 +434,10 @@ export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: n
     setError(null);
     setRaw(formatCellDuration(parsed));
     setOpen(false);
-    patch(
+    setShown(parsed);
+    await patch(
       { estimate_minutes: parsed },
-      { paint: () => setShown(parsed), success: `Estimate ${formatCellDuration(parsed)}` },
+      { success: `Estimate ${formatCellDuration(parsed)}` },
     );
   }
 
@@ -547,14 +516,12 @@ export function InlineList({
 
   const nameOf = (id: string | null) => lists.find((list) => list.id === id)?.name ?? null;
 
-  function choose(next: string | null) {
+  async function choose(next: string | null) {
     setOpen(false);
-    patch(
+    setShown(next);
+    await patch(
       { list_id: next },
-      {
-        paint: () => setShown(next),
-        success: next ? `Filed under ${nameOf(next)}` : "Removed from its list",
-      },
+      { success: next ? `Filed under ${nameOf(next)}` : "Removed from its list" },
     );
   }
 
