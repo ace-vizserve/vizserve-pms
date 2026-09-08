@@ -396,6 +396,14 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       context.managedDepartmentIds.includes(task.department_id),
     isAdmin: roleAtLeast(context.role, "owner"),
     /*
+     * P11-05 — an active member of THIS task's department.
+     *
+     * Mirrors `v_in_dept` in `vizserve_pms_transition_task` and the clause
+     * P11-03 added to both tasks policies. `primary_department_id` is what this
+     * schema means by "a member of a department" everywhere else.
+     */
+    inDepartment: context.primaryDepartmentId === task.department_id,
+    /*
      * P8-01c — the Admin tick on THIS task's department, which is what
      * `vizserve_pms_force_task_status` now also accepts.
      *
@@ -409,11 +417,17 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const late = isOverdue(task.due_date) && !isTerminal(task.status);
 
   /**
-   * On the task, or leading it. The single test behind renaming, editing every
-   * field, uploading an output and adding a subtask — it was spelled out four
-   * times in the JSX and drifted once already.
+   * On the task, leading it, or IN ITS DEPARTMENT. The single test behind
+   * renaming, editing every field, uploading an output and adding a subtask —
+   * it was spelled out four times in the JSX and drifted once already.
+   *
+   * P11-05 added the third clause. P11-03 had opened all of this in the
+   * database a day earlier; until now the screen still hid it, so a colleague
+   * who could legally fix a wrong due date opened the task and found it
+   * read-only. A permission nobody can reach is not a permission.
    */
-  const canWork = viewer.isAssignee || viewer.isQa || viewer.leadsDepartment;
+  const canWork =
+    viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment;
 
   /**
    * Who this work can be given to. The department's own people, which is the
@@ -601,9 +615,19 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               picName={task.assignee_id ? (nameOf.get(task.assignee_id) ?? null) : null}
               qaName={task.qa_assignee_id ? (nameOf.get(task.qa_assignee_id) ?? null) : null}
               candidates={departmentPeople}
-              // Reassignment is a lead decision, not self-service. The server
-              // re-checks it regardless of what is rendered.
-              canReassign={viewer.leadsDepartment}
+              /* P11-06 — was `viewer.leadsDepartment`, with the note
+                 "reassignment is a lead decision, not self-service".
+                 P11-03 had already contradicted that in the database: its
+                 WITH CHECK admits any active member of the task's department
+                 as the RESULT, and its USING now admits them as the ACTOR. So
+                 the screen was hiding a control the server would have
+                 accepted, which is the worst of both — no protection, and a
+                 colleague who cannot hand work over without asking a lead.
+
+                 The person it can be handed TO is still checked server-side:
+                 `candidates` is this task's department, and `reassignTask`
+                 refuses anybody outside it. */
+              canReassign={canWork}
               // P7-60. Whether the empty resolution is currently BLOCKING
               // anything, so the field can say so itself. Derived here because
               // this is the one place that already holds every argument

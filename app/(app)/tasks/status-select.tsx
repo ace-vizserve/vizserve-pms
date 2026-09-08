@@ -19,8 +19,7 @@ import {
   availableTransitions,
   isTerminal,
   taskCategory,
-  type TaskStatus,
-} from "@/lib/schemas/tasks";
+  type TaskStatus, type TaskViewer } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 
 import { TransitionCommentDialog, useTaskTransition } from "./transition";
@@ -99,7 +98,7 @@ export function TaskStatusSelect({
 }: {
   taskId: string;
   status: TaskStatus;
-  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
+  viewer: TaskViewer;
   /** Which of the three kinds of work this is. It decides the whole menu. */
   task: { request_id: string | null; is_personal: boolean };
   /**

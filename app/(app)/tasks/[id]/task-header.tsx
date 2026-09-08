@@ -2,7 +2,7 @@
 
 import { Chip } from "@/components/status-badge";
 import { formatDate } from "@/lib/dates";
-import { availableTransitions, type TaskCategory, type TaskStatus } from "@/lib/schemas/tasks";
+import { availableTransitions, type TaskCategory, type TaskStatus, type TaskViewer } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 
 import { TaskStatusSelect } from "../status-select";
@@ -58,7 +58,7 @@ export function TaskHeader({
   status: TaskStatus;
   /** Decides the kind chip and, through `availableTransitions`, the whole menu. */
   category: TaskCategory;
-  viewer: { isAssignee: boolean; isQa: boolean; leadsDepartment: boolean; isAdmin: boolean };
+  viewer: TaskViewer;
   task: { request_id: string | null; is_personal: boolean };
   /** On the task, or leading it — the same test the surface uses. */
   canEdit: boolean;

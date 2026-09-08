@@ -135,6 +135,12 @@ export type Viewer = {
    * the serialisable half of.
    */
   deptAdminOf: string | null;
+  /**
+   * P11-05 — the department this person BELONGS to, which is what decides
+   * whether a task is theirs to edit and move. Distinct from
+   * `managedDepartmentIds` (which they lead) and `deptAdminOf` (the Admin tick).
+   */
+  primaryDepartmentId: string | null;
 };
 
 export type TaskLookups = {
@@ -282,6 +288,10 @@ export function TaskGroupTable({
       leadsDepartment:
         roleAtLeast(viewer.role, "owner") ||
         viewer.managedDepartmentIds.includes(task.department_id),
+      /* P11-05. Mirrors `v_in_dept`: `primary_department_id` is what this
+         schema means by "a member of a department" everywhere else. The
+         server re-checks it — this only decides what is on screen. */
+      inDepartment: viewer.primaryDepartmentId === task.department_id,
       isAdmin,
     };
   }
@@ -580,10 +590,14 @@ export function TaskGroupTable({
           // own function refuses anybody outside it, so offering a wider list
           // would only produce an error after the click.
           candidates={get(lookups.byDepartment, task.department_id) ?? []}
+          /* P11-03 opened editing to the whole department in the database;
+             this is the half that had been left behind, so the permission was
+             invisible on the screen it applies to. */
           canEdit={
             seat(task).isAssignee ||
             seat(task).isQa ||
-            seat(task).leadsDepartment
+            seat(task).leadsDepartment ||
+            seat(task).inDepartment
           }
           // P7-43. A client task has a person in charge; an internal one does
           // not, and `request_id` is the same test `taskCategory` uses.
