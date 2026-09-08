@@ -615,9 +615,19 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               picName={task.assignee_id ? (nameOf.get(task.assignee_id) ?? null) : null}
               qaName={task.qa_assignee_id ? (nameOf.get(task.qa_assignee_id) ?? null) : null}
               candidates={departmentPeople}
-              // Reassignment is a lead decision, not self-service. The server
-              // re-checks it regardless of what is rendered.
-              canReassign={viewer.leadsDepartment}
+              /* P11-06 — was `viewer.leadsDepartment`, with the note
+                 "reassignment is a lead decision, not self-service".
+                 P11-03 had already contradicted that in the database: its
+                 WITH CHECK admits any active member of the task's department
+                 as the RESULT, and its USING now admits them as the ACTOR. So
+                 the screen was hiding a control the server would have
+                 accepted, which is the worst of both — no protection, and a
+                 colleague who cannot hand work over without asking a lead.
+
+                 The person it can be handed TO is still checked server-side:
+                 `candidates` is this task's department, and `reassignTask`
+                 refuses anybody outside it. */
+              canReassign={canWork}
               // P7-60. Whether the empty resolution is currently BLOCKING
               // anything, so the field can say so itself. Derived here because
               // this is the one place that already holds every argument
