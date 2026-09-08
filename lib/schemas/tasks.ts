@@ -871,6 +871,30 @@ export const listSchema = z.object({
 export type ListInput = z.infer<typeof listSchema>;
 
 /**
+ * P11-06 — a personal list.
+ *
+ * ⚠️ NOT `listSchema.pick(...)`, AND THE DIFFERENCE IS THE WHOLE POINT. A
+ * derived schema would carry `department_id` and `group_id` forward as fields
+ * somebody can send, and both are things a personal list must not be told: the
+ * department is DERIVED by `vizserve_pms_lists_owner_guard` from the owner's own
+ * row, and a folder is refused outright by
+ * `vizserve_pms_lists_personal_is_loose`. A parameter that cannot be honoured is
+ * a rule waiting to be bent — the same reasoning that keeps
+ * `vizserve_pms_create_personal_task` free of `p_department_id`.
+ *
+ * `is_active` IS here, because archiving is how a personal list is put away.
+ * There is no delete: the tasks in it are real work with real hours logged
+ * against them, and the no-hard-delete rule that covers every other list covers
+ * this one.
+ */
+export const personalListSchema = z.object({
+  name: z.string().trim().min(1, "Give the list a name.").max(80),
+  is_active: z.boolean().default(true),
+});
+
+export type PersonalListInput = z.infer<typeof personalListSchema>;
+
+/**
  * P7-18 — a folder: one level above lists, so the tree reads
  * Department → Folder → List → Task.
  *

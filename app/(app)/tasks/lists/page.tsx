@@ -46,6 +46,16 @@ export default async function ListsPage() {
       supabase
         .from("vizserve_pms_lists")
         .select("id, name, description, department_id, is_active, sort_order, group_id, form_id")
+        // P11-06. This screen is how a DEPARTMENT is organised — folders, sort
+        // order, which team a list belongs to. None of it applies to a personal
+        // list, which is in no folder and belongs to a person; those are made and
+        // renamed from the sidebar's Personal lists group instead.
+        //
+        // ⚠️ NOT REDUNDANT WITH RLS. The policy lets the caller read their OWN
+        // personal lists, so without this a lead would find their private lists
+        // sitting in their department's tree here, offered a folder picker the
+        // check constraint refuses.
+        .is("owner_id", null)
         .order("sort_order")
         .order("name"),
       supabase

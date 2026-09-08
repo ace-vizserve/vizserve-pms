@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/sidebar";
 import type { NavGroup, NavItem } from "@/lib/navigation";
 import { NavIcon } from "./nav-icon";
+import { NavPersonal, type PersonalList } from "./nav-personal";
 import { NavProjects, type ProjectSpace } from "./nav-projects";
 import { LinkPending } from "./link-pending";
 import { NavUser } from "./nav-user";
@@ -54,6 +55,7 @@ export function AppSidebar({
   badges,
   spaces = [],
   canManageLists = false,
+  personalLists = [],
 }: {
   sections: SidebarSection[];
   user: { fullName: string; email: string; role: string; departments: string[] };
@@ -84,6 +86,20 @@ export function AppSidebar({
   spaces?: ProjectSpace[];
   /** Whether `/tasks/lists` is reachable for this person — it is team_leader+. */
   canManageLists?: boolean;
+  /**
+   * P11-06 — the reader's OWN lists, active and archived.
+   *
+   * Deliberately NOT folded into `spaces`, and it arrives from its own query. A
+   * personal list is not part of the department's shape: it is in no folder,
+   * nobody else can see it, and it holds only its owner's own personal tasks.
+   * Keeping the two props apart also means this feature has no way to change
+   * what the project tree renders. See nav-personal.tsx.
+   *
+   * No `can…` flag beside it, unlike `canManageLists` above. Everybody may make
+   * one, at every rank — the policy underneath asks only whether the row is
+   * yours, and a rank test here would be a rule this app does not have.
+   */
+  personalLists?: PersonalList[];
 }) {
   const pathname = usePathname();
 
@@ -150,6 +166,11 @@ export function AppSidebar({
             DO, the projects are where the work lives, and Admin stays at the
             foot. */}
         <NavProjects spaces={spaces} canManageLists={canManageLists} />
+
+        {/* P11-06 — after Projects, before the pinned sections. The order is the
+            claim: what the team is doing first, what only you are doing after
+            it, and Admin still at the foot. */}
+        <NavPersonal lists={personalLists} />
 
         {pinned.map((section) => (
           <NavSection

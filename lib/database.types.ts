@@ -1181,12 +1181,24 @@ export type Database = {
           group_id: string | null;
           /** P7-18. Set only on a form's auto-created inbox list. */
           form_id: string | null;
+          /**
+           * P11-06. Null is an ordinary department list. Set means a PERSONAL
+           * list — one person's own, invisible to everybody else including
+           * their lead, in no folder and behind no form.
+           */
+          owner_id: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
           id?: string;
+          /**
+           * ⚠️ REQUIRED EVEN FOR A PERSONAL LIST, and then overwritten.
+           * `vizserve_pms_lists_owner_guard` derives it from the owner's own
+           * row, because every downstream reader scopes on it. Send the
+           * caller's own department and the trigger will agree with you.
+           */
           department_id: string;
           name: string;
           description?: string;
@@ -1194,6 +1206,8 @@ export type Database = {
           sort_order?: number;
           group_id?: string | null;
           form_id?: string | null;
+          /** P11-06. Set at insert only — the guard freezes it afterwards. */
+          owner_id?: string | null;
           created_by?: string | null;
         };
         /**
@@ -1205,6 +1219,10 @@ export type Database = {
          * `form_id` is deliberately ABSENT. `vizserve_pms_lists_group_guard`
          * refuses to let a form's inbox list leave the Client Requests folder, so
          * offering the column here would only produce a runtime error.
+         *
+         * `owner_id` is absent for the same shape of reason and a stronger one:
+         * `vizserve_pms_lists_owner_guard` refuses to let a list change hands
+         * between a person and a department in either direction (P11-06).
          */
         Update: Partial<{
           name: string;

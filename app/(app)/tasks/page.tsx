@@ -111,7 +111,11 @@ type Kind = "all" | "internal" | "client";
  * every child the one result. The lists read has three readers below (the
  * breadcrumb, the filter panel and the row lookups) and is still one query.
  */
-type ListsResult = { data: { id: string; name: string; group_id: string | null }[] | null };
+type ListsResult = {
+  data:
+    | { id: string; name: string; group_id: string | null; owner_id: string | null }[]
+    | null;
+};
 type GroupsResult = { data: { id: string; name: string }[] | null };
 
 /**
@@ -232,7 +236,11 @@ export default async function TasksPage({
   const listsPromise: Promise<ListsResult> = Promise.resolve(
     supabase
       .from("vizserve_pms_lists")
-      .select("id, name, group_id")
+      // P11-06. `owner_id` rides along so `TaskFiltersSection` can drop personal
+      // lists from the filter dropdown while the breadcrumb and the row labels —
+      // the read's two other consumers — keep them. It is not filtered in SQL
+      // for exactly that reason; see the note in that component.
+      .select("id, name, group_id, owner_id")
       .eq("is_active", true)
       .order("name"),
   );
@@ -479,7 +487,24 @@ async function TaskFiltersSection({
 }) {
   const [{ data: lists }, { data: groups }] = await Promise.all([listsPromise, groupsPromise]);
 
-  return <TaskFilters lists={lists ?? []} groups={groups ?? []} />;
+  /*
+   * ⚠️ P11-06 — PERSONAL LISTS ARE DROPPED HERE AND NOWHERE ELSE, and the split
+   * is the point.
+   *
+   * `listsPromise` has THREE readers (see the note where it is built): this
+   * panel, the breadcrumb, and the row labels on the table. The other two NEED
+   * personal lists in it — standing in one, `ListCrumb` is what puts its name in
+   * the breadcrumb, and without it the crumb reads "Tasks" over your own list.
+   * So the filter is applied to this reader alone rather than to the query.
+   *
+   * Why drop them from the FILTER at all: this panel narrows a department's
+   * board, and it sits next to a folder filter no personal list can ever match.
+   * The rail's Personal lists group is the way into one, deliberately — Amier,
+   * 8 Sep: "i want i can only see it under the personal lists".
+   */
+  const departmentLists = (lists ?? []).filter((list) => list.owner_id === null);
+
+  return <TaskFilters lists={departmentLists} groups={groups ?? []} />;
 }
 
 /** The Gate 1 queue, waiting on `loadPendingRequests` and nothing else. */

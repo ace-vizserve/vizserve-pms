@@ -24,6 +24,7 @@ import {
   createTaskSchema,
   listSchema,
   overridePayloadSchema,
+  personalListSchema,
   taskCommentSchema,
   taskGroupSchema,
   taskParentSchema,
@@ -1352,6 +1353,123 @@ export async function saveList(
   }
 
   revalidatePath("/tasks/lists");
+  return { ok: true, data: { id: data.id } };
+}
+
+// ---------------------------------------------------------------------------
+// P11-06 — a list of your own
+// ---------------------------------------------------------------------------
+
+/**
+ * Create, rename or archive a PERSONAL list.
+ *
+ * `requireAuthContextOrThrow`, not `requireDepartmentShape` — and that is the
+ * entire slice, exactly as `createPersonalTask` is to `createTask`. Making a
+ * list for a DEPARTMENT reshapes the project tree for everybody in it, which is
+ * why `saveList` still asks for a shaper. Making one for yourself reshapes
+ * nothing anybody else can see.
+ *
+ * ⚠️ THREE THINGS ARE NOT PARAMETERS HERE, and each is a rule rather than an
+ * omission:
+ *
+ *   owner_id       always `context.userId`. Sending it would offer the browser a
+ *                  chance to make a list on somebody else's behalf, and
+ *                  `personal lists belong to their owner` would refuse it —
+ *                  after the form had already collected it.
+ *   department_id  derived by `vizserve_pms_lists_owner_guard` from the owner's
+ *                  own row. The insert below sends `context.primaryDepartmentId`
+ *                  because the column is NOT NULL and something has to satisfy
+ *                  it; the trigger then overwrites it with the same value.
+ *   group_id       refused outright by `vizserve_pms_lists_personal_is_loose`. A
+ *                  personal list is never in a folder.
+ *
+ * NO DELETE, ONLY `is_active`. The tasks in a personal list are real work with
+ * real timesheet hours logged against them — the no-hard-delete rule that covers
+ * every other list covers this one, and archiving is what the sidebar hides on.
+ */
+export async function savePersonalList(
+  listId: string | null,
+  input: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  const context = await requireAuthContextOrThrow();
+
+  const parsed = personalListSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Check the highlighted fields.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
+  }
+
+  const values = parsed.data;
+  const supabase = await createClient();
+
+  /*
+   * Said here as well as in the trigger, because the two produce different
+   * sentences for the same fact. The trigger raises when the row is already
+   * halfway written; this catches it before the person has pressed anything, and
+   * it is the one case where a brand-new account genuinely cannot proceed.
+   */
+  if (!context.primaryDepartmentId) {
+    return {
+      ok: false,
+      error: "You are not assigned to a department yet, so there is nowhere to file a list.",
+    };
+  }
+
+  if (listId) {
+    /*
+     * ⚠️ NO `.eq("owner_id", context.userId)` HERE, AND THAT IS DELIBERATE. The
+     * policy is the enforcement: `personal lists belong to their owner` is the
+     * only one that admits a row with an owner, so an id belonging to somebody
+     * else matches nothing and the update touches zero rows. Restating the
+     * filter would imply the policy were optional — the standing rule in this
+     * codebase.
+     */
+    const { error } = await supabase
+      .from("vizserve_pms_lists")
+      .update({ name: values.name, is_active: values.is_active })
+      .eq("id", listId);
+
+    if (error) {
+      return error.code === "23505"
+        ? {
+            ok: false,
+            error: "You already have a list with this name.",
+            fieldErrors: { name: ["Already in use."] },
+          }
+        : { ok: false, error: readableError(error) };
+    }
+
+    refresh();
+    return { ok: true, data: { id: listId } };
+  }
+
+  const { data, error } = await supabase
+    .from("vizserve_pms_lists")
+    .insert({
+      name: values.name,
+      is_active: values.is_active,
+      owner_id: context.userId,
+      // NOT NULL, and overwritten by the guard with this same value. See above.
+      department_id: context.primaryDepartmentId,
+      created_by: context.userId,
+    })
+    .select("id")
+    .single();
+
+  if (error) {
+    return error.code === "23505"
+      ? {
+          ok: false,
+          error: "You already have a list with this name.",
+          fieldErrors: { name: ["Already in use."] },
+        }
+      : { ok: false, error: readableError(error) };
+  }
+
+  refresh();
   return { ok: true, data: { id: data.id } };
 }
 

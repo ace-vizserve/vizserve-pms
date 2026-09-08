@@ -57,6 +57,54 @@ export async function NewTaskButton({
   const supabase = await createClient();
 
   /*
+   * P11-06 — ⚠️ INSIDE A PERSONAL LIST, THE LIST DECIDES AND NOT THE RANK, WHICH
+   * IS WHY THIS BRANCH COMES FIRST.
+   *
+   * Everything below this point branches on role: a member gets the personal
+   * dialog, a team leader gets the one with a department and a QA reviewer. That
+   * was complete while every list belonged to a department. It is not any more.
+   *
+   * A personal list holds ONLY its owner's own personal tasks — that is
+   * `vizserve_pms_tasks_personal_list_guard`, and it is not negotiable. So a
+   * team leader standing in their own personal list and pressing New task would
+   * otherwise get `NewTaskDialog`, which posts to `vizserve_pms_create_task`,
+   * which makes a non-personal task, which the trigger refuses. The rule would
+   * be met as an error message after the form had been filled in.
+   *
+   * `colleagues` is deliberately EMPTY rather than omitted: the dialog offers
+   * the assignee picker only when it has somebody to offer, so an empty array is
+   * how "this can only be your own work" is expressed — which is exactly true
+   * here.
+   *
+   * Scoped by `owner_id = context.userId` rather than by RLS alone, because the
+   * question is not "may I see this list" but "is this list MINE".
+   */
+  if (listId) {
+    const { data: personalList } = await supabase
+      .from("vizserve_pms_lists")
+      .select("id, name")
+      .eq("id", listId)
+      .eq("owner_id", context.userId)
+      .maybeSingle();
+
+    if (personalList) {
+      const dialog = (
+        <NewPersonalTaskDialog
+          lists={[personalList]}
+          colleagues={[]}
+          departmentId={context.primaryDepartmentId}
+          trigger={trigger}
+          defaultListId={personalList.id}
+        />
+      );
+
+      if (trigger === "column") return <div className="shrink-0 px-2 pb-2">{dialog}</div>;
+      if (trigger === "row") return <div className="border-t px-2 py-1.5">{dialog}</div>;
+      return dialog;
+    }
+  }
+
+  /*
    * The member path, and it returns BEFORE the team-leader fetch below.
    *
    * Both of that fetch's early returns — the role gate and
@@ -127,9 +175,15 @@ export async function NewTaskButton({
       .select("id, full_name, primary_department_id")
       .eq("is_active", true)
       .order("full_name"),
+    // P11-06. `NewTaskDialog` always posts to `vizserve_pms_create_task`, which
+    // makes a NON-personal task — and a personal list refuses one. Offering the
+    // reader's own lists here would be offering the one destination this dialog
+    // can never file into. The branch at the top of this function is what handles
+    // "I am actually standing in my personal list".
     supabase
       .from("vizserve_pms_lists")
       .select("id, name, department_id")
+      .is("owner_id", null)
       .eq("is_active", true)
       .order("name"),
   ]);

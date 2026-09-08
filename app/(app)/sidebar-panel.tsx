@@ -139,6 +139,7 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
     { data: groups },
     { data: openTasks },
     { data: pendingRequests },
+    { data: myLists },
   ] = await Promise.all([
     managedDepartmentsQuery,
 
@@ -195,6 +196,29 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
     supabase
       .from("vizserve_pms_lists")
       .select("id, name, department_id, group_id")
+      /*
+       * ⚠️ P11-06 — THE ONE EXCEPTION TO THE "NO SCOPE FILTER" NOTE ABOVE, and
+       * it is not a scope filter. It shipped without this line and the result
+       * was the bug Amier reported on 8 Sep: your own personal list appearing
+       * TWICE in the rail — once under Personal lists where it belongs, and
+       * once under your department in the project tree, as a folderless list
+       * with an open-task count beside it.
+       *
+       * The note above is still right about scope and that is exactly why this
+       * is needed. `personal lists belong to their owner` DOES return your own
+       * personal lists to you, correctly — the policy is not the thing being
+       * second-guessed here. What this excludes is a KIND of list, not a set of
+       * rows somebody may not see: a personal list carries a department (it has
+       * to; see the migration) but is not part of that department's shape. It
+       * is in no folder, nobody else can see it, and the tree above it is
+       * explicitly where the DEPARTMENT'S work lives.
+       *
+       * The distinction matters for the next person: restating a POLICY here
+       * would be wrong, and this is not that. Nobody else's tree changes by one
+       * row — for every other reader `owner_id` was already null on everything
+       * they could see.
+       */
+      .is("owner_id", null)
       .eq("is_active", true)
       .order("sort_order")
       .order("name"),
@@ -229,6 +253,35 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
       .from("vizserve_pms_requests")
       .select("vizserve_pms_forms!inner(default_list_id)")
       .eq("status", "PENDING_REVIEW"),
+
+    /*
+     * P11-06 — the reader's own lists, for the Personal group.
+     *
+     * ⚠️ A NINTH QUERY RATHER THAN A COLUMN ON THE LISTS READ ABOVE, AND THAT IS
+     * THE POINT. Adding `owner_id` to that query and splitting the rows here
+     * would have made the project tree — the thing every person in the company
+     * looks at all day — depend on this feature parsing correctly. It does not.
+     * The tree's query is byte-for-byte what it was; a failure here empties the
+     * Personal group and nothing else.
+     *
+     * ⚠️ NO `is_active` FILTER, unlike every other lists read in this app. The
+     * Personal group shows archived lists behind a disclosure, because the only
+     * screen that could otherwise un-archive one is `/tasks/lists`, which is
+     * department-scoped and refuses a plain member — so filtering here would
+     * make archiving a one-way door.
+     *
+     * The `owner_id` filter is BELT AND BRACES, not the enforcement: `personal
+     * lists belong to their owner` is the only policy that admits an owned row,
+     * so the caller could not read anybody else's regardless. It is stated
+     * because this query would otherwise also return every DEPARTMENT list a
+     * second time, which is a correctness bug rather than a security one.
+     */
+    supabase
+      .from("vizserve_pms_lists")
+      .select("id, name, is_active")
+      .eq("owner_id", context.userId)
+      .order("sort_order")
+      .order("name"),
   ]);
 
   const departmentNames = (managedDepartments?.data ?? []).map((row) => row.name);
@@ -304,6 +357,15 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
     // made one.
     .filter((space) => space.lists.length > 0 || space.folders.length > 0);
 
+  /*
+   * P11-06. `?? []` like every other read in this batch — a failure here renders
+   * an empty Personal group and leaves the tree above it alone.
+   */
+  const personalLists = (myLists ?? []).map((list) => ({
+    id: list.id,
+    name: list.name,
+    isActive: list.is_active,
+  }));
 
   return (
     <AppSidebar
@@ -314,6 +376,7 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
       }}
       spaces={spaces}
       canManageLists={canShapeAnyDepartment(context)}
+      personalLists={personalLists}
       user={{
         fullName: context.fullName,
         email: context.email,
