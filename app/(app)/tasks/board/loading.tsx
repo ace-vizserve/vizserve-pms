@@ -14,7 +14,11 @@ export default function Loading() {
         <Skeleton className="h-9 w-64 rounded-lg" />
       </div>
 
-      <div className="min-h-0 min-w-0 flex-1 overflow-hidden" aria-hidden>
+      {/* Absolute for the same reason the real strip is — see the long note in
+          `page.tsx`. A skeleton that pushes the document taller than the board
+          it stands in for is a layout jump on arrival. */}
+      <div className="relative min-h-0 min-w-0 flex-1" aria-hidden>
+        <div className="absolute inset-0 overflow-hidden">
         <div className="flex h-full items-stretch gap-3">
           {Array.from({ length: 6 }, (_, index) => (
             <div
@@ -30,6 +34,7 @@ export default function Loading() {
               ))}
             </div>
           ))}
+        </div>
         </div>
       </div>
     </PageShell>

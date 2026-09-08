@@ -2,11 +2,12 @@
 
 import { useState, useTransition } from "react";
 
-import { useOptimisticMove } from "./optimistic-move";
-import { useRouter, useSearchParams } from "next/navigation";
-import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
+import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useOptimisticMove } from "./optimistic-move";
 
+import { TaskPriorityBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { toDateString } from "@/components/ui/date-picker";
@@ -14,7 +15,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TableCell, TableRow } from "@/components/ui/table";
-import { TaskPriorityBadge } from "@/components/status-badge";
 import { formatDate, parseDateOnly } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
@@ -226,9 +226,7 @@ export function ComposerRow({
           value={draft.title}
           disabled={pending}
           placeholder={parentId ? "Subtask name" : "Task name"}
-          aria-label={
-            parentId ? "Subtask name" : `Task name, added to ${TASK_STATUS_LABELS[status]}`
-          }
+          aria-label={parentId ? "Subtask name" : `Task name, added to ${TASK_STATUS_LABELS[status]}`}
           onChange={(event) => set("title", event.target.value)}
           onKeyDown={onKeyDown}
           // `min-w-48` overrides the primitive's `min-w-0` — cn is
@@ -242,12 +240,7 @@ export function ComposerRow({
             never hidden. The breakpoint must track the Save cell's own — they
             are the two halves of one control. */}
         <div className="mt-2 2xl:hidden">
-          <Actions
-            submit={submit}
-            cancel={onCancel}
-            pending={pending}
-            disabled={!draft.title.trim()}
-          />
+          <Actions submit={submit} cancel={onCancel} pending={pending} disabled={!draft.title.trim()} />
         </div>
       </TableCell>
 
@@ -264,11 +257,7 @@ export function ComposerRow({
       </TableCell>
 
       <TableCell className="hidden lg:table-cell">
-        <PriorityField
-          value={draft.priority}
-          disabled={pending}
-          onChange={(next) => set("priority", next)}
-        />
+        <PriorityField value={draft.priority} disabled={pending} onChange={(next) => set("priority", next)} />
       </TableCell>
 
       <TableCell className="hidden xl:table-cell whitespace-nowrap">
@@ -292,9 +281,7 @@ export function ComposerRow({
       </TableCell>
 
       {/* closed — it is being created, so there is nothing to say here ever. */}
-      <TableCell className="hidden 2xl:table-cell whitespace-nowrap text-2xs text-foreground-faint">
-        —
-      </TableCell>
+      <TableCell className="hidden 2xl:table-cell whitespace-nowrap text-2xs text-foreground-faint">—</TableCell>
 
       <TableCell className="hidden xl:table-cell whitespace-nowrap text-right">
         <EstimateInlineField
@@ -357,9 +344,7 @@ export function ComposerCard({
         value={draft.title}
         disabled={pending}
         placeholder={parentId ? "Subtask name" : "Task name"}
-        aria-label={
-          parentId ? "Subtask name" : `Task name, added to ${TASK_STATUS_LABELS[status]}`
-        }
+        aria-label={parentId ? "Subtask name" : `Task name, added to ${TASK_STATUS_LABELS[status]}`}
         onChange={(event) => set("title", event.target.value)}
         onKeyDown={onKeyDown}
         className="h-8"
@@ -389,11 +374,7 @@ export function ComposerCard({
           onChange={(next) => set("dueDate", next)}
           onKeyDown={onKeyDown}
         />
-        <PriorityField
-          value={draft.priority}
-          disabled={pending}
-          onChange={(next) => set("priority", next)}
-        />
+        <PriorityField value={draft.priority} disabled={pending} onChange={(next) => set("priority", next)} />
         <EstimateInlineField
           value={draft.estimateMinutes}
           disabled={pending}
@@ -436,8 +417,7 @@ export function ComposerTrigger({
         "flex w-full items-center gap-1.5 text-left text-xs text-muted-foreground",
         "hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
         shape === "column" ? "shrink-0 rounded-sm px-2 py-1.5" : "border-t px-3.5 py-2",
-      )}
-    >
+      )}>
       <Plus className="size-3.5 shrink-0" aria-hidden />
       {label}
     </button>
@@ -502,8 +482,7 @@ function AssigneeField({
       <PopoverTrigger
         disabled={disabled}
         className={cn(CHIP, value ? "border-accent-border bg-accent" : "border-dashed")}
-        aria-label={chosen ? `Assigned to ${chosen.full_name}. Change it.` : "Assign to somebody"}
-      >
+        aria-label={chosen ? `Assigned to ${chosen.full_name}. Change it.` : "Assign to somebody"}>
         <CircleUser className="size-3.5 shrink-0" aria-hidden />
         <span className="max-w-24 truncate">{chosen ? chosen.full_name : "Myself"}</span>
       </PopoverTrigger>
@@ -515,16 +494,13 @@ function AssigneeField({
             onChange(null);
             setOpen(false);
           }}
-          className={cn(MENU_ROW, value === null && "font-semibold")}
-        >
+          className={cn(MENU_ROW, value === null && "font-semibold")}>
           Myself
           <span className="ml-auto text-2xs text-muted-foreground">personal</span>
         </button>
 
         {people.length === 0 ? (
-          <p className="px-2 py-1.5 text-2xs text-muted-foreground">
-            Nobody else in your department to assign to.
-          </p>
+          <p className="px-2 py-1.5 text-2xs text-muted-foreground">Nobody else in your department to assign to.</p>
         ) : (
           <div className="max-h-56 overflow-y-auto">
             {people.map((person) => (
@@ -535,8 +511,7 @@ function AssigneeField({
                   onChange(person.id);
                   setOpen(false);
                 }}
-                className={cn(MENU_ROW, value === person.id && "font-semibold")}
-              >
+                className={cn(MENU_ROW, value === person.id && "font-semibold")}>
                 <span className="truncate">{person.full_name}</span>
               </button>
             ))}
@@ -567,8 +542,7 @@ function DateField({
       <PopoverTrigger
         disabled={disabled}
         className={cn(CHIP, value ? "border-accent-border bg-accent" : "border-dashed")}
-        aria-label={value ? `${label} ${formatDate(value)}. Change it.` : `Set a ${label.toLowerCase()} date`}
-      >
+        aria-label={value ? `${label} ${formatDate(value)}. Change it.` : `Set a ${label.toLowerCase()} date`}>
         <CalendarPlus className="size-3.5 shrink-0" aria-hidden />
         <span className="tabular-nums">{value ? formatDate(value) : label}</span>
       </PopoverTrigger>
@@ -603,8 +577,7 @@ function DateField({
               onClick={() => {
                 onChange("");
                 setOpen(false);
-              }}
-            >
+              }}>
               <X />
             </Button>
           ) : null}
@@ -630,8 +603,7 @@ function PriorityField({
       <PopoverTrigger
         disabled={disabled}
         className={cn(CHIP, value ? "border-transparent p-0" : "border-dashed")}
-        aria-label={value ? `Priority ${TASK_PRIORITY_LABELS[value]}. Change it.` : "Set a priority"}
-      >
+        aria-label={value ? `Priority ${TASK_PRIORITY_LABELS[value]}. Change it.` : "Set a priority"}>
         {value ? (
           <TaskPriorityBadge priority={value} className="h-7" />
         ) : (
@@ -653,8 +625,7 @@ function PriorityField({
               onChange(option);
               setOpen(false);
             }}
-            className={cn(MENU_ROW, value === option && "font-semibold")}
-          >
+            className={cn(MENU_ROW, value === option && "font-semibold")}>
             <Flag className="size-3.5 shrink-0" aria-hidden />
             {TASK_PRIORITY_LABELS[option]}
           </button>
@@ -666,8 +637,7 @@ function PriorityField({
               onChange(null);
               setOpen(false);
             }}
-            className={cn(MENU_ROW, "text-muted-foreground")}
-          >
+            className={cn(MENU_ROW, "text-muted-foreground")}>
             Clear
           </button>
         ) : null}
@@ -721,17 +691,13 @@ function EstimateInlineField({
           setRaw(value === null ? "" : formatCellDuration(value));
           setError(null);
         }
-      }}
-    >
+      }}>
       <PopoverTrigger
         disabled={disabled}
         className={cn(CHIP, value !== null ? "border-accent-border bg-accent" : "border-dashed")}
-        aria-label={value === null ? "Set an estimate" : `Estimate ${formatCellDuration(value)}. Change it.`}
-      >
+        aria-label={value === null ? "Set an estimate" : `Estimate ${formatCellDuration(value)}. Change it.`}>
         <Hourglass className="size-3.5 shrink-0" aria-hidden />
-        <span className="tabular-nums">
-          {value === null ? "Estimate" : formatCellDuration(value)}
-        </span>
+        <span className="tabular-nums">{value === null ? "Estimate" : formatCellDuration(value)}</span>
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-52 p-2">

@@ -225,7 +225,27 @@ export default async function TaskBoardPage({
         nothing to scroll to.
       */}
       <div className="relative min-h-0 min-w-0 flex-1">
-      <div className="-mx-1 h-full min-h-0 min-w-0 overflow-x-auto overflow-y-hidden px-1 pb-1">
+      {/*
+        ⚠️ ABSOLUTE, AND THAT IS WHAT CAPS THE BOARD AT ONE SCREEN.
+
+        It was `h-full` in normal flow, and the board ran past the bottom of the
+        window — a stage with thirty cards made the whole page scroll instead of
+        the column. `PageShell` above is capped and clipped, but a cap cannot
+        hold against pressure from BELOW: the columns' intrinsic height climbed
+        the flex chain to `(app)/layout.tsx`'s `<main>`, which has no `min-h-0`
+        because every ordinary page needs to grow and scroll the document. So
+        `main` grew, the provider grew with it, and the shell — being `flex-1` —
+        grew to match the space it had just been given.
+
+        Out of flow, the strip contributes nothing upward. `main` stays at one
+        viewport, the shell's `calc(100svh - 3.5rem)` holds, and `inset-0` gives
+        the columns a definite box to resolve `h-full` against and scroll inside.
+
+        Do NOT put `min-h-0` on that `<main>` to fix this from the other end: it
+        would cap every page in the app at a screen and clip the ones that are
+        meant to scroll.
+      */}
+      <div className="absolute inset-0 -mx-1 overflow-x-auto overflow-y-hidden px-1 pb-1">
         <div className="flex h-full min-w-max items-stretch gap-3">
           {/* Before every stage, and deliberately not one of them: nothing in
               it has a status yet. It is not a `BoardColumn` either — that is a
