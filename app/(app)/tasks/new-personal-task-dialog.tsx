@@ -83,7 +83,13 @@ export function NewPersonalTaskDialog({
   colleagues: { id: string; full_name: string }[];
   /** The member's own department, read on the server. Never chosen here. */
   departmentId: string | null;
-  trigger?: "toolbar" | "column" | "row";
+  /**
+   * The SHAPE, never the permission — the same rule `new-task-button.tsx`
+   * states. `quick` is the home page's action grid, where this sits beside five
+   * outline links and has to look like the sixth rather than the only primary
+   * button on the page.
+   */
+  trigger?: "toolbar" | "column" | "row" | "quick";
 }) {
   const [open, setOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
@@ -209,13 +215,20 @@ export function NewPersonalTaskDialog({
         render={
           trigger === "toolbar" ? (
             <Button />
+          ) : trigger === "quick" ? (
+            /* Matched to the five links beside it, class for class — they are
+               `buttonVariants({ variant: "outline", size: "sm" })` plus
+               `h-auto min-h-9 justify-start`. A grid where one cell is a
+               primary button reads as one recommended action and five
+               afterthoughts. */
+            <Button variant="outline" size="sm" className="h-auto min-h-9 w-full justify-start" />
           ) : (
             <Button variant="ghost" size="sm" className="w-full justify-start text-muted-foreground" />
           )
         }
       >
         <Plus className="size-4" />
-        {trigger === "toolbar" ? "New task" : "Add a task"}
+        {trigger === "toolbar" || trigger === "quick" ? "New task" : "Add a task"}
       </DialogTrigger>
 
       <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">

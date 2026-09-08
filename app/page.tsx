@@ -34,6 +34,7 @@ import {
 } from "./_home/leave-calendar";
 import { LeaveTooltip } from "./_home/leave-entry";
 import { Cell, CellBody, CellHead, StatStrip, initials } from "./_home/home-widgets";
+import { HomeNewTaskAction } from "./_home/new-task-action";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata: Metadata = { title: "Home" };
@@ -715,8 +716,14 @@ export default async function DashboardPage({
 
   const spansPromise = loadHomeSpans({ supabase, context, gridFrom, gridTo });
 
+  /*
+    "New task" IS NOT IN THIS LIST ANY MORE, and that is the point of the
+    change. It was `href: "/tasks"` — a route that redirects to `/tasks/lists`
+    when it carries no `?list=`, so the one action here that says "new" landed
+    the reader on a directory of folders with nothing created and no form open.
+    It is a dialog now, rendered first in the grid below.
+  */
   const QUICK = [
-    { label: "New task", href: "/tasks" },
     /*
       `?type=`, not `?new=`. These four were written against a parameter nothing
       ever read, so every one of them landed on /approvals with the dialog shut —
@@ -921,6 +928,30 @@ export default async function DashboardPage({
           <Cell span="sm:col-span-2" label="Quick actions">
             <CellHead title="Quick actions" />
             <CellBody className="grid grid-cols-2 content-stretch gap-1.5 p-2.5">
+              {/*
+                FIRST IN THE GRID, and behind its own boundary so the five
+                links beside it do not wait on its three queries. The fallback
+                is the same button, inert — not a grey bar: this cell is a row
+                of six controls and a skeleton among them reads as one of them
+                having broken.
+              */}
+              <Suspense
+                fallback={
+                  <span
+                    aria-hidden
+                    className={cn(
+                      buttonVariants({ variant: "outline", size: "sm" }),
+                      "h-auto min-h-9 justify-start opacity-60",
+                    )}
+                  >
+                    <Plus />
+                    New task
+                  </span>
+                }
+              >
+                <HomeNewTaskAction />
+              </Suspense>
+
               {QUICK.map((action) => (
                 <Link
                   key={action.label}
