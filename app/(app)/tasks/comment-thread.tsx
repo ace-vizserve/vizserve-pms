@@ -5,6 +5,8 @@ import { startTransition, useOptimistic, useState, useTransition } from "react";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
+import { isPlaceholder, placeholderId } from "./optimistic-move";
+
 import { Button } from "@/components/ui/button";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { RICH_TEXT_CLASS } from "@/components/ui/rich-text";
@@ -173,7 +175,7 @@ export function CommentThread({
       {
         // A key React can tell apart from every real id. It exists for one
         // render and is replaced by the server's row.
-        id: `optimistic-${state.length}`,
+        id: placeholderId(state.length),
         body: text,
         authorId: viewerId,
         authorName:
@@ -306,7 +308,16 @@ export function CommentThread({
             row.event ? (
               <ActivityEntry key={`event-${row.event.id}`} event={row.event} />
             ) : (
-              <li key={row.comment!.id} className="rounded-sm border bg-card px-3 py-2">
+              <li
+                key={row.comment!.id}
+                /* ⚠️ DIMMED WHILE IT IS STILL GOING IN. Predicting that a
+                   comment will be accepted is fine; drawing it as though it
+                   already has been is not — nobody should quote a comment in a
+                   meeting that never landed. */
+                className={cn(
+                  "rounded-sm border bg-card px-3 py-2",
+                  isPlaceholder(row.comment!.id) && "opacity-60",
+                )}>
                 {/*
                   P7-55 — the monogram is what makes a list of boxes read as a
                   thread. It sits ON the existing baseline row, so it costs no
@@ -327,6 +338,12 @@ export function CommentThread({
                         invisible. */}
                     {row.comment!.updatedAt !== row.comment!.createdAt ? " · edited" : null}
                   </span>
+
+                  {isPlaceholder(row.comment!.id) ? (
+                    <span aria-live="polite" className="text-2xs text-muted-foreground">
+                      Sending…
+                    </span>
+                  ) : null}
                 </div>
 
                 {editing === row.comment!.id ? (
@@ -370,7 +387,12 @@ export function CommentThread({
                       dangerouslySetInnerHTML={{ __html: row.comment!.body }}
                     />
 
-                    {row.comment!.authorId === viewerId ? (
+                    {/* ⚠️ NOT ON A ROW THAT DOES NOT EXIST YET. Its id is a
+                        placeholder string, and `deleteTaskComment` is typed
+                        `uuid` — pressing Delete on a comment still in flight
+                        came back `invalid input syntax for type uuid`. There is
+                        also nothing to edit: the server has not written it. */}
+                    {row.comment!.authorId === viewerId && !isPlaceholder(row.comment!.id) ? (
                       <div className="mt-1.5 flex gap-2">
                         <button
                           type="button"

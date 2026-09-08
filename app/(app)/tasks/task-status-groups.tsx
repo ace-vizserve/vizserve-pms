@@ -4,7 +4,7 @@ import { useMemo, useOptimistic } from "react";
 
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 
-import { OptimisticMoveContext, type OptimisticMove } from "./optimistic-move";
+import { OptimisticMoveContext, placeholderId, type OptimisticMove } from "./optimistic-move";
 
 import { TaskStatusGroup } from "./status-group";
 import { TaskGroupTable, type ListRow, type TaskLookups, type Viewer } from "./tasks-table";
@@ -88,10 +88,15 @@ export function TaskStatusGroups({
     return [
       ...state,
       {
-        id: `optimistic-${state.length}`,
+        id: placeholderId(state.length),
         title: move.title,
         status: move.status,
         depth: 0,
+        /* Not invented — the composer cannot create client-backed work; that
+           only ever arrives through a request. Stated because `taskCategory`
+           reads it, and `undefined !== null` would put the client-work accent
+           edge on a row that has no client. */
+        request_id: null,
       } as unknown as ListRow,
     ];
   });

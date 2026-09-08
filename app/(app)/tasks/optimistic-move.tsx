@@ -46,6 +46,36 @@ export type OptimisticMove =
    */
   | { kind: "patch"; id: string; fields: Record<string, unknown> };
 
+/*
+ * THE PLACEHOLDER ID — AND WHY IT IS NOT A UUID.
+ *
+ * An optimistic row stands for a task the server has not created yet, so it has
+ * no id to carry. React still needs a key, and the key has to be one nothing
+ * can mistake for a real id.
+ *
+ * ⚠️ THE MISTAKE IT GUARDS AGAINST IS REAL AND WAS SHIPPED: the placeholder
+ * row rendered the ordinary task row, link and all, and `<HoverPrefetchLink
+ * href={`/tasks/optimistic-0`}>` fetched that page on hover — which reached
+ * Postgres and came back `invalid input syntax for type uuid: "optimistic-0"`.
+ * Every control on that row had the same hole: a priority, a date or a delete
+ * pressed before the server answered would have sent this string to an action
+ * typed `uuid`.
+ *
+ * So the rule is: a placeholder row is INERT. It shows what was typed and says
+ * it is still going in. `isPlaceholder` is how every renderer asks.
+ */
+const PLACEHOLDER_PREFIX = "optimistic-";
+
+/** The key for the nth pending row. Never reaches the database. */
+export function placeholderId(index: number) {
+  return `${PLACEHOLDER_PREFIX}${index}`;
+}
+
+/** True for a row that exists only in this browser. Nothing may be sent about it. */
+export function isPlaceholder(id: string) {
+  return id.startsWith(PLACEHOLDER_PREFIX);
+}
+
 /** Null wherever the control renders with no groups around it — the task detail page and the board. */
 export const OptimisticMoveContext = createContext<((move: OptimisticMove) => void) | null>(null);
 

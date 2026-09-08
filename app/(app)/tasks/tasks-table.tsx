@@ -45,6 +45,7 @@ import { LatestCommentCell } from "./latest-comment-cell";
 import { TaskSelectAll, TaskSelectCheckbox } from "./task-selection";
 import { TaskStatusSelect } from "./status-select";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
+import { isPlaceholder } from "./optimistic-move";
 
 /**
  * P7-64 - the task list's columns, in a client component.
@@ -292,6 +293,9 @@ export function TaskGroupTable({
    */
   const deletableInGroup = group
     .flatMap((task) => [task, ...(task.subRows ?? [])])
+    /* A row the server has not created cannot be selected for deletion — its
+       id is a placeholder string and the bulk delete is typed `uuid`. */
+    .filter((task) => !isPlaceholder(task.id))
     .filter(canDelete)
     .map((task) => ({ id: task.id, title: task.title }));
 
@@ -325,6 +329,31 @@ export function TaskGroupTable({
       header: "Task",
       className: "max-w-sm whitespace-normal",
       cell: (task, _index, controls) => {
+        /*
+         * ⚠️ THE PENDING ROW IS INERT, AND THIS IS THE BUG IT FIXES.
+         *
+         * A task added from the composer appears here before the server has
+         * created it, so it carries a placeholder key rather than an id. It was
+         * being drawn as an ordinary row — which meant `HoverPrefetchLink`
+         * fetched `/tasks/optimistic-0` the moment the cursor crossed it, and
+         * that page asks Postgres for a uuid: `invalid input syntax for type
+         * uuid: "optimistic-0"`. Every control on the row had the same hole.
+         *
+         * So it shows what was typed and says it is still going in. One line,
+         * no link, no controls — which is also the honest drawing: none of the
+         * other columns have anything to say about a task that does not exist.
+         */
+        if (isPlaceholder(task.id)) {
+          return (
+            <span className="flex min-w-0 items-center gap-2 pl-7 opacity-60">
+              <span className="truncate font-medium">{task.title}</span>
+              <span aria-live="polite" className="shrink-0 text-2xs text-muted-foreground">
+                Adding…
+              </span>
+            </span>
+          );
+        }
+
         const isChild = task.depth === 1;
         const childCount = task.subRows?.length ?? 0;
 
@@ -730,10 +759,29 @@ export function TaskGroupTable({
     },
   ];
 
+  /*
+   * Every OTHER column, blanked on a pending row.
+   *
+   * Done here rather than as a check inside each of the eleven `cell`
+   * functions, because the rule is about the ROW, not about any one cell — and
+   * a rule spread over eleven places is a rule the twelfth column will not
+   * follow. Each of those cells would otherwise hand a placeholder string to an
+   * action typed `uuid`.
+   */
+  const rendered: Column<ListRow>[] = columns.map((column) =>
+    column.key === "task"
+      ? column
+      : {
+          ...column,
+          cell: (task, index, controls) =>
+            isPlaceholder(task.id) ? null : column.cell(task, index, controls),
+        },
+  );
+
   return (
     <DataTable
       bare
-      columns={columns}
+      columns={rendered}
       rows={group}
       getRowKey={(task) => task.id}
       getSubRows={(task) => task.subRows}
