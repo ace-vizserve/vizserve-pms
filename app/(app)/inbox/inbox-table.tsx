@@ -73,10 +73,24 @@ export function InboxTable({
   toolbar?: React.ReactNode;
   count?: React.ReactNode;
 }) {
-  /* The one flag. Every `read_at` read below goes through `isRead`. */
+  /*
+   * ⚠️ BOTH OPTIMISTIC VALUES LIVE HERE, and the second one had to move up.
+   *
+   * The unread DOT, the bold title, the `sr-only` "(unread)" and the actions
+   * cell are rendered by this component, while the clickable title is a child
+   * (`MarkReadTitle`). That child used to hold its own `useOptimistic`, so
+   * clicking a title turned it into plain text while the dot beside it stayed
+   * blue — one field, two components, two pieces of state.
+   *
+   * Which rows have been read lives on the parent now and is passed down. Every
+   * reader goes through `isRead`.
+   */
   const router = useRouter();
   const [allRead, markAllRead] = useOptimistic(false);
-  const isRead = (item: Notification) => allRead || Boolean(item.read_at);
+  const [readIds, markRead] = useOptimistic<string[], string>([], (state, id) => [...state, id]);
+
+  const isRead = (item: Notification) =>
+    allRead || readIds.includes(item.id) || Boolean(item.read_at);
 
   const columns: Column<Notification>[] = [
     {
@@ -133,7 +147,7 @@ export function InboxTable({
                * being a control at all — there is nothing left for it to do,
                * and an inert button is worse than plain text.
                */
-              <MarkReadTitle item={item} allRead={allRead} />
+              <MarkReadTitle item={item} read={isRead(item)} onRead={markRead} />
             )}
             {/*
               ⚠️ FLATTENED, BECAUSE THE BODY IS MARKUP NOW.
@@ -271,7 +285,16 @@ export function InboxTable({
  * rather than as a control bolted beside one. It is the same words in the same
  * place either way; the only difference is whether pressing them does anything.
  */
-function MarkReadTitle({ item, allRead }: { item: Notification; allRead: boolean }) {
+function MarkReadTitle({
+  item,
+  read,
+  onRead,
+}: {
+  item: Notification;
+  /** Decided by the table, so the dot and the title cannot disagree. */
+  read: boolean;
+  onRead: (id: string) => void;
+}) {
   /*
    * P11-05 — the row stops being unread on the click.
    *
@@ -281,12 +304,7 @@ function MarkReadTitle({ item, allRead }: { item: Notification; allRead: boolean
    * a plain span, so the button that was just pressed becomes the thing it
    * pressed toward.
    */
-  /* Its own optimism for a single click, plus the table's for "mark all" —
-     either one is enough to turn this into a plain title. */
   const router = useRouter();
-  const [read, markRead] = useOptimistic(Boolean(item.read_at));
-
-  if (allRead) return <span className="text-sm">{item.title}</span>;
 
   if (read) {
     return <span className="text-sm">{item.title}</span>;
@@ -301,7 +319,7 @@ function MarkReadTitle({ item, allRead }: { item: Notification; allRead: boolean
     <form
       action={() =>
         startTransition(async () => {
-          markRead(true);
+          onRead(item.id);
           await markNotificationRead(item.id);
           router.refresh();
         })

@@ -303,8 +303,33 @@ export function WeekGrid({
   const allRows = [...rows, ...extraRows].sort((a, b) => a.title.localeCompare(b.title));
   const pickable = tasks.filter((task) => !logged.has(task.id) && !extraTaskIds.includes(task.id));
 
-  const dayTotal = (day: string) => allRows.reduce((total, row) => total + sum(row.cells[day]), 0);
-  const rowTotal = (row: TaskRow) => days.reduce((total, day) => total + sum(row.cells[day]), 0);
+  /*
+   * P11-05 — THE CELL'S OPTIMISTIC MINUTES LIVE HERE, NOT IN THE CELL.
+   *
+   * ⚠️ A TYPED CELL IS FOUR NUMBERS, NOT ONE. The cell itself, its row total,
+   * its day total in the header and the week total in the footer are the same
+   * fact drawn in four places — and three of them are computed HERE, from
+   * `cells`. While the optimistic minutes sat inside `TimeCell` the cell
+   * repainted on the keystroke and the three totals around it held the old
+   * figure until the server answered, so the grid visibly disagreed with
+   * itself. Half-instant is worse than slow: the eye goes straight to the
+   * number that did not move.
+   *
+   * Keyed `taskId|day`, because that pair is what a cell IS. React drops the
+   * whole map when the transition that filled it ends, so a refused write needs
+   * no rollback — `sum(...)` has been underneath it the entire time.
+   */
+  const [pendingMinutes, setPendingMinutes] = useOptimistic<
+    Record<string, number>,
+    { taskId: string; day: string; minutes: number }
+  >({}, (state, next) => ({ ...state, [`${next.taskId}|${next.day}`]: next.minutes }));
+
+  /** What a cell holds RIGHT NOW: the number being saved, else the server's. */
+  const cellTotal = (row: TaskRow, day: string) =>
+    pendingMinutes[`${row.taskId}|${day}`] ?? sum(row.cells[day]);
+
+  const dayTotal = (day: string) => allRows.reduce((total, row) => total + cellTotal(row, day), 0);
+  const rowTotal = (row: TaskRow) => days.reduce((total, day) => total + cellTotal(row, day), 0);
   const weekTotal = days.reduce((total, day) => total + dayTotal(day), 0);
 
   /**
@@ -631,6 +656,10 @@ export function WeekGrid({
                         taskTitle={row.title}
                         day={day}
                         entries={row.cells[day] ?? []}
+                        total={cellTotal(row, day)}
+                        onOptimisticTotal={(minutes) =>
+                          setPendingMinutes({ taskId: row.taskId, day, minutes })
+                        }
                         future={day > today}
                         locked={locked}
                         onEmptied={() => keepRow(row)}
@@ -1172,6 +1201,8 @@ function TimeCell({
   taskTitle,
   day,
   entries,
+  total,
+  onOptimisticTotal,
   future,
   locked,
   onEmptied,
@@ -1180,6 +1211,14 @@ function TimeCell({
   taskTitle: string;
   day: string;
   entries: CellEntry[];
+  /**
+   * The minutes this cell holds — the optimistic figure while a write is in
+   * flight, the server's the rest of the time. Owned by the grid, because the
+   * row, day and week totals are drawn from the same number.
+   */
+  total: number;
+  /** Paints the parsed minutes everywhere at once. Call it inside a transition. */
+  onOptimisticTotal: (minutes: number) => void;
   future: boolean;
   locked: boolean;
   onEmptied: () => void;
@@ -1188,8 +1227,6 @@ function TimeCell({
   const [draft, setDraft] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  const serverTotal = sum(entries);
 
   /*
    * P11-05 — THE CELL KEEPS THE NUMBER IT IS ABOUT TO SAVE.
@@ -1205,11 +1242,15 @@ function TimeCell({
    * so on a slow connection a whole row of typed numbers reverted one by one and
    * then re-appeared. That reads as the grid losing work.
    *
+   * ⚠️ AND THE VALUE ITSELF LIVES IN THE GRID, not here. `total` and
+   * `onOptimisticTotal` are props for one reason: this number is also a row
+   * total, a day total and a week total, and those three are summed by the
+   * parent. See `pendingMinutes`.
+   *
    * React drops the value if the write is refused and the server total returns,
    * with the toast explaining it. No rollback to write.
    */
   const router = useRouter();
-  const [total, setOptimisticTotal] = useOptimistic(serverTotal);
   const split = entries.length > 1;
 
   // Three reasons a cell cannot be typed into, and they are not the same reason:
@@ -1331,7 +1372,7 @@ function TimeCell({
     if (plan.kind === "noop") return;
 
     startTransition(async () => {
-      setOptimisticTotal(plan.kind === "delete" ? 0 : plan.minutes);
+      onOptimisticTotal(plan.kind === "delete" ? 0 : plan.minutes);
 
       const result = await persist(plan);
 
