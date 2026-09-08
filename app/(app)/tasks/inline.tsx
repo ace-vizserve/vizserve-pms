@@ -1,18 +1,17 @@
 "use client";
 
+import { toast } from "@/components/ui/toast";
+import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition, type ReactNode } from "react";
-import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
-import { toast } from "@/components/ui/toast";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { toDateString } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 
-import { DeleteTaskDialog } from "./delete-task-dialog";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { TaskPriorityBadge } from "@/components/status-badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { formatDate, parseDateOnly } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
@@ -23,6 +22,7 @@ import {
 } from "@/lib/schemas/tasks";
 import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
+import { DeleteTaskDialog } from "./delete-task-dialog";
 
 import { updateTaskField } from "./actions";
 import { ComposerCard, type Assignable } from "./task-composer";
@@ -47,12 +47,18 @@ import { ComposerCard, type Assignable } from "./task-composer";
  */
 
 /**
- * Shared: run a patch, report it, and roll the field back if it was refused.
+ * Shared: paint the new value, write it, and let React put it back if refused.
  *
- * ⚠️ NO `router.refresh()`. `updateTaskField` calls `refresh(taskId)` itself,
- * so the fresh RSC payload already comes back WITH the action's response — the
- * client call was a second fetch of a route the server had just re-rendered, and
- * it is what made changing a priority feel slower than it is.
+ * ⚠️ `paint` IS CALLED INSIDE THIS TRANSITION, AND THAT PLACEMENT IS THE WHOLE
+ * FIX. `useOptimistic` shows its value only while the transition THAT SET IT is
+ * pending. The callers here are form actions, which React runs in a transition
+ * of their own — so a `setShown` in the caller belonged to a transition that
+ * ended the moment the caller returned, while the await happened in this one.
+ * The value was set and dropped a frame later, which is why the chip did not
+ * move until the server answered.
+ *
+ * Passing the setter in, rather than calling it before `patch`, is what puts it
+ * in the same transition as the await.
  */
 function usePatch(taskId: string) {
   const router = useRouter();
@@ -60,15 +66,30 @@ function usePatch(taskId: string) {
 
   function patch(
     field: Record<string, unknown>,
-    { onRefused, success }: { onRefused: () => void; success?: string },
+    {
+      paint,
+      success,
+    }: {
+      /**
+       * The optimistic write. Runs inside the transition, before the await.
+       *
+       * Optional for the one caller with nothing to paint: `InlineTitle` renders
+       * an input, not the title — the row's heading comes from a prop rendered
+       * by the table. ⚠️ SO RENAMING FROM A ROW IS STILL NOT OPTIMISTIC, and
+       * making it so means an optimistic title on the ROW, not here.
+       */
+      paint?: () => void;
+      success?: string;
+    },
   ) {
     startTransition(async () => {
+      paint?.();
+
       const result = await updateTaskField(taskId, field);
 
       if (!result.ok) {
-        // The row on screen still shows the new value at this point. Putting the
-        // old one back is the whole contract of this function.
-        onRefused();
+        // No rollback: React drops the optimistic value when this transition
+        // ends, and the row goes back to what the server still says.
         toast.error(result.error);
         return;
       }
@@ -145,8 +166,7 @@ export function TaskRowActions({
         // Focus stays outside the query: a keyboard is a fine pointer's
         // companion, but a tabbed-to control must appear on any device.
         "focus-within:opacity-100",
-      )}
-    >
+      )}>
       {children}
       <InlineTitle taskId={taskId} title={title} />
       <InlinePriority taskId={taskId} value={priority} iconOnly />
@@ -173,13 +193,7 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
       return;
     }
 
-    patch(
-      { title: next },
-      {
-        success: "Renamed",
-        onRefused: () => setDraft(title),
-      },
-    );
+    patch({ title: next }, { success: "Renamed" });
     setOpen(false);
   }
 
@@ -189,14 +203,8 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
       onOpenChange={(next) => {
         setOpen(next);
         if (next) setDraft(title);
-      }}
-    >
-      <PopoverTrigger
-        aria-label={`Rename ${title}`}
-        title="Rename"
-        className={ICON_BUTTON}
-        disabled={pending}
-      >
+      }}>
+      <PopoverTrigger aria-label={`Rename ${title}`} title="Rename" className={ICON_BUTTON} disabled={pending}>
         <Pencil className="size-3.5" aria-hidden />
       </PopoverTrigger>
 
@@ -265,13 +273,13 @@ export function InlinePriority({
   const [shown, setShown] = useOptimistic(value);
 
   function choose(next: TaskPriority | null) {
-    setShown(next);
     setOpen(false);
     patch(
       { priority: next },
       {
+        // Inside the transition that awaits — see `usePatch`.
+        paint: () => setShown(next),
         success: next === null ? "Priority cleared" : `Priority: ${TASK_PRIORITY_LABELS[next]}`,
-        onRefused: () => {},
       },
     );
   }
@@ -284,8 +292,7 @@ export function InlinePriority({
         className={cn(
           iconOnly ? ICON_BUTTON : "rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-60",
-        )}
-      >
+        )}>
         {iconOnly ? (
           <Flag className={cn("size-3.5", shown ? FLAG_TONE[shown] : undefined)} aria-hidden />
         ) : shown ? (
@@ -304,34 +311,29 @@ export function InlinePriority({
         {/* One form around the menu; every row is a submit carrying its
             own formAction. React gives each its own transition. */}
         <form>
-        {/* Highest first, unlike TASK_PRIORITIES itself — that constant is
+          {/* Highest first, unlike TASK_PRIORITIES itself — that constant is
             declared low→high because Postgres compares enums by declaration
             order, and a person reading a picker scans from the most severe
             down. */}
-        {[...TASK_PRIORITIES].reverse().map((option) => (
-          <button
-            key={option}
-            type="submit"
-            formAction={() => choose(option)}
-            className={cn(MENU_ROW, shown === option && "font-semibold")}
-          >
-            <Flag className={cn("size-3.5 shrink-0", FLAG_TONE[option])} aria-hidden />
-            {TASK_PRIORITY_LABELS[option]}
-            {shown === option ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
-          </button>
-        ))}
+          {[...TASK_PRIORITIES].reverse().map((option) => (
+            <button
+              key={option}
+              type="submit"
+              formAction={() => choose(option)}
+              className={cn(MENU_ROW, shown === option && "font-semibold")}>
+              <Flag className={cn("size-3.5 shrink-0", FLAG_TONE[option])} aria-hidden />
+              {TASK_PRIORITY_LABELS[option]}
+              {shown === option ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
+            </button>
+          ))}
 
-        {/* Only offered once there is something to clear. */}
-        {shown !== null ? (
-          <button
-            type="submit"
-            formAction={() => choose(null)}
-            className={cn(MENU_ROW, "text-muted-foreground")}
-          >
-            <Ban className="size-3.5 shrink-0" aria-hidden />
-            Clear
-          </button>
-        ) : null}
+          {/* Only offered once there is something to clear. */}
+          {shown !== null ? (
+            <button type="submit" formAction={() => choose(null)} className={cn(MENU_ROW, "text-muted-foreground")}>
+              <Ban className="size-3.5 shrink-0" aria-hidden />
+              Clear
+            </button>
+          ) : null}
         </form>
       </PopoverContent>
     </Popover>
@@ -375,13 +377,12 @@ export function InlineDate({
 
   function commit(next: string) {
     // "" from a cleared input means no date. The action turns it into null.
-    setShown(next || null);
     setOpen(false);
     patch(
       { [field]: next },
       {
+        paint: () => setShown(next || null),
         success: next ? `${label} ${formatDate(next)}` : `${label} cleared`,
-        onRefused: () => {},
       },
     );
   }
@@ -395,8 +396,7 @@ export function InlineDate({
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-60",
           emphasis ? "font-medium text-destructive" : "text-muted-foreground",
-        )}
-      >
+        )}>
         {shown ? formatDate(shown) : <span className="text-foreground-faint">—</span>}
       </PopoverTrigger>
 
@@ -417,8 +417,7 @@ export function InlineDate({
               size="icon"
               variant="ghost"
               aria-label={`Clear the ${label.toLowerCase()}`}
-              onClick={() => commit("")}
-            >
+              onClick={() => commit("")}>
               <X />
             </Button>
           ) : null}
@@ -436,13 +435,7 @@ export function InlineDate({
  * value is reformatted on commit, which is what makes a misread `1.5` visible
  * where it was typed.
  */
-export function InlineEstimate({
-  taskId,
-  minutes,
-}: {
-  taskId: string;
-  minutes: number | null;
-}) {
+export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: number | null }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   /*
@@ -459,9 +452,8 @@ export function InlineEstimate({
 
     if (!trimmed) {
       setError(null);
-      setShown(null);
       setOpen(false);
-      patch({ estimate_minutes: null }, { success: "Estimate cleared", onRefused: () => {} });
+      patch({ estimate_minutes: null }, { paint: () => setShown(null), success: "Estimate cleared" });
       return;
     }
 
@@ -472,12 +464,11 @@ export function InlineEstimate({
     }
 
     setError(null);
-    setShown(parsed);
     setRaw(formatCellDuration(parsed));
     setOpen(false);
     patch(
       { estimate_minutes: parsed },
-      { success: `Estimate ${formatCellDuration(parsed)}`, onRefused: () => {} },
+      { paint: () => setShown(parsed), success: `Estimate ${formatCellDuration(parsed)}` },
     );
   }
 
@@ -490,16 +481,14 @@ export function InlineEstimate({
           setRaw(shown === null ? "" : formatCellDuration(shown));
           setError(null);
         }
-      }}
-    >
+      }}>
       <PopoverTrigger
         aria-label={shown === null ? "Set an estimate" : `Estimate ${formatCellDuration(shown)}. Change it.`}
         className={cn(
           "rounded-sm px-1 py-0.5 tabular-nums text-muted-foreground",
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
           "disabled:cursor-not-allowed disabled:opacity-60",
-        )}
-      >
+        )}>
         {shown === null ? <span className="text-foreground-faint">—</span> : formatCellDuration(shown)}
       </PopoverTrigger>
 
@@ -559,13 +548,12 @@ export function InlineList({
   const nameOf = (id: string | null) => lists.find((list) => list.id === id)?.name ?? null;
 
   function choose(next: string | null) {
-    setShown(next);
     setOpen(false);
     patch(
       { list_id: next },
       {
+        paint: () => setShown(next),
         success: next ? `Filed under ${nameOf(next)}` : "Removed from its list",
-        onRefused: () => {},
       },
     );
   }
@@ -576,33 +564,27 @@ export function InlineList({
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         aria-label={label ? `List: ${label}. Change it.` : "File this under a list"}
-        className={VALUE_BUTTON}
-      >
+        className={VALUE_BUTTON}>
         {label ?? <span className="text-muted-foreground">No list</span>}
       </PopoverTrigger>
 
       <PopoverContent align="start" className="w-56 p-1">
         <form>
-        <button
-          type="submit"
-          formAction={() => choose(null)}
-          className={cn(MENU_ROW, "text-muted-foreground")}
-        >
-          No list
-          {shown === null ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
-        </button>
-
-        {lists.map((list) => (
-          <button
-            key={list.id}
-            type="submit"
-            formAction={() => choose(list.id)}
-            className={cn(MENU_ROW, shown === list.id && "font-semibold")}
-          >
-            <span className="min-w-0 flex-1 truncate">{list.name}</span>
-            {shown === list.id ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
+          <button type="submit" formAction={() => choose(null)} className={cn(MENU_ROW, "text-muted-foreground")}>
+            No list
+            {shown === null ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
           </button>
-        ))}
+
+          {lists.map((list) => (
+            <button
+              key={list.id}
+              type="submit"
+              formAction={() => choose(list.id)}
+              className={cn(MENU_ROW, shown === list.id && "font-semibold")}>
+              <span className="min-w-0 flex-1 truncate">{list.name}</span>
+              {shown === list.id ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
+            </button>
+          ))}
         </form>
       </PopoverContent>
     </Popover>
@@ -662,9 +644,7 @@ export function AddSubtask({
       <PopoverTrigger
         aria-label="Add a subtask"
         title="Add a subtask"
-        className={cn(
-          className ?? (label ? buttonVariants({ variant: "outline", size: "sm" }) : ICON_BUTTON),
-        )}>
+        className={cn(className ?? (label ? buttonVariants({ variant: "outline", size: "sm" }) : ICON_BUTTON))}>
         <Plus className={label && !className ? undefined : "size-3.5"} aria-hidden />
         {label}
       </PopoverTrigger>
@@ -707,10 +687,7 @@ export function SubtaskProgress({ done, total }: { done: number; total: number }
   const percent = Math.round((done / total) * 100);
 
   return (
-    <span
-      className="inline-flex items-center gap-1.5"
-      title={`${done} of ${total} subtasks done`}
-    >
+    <span className="inline-flex items-center gap-1.5" title={`${done} of ${total} subtasks done`}>
       <span className="h-1.5 w-10 overflow-hidden rounded-full bg-muted" aria-hidden>
         <span
           className={cn("block h-full rounded-full", done === total ? "bg-success" : "bg-primary")}
