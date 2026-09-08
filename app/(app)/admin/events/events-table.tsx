@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { CalendarDays, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
@@ -87,6 +88,7 @@ export function EventsTable({
    * new event has no id, and a row that no control can open is worse than a
    * moment's wait.
    */
+  const router = useRouter();
   const [shownEvents, patchEvents] = useOptimistic(
     events,
     (state: EventRecord[], change: { remove: string } | (Partial<EventRecord> & { id: string })) =>
@@ -125,6 +127,10 @@ export function EventsTable({
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(`${going.title} removed from the calendar.`);
     });
   }
@@ -370,6 +376,7 @@ function EventForm({
   onSaved: (patch: Partial<EventRecord> & { id: string }) => void;
 }) {
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const [title, setTitle] = useState(event?.title ?? "");
   const [description, setDescription] = useState(event?.description ?? "");
@@ -419,6 +426,10 @@ function EventForm({
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(event ? "Event updated" : "Event added");
       onDone();
     });

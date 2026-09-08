@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
@@ -23,6 +24,7 @@ import { decideInternalRequest } from "./actions";
  * to get a box.
  */
 export function DecisionPanel({ requestId }: { requestId: string }) {
+  const router = useRouter();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
@@ -68,6 +70,10 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
 
       // Said explicitly, because the whole value of a No Time-In request is
       // that approving it CHANGED something — and the DTR is a different screen.
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(
         result.data.dtrEntryId
           ? "Approved. The DTR record has been corrected."

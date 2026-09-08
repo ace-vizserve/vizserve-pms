@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useEffect, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check } from "lucide-react";
@@ -263,6 +264,7 @@ export function TaskSurface({
    * autosave that is the one change that makes this page feel broken: disabling
    * a focused textarea mid-save blurs it and drops the caret to position 0.
    */
+  const router = useRouter();
   const [moving, startTransition] = useTransition();
   const autosave = useTaskAutosave(taskId);
   const gate = useTaskGate();
@@ -343,6 +345,10 @@ export function TaskSurface({
         setError(result.error ?? "That did not go through.");
         return;
       }
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(success);
       setOverrideOpen(false);
       setOverrideReason("");
@@ -379,6 +385,10 @@ export function TaskSurface({
         setReassignOpen(true);
         return;
       }
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success("Reassigned");
     });
   }

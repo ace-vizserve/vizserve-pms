@@ -3,7 +3,7 @@
 import { useState, useTransition } from "react";
 
 import { useOptimisticMove } from "./optimistic-move";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -98,6 +98,7 @@ function useComposer({
   const searchParams = useSearchParams();
   const listId = searchParams.get("list");
   const [draft, setDraft] = useState<Draft>(EMPTY);
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -144,6 +145,10 @@ function useComposer({
 
       // Cleared only on success, and the composer stays open: adding tasks is
       // something people do in runs of five.
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       setDraft(EMPTY);
       onDone?.();
     });

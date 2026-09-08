@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { Check, Search, UserPlus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -129,6 +130,7 @@ export function AssigneePicker({
   showPic?: boolean;
   align?: "start" | "center" | "end";
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -188,6 +190,8 @@ export function AssigneePicker({
         toast.error(result.error ?? "That did not go through.");
         return;
       }
+      /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
+      router.refresh();
       toast.success(success);
     });
   }

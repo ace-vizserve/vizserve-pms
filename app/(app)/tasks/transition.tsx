@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 
@@ -84,6 +85,7 @@ export function useTaskTransition({
    * arriving out of order against the same task would be refused by the state
    * machine and reported as an error the person did not cause.
    */
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   /*
@@ -175,6 +177,8 @@ export function useTaskTransition({
         return;
       }
 
+      /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
+      router.refresh();
       toast.success(transition.label);
       setPrompt(null);
       setError(null);

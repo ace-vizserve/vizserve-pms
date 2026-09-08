@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { CheckCheck } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { startTransition, useOptimistic } from "react";
 
 import { DataTable, type Column } from "@/components/data-table";
@@ -73,6 +74,7 @@ export function InboxTable({
   count?: React.ReactNode;
 }) {
   /* The one flag. Every `read_at` read below goes through `isRead`. */
+  const router = useRouter();
   const [allRead, markAllRead] = useOptimistic(false);
   const isRead = (item: Notification) => allRead || Boolean(item.read_at);
 
@@ -236,6 +238,10 @@ export function InboxTable({
                 startTransition(async () => {
                   markAllRead(true);
                   await markAllAction();
+                  /* Holds the transition until the fresh rows land; without it
+                     the optimistic flag reverts and every row goes bold again
+                     for a beat. */
+                  router.refresh();
                 })
               }
             >
@@ -277,6 +283,7 @@ function MarkReadTitle({ item, allRead }: { item: Notification; allRead: boolean
    */
   /* Its own optimism for a single click, plus the table's for "mark all" —
      either one is enough to turn this into a plain title. */
+  const router = useRouter();
   const [read, markRead] = useOptimistic(Boolean(item.read_at));
 
   if (allRead) return <span className="text-sm">{item.title}</span>;
@@ -296,6 +303,7 @@ function MarkReadTitle({ item, allRead }: { item: Notification; allRead: boolean
         startTransition(async () => {
           markRead(true);
           await markNotificationRead(item.id);
+          router.refresh();
         })
       }
     >

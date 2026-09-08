@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { EyeOff, Pencil, Plus, UserCheck } from "lucide-react";
 import { useOptimistic, useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
@@ -102,6 +103,7 @@ function draftFrom(type: LeaveTypeRow | null): Draft {
 }
 
 export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   /*
@@ -179,6 +181,10 @@ export function LeaveTypesTable({ types }: { types: LeaveTypeRow[] }) {
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(draft.id ? "Leave type updated." : "Leave type added.");
       setDraft(null);
     });

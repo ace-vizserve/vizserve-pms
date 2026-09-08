@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import { FolderPlus, Pencil, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -432,6 +433,7 @@ function ListForm({
   onSaved?: (patch: Partial<ListRow> & { id: string }) => void;
 }) {
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const [name, setName] = useState(list?.name ?? "");
   const [description, setDescription] = useState(list?.description ?? "");
@@ -525,6 +527,10 @@ function ListForm({
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(list ? "List saved" : "List created");
       onDone();
     });
@@ -708,6 +714,7 @@ function GroupForm({
   onDone: () => void;
 }) {
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState(group?.description ?? "");
@@ -738,6 +745,10 @@ function GroupForm({
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(group ? "Folder saved" : "Folder created");
       onDone();
     });

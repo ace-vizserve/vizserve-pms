@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { useOptimisticMove } from "./optimistic-move";
@@ -53,6 +54,7 @@ export function DeleteTaskDialog({
   const [open, setOpen] = useState(false);
   const [impact, setImpact] = useState<TaskDeleteImpact | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
   const [loadingImpact, startImpact] = useTransition();
   const [pending, startDelete] = useTransition();
 
@@ -94,6 +96,8 @@ export function DeleteTaskDialog({
         return;
       }
 
+      /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
+      router.refresh();
       toast.success("Task deleted");
       onDeleted?.();
     });

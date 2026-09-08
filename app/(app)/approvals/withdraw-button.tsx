@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
 import { useOptimistic, useState, useTransition } from "react";
 
@@ -32,6 +33,7 @@ import { withdrawInternalRequest } from "./actions";
  * in a client component is a suggestion.
  */
 export function WithdrawButton({ requestId }: { requestId: string }) {
+  const router = useRouter();
   const [open, setOpen] = useState(false);
   /*
    * P11-05 — the button answers on the click.
@@ -72,6 +74,10 @@ export function WithdrawButton({ requestId }: { requestId: string }) {
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success("Request withdrawn.");
     });
   }

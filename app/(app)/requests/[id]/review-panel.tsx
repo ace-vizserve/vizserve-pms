@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
 import { AlertTriangle, ChevronRight, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -99,6 +100,7 @@ export function ReviewPanel({
    */
   clientFolderId: string | null;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   const [assigneeId, setAssigneeId] = useState<string>("");
@@ -189,6 +191,10 @@ export function ReviewPanel({
       }
 
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(
         result.data.status === "APPROVED"
           ? "Approved — the task is created, and the PIC and the client have been told."

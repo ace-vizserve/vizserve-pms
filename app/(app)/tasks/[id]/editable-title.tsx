@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -46,6 +47,7 @@ export function EditableTitle({
    * `setDraft(title)` restored an input nobody could see. Now the heading really
    * does show it, and React puts it back by itself if the server refuses.
    */
+  const router = useRouter();
   const [shownTitle, setShownTitle] = useOptimistic(title);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -90,6 +92,8 @@ export function EditableTitle({
         return;
       }
 
+      /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
+      router.refresh();
       toast.success("Renamed");
     });
   }

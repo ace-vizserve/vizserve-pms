@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight, CopyPlus } from "lucide-react";
@@ -77,6 +78,7 @@ export function BalancesGrid({
   departments: { id: string; name: string }[];
   allocations: Record<string, number>;
 }) {
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [department, setDepartment] = useState<string>(ALL_DEPARTMENTS);
   const [query, setQuery] = useState("");
@@ -263,6 +265,10 @@ export function BalancesGrid({
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(
         `Saved ${result.data.saved} ${result.data.saved === 1 ? "person" : "people"}.`,
       );

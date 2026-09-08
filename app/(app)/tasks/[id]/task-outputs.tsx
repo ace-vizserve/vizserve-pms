@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useOptimistic, useRef, useState, useTransition } from "react";
 import { ChevronDown, Download, Link2, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -108,6 +109,7 @@ export function TaskOutputs({
   variant?: "card" | "field";
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const router = useRouter();
   const [pending, startTransition] = useTransition();
   const [opening, setOpening] = useState<string | null>(null);
 
@@ -168,6 +170,10 @@ export function TaskOutputs({
         setLinkOpen(true);
         return;
       }
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(parsed.data ? "Link saved" : "Link removed");
     });
   }
@@ -222,6 +228,10 @@ export function TaskOutputs({
         toast.error(result.error);
         return;
       }
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success("Removed");
     });
   }

@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition, useOptimistic } from "react";
 
 import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
@@ -1207,6 +1208,7 @@ function TimeCell({
    * React drops the value if the write is refused and the server total returns,
    * with the toast explaining it. No rollback to write.
    */
+  const router = useRouter();
   const [total, setOptimisticTotal] = useOptimistic(serverTotal);
   const split = entries.length > 1;
 
@@ -1343,6 +1345,10 @@ function TimeCell({
       // Not a toast. A toast per cell makes filling in a week feel like an alarm
       // going off, and it appears in the corner rather than on the number that
       // changed.
+      /* Holds the transition until the server's own figure lands, so the
+         optimistic total does not blink back to the old one first. */
+      router.refresh();
+
       setSaved(true);
 
       if (plan.kind === "delete") onEmptied();

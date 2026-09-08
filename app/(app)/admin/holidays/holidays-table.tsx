@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useMemo, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { CalendarOff, ChevronLeft, ChevronRight, Pencil, Plus, Trash2 } from "lucide-react";
@@ -69,6 +70,7 @@ export function HolidaysTable({
    * entered date is a delete and an add, because that is what it is. So a rename
    * can be predicted and a re-dating cannot be.
    */
+  const router = useRouter();
   const [shownHolidays, patchHolidays] = useOptimistic(
     holidays,
     (state: Holiday[], change: { remove: string } | { holiday_date: string; name: string }) =>
@@ -119,6 +121,10 @@ export function HolidaysTable({
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(`${going.name} removed from the calendar.`);
     });
   }
@@ -372,6 +378,7 @@ function HolidayForm({
   onSaved: (patch: { holiday_date: string; name: string }) => void;
 }) {
   const [pending, startTransition] = useTransition();
+  const router = useRouter();
 
   // Seeded to the first of the year being viewed, so adding January's holidays
   // to 2027 does not start the picker in whatever month today happens to be.
@@ -401,6 +408,10 @@ function HolidayForm({
         return;
       }
 
+      /* ⚠️ Holds the transition open until the fresh data lands — without it
+         `useOptimistic` reverts the moment the action resolves. See
+         `tasks/inline.tsx` for the full account. */
+      router.refresh();
       toast.success(holiday ? "Holiday renamed" : "Holiday added");
       onDone();
     });

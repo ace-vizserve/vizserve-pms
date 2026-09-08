@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { startTransition, useOptimistic, useState, useTransition } from "react";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -146,6 +147,7 @@ export function CommentThread({
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
+  const router = useRouter();
   const [pending, startPending] = useTransition();
 
   /*
@@ -194,6 +196,11 @@ export function CommentThread({
       addOptimisticComment(text);
 
       const result = await addTaskComment(taskId, { body: text });
+
+      /* ⚠️ Before the ok-check, deliberately: a refused comment still needs the
+         thread re-read, because the optimistic row has to be replaced by
+         whatever the server actually holds. */
+      router.refresh();
 
       if (!result.ok) {
         // Put it back: a comment the server refused must not be lost to a toast
