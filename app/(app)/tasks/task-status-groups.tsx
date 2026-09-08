@@ -71,6 +71,12 @@ export function TaskStatusGroups({
       return state.filter((row) => row.id !== move.id);
     }
 
+    /* Every cell on the row reads from this array, so one patch reaches all of
+       them — including the two places `InlinePriority` is rendered. */
+    if (move.kind === "patch") {
+      return state.map((row) => (row.id === move.id ? { ...row, ...move.fields } : row));
+    }
+
     /*
      * A row for a task that does not exist yet.
      *

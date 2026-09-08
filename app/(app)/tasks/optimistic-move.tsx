@@ -30,7 +30,21 @@ import type { VizservePmsTaskStatus } from "@/lib/database.types";
 export type OptimisticMove =
   | { kind: "move"; id: string; status: VizservePmsTaskStatus }
   | { kind: "add"; title: string; status: VizservePmsTaskStatus }
-  | { kind: "remove"; id: string };
+  | { kind: "remove"; id: string }
+  /**
+   * Any other column on the row — priority, the two dates, the estimate, the
+   * list.
+   *
+   * ⚠️ IT HAS TO LIVE ON THE ROW, NOT IN THE CONTROL, and that is what a local
+   * `useOptimistic` could never do. `InlinePriority` is rendered TWICE in a
+   * single task row — once beside the title and once as the priority column —
+   * and `TaskRowActions` reads the same field a third time. Three component
+   * instances, three separate pieces of local state: changing one left the other
+   * two showing the old value until the server answered.
+   *
+   * One patch on the row feeds all three, because all three render from it.
+   */
+  | { kind: "patch"; id: string; fields: Record<string, unknown> };
 
 /** Null wherever the control renders with no groups around it — the task detail page and the board. */
 export const OptimisticMoveContext = createContext<((move: OptimisticMove) => void) | null>(null);

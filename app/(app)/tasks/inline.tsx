@@ -5,6 +5,8 @@ import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, type ReactNode } from "react";
 
+import { useOptimisticMove } from "./optimistic-move";
+
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { toDateString } from "@/components/ui/date-picker";
@@ -61,10 +63,26 @@ import { ComposerCard, type Assignable } from "./task-composer";
 function usePatch(taskId: string) {
   const router = useRouter();
 
-  async function patch(
-    field: Record<string, unknown>,
-    { success }: { success?: string } = {},
-  ) {
+  /*
+   * ⚠️ THE ROW IS PATCHED, NOT JUST THIS CONTROL'S OWN STATE.
+   *
+   * `InlinePriority` is rendered TWICE in one task row — beside the title and as
+   * the priority column — and `TaskRowActions` reads the field a third time.
+   * Three component instances with three separate local values: the one you
+   * clicked moved and the other two sat on the old value until the server
+   * answered. The optimistic value has to live on the ROW, held by the parent
+   * that renders it and read by every cell as a prop.
+   *
+   * Null on the board and the task detail page, which render these controls with
+   * no optimistic row list around them. There the control's own value is the
+   * only one on screen, so nothing is missing.
+   */
+  const patchRow = useOptimisticMove();
+
+  async function patch(field: Record<string, unknown>, { success }: { success?: string } = {}) {
+    // The ROW, so every cell that renders this field moves together.
+    patchRow?.({ kind: "patch", id: taskId, fields: field });
+
     const result = await updateTaskField(taskId, field);
 
     if (!result.ok) {
@@ -348,10 +366,7 @@ export function InlineDate({
     // "" from a cleared input means no date. The action turns it into null.
     setOpen(false);
     setShown(next || null);
-    await patch(
-      { [field]: next },
-      { success: next ? `${label} ${formatDate(next)}` : `${label} cleared` },
-    );
+    await patch({ [field]: next }, { success: next ? `${label} ${formatDate(next)}` : `${label} cleared` });
   }
 
   return (
@@ -435,10 +450,7 @@ export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: n
     setRaw(formatCellDuration(parsed));
     setOpen(false);
     setShown(parsed);
-    await patch(
-      { estimate_minutes: parsed },
-      { success: `Estimate ${formatCellDuration(parsed)}` },
-    );
+    await patch({ estimate_minutes: parsed }, { success: `Estimate ${formatCellDuration(parsed)}` });
   }
 
   return (
@@ -519,10 +531,7 @@ export function InlineList({
   async function choose(next: string | null) {
     setOpen(false);
     setShown(next);
-    await patch(
-      { list_id: next },
-      { success: next ? `Filed under ${nameOf(next)}` : "Removed from its list" },
-    );
+    await patch({ list_id: next }, { success: next ? `Filed under ${nameOf(next)}` : "Removed from its list" });
   }
 
   const label = nameOf(shown);
