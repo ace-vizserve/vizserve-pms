@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useOptimistic, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
@@ -287,10 +286,9 @@ export function TaskSurface({
    * autosave that is the one change that makes this page feel broken: disabling
    * a focused textarea mid-save blurs it and drops the caret to position 0.
    */
-  const router = useRouter();
   /*
    * P12-06 — the page this control sits on reads `qk.task(id)` from the cache
-   * now, so a write has to say so. `router.refresh()` stays beside it because
+   * now, so a write has to say so. `router.refresh()` stood beside it because
    * the ACTION revalidates four routes and because removing it breaks the
    * optimistic hold below — see `lib/query/invalidate.ts` for the full account
    * of why both, and `ded2244` for what happened the day one of them went.
@@ -380,17 +378,18 @@ export function TaskSurface({
         setError(result.error ?? "That did not go through.");
         return;
       }
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
-      /* ⚠️ AWAITED, AND INSIDE THE TRANSITION, for exactly the same reason the
-         line above it is here: an un-awaited invalidate lets the transition end
-         before the fresh rows arrive and the value snaps back. A forced status
-         also writes a history row, which is why this sweeps the whole task
-         rather than one part. */
-      await invalidateTaskWrite(queryClient, taskId);
+      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
+         the WRITE, which has already happened; scheduled after the invalidation
+         it reported the refetch instead. See `lib/query/invalidate.ts`. */
       toast.success(success);
+
+      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO.
+         An un-awaited invalidate lets the transition end before the fresh rows
+         arrive and the value snaps back, which is `ded2244`; the refresh was a
+         second way of holding the same transition open, and this page has read
+         from the cache since P12-06. A forced status also writes a history row,
+         which is why this sweeps the whole task rather than one part. */
+      await invalidateTaskWrite(queryClient, taskId);
       setOverrideOpen(false);
       setOverrideReason("");
     });
@@ -426,16 +425,20 @@ export function TaskSurface({
         setReassignOpen(true);
         return;
       }
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
-      /* ⚠️ AND THE CACHE, AWAITED INSIDE THE TRANSITION. A reassignment changes
+      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
+         the WRITE, which has already happened; scheduled after the invalidation
+         it reported the refetch instead. See `lib/query/invalidate.ts`. */
+      toast.success("Reassigned");
+
+      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO:
+         hold the transition open until the fresh data lands, or `useOptimistic`
+         reverts the moment the action resolves (`ded2244`).
+
+         A reassignment changes
          `assignee_id` / `qa_assignee_id`, which is what `viewer.isAssignee` and
          `viewer.isQa` are derived from on this page — so without this the
          controls would keep offering the old seat's moves until a navigation. */
       await invalidateTaskWrite(queryClient, taskId);
-      toast.success("Reassigned");
     });
   }
 

@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useOptimisticMove } from "./optimistic-move";
 
@@ -102,16 +102,17 @@ function useComposer({
   const searchParams = useSearchParams();
   const listId = searchParams.get("list");
   const [draft, setDraft] = useState<Draft>(EMPTY);
-  const router = useRouter();
   /*
    * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
    *
    * This composer is shared: it is the foot of a list group, the foot of a board
    * column, and "Add a subtask" on `/tasks/[id]`. That last surface reads
    * `qk.taskPart(parentId, "subtasks")` from the cache now; the other two still
-   * read their rows in an RSC, so the `router.refresh()` below stays until Phase
-   * 3c. See `lib/query/invalidate.ts`, and `ded2244` for what removing the
-   * refresh early costs.
+   * read their rows from the cache too since P12-07, so P12-09 took the
+   * `router.refresh()` out: one mechanism, not two. The AWAITED invalidate is
+   * what holds the placeholder row across the settle — see
+   * `lib/query/invalidate.ts`, and `ded2244` for what removing the hold with
+   * nothing in its place cost.
    */
   const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
@@ -160,13 +161,28 @@ function useComposer({
 
       // Cleared only on success, and the composer stays open: adding tasks is
       // something people do in runs of five.
-      /* ⚠️ NOT A DUPLICATE ROUND TRIP — holds the transition open until the
-         fresh data lands. Without it `useOptimistic` reverts the moment the
-         action resolves and the placeholder row vanishes before the real one
-         arrives. Removed once and restored (`a64b06c` → `ded2244`); P12-02
-         re-checked it against Next 16's action queue and kept it. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      /*
+       * ⚠️ P12-09 — `router.refresh()` WAS HERE, AND THE AWAITED INVALIDATE
+       * BELOW IS WHAT REPLACED IT. Read this before putting it back.
+       *
+       * The refresh existed to HOLD THE TRANSITION OPEN. `useOptimistic` drops
+       * its value the instant the transition that set it ends, and Next resolves
+       * an action's promise BEFORE the router commits the revalidated tree — so
+       * without something pending, the value snapped back to the old one with
+       * the success toast firing in the gap. That is `ded2244`, which reverted
+       * this same removal across eighteen files in a day. The full account is
+       * the long note in `app/(app)/tasks/inline.tsx`.
+       *
+       * What changed is not the argument, it is the data path. `/tasks`,
+       * `/tasks/board` and `/tasks/[id]` all read from the cache now, so
+       * `invalidateTaskWrite` refetches the very rows this control is rendered
+       * over — and it is AWAITED, inside the same transition, which is exactly
+       * the hold the refresh was providing. One mechanism instead of two, and
+       * the route render that ran beside every click is gone.
+       *
+       * ⚠️ SO THE AWAIT IS NOT OPTIONAL AND MUST NOT BECOME A FIRE-AND-FORGET.
+       * Removing it is `ded2244` again, through a different door.
+       */
       /*
        * ⚠️ AWAITED, INSIDE THE TRANSITION, or the placeholder row vanishes
        * before the real one lands — see the note above and `ded2244`.

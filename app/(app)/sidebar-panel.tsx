@@ -106,25 +106,26 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
       sections={sections}
       /*
        * ⚠️ THE OLD REFRESH SIGNAL, FORWARDED — and it is STILL load-bearing
-       * after P12-02, which is not what the plan said would happen.
+       * after P12-09, which is not what the plan said would happen twice over.
        *
        * Phase 2 was meant to retire this once `use-realtime-refresh.ts` stopped
-       * calling `router.refresh()`. It has stopped, and this stays anyway:
-       * realtime degrades to "off for the rest of this page view" on a single
-       * `CHANNEL_ERROR` by design, task mutations do not get their own
-       * `onSettled` invalidation until Phase 3, and the realtime task filter is
-       * narrower than what the rail counts. Delete it now and the rail freezes
-       * after every mutation for anybody whose socket is down. The full argument
-       * is above `useRefetchOnServerRender` in `sidebar-snapshot.tsx`; it goes
-       * in PHASE 3, with the `useMutation` conversion.
+       * calling `router.refresh()`; P12-09 was meant to retire it once the task
+       * controls stopped too. Both have happened and this stays, for a reason
+       * that is now about the OTHER domains rather than about tasks: lists,
+       * requests, approvals, the inbox, the timesheet and DTR all write through
+       * Server Actions that touch the query cache nowhere, and the rail carries
+       * a count for every one of them. The full argument is above
+       * `useRefetchOnServerRender` in `sidebar-snapshot.tsx`; it goes when the
+       * last of those is converted (Phases 4–6).
        *
-       * Every mutation here ends in `revalidatePath` and `router.refresh()`,
-       * which re-runs this server component. That is how the rail's counts used
-       * to move. A `router.refresh()` does NOT remount a client component, so
-       * the query inside one would never be asked to refetch and completing a
-       * task would leave the count where it was. A fresh number on every server
-       * render is the signal; `useRefetchOnServerRender` turns it into one
-       * invalidation. No timer, no poll.
+       * Those mutations end in `revalidatePath`, which re-runs this server
+       * component. That is how the rail's counts move for them. A re-render does
+       * NOT remount a client component, so the query inside one would never be
+       * asked to refetch and approving a request would leave the count where it
+       * was. A fresh number on every server render is the signal;
+       * `useRefetchOnServerRender` turns it into one invalidation. No timer, no
+       * poll — and after P12-09 a task click does not produce one at all,
+       * because nothing re-renders this component any more.
        *
        * ⚠️ `react-hooks/purity` IS SUPPRESSED HERE, DELIBERATELY AND EXACTLY
        * ONCE. The rule is right about client components: an impure call during

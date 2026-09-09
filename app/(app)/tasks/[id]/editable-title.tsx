@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
@@ -50,7 +49,6 @@ export function EditableTitle({
    * `setDraft(title)` restored an input nobody could see. Now the heading really
    * does show it, and React puts it back by itself if the server refuses.
    */
-  const router = useRouter();
   const queryClient = useQueryClient();
   const [shownTitle, setShownTitle] = useOptimistic(title);
   const [editing, setEditing] = useState(false);
@@ -96,16 +94,19 @@ export function EditableTitle({
         return;
       }
 
-      /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
-      router.refresh();
-      /* ⚠️ P12-06 — AND THE CACHE, AWAITED, FOR THE SAME REASON. This control is
-         `/tasks/[id]`-only, so the refresh above is now redundant for THIS page
-         — and it stays anyway, because it is what holds the optimistic heading
-         until fresh data lands and the whole of `ded2244` is what happens when
-         that hold is removed while `useOptimistic` is still doing the work.
-         Phase 3c retires both together, with the `useMutation` conversion. */
-      await invalidateTaskWrite(queryClient, taskId);
+      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
+         the WRITE, which has already happened; scheduled after the invalidation
+         it reported the refetch instead. See `lib/query/invalidate.ts`. */
       toast.success("Renamed");
+
+      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO.
+         The refresh held the transition open until fresh data landed; without
+         something doing that, `useOptimistic` drops the heading the instant the
+         action resolves and it snaps back to the old title with the toast
+         firing in the gap. That is `ded2244`. This page has read `qk.task(id)`
+         from the cache since P12-06, so the invalidate below IS the fresh data
+         and the route render beside it was redundant work on every rename. */
+      await invalidateTaskWrite(queryClient, taskId);
     });
   }
 

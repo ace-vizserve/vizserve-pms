@@ -2,7 +2,6 @@
 
 import { toast } from "@/components/ui/toast";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useOptimistic, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -65,7 +64,6 @@ import { ComposerCard, type Assignable } from "./task-composer";
  * One transition. Set, await, done — all in the caller.
  */
 function usePatch(taskId: string) {
-  const router = useRouter();
 
   /*
    * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
@@ -73,10 +71,10 @@ function usePatch(taskId: string) {
    * This control is shared: the detail header renders it, every list row renders
    * it and every board card renders it. `/tasks/[id]` reads `qk.task(id)` from
    * the cache now, so a write has to invalidate; `/tasks` and `/tasks/board`
-   * still read their rows in an RSC, so the `router.refresh()` below stays until
-   * Phase 3c. The precedent is `hooks/use-realtime-refresh.ts` (P12-02), which
-   * invalidates AND refreshes for exactly this reason. Full account, including
-   * what `ded2244` cost, in `lib/query/invalidate.ts`.
+   * read their rows from the cache too since P12-07, so P12-09 took the
+   * `router.refresh()` out: one mechanism, not two. The AWAITED invalidate is
+   * what holds the optimistic value across the settle now — see the long note
+   * at the call site below, which is this repo's account of `ded2244`.
    */
   const queryClient = useQueryClient();
 
@@ -144,12 +142,32 @@ function usePatch(taskId: string) {
      *
      * ⚠️ P12-02 LEFT ALL FIVE OF THESE IN PLACE FOR EXACTLY THIS REASON, and
      * removed only the sites with no optimistic value behind them
-     * (`nav-personal.tsx`). THE REAL FIX IS PHASE 3: `useMutation` with
-     * `onMutate`/`onSettled` against the query cache holds its own optimistic
-     * value across the settle, so the hold stops needing a route render at all
-     * and these lines go with `optimistic-move.tsx`.
+     * (`nav-personal.tsx`).
+     *
+     * ⚠️ AND P12-09 IS WHEN IT FINALLY CAME OUT. Everything above this line is
+     * still true about `router.refresh()`; what changed is that there is now
+     * something ELSE holding the transition open. `/tasks`, `/tasks/board` and
+     * `/tasks/[id]` all read from the cache since P12-07, so the AWAITED
+     * `invalidateTaskWrite` below refetches the very rows this control is
+     * rendered over, inside the same transition — which is the entangled
+     * pending promise the paragraph above describes, arrived at from the data
+     * rather than from the router. The optimistic value holds until the real one
+     * replaces it, and the route render that used to run beside every inline
+     * edit is gone.
+     *
+     * ⚠️ THE AWAIT IS THEREFORE LOAD-BEARING AND MUST NOT BECOME A
+     * FIRE-AND-FORGET. Dropping it is `a64b06c` again, and `ded2244` is what
+     * that costs. The remaining step is `useMutation` with `onMutate` /
+     * `onSettled`, which holds its own optimistic value across the settle and
+     * retires `optimistic-move.tsx` with it — deliberately left for a later
+     * pass rather than folded into this one.
      */
-    router.refresh();
+    /*
+     * ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
+     * the WRITE, which has already happened; scheduled after the invalidation it
+     * reported the refetch instead. See `lib/query/invalidate.ts`.
+     */
+    if (success) toast.success(success);
 
     /*
      * ⚠️ AWAITED, AND STILL INSIDE THE CALLER'S FORM ACTION — which is a
@@ -159,8 +177,6 @@ function usePatch(taskId: string) {
      * which is the whole of `ded2244` in one line.
      */
     await invalidateTaskWrite(queryClient, taskId);
-
-    if (success) toast.success(success);
   }
 
   return { patch };

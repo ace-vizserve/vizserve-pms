@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
@@ -32,15 +31,16 @@ import { createClient } from "@/utils/supabase/client";
  * `invalidateForTable`, which marks the mapped keys stale and refetches only
  * what something is actually observing (`lib/query/realtime.ts`).
  *
- * ⚠️ THE COST OF THAT, WRITTEN DOWN HONESTLY: a page whose data is still
- * SERVER-rendered no longer redraws on somebody else's write. `/tasks`,
- * `/tasks/board`, `/tasks/[id]` and `/requests` read their rows in RSC, so the
- * keys this now invalidates have no observer there yet and a colleague moving a
- * card will not repaint your board until you navigate. The rail is the part that
- * does update, because `sidebar-snapshot.tsx` reads `qk.snapshot()` from the
- * cache. Phases 3 and 4 move those pages onto the same keys and the behaviour
- * comes back wider than it was — do NOT restore `router.refresh()` here to close
- * the gap in the meantime; that is the three-render storm again.
+ * ⚠️ THE COST OF THAT, WRITTEN DOWN HONESTLY — AND MOSTLY PAID OFF BY P12-09.
+ * A page whose data is still SERVER-rendered does not redraw on somebody else's
+ * write, because the keys this invalidates have no observer there. When P12-02
+ * landed that was `/tasks`, `/tasks/board`, `/tasks/[id]` and `/requests`, and a
+ * `router.refresh()` was kept here to cover them. P12-07 moved the three task
+ * surfaces onto `qk.taskList` / `qk.taskBoard` / `qk.task`, so P12-09 took the
+ * refresh out: they are live again, wider than before. What is left waiting for
+ * a navigation is `/requests` and the inbox list, until Phase 4 puts them on
+ * `qk.requests(f)` and `qk.inbox(f)` — no change here when it does. Do NOT
+ * restore `router.refresh()` to close that gap; convert the page instead.
  *
  * ⚠️ THE FILTER IS EVALUATED SERVER-SIDE AND RLS RUNS ON TOP OF IT. A
  * filtered-out event never leaves the database, and an event that survives the
@@ -248,7 +248,6 @@ export function useRealtimeRefresh({
   event = "*",
 }: UseRealtimeRefreshOptions): void {
   const queryClient = useQueryClient();
-  const router = useRouter();
 
   /*
    * `onPing` is almost always an inline arrow, so it is a new function on every
@@ -280,29 +279,31 @@ export function useRealtimeRefresh({
     if (keys.length === 0) reportUnmapped(table);
 
     /*
-     * ⚠️ AND STILL `router.refresh()`, UNTIL PHASE 3. BOTH, ON PURPOSE.
+     * ⚠️ P12-09 — `router.refresh()` WAS HERE, AND ITS OWN STATED CONDITION IS
+     * WHAT REMOVED IT. It read: "DELETE THIS THE DAY `qk.taskList` /
+     * `qk.taskBoard` / `qk.task` HAVE OBSERVERS." P12-07 gave them observers.
      *
-     * Invalidation only repaints something if a QUERY IS OBSERVING IT, and today
-     * exactly one is: the rail's `qk.snapshot()`. `/tasks`, `/tasks/board`,
-     * `/tasks/[id]` and `/requests` still read their rows in an RSC, so dropping
-     * the refresh here would have taken cross-user live updates with it — a
+     * The argument for keeping it was that invalidation only repaints what a
+     * query is OBSERVING, and until this week exactly one thing was: the rail.
+     * `/tasks`, `/tasks/board` and `/tasks/[id]` read their rows in an RSC, so
+     * dropping the refresh would have taken cross-user live updates with it — a
      * colleague moving a card would stop repainting the board you left open,
-     * which is the entire feature P8-03 was built for. Your OWN changes would
-     * still land (the action revalidates), so the regression would show up only
-     * between two people and only on the screen nobody has open while testing.
+     * which is the whole of P8-03. All three read from the cache now, and the
+     * `vizserve_pms_tasks` row of `INVALIDATES` reaches every one of them.
      *
-     * ⚠️ THIS IS NOT THE THREE-RENDER PROBLEM P12-02 IS ABOUT. That one was
-     * SELF-inflicted: your own click paying for a revalidate payload, a
-     * `router.refresh()` at the control, and this ping. A ping is now suppressed
-     * for your own writes at the control, so what is left here fires on SOMEBODY
-     * ELSE'S change — rare, and already what today costs.
+     * ⚠️ TWO SURFACES STILL READ IN RSC AND KNOWINGLY LOSE THE PUSH:
+     * `/requests` (its table waits for a navigation — that page already carries
+     * this note, and Phase 4 puts it on `qk.requests(f)`, at which point the same
+     * event moves the rows with no change here) and the inbox list (same, on
+     * `qk.inbox(f)`). Their COUNTS stay live either way, because the rail
+     * observes `qk.snapshot()` and both rows carry it.
      *
-     * DELETE THIS THE DAY `qk.taskList` / `qk.taskBoard` / `qk.task` HAVE
-     * OBSERVERS (Phase 3). Not before, and not because a plan document says
-     * Phase 2 — see the same warning on `serverRenderedAt`.
+     * The alternative was keeping a whole-route render on every event anybody
+     * receives so that two unconverted pages stay live — which is the storm
+     * P12-02 exists to stop, paid by every screen in the product. Do not restore
+     * it; convert the page instead.
      */
-    router.refresh();
-  }, [queryClient, table, router]);
+  }, [queryClient, table]);
 
   useEffect(() => {
     if (!enabled) return;

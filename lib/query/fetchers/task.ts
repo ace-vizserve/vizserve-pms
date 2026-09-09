@@ -2,10 +2,9 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 
 import type { Database } from "@/lib/database.types";
 import { read, ReadError } from "@/lib/query/read";
+import { parse, parseAll } from "@/lib/query/parse";
 import {
   clientDecisionSchema,
-  departmentListSchema,
-  directoryPersonSchema,
   subtaskRowSchema,
   taskAttachmentRowSchema,
   taskCommentRowSchema,
@@ -15,8 +14,6 @@ import {
   taskRowSchema,
   taskTimeTrackedSchema,
   type ClientDecision,
-  type DepartmentList,
-  type DirectoryPerson,
   type SubtaskRow,
   type TaskAttachmentRow,
   type TaskCommentRow,
@@ -25,6 +22,12 @@ import {
   type TaskRequestRow,
   type TaskRow,
 } from "@/lib/schemas/task-detail";
+import {
+  directoryPersonSchema,
+  visibleListSchema,
+  type DirectoryPerson,
+  type VisibleList,
+} from "@/lib/schemas/task-list";
 import { parseTaskRequestBrief, type TaskRequestBrief } from "@/lib/schemas/tasks";
 
 /**
@@ -355,63 +358,81 @@ export async function fetchTaskTimeTracked(
 }
 
 /**
- * `qk.lists(departmentId)` — the department's active lists.
+ * `qk.listsVisible()` — EVERY ACTIVE LIST THE READER MAY SEE. One entry, shared.
  *
- * ⚠️ FILED UNDER THE DEPARTMENT AND NOT UNDER THE TASK, because that is what it
- * is: every task in a department reads the same list, and a per-task key would
- * hold one copy per task anybody opens and refetch all of them when a list is
- * renamed.
+ * ⚠️ THIS WAS `fetchDepartmentLists` UNDER `qk.lists(departmentId)`, AND THE
+ * WARNING IT CARRIED IS WHAT CHANGED IT. That note said the shape was narrower
+ * than the next consumer would want, that whichever shape was written last would
+ * win the entry silently, and that the fetcher had to be widened to a SUPERSET
+ * rather than left to race. P12-07 is that consumer arriving — `/tasks` and
+ * `/tasks/board` need every list they can see, across departments, with
+ * `group_id` for the folder filter and `owner_id` for the P11-06 personal-list
+ * split.
  *
- * ⚠️ AND IT IS A NARROWER SHAPE THAN `/tasks/lists` WILL WANT. Phase 4 moves
- * `list-manager.tsx` onto this same key, and that screen needs folders, sort
- * order, ownership and the archived lists this one filters out. WHICHEVER
- * SHAPE IS WRITTEN LAST WINS THE CACHE ENTRY, silently, and the loser reads
- * `undefined` off a column it was promised — so when that lands, this fetcher
- * must be widened to the SUPERSET rather than left to race. Flagged here rather
- * than discovered there.
+ * ⚠️ A DEPARTMENT-KEYED ENTRY COULD NOT HOLD THAT, which is why the KEY moved
+ * and not just the columns. `qk.lists(x)` means "department x's lists"; a lead
+ * of two departments and an owner of all of them need a row set that is not a
+ * subset of any single entry under it. So the superset is the whole visible set,
+ * under `qk.listsVisible()`, and the detail page's own use — its department's
+ * lists, for the move picker — is a `.filter()` in the browser over an entry
+ * every task in the tab already shares. `qk.lists(departmentId)` is left defined
+ * and unused, for Phase 4 to give a shape of its own.
  *
- * Ordered by name, and no department filter beyond the one this page needs:
- * the `lists readable in department scope` policy is what decides visibility.
+ * ⚠️ `is_active` IS STILL FILTERED IN SQL, and dropping it would be a third
+ * consumer's problem rather than a favour. `/tasks/lists` wants the archived
+ * ones; `/tasks` deliberately does not — an archived list must not appear in the
+ * filter dropdown, and the breadcrumb note on that page says in as many words
+ * that a bookmarked `?list=` whose list has since been archived should draw no
+ * label rather than a stale one. Widening the ROWS here would quietly reverse
+ * both. Phase 4 widens it when it can pay for the consequences.
+ *
+ * Ordered by name, and NO department filter at all: the `lists readable in
+ * department scope` policy is what decides visibility, and restating it here
+ * would imply the policy were optional.
  */
-export async function fetchDepartmentLists(
-  client: TaskReadClient,
-  departmentId: string,
-): Promise<DepartmentList[]> {
+export async function fetchVisibleLists(client: TaskReadClient): Promise<VisibleList[]> {
   const rows = await read<unknown[]>(
     client
       .from("vizserve_pms_lists")
-      .select("id, name")
-      .eq("department_id", departmentId)
+      .select("id, name, group_id, owner_id, department_id")
       .eq("is_active", true)
       .order("name"),
   );
 
-  return parseAll(departmentListSchema, rows, "lists");
+  return parseAll(visibleListSchema, rows, "lists");
 }
 
 /**
- * `qk.ref("users")` — every active person, for every name on the page.
+ * `qk.ref("users")` — THE WHOLE DIRECTORY, ACTIVE AND NOT.
  *
- * ⚠️ THIS IS REFERENCE DATA AND IT IS FILED AS SUCH, which is the one key on
- * this page that belongs to a later phase. The alternative was
+ * ⚠️ THIS IS REFERENCE DATA AND IT IS FILED AS SUCH, which is the one key on the
+ * detail page that belongs to a later phase. The alternative was
  * `qk.taskPart(id, "assignees")`, and it is wrong twice: this is not the task's
- * assignees, it is the whole active directory, and filing it per task would
- * hold one copy of the staff list for every task open in the tab. `qk.ref` is
- * where `client.ts`'s `REF_STALE_TIME` already points, so Phase 6 inherits a
- * populated key rather than a duplicate to reconcile.
+ * assignees, it is the whole directory, and filing it per task would hold one
+ * copy of the staff list for every task open in the tab. `qk.ref` is where
+ * `client.ts`'s `REF_STALE_TIME` already points, so Phase 6 inherits a populated
+ * key rather than a duplicate to reconcile.
  *
- * The page uses it for three things: names beside history rows and subtasks,
- * the coverage sentence, and `departmentPeople` — the reassign candidates,
- * filtered to the task's own department because that is the set `reassignTask`
- * and `quickAddTask` will accept. Offering anybody else is offering a door the
- * server does not open.
+ * ⚠️ IT WAS `fetchActiveUsers`, FILTERED TO `is_active = true`, AND THE FILTER
+ * CAME OFF IN P12-07 — a widening, on purpose, and the second half of the
+ * superset rule above. `/tasks` resolves the AUTHOR of every comment and the
+ * ACTOR of every history row through this same map, and those are exactly the
+ * people who leave: filtered to the active, a deactivated colleague's comments
+ * render as "Someone no longer active" while the row beside them, read from a
+ * different entry, still names them. `is_active` rides along as a column so the
+ * three consumers that need the ACTIVE set — the reassign candidates, the
+ * composer's assignable people, the assignee picker — filter it themselves,
+ * which they must do anyway: they each narrow by department as well.
+ *
+ * ⚠️ SO A CALLER OFFERING SOMEBODY A SEAT MUST TEST `is_active` ITSELF. Offering
+ * a deactivated colleague as an assignee is offering a door the server does not
+ * open — `vizserve_pms_create_task` and `add_task_assignee` both refuse one.
  */
-export async function fetchActiveUsers(client: TaskReadClient): Promise<DirectoryPerson[]> {
+export async function fetchDirectory(client: TaskReadClient): Promise<DirectoryPerson[]> {
   const rows = await read<unknown[]>(
     client
       .from("vizserve_pms_users")
-      .select("id, full_name, primary_department_id")
-      .eq("is_active", true)
+      .select("id, full_name, primary_department_id, is_active")
       .order("full_name"),
   );
 
@@ -454,47 +475,3 @@ export async function fetchTaskRequest(
   if (row === null) return null;
   return parse(taskRequestRowSchema, row, "the request");
 }
-
-/* -------------------------------------------------------------------------- */
-/* The parse boundary.                                                         */
-/* -------------------------------------------------------------------------- */
-
-/**
- * ⚠️ ONE PLACE THE PARSE FAILURE IS TURNED INTO A SENTENCE, so every fetcher
- * above reports a shape mismatch the same way and none of them is tempted to
- * cast instead.
- *
- * NO POSTGREST CODE IS INVENTED FOR IT — `snapshot.ts` argues this at length.
- * `isPermanent()` keys on the `42xxx` family because those are genuinely
- * "permission denied for table …"; borrowing one to buy a skipped retry would
- * make the retry policy lie about what happened. So a shape fault retries twice
- * like any other transient failure and then lands in `isError`, where it
- * belongs.
- */
-function parse<T>(schema: { safeParse: (value: unknown) => SafeParse<T> }, value: unknown, what: string): T {
-  const parsed = schema.safeParse(value);
-  if (parsed.success) return parsed.data;
-
-  throw new ReadError(
-    `${what} came back in a shape this build does not recognise. If a migration has ` +
-      `not been applied to this project yet, that is why.`,
-    undefined,
-    parsed.error.message,
-  );
-}
-
-function parseAll<T>(
-  schema: { safeParse: (value: unknown) => SafeParse<T> },
-  rows: unknown,
-  what: string,
-): T[] {
-  if (!Array.isArray(rows)) {
-    throw new ReadError(`${what} came back as something other than a list of rows.`);
-  }
-  return rows.map((row) => parse(schema, row, what));
-}
-
-/** The half of zod's result these two helpers actually read. */
-type SafeParse<T> =
-  | { success: true; data: T }
-  | { success: false; error: { message: string } };

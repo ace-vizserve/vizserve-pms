@@ -51,7 +51,16 @@ export const INVALIDATES = {
   vizserve_pms_task_comments: [["task"], qk.tasks()],
   vizserve_pms_task_assignees: [["task"], qk.tasks()],
   vizserve_pms_lists: [["lists"], qk.snapshot()],
-  vizserve_pms_task_groups: [["lists"], qk.snapshot()],
+  /*
+   * ⚠️ THREE KEYS, BECAUSE THE FOLDER LIST ITSELF IS FILED AS REFERENCE DATA.
+   * `["lists"]` covers the list rows that quote a folder's name;
+   * `qk.ref("task-groups")` is the folder list the `/tasks` filter panel reads,
+   * and it carries `REF_STALE_TIME` — ten minutes — so without this row a
+   * renamed folder would keep its old name in that dropdown for the rest of the
+   * session. A long stale time is exactly what makes the invalidation row
+   * mandatory rather than a nicety.
+   */
+  vizserve_pms_task_groups: [["lists"], qk.ref("task-groups"), qk.snapshot()],
   vizserve_pms_requests: [["requests"], qk.snapshot()],
   /*
    * ⚠️ `qk.snapshot()` IS NOT OPTIONAL HERE, and leaving it off is exactly the

@@ -47,8 +47,23 @@ export type TaskPart =
 /**
  * Reference data — admin-managed, changes rarely, read by pickers everywhere.
  * Kept under one `["ref", …]` prefix so a settings change can sweep all of it.
+ *
+ * ⚠️ `task-groups` IS THE FOLDER LIST (P7-18), and it is reference data by the
+ * same test as the rest: admin-managed, read by a picker, changed about once a
+ * quarter. It is NOT under `["lists"]` even though a folder holds lists —
+ * `lib/query/realtime.ts` already maps `vizserve_pms_task_groups` to `["lists"]`
+ * so a folder rename sweeps the list labels that quote it, and putting the
+ * folder list itself under that prefix as well would be correct but would spend
+ * `REF_STALE_TIME` on nothing. The invalidation still reaches it: that map is
+ * where a folder event is turned into keys, and it names both.
  */
-export type RefTable = "users" | "departments" | "holidays" | "leave-types" | "events";
+export type RefTable =
+  | "users"
+  | "departments"
+  | "holidays"
+  | "leave-types"
+  | "events"
+  | "task-groups";
 
 /**
  * Drops keys whose value is `undefined` or `""`.
@@ -90,6 +105,32 @@ export const qk = {
   /** Lists and folders for the management screen. Department-scoped by policy. */
   lists: (departmentId: string) => ["lists", departmentId] as const,
 
+  /**
+   * EVERY ACTIVE LIST THE READER MAY SEE, across departments. One entry, shared.
+   *
+   * ⚠️ THIS EXISTS BECAUSE `qk.lists(departmentId)` COULD NOT HOLD IT, and the
+   * distinction is the one `fetchDepartmentLists` warned about in P12-06. That
+   * key is keyed BY DEPARTMENT, so an entry under it holds one department's
+   * rows. `/tasks` and `/tasks/board` need the lists of every department the
+   * reader can see — a lead of two departments, an owner of all of them — which
+   * is not a superset of any single entry, it is a different row set. Writing it
+   * to `qk.lists(x)` would have meant whichever fetcher ran last won the entry
+   * and the other consumer silently lost rows.
+   *
+   * ⚠️ AND THE DETAIL PAGE MOVED ONTO THIS ONE RATHER THAN KEEPING ITS OWN.
+   * `/tasks/[id]` wants its own department's active lists, which IS a subset of
+   * this — so it reads this entry and filters in the browser, and the tab holds
+   * ONE copy of the list tree instead of one per department anybody opens. The
+   * shape is the genuine superset of both: `group_id`, `owner_id` and
+   * `department_id` ride along for the filter panel, the P11-06 personal-list
+   * split and that filter respectively.
+   *
+   * Under the `["lists"]` prefix on purpose: `INVALIDATES` in `realtime.ts` maps
+   * both list tables to it, so a rename or a new list sweeps this and
+   * `qk.lists(…)` together.
+   */
+  listsVisible: () => ["lists", "visible"] as const,
+
   // ── the two approval domains ────────────────────────────────────────────────
   // Separate prefixes on purpose. Client forms and internal approvals look
   // mergeable and are not (different auth models, different lifecycles) — a
@@ -97,6 +138,19 @@ export const qk = {
   requests: (filters: Record<string, string | undefined>) =>
     ["requests", normalize(filters)] as const,
   request: (id: string) => ["request", id] as const,
+  /**
+   * P7-26 — the Gate 1 queue as the TASK VIEWS show it, above the stages and as
+   * the board's first column.
+   *
+   * ⚠️ ITS OWN SEGMENT UNDER `["requests"]`, NOT `qk.requests(filters)`, and the
+   * reason is the collision `fetchDepartmentLists` records: Phase 4 puts
+   * `/requests` on that key with a far wider column set and no
+   * `status = PENDING_REVIEW` filter. Two different row sets under one key is
+   * whichever-ran-last-wins, silently. The shared PREFIX is deliberate though —
+   * a Gate 1 decision invalidates `["requests"]` and moves both.
+   */
+  pendingRequests: (filters: Record<string, string | undefined>) =>
+    ["requests", "pending", normalize(filters)] as const,
   approvals: (filters: Record<string, string | undefined>) =>
     ["approvals", normalize(filters)] as const,
   approval: (id: string) => ["approval", id] as const,

@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
@@ -33,7 +32,7 @@ import { updateTaskField } from "../actions";
  *
  * ⚠️ NOT BUILT ON `usePatch` (`app/(app)/tasks/inline.tsx:50`), and the reason
  * matters: that hook has one shared `useTransition` per instance, always toasts
- * and always `router.refresh()`es. It is correct for a list row editing one
+ * and always refreshes. It is correct for a list row editing one
  * field at a time, and wrong here, where six fields save independently and two
  * of them must NOT trigger a refresh. The relationship is the same one
  * `week-grid.tsx`'s state-free `persist` has to its ordinary path — a second,
@@ -96,7 +95,6 @@ export type TaskAutosave = {
 };
 
 export function useTaskAutosave(taskId: string): TaskAutosave {
-  const router = useRouter();
   const queryClient = useQueryClient();
 
   const [states, setStates] = useState<Record<string, FieldState>>({});
@@ -141,7 +139,6 @@ export function useTaskAutosave(taskId: string): TaskAutosave {
       setState(key, "saved");
 
       if (options.refresh !== false) {
-        router.refresh();
         /*
          * ⚠️ AWAITED. This function is not inside a `useTransition` — the header
          * explains at length why it must not be — so there is no optimistic
@@ -150,6 +147,12 @@ export function useTaskAutosave(taskId: string): TaskAutosave {
          * not resolve until the fresh row is in the cache: the move is decided
          * on the SAVED resolution, and a gate that reads a stale one is the
          * exact failure `task-gate.tsx` was built to prevent.
+         *
+         * ⚠️ P12-09 took a `router.refresh()` off the line above this. It was
+         * a second round trip for the same purpose, and the one it left behind
+         * is the one the gate actually reads. `updateTaskField` still
+         * revalidates its four routes on the server, so a later navigation to a
+         * page that is still server-rendered is fresh.
          */
         await invalidateTaskWrite(queryClient, taskId);
       } else {
@@ -158,7 +161,7 @@ export function useTaskAutosave(taskId: string): TaskAutosave {
         markTaskStale(queryClient, taskId);
       }
     },
-    [queryClient, router, setState, taskId],
+    [queryClient, setState, taskId],
   );
 
   const clearTimer = useCallback((key: string) => {

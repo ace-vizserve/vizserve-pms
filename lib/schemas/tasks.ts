@@ -1017,3 +1017,23 @@ export function parseTaskRequestBrief(value: unknown): TaskRequestBrief | null {
   const parsed = taskRequestBriefSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
+
+/**
+ * P9-05 — the "Mine" view is a COMPUTED COLUMN now, not a filter built here.
+ *
+ * `mineFilter` used to live at this spot and returned a PostgREST `or(...)`
+ * fragment containing every id from `vizserve_pms_task_assignees`. Filters
+ * travel in the URL; a real user with 444 rows produced a 16,542-character
+ * query string and `fetch` failed outright — no status code, no PostgREST
+ * error. Callers did `data ?? []`, so it rendered as an empty board.
+ *
+ * The rule now lives in `is_mine(vizserve_pms_tasks)` in Postgres and callers
+ * ask for it with `.eq(MINE_COLUMN, true)`. Nothing variable-length is sent,
+ * the single query keeps its filters and its ordering, and "what counts as
+ * mine" has one home instead of two.
+ *
+ * Exported as a constant so the three call sites cannot misspell it — a wrong
+ * column name here is a PostgREST error at runtime and nothing at compile time,
+ * because it is a string the generated types have never heard of.
+ */
+export const MINE_COLUMN = "is_mine";

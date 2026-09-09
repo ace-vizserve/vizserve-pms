@@ -20,11 +20,19 @@ import { describe, expect, it } from "vitest";
  * which sends a boolean. What is asserted here is that neither grows the habit
  * back — read as SOURCE, because the alternative is importing three server
  * modules to compare some strings.
+ *
+ * ⚠️ P12-07 MOVED THE CALLERS, NOT THE RULE. `/tasks` and `/tasks/board` build
+ * their queries in `lib/query/fetchers/task-list.ts` now — the pages are auth
+ * and a redirect — so the paths below follow the code. The rule is unchanged
+ * and so is every assertion: whichever file BUILDS the filter is the file that
+ * must not put an id list in it. `tests/unit/task-list-fetchers.test.ts` guards
+ * the other side of the same bug, by asserting what the call actually sends.
  */
 
 const read = (path: string) => readFileSync(join(process.cwd(), path), "utf8");
 
 const CALLERS = [
+  "lib/query/fetchers/task-list.ts",
   "app/(app)/tasks/page.tsx",
   "app/(app)/tasks/board/page.tsx",
   "app/(app)/approvals/page.tsx",
@@ -54,10 +62,25 @@ describe("the Mine view asks Postgres, not the URL", () => {
   it("names the computed column once and shares it", () => {
     // A wrong column name here is a PostgREST error at runtime and NOTHING at
     // compile time — it is a string the generated types have never heard of.
-    expect(read("lib/tasks-server.ts")).toMatch(/export const MINE_COLUMN = "is_mine"/);
+    //
+    // ⚠️ P12-07 MOVED IT OUT OF `lib/tasks-server.ts`, which opens with
+    // `import "server-only"` — the query is built in the BROWSER now, and a
+    // client bundle reaching into that module is a build error by design. It
+    // lives in `lib/schemas/tasks.ts`, which has no such import and is already
+    // the home of every other shared rule about what a task is.
+    expect(read("lib/schemas/tasks.ts")).toMatch(/export const MINE_COLUMN = "is_mine"/);
   });
 
-  it.each(["app/(app)/tasks/page.tsx", "app/(app)/tasks/board/page.tsx"])(
+  it("still has exactly ONE definition of it", () => {
+    // The whole value of the constant is that there is one. `lib/tasks-server.ts`
+    // RE-EXPORTS it so its existing server callers keep resolving; a second
+    // `export const` there would be the drift this guards against.
+    const server = read("lib/tasks-server.ts");
+    expect(server).toMatch(/export \{ MINE_COLUMN \} from "@\/lib\/schemas\/tasks"/);
+    expect(server).not.toMatch(/export const MINE_COLUMN/);
+  });
+
+  it.each(["lib/query/fetchers/task-list.ts"])(
     "%s filters through MINE_COLUMN",
     (path) => {
       const source = read(path);

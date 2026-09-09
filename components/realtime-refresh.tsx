@@ -106,16 +106,21 @@ export function RealtimeNotifications({ userId }: { userId: string }) {
  * co-exist, but keying on the filter rather than on the pathname means the topic
  * is a function of what is being watched, which is the property that has to hold.
  *
- * ⚠️ P12-02 NARROWED WHAT THIS ACTUALLY REPAINTS, AND THE GAP IS TEMPORARY BUT
- * REAL. A task event now invalidates `qk.tasks()` and `qk.snapshot()` instead of
- * re-rendering the route. Only the second of those has an observer today, so the
- * RAIL's counts move live and the ROWS on /tasks, /tasks/board and /tasks/[id]
- * do not — those four pages still read in RSC, and they get their new rows from
- * the Server Action's own `revalidatePath` when YOU are the one who changed
- * something. What is lost until Phase 3 moves them onto `qk.taskList` /
- * `qk.taskBoard` / `qk.task` is a COLLEAGUE's change repainting your open board
- * without a navigation. Deliberate: the alternative is `router.refresh()` back
- * in the hook, which is the three-renders-per-mutation storm P12-02 removed.
+ * ⚠️ P12-02 NARROWED WHAT THIS REPAINTS AND P12-07 GAVE IT BACK. A task event
+ * invalidates `qk.tasks()` and `qk.snapshot()` rather than re-rendering the
+ * route. For one phase only the second of those had an observer, so the RAIL's
+ * counts moved live and the ROWS did not — /tasks, /tasks/board and /tasks/[id]
+ * were still RSC and got their rows from the Server Action's own
+ * `revalidatePath`, which only covers YOUR OWN writes. All three read from the
+ * cache now, `["tasks"]` prefix-matches every one of their keys, and a
+ * COLLEAGUE's change repaints your open board again without a navigation.
+ *
+ * ⚠️ `/requests` MOUNTS THIS TOO AND IS STILL RSC. Its awaiting-review COUNT
+ * is live (the rail observes `qk.snapshot()`); its table waits for a navigation
+ * until Phase 4 puts it on `qk.requests(f)`, at which point the same event moves
+ * those rows with no change here. Do not put `router.refresh()` back in the hook
+ * to close that — it is the three-renders-per-mutation storm P12-02 removed,
+ * paid by every screen in the product so that one unconverted page stays live.
  */
 export function RealtimeTasks({ filter }: { filter: string | null }) {
   useRealtimeRefresh({

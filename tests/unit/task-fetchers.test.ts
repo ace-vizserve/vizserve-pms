@@ -2,8 +2,7 @@ import type { PostgrestError } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 
 import {
-  fetchActiveUsers,
-  fetchDepartmentLists,
+  fetchDirectory,
   fetchSubtasks,
   fetchTaskAttachments,
   fetchTaskComments,
@@ -11,6 +10,7 @@ import {
   fetchTaskHistory,
   fetchTaskRequest,
   fetchTaskTimeTracked,
+  fetchVisibleLists,
   type TaskReadClient,
 } from "@/lib/query/fetchers/task";
 import { qk } from "@/lib/query/keys";
@@ -426,44 +426,67 @@ describe("the per-panel reads", () => {
     await expect(fetchTaskTimeTracked(client, TASK)).resolves.toBe(0);
   });
 
-  it("fetchDepartmentLists asks for the department's ACTIVE lists", async () => {
+  it("fetchVisibleLists asks for every ACTIVE list and no department at all", async () => {
+    /*
+     * ⚠️ P12-07 WIDENED THIS FROM ONE DEPARTMENT'S LISTS TO EVERY VISIBLE ONE,
+     * and the two halves of that are both asserted here because both are load
+     * bearing. THE ROWS: no `department_id` filter, because `/tasks` needs the
+     * lists of every department the reader can see and a department-keyed entry
+     * could not hold them — the detail page filters this set in the browser
+     * instead. THE COLUMNS: `group_id`, `owner_id` and `department_id` ride
+     * along for the folder filter, the P11-06 personal-list split and that
+     * filter respectively.
+     *
+     * `is_active` STAYS. Dropping it would put archived lists in the filter
+     * dropdown and a stale name in the breadcrumb, both of which `/tasks`
+     * documents as deliberate.
+     */
+    const LIST = {
+      id: "44444444-0000-4000-8000-000000000014",
+      name: "Collateral",
+      group_id: null,
+      owner_id: null,
+      department_id: DEPT,
+    };
     const { client, calls } = stubClient({
-      tables: {
-        vizserve_pms_lists: {
-          data: [{ id: "44444444-0000-4000-8000-000000000014", name: "Collateral" }],
-          error: null,
-        },
-      },
+      tables: { vizserve_pms_lists: { data: [LIST], error: null } },
     });
 
-    await expect(fetchDepartmentLists(client, DEPT)).resolves.toEqual([
-      { id: "44444444-0000-4000-8000-000000000014", name: "Collateral" },
-    ]);
-    // No scope filter beyond the department this page is on — `lists readable in
-    // department scope` is what decides visibility, and restating it here would
-    // imply the policy is optional.
-    expect(calls[0]?.filters).toEqual([
-      ["department_id", DEPT],
-      ["is_active", true],
-    ]);
+    await expect(fetchVisibleLists(client)).resolves.toEqual([LIST]);
+    // `lists readable in department scope` is what decides visibility, and
+    // restating it here would imply the policy is optional.
+    expect(calls[0]?.filters).toEqual([["is_active", true]]);
+    expect(calls[0]?.select).toContain("department_id");
   });
 
-  it("fetchActiveUsers returns the directory with the department on each row", async () => {
-    // `primary_department_id` is what `departmentPeople` filters on, and that is
-    // the same set `reassignTask` will accept — offering anybody else is
-    // offering a door the server does not open.
-    const { client } = stubClient({
-      tables: {
-        vizserve_pms_users: {
-          data: [{ id: USER, full_name: "Ace Guevarra", primary_department_id: DEPT }],
-          error: null,
-        },
-      },
+  it("fetchDirectory keeps the people who have LEFT, with the flag to tell them apart", async () => {
+    /*
+     * ⚠️ THE `is_active = true` FILTER CAME OFF IN P12-07 AND THAT IS THE TEST.
+     * The people who leave are exactly the people whose old comments and history
+     * rows still need a name: filtered to the active, a deactivated colleague's
+     * comment renders as "Someone no longer active" while the row beside it,
+     * read from a different entry, still names them. Every consumer that offers
+     * somebody a SEAT filters on the column itself — and must, because each
+     * narrows by department in the same pass.
+     */
+    const GONE = {
+      id: "99999999-0000-4000-8000-000000000019",
+      full_name: "Someone Who Left",
+      primary_department_id: DEPT,
+      is_active: false,
+    };
+    const HERE = {
+      id: USER,
+      full_name: "Ace Guevarra",
+      primary_department_id: DEPT,
+      is_active: true,
+    };
+    const { client, calls } = stubClient({
+      tables: { vizserve_pms_users: { data: [HERE, GONE], error: null } },
     });
 
-    await expect(fetchActiveUsers(client)).resolves.toEqual([
-      { id: USER, full_name: "Ace Guevarra", primary_department_id: DEPT },
-    ]);
+    await expect(fetchDirectory(client)).resolves.toEqual([HERE, GONE]);
+    expect(calls[0]?.filters).toEqual([]);
   });
 
   it("fetchTaskRequest returns null where the policy returns no row", async () => {
@@ -485,20 +508,36 @@ describe("the per-panel reads", () => {
  * The claim the whole split exists to make, as one assertion each way.
  */
 describe("what a task write invalidates", () => {
+  /**
+   * ⚠️ THE STUB NEVER SETTLES BY ITSELF, WHICH IS WHAT MAKES "AWAITED" TESTABLE.
+   *
+   * P12-08 split these helpers into keys the caller WAITS for and keys it merely
+   * fires, and the difference is invisible to a recorder whose promises are
+   * already resolved. Each call here parks its promise in `settle`, so a test can
+   * see which invalidations the helper is still holding its transition open for —
+   * and that is the half `ded2244` turns on.
+   */
   function recorder() {
     const calls: unknown[][] = [];
+    const settle: (() => void)[] = [];
     const client: Invalidator = {
       invalidateQueries: ({ queryKey }) => {
         calls.push([...queryKey]);
-        return Promise.resolve();
+        return new Promise<void>((resolve) => settle.push(resolve));
       },
     };
-    return { client, calls };
+    /** Let every outstanding invalidation land. */
+    const finish = () => {
+      for (const resolve of settle.splice(0)) resolve();
+    };
+    return { client, calls, finish };
   }
 
   it("a comment refetches the comments and NOT the task", async () => {
-    const { client, calls } = recorder();
-    await invalidateTaskPart(client, TASK, "comments", [qk.tasks()]);
+    const { client, calls, finish } = recorder();
+    const done = invalidateTaskPart(client, TASK, "comments", [qk.tasks()]);
+    finish();
+    await done;
 
     expect(calls).toEqual([[...qk.taskPart(TASK, "comments")], [...qk.tasks()]]);
     // ⚠️ THE NEGATIVE HALF IS THE POINT. `["task", id]` would prefix-match the
@@ -508,18 +547,62 @@ describe("what a task write invalidates", () => {
   });
 
   it("a status move sweeps the task, the list views and the rail", async () => {
-    const { client, calls } = recorder();
-    await invalidateTaskWrite(client, TASK);
+    const { client, calls, finish } = recorder();
+    const done = invalidateTaskWrite(client, TASK);
+    finish();
+    await done;
 
     // `qk.task(id)` prefix-matches every panel, which is right here: a move
-    // writes a history row and changes the counts in the rail.
+    // writes a history row and changes the counts in the rail. All three are
+    // invalidated; the rail is simply not waited for — see below.
+    expect(calls).toEqual([[...qk.snapshot()], [...qk.task(TASK)], [...qk.tasks()]]);
+  });
+
+  it("does not hold the caller open for the RAIL, only for the surfaces", async () => {
+    /*
+     * ⚠️ P12-08, AND IT IS THE HALF A RECORDER USUALLY CANNOT SEE. What must be
+     * awaited is only what an optimistic value is standing in for: the task and
+     * the list/board views. Awaiting an UNOBSERVED key is free — `invalidateQueries`
+     * refetches only what a mounted component is watching — so awaiting both
+     * surfaces costs whichever one the reader is actually on. `qk.snapshot()` is
+     * the exception: the rail is mounted on every page in the product and its
+     * refetch is a whole-tree aggregate, and it has no optimistic value that
+     * could revert while it catches up. So it is fired, not waited for.
+     */
+    const { client, finish } = recorder();
+
+    let settled = false;
+    const done = invalidateTaskWrite(client, TASK).then(() => {
+      settled = true;
+    });
+
+    // Nothing has landed yet, so nothing may have resolved.
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    finish();
+    await done;
+    expect(settled).toBe(true);
+  });
+
+  it("waits for everything when a caller asks it to", async () => {
+    // The pre-P12-08 behaviour, kept for a caller that genuinely cannot proceed
+    // until the counts are right. There is none today, and adding one should
+    // come with a reason at the call site.
+    const { client, calls, finish } = recorder();
+    const done = invalidateTaskWrite(client, TASK, { wait: "everything" });
+    finish();
+    await done;
+
     expect(calls).toEqual([[...qk.task(TASK)], [...qk.tasks()], [...qk.snapshot()]]);
   });
 
   it("a task created with no parent names no task key at all", async () => {
-    const { client, calls } = recorder();
-    await invalidateTaskWrite(client);
+    const { client, calls, finish } = recorder();
+    const done = invalidateTaskWrite(client);
+    finish();
+    await done;
 
-    expect(calls).toEqual([[...qk.tasks()], [...qk.snapshot()]]);
+    expect(calls).toEqual([[...qk.snapshot()], [...qk.tasks()]]);
   });
 });

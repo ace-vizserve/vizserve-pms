@@ -58,25 +58,22 @@ export const fetchJoinedTaskIdSet = cache(async (userId: string): Promise<Set<st
   return new Set(await fetchJoinedTaskIds(userId));
 });
 
-/**
- * P9-05 — the "Mine" view is a COMPUTED COLUMN now, not a filter built here.
+/*
+ * ⚠️ `MINE_COLUMN` MOVED TO `lib/schemas/tasks.ts` IN P12-07, AND IT IS
+ * RE-EXPORTED HERE SO EVERY EXISTING IMPORT STILL RESOLVES.
  *
- * `mineFilter` used to live at this spot and returned a PostgREST `or(...)`
- * fragment containing every id from `vizserve_pms_task_assignees`. Filters
- * travel in the URL; a real user with 444 rows produced a 16,542-character
- * query string and `fetch` failed outright — no status code, no PostgREST
- * error. Callers did `data ?? []`, so it rendered as an empty board.
+ * This module opens with `import "server-only"`, which is the whole reason it
+ * had to move: `/tasks` and `/tasks/board` build their queries in the BROWSER
+ * now, and a client bundle reaching into this file is a build error by design.
+ * The constant had exactly one job — "the three call sites cannot misspell it,
+ * because a wrong column name here is a PostgREST error at runtime and nothing
+ * at compile time" — and that job only works while there is ONE definition of
+ * it. Copying it into a client-safe module would have been two.
  *
- * The rule now lives in `is_mine(vizserve_pms_tasks)` in Postgres and callers
- * ask for it with `.eq(MINE_COLUMN, true)`. Nothing variable-length is sent,
- * the single query keeps its filters and its ordering, and "what counts as
- * mine" has one home instead of two.
- *
- * Exported as a constant so the three call sites cannot misspell it — a wrong
- * column name here is a PostgREST error at runtime and nothing at compile time,
- * because it is a string the generated types have never heard of.
+ * `lib/schemas/tasks.ts` is where it lives now: no `server-only`, and already
+ * the home of every other shared rule about what a task is.
  */
-export const MINE_COLUMN = "is_mine";
+export { MINE_COLUMN } from "@/lib/schemas/tasks";
 
 /**
  * P9-01 — the tasks somebody could hand over to a reliever.

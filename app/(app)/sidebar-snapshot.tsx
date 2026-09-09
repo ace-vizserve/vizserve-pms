@@ -105,32 +105,37 @@ function withUnknownCounts(space: ProjectSpace): ProjectSpace {
  * ⚠️ THE FIRST VALUE IS SKIPPED. Without the ref, mount would invalidate the
  * query it just started and buy a second round trip on every page load.
  *
- * ⚠️ PHASE 2 WAS SUPPOSED TO DELETE THIS AND DELIBERATELY DID NOT. P12-02
- * landed: `use-realtime-refresh.ts` now calls `invalidatedBy(table)` instead of
- * `router.refresh()`, and the notifications and tasks rows both carry
- * `qk.snapshot()`. That is a SECOND path to the same invalidation, not a
- * replacement for this one, and the difference is what a realtime event cannot
- * promise:
+ * ⚠️ PHASE 2 WAS SUPPOSED TO DELETE THIS AND DID NOT. NOR DID P12-09, WHICH
+ * DELETED EVERY OTHER `router.refresh()` IN THE TASK PATH. The reason has
+ * changed, so it is restated here in full rather than left to be re-derived.
  *
- *   1. REALTIME DEGRADES TO OFF FOR THE REST OF THE PAGE VIEW, BY DESIGN. One
- *      `CHANNEL_ERROR` or `TIMED_OUT` — a network blip, a publication that has
- *      not been pasted yet, Realtime switched off for the project — and the
- *      channel is removed with no retry (see that file's degrade note). Delete
- *      this bridge now and the rail freezes after every mutation for anybody
- *      whose socket is down, with nothing on screen admitting it.
- *   2. NOTHING INVALIDATES `qk.snapshot()` FROM A MUTATION YET. Task writes stay
- *      on Server Actions called from bare transitions until Phase 3 moves them
- *      to `useMutation`, where an explicit `onSettled` invalidation makes the
- *      rail YOUR OWN write's responsibility rather than a round trip through
- *      Postgres and back over a websocket.
- *   3. `realtimeDepartmentFilter` IS NARROWER THAN WHAT THE RAIL COUNTS. A task
- *      assigned to you in a department you are not mapped to never pushes, and
- *      somebody mapped to no department subscribes to nothing at all.
+ * Two of the three arguments for keeping it are now spent:
  *
- * ⚠️ SO IT GOES IN PHASE 3, WITH THE `useMutation` CONVERSION, AND NOT BEFORE.
- * The cost of keeping it is one extra invalidation on renders that came from the
- * server anyway; the cost of removing it early is a rail that silently stops
- * counting. Do not delete it because a plan document says Phase 2.
+ *   1. "NOTHING INVALIDATES `qk.snapshot()` FROM A MUTATION YET" — no longer
+ *      true of TASKS. `invalidateTaskWrite` names `qk.snapshot()` and every task
+ *      control calls it, so a status change, a delete, a rename and a new task
+ *      all move the rail directly. That is the P12-08 split: the rail is fired
+ *      rather than awaited, so the counts land a beat after the row does.
+ *   2. REALTIME DEGRADES TO OFF FOR THE REST OF THE PAGE VIEW, BY DESIGN, and
+ *      `realtimeDepartmentFilter` is narrower than what the rail counts. Both
+ *      still true, and both now covered for tasks by (1) — your own write no
+ *      longer depends on a round trip through Postgres and back over a socket.
+ *
+ * ⚠️ WHAT KEEPS IT ALIVE IS THE SIX DOMAINS THAT HAVE NOT BEEN CONVERTED.
+ * Lists, requests, approvals, the inbox, the timesheet and DTR all still write
+ * through Server Actions that end in `revalidatePath` and touch the query cache
+ * NOWHERE. Creating a personal list, approving a request, reading a
+ * notification, submitting a week — not one of them invalidates `qk.snapshot()`,
+ * and the rail carries a count for every one of them. `revalidatePath` re-runs
+ * `sidebar-panel.tsx`, which is what changes `serverRenderedAt`, which is what
+ * this turns into the one invalidation that keeps those numbers honest. Delete
+ * it today and the rail silently stops counting for two thirds of the product.
+ *
+ * ⚠️ SO THE CONDITION IS NOW EXPLICIT: it goes when the LAST domain that
+ * writes without invalidating is converted (Phases 4–6), not when the plan
+ * document says a phase number. The cost of keeping it is one extra invalidation
+ * on renders that came from the server anyway — and after P12-09 those are
+ * navigations and other domains' writes, not task clicks.
  */
 function useRefetchOnServerRender(serverRenderedAt: number) {
   const client = useQueryClient();

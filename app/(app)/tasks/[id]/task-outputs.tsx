@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useOptimistic, useRef, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Download, Link2, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
@@ -112,11 +111,10 @@ export function TaskOutputs({
   variant?: "card" | "field";
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
   /*
    * P12-06 — `/tasks/[id]` reads its attachments from `qk.taskPart(id,
    * "attachments")` now, and its `output_link` off the task row. The
-   * `router.refresh()` calls below stay until Phase 3c: this file is
+   * `router.refresh()` calls below came out in P12-09: this file is
    * detail-page-only, so they are redundant for the DATA — and they are still
    * what holds the two `useOptimistic` values open until the fresh rows land.
    * Removing them while the optimism is hand-rolled is `ded2244`.
@@ -182,14 +180,17 @@ export function TaskOutputs({
         setLinkOpen(true);
         return;
       }
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
+         the WRITE, which has already happened; scheduled after the invalidation
+         it reported the refetch instead. See `lib/query/invalidate.ts`. */
+      toast.success(parsed.data ? "Link saved" : "Link removed");
+
+      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO:
+         hold the transition open until the fresh data lands, or `useOptimistic`
+         reverts the moment the action resolves. See `tasks/inline.tsx`. */
       // The LINK is a column on the task row, not an attachment — so this
       // sweeps the task rather than the attachments panel.
       await invalidateTaskWrite(queryClient, taskId);
-      toast.success(parsed.data ? "Link saved" : "Link removed");
     });
   }
 
@@ -251,13 +252,16 @@ export function TaskOutputs({
         toast.error(result.error);
         return;
       }
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
+         the WRITE, which has already happened; scheduled after the invalidation
+         it reported the refetch instead. See `lib/query/invalidate.ts`. */
+      toast.success("Removed");
+
+      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO:
+         hold the transition open until the fresh data lands, or `useOptimistic`
+         reverts the moment the action resolves. See `tasks/inline.tsx`. */
       // One panel, not the task: removing a file changes nothing about the row.
       await invalidateTaskPart(queryClient, taskId, "attachments");
-      toast.success("Removed");
     });
   }
 

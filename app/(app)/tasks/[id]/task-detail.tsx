@@ -22,8 +22,7 @@ import { RichTextClient } from "@/components/ui/rich-text-client";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
 import {
-  fetchActiveUsers,
-  fetchDepartmentLists,
+  fetchDirectory,
   fetchSubtasks,
   fetchTaskAttachments,
   fetchTaskComments,
@@ -31,6 +30,7 @@ import {
   fetchTaskHistory,
   fetchTaskRequest,
   fetchTaskTimeTracked,
+  fetchVisibleLists,
 } from "@/lib/query/fetchers/task";
 import { qk } from "@/lib/query/keys";
 import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
@@ -81,12 +81,15 @@ import { TaskSurface } from "./task-surface";
  * here as `seat`, computed on the server. No decision about what somebody may
  * see is made in this file.
  *
- * ⚠️ AND THE SHARED CONTROLS STILL CALL `router.refresh()`. `transition.tsx`,
- * `inline.tsx`, `assignees.tsx`, `delete-task-dialog.tsx` and `task-composer.tsx`
- * are rendered by the list and the board as well as by this page, and both of
- * those still read their rows in an RSC. Each one now ALSO invalidates
- * (`lib/query/invalidate.ts`), which is what repaints this page. Removing the
- * refresh is Phase 3c — `ded2244` is what happens when it comes out early.
+ * ⚠️ AND THE SHARED CONTROLS NO LONGER CALL `router.refresh()`.
+ * `transition.tsx`, `inline.tsx`, `assignees.tsx`, `delete-task-dialog.tsx` and
+ * `task-composer.tsx` are rendered by the list and the board as well as by this
+ * page, and while those two still read in RSC each control did BOTH — a refresh
+ * for them and an invalidation for this page. P12-07 moved them onto the cache
+ * and P12-09 removed the refresh: one mechanism, and the AWAITED invalidate in
+ * `lib/query/invalidate.ts` is what now holds an optimistic value across the
+ * settle. `ded2244` is what happened when the refresh came out with nothing in
+ * its place; do not remove the await.
  * ------------------------------------------------------------------------
  */
 
@@ -208,17 +211,29 @@ export function TaskDetail({
 
   /*
    * The staff directory, under `qk.ref("users")` rather than a per-task key —
-   * see `fetchActiveUsers`. Every task open in the tab shares this one entry.
+   * see `fetchDirectory`. Every task open in the tab shares this one entry, and
+   * so do `/tasks` and `/tasks/board`.
    */
   const peopleQuery = useQuery({
     queryKey: qk.ref("users"),
-    queryFn: () => fetchActiveUsers(browserClient()),
+    queryFn: () => fetchDirectory(browserClient()),
   });
 
+  /*
+   * ⚠️ EVERY VISIBLE LIST, NARROWED HERE RATHER THAN IN THE QUERY (P12-07).
+   *
+   * This was `qk.lists(task.department_id)` with a department filter in SQL, and
+   * its own comment warned that the shape was narrower than the next consumer
+   * would want and that whichever fetcher wrote the entry last would win it
+   * silently. `/tasks` was that consumer: it needs the lists of every department
+   * the reader can see, which is not a subset of any single department-keyed
+   * entry. So the fetcher was widened to the genuine superset and the KEY moved
+   * with it, and this page — which wants a subset — filters. One entry per tab
+   * instead of one per department anybody opens.
+   */
   const listsQuery = useQuery({
-    queryKey: qk.lists(task?.department_id ?? ""),
-    queryFn: () => fetchDepartmentLists(browserClient(), task!.department_id),
-    enabled: Boolean(task?.department_id),
+    queryKey: qk.listsVisible(),
+    queryFn: () => fetchVisibleLists(browserClient()),
   });
 
   /*
@@ -275,7 +290,9 @@ export function TaskDetail({
   const commentRows = commentsQuery.data ?? [];
   const children = subtasksQuery.data ?? [];
   const outputs = attachmentsQuery.data ?? [];
-  const lists = listsQuery.data ?? [];
+  const lists = (listsQuery.data ?? []).filter(
+    (list) => list.department_id === task.department_id,
+  );
   const people = peopleQuery.data ?? [];
 
   /*
@@ -462,7 +479,13 @@ export function TaskDetail({
    * else is offering a door the server does not open.
    */
   const departmentPeople = people
-    .filter((person) => person.primary_department_id === task.department_id)
+    /* ⚠️ `is_active` IS TESTED HERE AND NOT IN THE QUERY (P12-07). `qk.ref("users")`
+       holds the WHOLE directory now, because the people who leave are exactly the
+       ones whose old comments and history rows still need a name — so every
+       consumer that offers somebody a SEAT filters for itself, and this is one.
+       Offering a deactivated colleague is offering a door `reassignTask` does not
+       open. */
+    .filter((person) => person.is_active && person.primary_department_id === task.department_id)
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
   return (
@@ -479,13 +502,14 @@ export function TaskDetail({
         progress bar here. One channel shape across all four pages also
         means one thing to reason about rather than four.
 
-        ⚠️ P12-06 IS WHERE THIS STARTS PAYING AGAIN. P12-02 swapped the ping's
-        reaction from `router.refresh()` to invalidating `qk.tasks()` and
-        `qk.snapshot()`, and wrote down honestly that a page still reading in
-        RSC would stop repainting on somebody else's write. This page reads
-        `qk.task(id)` and its parts now, and the hook still calls
-        `router.refresh()` alongside the invalidation until Phase 3c — so a
-        colleague's edit lands here through both doors rather than neither.
+        ⚠️ P12-06 IS WHERE THIS STARTED PAYING AGAIN. P12-02 swapped the
+        ping's reaction from `router.refresh()` to invalidating `qk.tasks()`
+        and `qk.snapshot()`, and wrote down honestly that a page still reading
+        in RSC would stop repainting on somebody else's write. This page reads
+        `qk.task(id)` and its parts, so the invalidation reaches it — which is
+        why P12-09 could take the hook's refresh away once the list and the
+        board moved too. A colleague's edit lands here through the key, not
+        through a route render.
       */}
       <RealtimeTasks filter={realtimeFilter} />
 

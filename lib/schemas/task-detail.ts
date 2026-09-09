@@ -178,22 +178,16 @@ export const taskTimeTrackedSchema = z.object({
   minutes: z.number(),
 });
 
-/** A department's active lists, for the picker and the header's list name. */
-export const departmentListSchema = z.object({
-  id: z.uuid(),
-  name: z.string(),
-});
-
-export type DepartmentList = z.infer<typeof departmentListSchema>;
-
-/** One active person, for every name on the page. See `qk.ref("users")`. */
-export const directoryPersonSchema = z.object({
-  id: z.uuid(),
-  full_name: z.string(),
-  primary_department_id: z.uuid().nullable(),
-});
-
-export type DirectoryPerson = z.infer<typeof directoryPersonSchema>;
+/*
+ * ⚠️ THE LIST AND THE DIRECTORY MOVED TO `lib/schemas/task-list.ts` IN P12-07.
+ *
+ * `departmentListSchema` and `directoryPersonSchema` were defined here while
+ * this page was the only browser reader of either. `/tasks` and `/tasks/board`
+ * now read both from the SAME cache entries (`qk.listsVisible()`,
+ * `qk.ref("users")`), and a shape shared by three surfaces cannot be declared in
+ * the contract of one of them — see `visibleListSchema` and
+ * `directoryPersonSchema` there for the superset argument.
+ */
 
 /**
  * P7-59 — the request row, WHICH IS THE LEAD'S VIEW AND ONLY THE LEAD'S.

@@ -3,32 +3,28 @@ import type { QueryKey } from "@tanstack/react-query";
 import { qk, type TaskPart } from "./keys";
 
 /**
- * P12-06 — what a task WRITE invalidates, in one place.
+ * P12-06 / P12-09 — what a task WRITE invalidates, in one place.
  *
  * ------------------------------------------------------------------------
- * ⚠️ THIS IS THE SECOND HALF OF EVERY CONTROL, NOT A REPLACEMENT FOR THE FIRST.
+ * ⚠️ THIS IS THE WHOLE OF EVERY CONTROL NOW, AND IT USED TO BE HALF OF IT.
  *
  * The controls that write a task — `transition.tsx`, `inline.tsx`,
  * `assignees.tsx`, `delete-task-dialog.tsx`, `task-composer.tsx` — are SHARED.
  * The detail header renders them, every list row renders them, and every board
- * card renders them. `/tasks` and `/tasks/board` still read their rows in an
- * RSC, so they still repaint through `revalidatePath` + `router.refresh()` and
- * WILL until Phase 3c. So during the migration every one of those controls does
- * BOTH: it keeps its `router.refresh()` for the two server-rendered surfaces and
- * calls one of these for the one that now reads the cache.
+ * card renders them. For one phase the detail page read from the cache while the
+ * list and the board still read in an RSC, so each control did BOTH: a
+ * `router.refresh()` for the two server-rendered surfaces and one of these for
+ * the one that was not. P12-07 moved all three onto the cache and P12-09 removed
+ * the refresh. One mechanism.
  *
- * There is a precedent for exactly this, argued at length and for the same
- * reason: the `invalidate` callback in `hooks/use-realtime-refresh.ts` (P12-02)
- * invalidates the mapped keys AND still calls `router.refresh()`, because
- * invalidation only repaints something a query is OBSERVING and most of this app
- * is not observing anything yet. Same situation, same answer.
- *
- * ⚠️ AND `ded2244` IS WHY THE REFRESH MUST NOT COME OUT EARLY. Removing it from
- * these controls (`a64b06c`) had to be reverted the same day across eighteen
- * files: `useOptimistic` drops its value the instant the transition that set it
- * ENDS, and Next resolves the action's promise BEFORE the router commits the
- * revalidated tree — so the value snapped back to the old one, with the success
- * toast firing in the gap. The full account is the long note in
+ * ⚠️ AND `ded2244` IS WHY THE AWAIT BELOW IS NOT NEGOTIABLE. Removing the
+ * refresh from these controls (`a64b06c`) had to be reverted the same day across
+ * eighteen files: `useOptimistic` drops its value the instant the transition
+ * that set it ENDS, and Next resolves the action's promise BEFORE the router
+ * commits the revalidated tree — so the value snapped back to the old one, with
+ * the success toast firing in the gap. What made the removal safe this time is
+ * that an AWAITED invalidate holds the same transition open, over data the
+ * control is actually rendered on top of. The full account is the long note in
  * `app/(app)/tasks/inline.tsx`. Do not repeat it.
  *
  * ⚠️ WHICH IS ALSO WHY EVERY FUNCTION HERE IS `async` AND MUST BE AWAITED
@@ -58,6 +54,35 @@ async function sweep(client: Invalidator, keys: readonly QueryKey[]): Promise<vo
 }
 
 /**
+ * Invalidate WITHOUT waiting for the refetch.
+ *
+ * ⚠️ THE COUNTERPART TO `sweep`, AND CHOOSING BETWEEN THEM IS THE WHOLE OF
+ * P12-08. Every control here used to `await` all of it and then toast, which
+ * made a status change feel like a page load: 0.5–1s of nothing, then the row
+ * moved, then the toast. The write had landed in the first 150ms of that.
+ *
+ * ⚠️ WHAT MUST BE AWAITED IS ONLY WHAT AN OPTIMISTIC VALUE IS STANDING IN FOR.
+ * `useOptimistic` drops its value the instant the transition that set it ends,
+ * so the transition has to stay open until the REAL data for the thing on screen
+ * has landed — that is `ded2244`, and it is not negotiable. It says nothing
+ * about the other surfaces.
+ *
+ * ⚠️ AND "THE OTHER SURFACES" COSTS NOTHING TO AWAIT ANYWAY, WHICH IS THE PART
+ * THAT MAKES THIS SPLIT SIMPLE. `invalidateQueries` refetches only what a
+ * mounted component is OBSERVING; an unobserved key is marked stale and resolves
+ * immediately. So `qk.tasks()` awaited from `/tasks/[id]` is free (no list is
+ * mounted), and `qk.task(id)` awaited from `/tasks` is free for the mirror
+ * reason. The one key that is ALWAYS observed is the rail's `qk.snapshot()` —
+ * every page in the product renders it — and it is the one whose refetch is a
+ * whole-tree aggregate. That is why it, and only it, is fired rather than
+ * awaited: the rail has no optimistic value to protect, so nothing on screen
+ * reverts while its counts catch up a beat later.
+ */
+function fire(client: Invalidator, keys: readonly QueryKey[]): void {
+  for (const queryKey of keys) void client.invalidateQueries({ queryKey });
+}
+
+/**
  * A write that changed a task ROW: a status move, an inline field edit, a
  * reassignment, a delete.
  *
@@ -73,14 +98,46 @@ async function sweep(client: Invalidator, keys: readonly QueryKey[]): Promise<vo
  * `INVALIDATES` in `lib/query/realtime.ts` — a task write moves the list views
  * and it moves the rail's open-task counts. Keeping the two lists in step is the
  * point of naming them both from one place.
+ *
+ * ⚠️ P12-08 — THE RAIL IS FIRED, THE SURFACES ARE AWAITED. See `fire` above for
+ * the argument; the short version is that `qk.snapshot()` is the only key here
+ * that is observed on EVERY page, so awaiting it put a whole-tree aggregate in
+ * front of every status change, and the rail has no optimistic value that could
+ * revert while it catches up. The caller's `toast` belongs BEFORE this call
+ * either way: the write it is reporting has already happened, and a toast
+ * scheduled after an awaited refetch is reporting the refetch.
  */
-export async function invalidateTaskWrite(client: Invalidator, taskId?: string): Promise<void> {
-  await sweep(client, [
-    ...(taskId ? [qk.task(taskId) as QueryKey] : []),
-    qk.tasks(),
-    qk.snapshot(),
-  ]);
+export async function invalidateTaskWrite(
+  client: Invalidator,
+  taskId?: string,
+  options: { wait?: TaskWriteWait } = {},
+): Promise<void> {
+  const surfaces: QueryKey[] = [...(taskId ? [qk.task(taskId) as QueryKey] : []), qk.tasks()];
+
+  if (options.wait === "everything") {
+    await sweep(client, [...surfaces, qk.snapshot()]);
+    return;
+  }
+
+  /*
+   * The rail first and un-awaited, so its request is in flight alongside the
+   * ones below rather than after them. Order matters only in that direction:
+   * `fire` returns synchronously.
+   */
+  fire(client, [qk.snapshot()]);
+  await sweep(client, surfaces);
 }
+
+/**
+ * How much of a task write the caller is prepared to wait for.
+ *
+ * `"surfaces"` — the default — awaits the task and the list/board views and
+ * lets the rail catch up on its own. `"everything"` is the pre-P12-08 behaviour,
+ * kept for a caller that genuinely cannot proceed until the counts are right;
+ * there is none today, and adding one should come with a reason at the call
+ * site, because it puts a whole-tree aggregate back in front of a person.
+ */
+export type TaskWriteWait = "surfaces" | "everything";
 
 /**
  * A write that changed ONE PANEL of a task and nothing else.

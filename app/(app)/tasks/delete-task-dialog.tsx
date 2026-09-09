@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -57,17 +56,16 @@ export function DeleteTaskDialog({
   const [open, setOpen] = useState(false);
   const [impact, setImpact] = useState<TaskDeleteImpact | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
   /*
    * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
    *
    * This dialog is shared: the detail header, every list row and every board
    * card can open it. `/tasks/[id]` reads `qk.task(id)` from the cache now, so a
    * delete has to invalidate; `/tasks` and `/tasks/board` still read their rows
-   * in an RSC, so the `router.refresh()` below stays until Phase 3c. The
-   * precedent is `hooks/use-realtime-refresh.ts` (P12-02), which invalidates AND
-   * refreshes for exactly this reason. Full account, including what `ded2244`
-   * cost, in `lib/query/invalidate.ts`.
+   * from the cache too since P12-07, so P12-09 took the `router.refresh()` out:
+   * one mechanism, not two. The AWAITED invalidate is what holds the optimistic
+   * removal across the settle — see the note at the call site, and
+   * `lib/query/invalidate.ts` for what `ded2244` cost.
    */
   const queryClient = useQueryClient();
   const [loadingImpact, startImpact] = useTransition();
@@ -112,21 +110,42 @@ export function DeleteTaskDialog({
       }
 
       /*
-       * ⚠️ NOT A DUPLICATE ROUND TRIP — KEEPS THE TRANSITION PENDING UNTIL THE
-       * FRESH DATA IS APPLIED. Without it `useOptimistic` reverts the instant the
-       * action resolves and the value snaps back until the payload lands. Removed
-       * once and restored (`a64b06c` → `ded2244`); P12-02 re-checked it against
-       * Next 16's action queue and kept it. Full account in `tasks/inline.tsx`.
+       * ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
+       * the WRITE, which has already happened; scheduled after the invalidation
+       * it reported the refetch instead, and arrived up to a second late on a
+       * screen that had already moved. See `lib/query/invalidate.ts`.
        */
-      router.refresh();
+      toast.success("Task deleted");
+
       /*
-       * ⚠️ AWAITED, INSIDE THE TRANSITION. `qk.task(id)` is invalidated as well
-       * as the list views: a deleted task's own detail page may still be
-       * mounted — this dialog is reachable FROM it — and leaving a fresh copy
-       * of a deleted row in the cache is how the back button resurrects it.
+       * ⚠️ P12-09 — `router.refresh()` WAS HERE, AND THE AWAITED INVALIDATE
+       * BELOW IS WHAT REPLACED IT. Read this before putting it back.
+       *
+       * The refresh existed to HOLD THE TRANSITION OPEN. `useOptimistic` drops
+       * its value the instant the transition that set it ends, and Next resolves
+       * an action's promise BEFORE the router commits the revalidated tree — so
+       * without something pending, the value snapped back to the old one with
+       * the success toast firing in the gap. That is `ded2244`, which reverted
+       * this same removal across eighteen files in a day. The full account is
+       * the long note in `app/(app)/tasks/inline.tsx`.
+       *
+       * What changed is not the argument, it is the data path. `/tasks`,
+       * `/tasks/board` and `/tasks/[id]` all read from the cache now, so
+       * `invalidateTaskWrite` refetches the very rows this control is rendered
+       * over — and it is AWAITED, inside the same transition, which is exactly
+       * the hold the refresh was providing. One mechanism instead of two, and
+       * the route render that ran beside every click is gone.
+       *
+       * ⚠️ SO THE AWAIT IS NOT OPTIONAL AND MUST NOT BECOME A FIRE-AND-FORGET.
+       * Removing it is `ded2244` again, through a different door.
+       */
+      /*
+       * `qk.task(id)` is invalidated as well as the list views: a deleted task's
+       * own detail page may still be mounted — this dialog is reachable FROM a
+       * subtask row — and leaving a fresh copy of a deleted row in the cache is
+       * how the back button resurrects it.
        */
       await invalidateTaskWrite(queryClient, taskId);
-      toast.success("Task deleted");
       onDeleted?.();
     });
   }

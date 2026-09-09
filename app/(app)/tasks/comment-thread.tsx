@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { startTransition, useOptimistic, useState, useTransition } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
@@ -153,13 +152,12 @@ export function CommentThread({
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const router = useRouter();
   /*
    * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
    *
    * This thread is shared: the detail page's Activity card renders it, and so
    * does the popover behind `latest-comment-cell.tsx` on the task LIST, which is
-   * still server-rendered. So the `router.refresh()` below stays until Phase 3c.
+   * read from the cache too since P12-07, so P12-09 took the refresh out.
    *
    * ⚠️ AND THIS IS THE ONE THAT MAKES THE SPLIT WORTH HAVING. A comment
    * invalidates `["task", id, "comments"]` and NOTHING ELSE about the task — not
@@ -219,13 +217,16 @@ export function CommentThread({
 
       const result = await addTaskComment(taskId, { body: text });
 
-      /* ⚠️ Before the ok-check, deliberately: a refused comment still needs the
-         thread re-read, because the optimistic row has to be replaced by
-         whatever the server actually holds. */
-      router.refresh();
-      /* ⚠️ AWAITED, INSIDE THE TRANSITION, and before the ok-check for the same
-         reason as the line above it: `useOptimistic` drops the "Sending…" row
-         the instant this transition ends, so the real one has to be there. */
+      /* ⚠️ AWAITED, INSIDE THE TRANSITION, AND BEFORE THE OK-CHECK. Both halves
+         are deliberate. `useOptimistic` drops the "Sending…" row the instant this
+         transition ends, so the real one has to be there first; and a REFUSED
+         comment still needs the thread re-read, because the optimistic row has
+         to be replaced by whatever the server actually holds either way.
+
+         ⚠️ P12-09 took a `router.refresh()` off the line above this. It was
+         doing the same job through the router, back when `/tasks` read its
+         latest-comment column in an RSC; `qk.tasks()` in the `extra` list is
+         that surface now. See `lib/query/invalidate.ts`. */
       await invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
 
       if (!result.ok) {
@@ -249,10 +250,10 @@ export function CommentThread({
         return;
       }
 
-      // No `router.refresh()` here and there never was one — this path has no
-      // optimistic value to hold, so the action's own `revalidatePath` was
-      // enough. The cache has no such fallback: without this the edited body
-      // would sit at its old text until something else invalidated the thread.
+      // No refresh here and there never was one — this path has no optimistic
+      // value to hold, so the action's own `revalidatePath` was enough. The
+      // cache has no such fallback: without this the edited body would sit at
+      // its old text until something else invalidated the thread.
       await invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
 
       setEditing(null);
