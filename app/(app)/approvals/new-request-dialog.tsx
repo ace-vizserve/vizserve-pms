@@ -3,7 +3,7 @@
 import { toast } from "@/components/ui/toast";
 import { ChevronsUpDown, Plus, X } from "lucide-react";
 import Link from "next/link";
-import { Fragment, useState, useTransition } from "react";
+import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -24,6 +24,7 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
   SelectLabel,
   SelectTrigger,
@@ -74,6 +75,26 @@ export type PickableLeaveType = { id: string; label: string; requires_reliever: 
  * Never null: `vizserve_pms_reliever_candidates` joins departments inner, so
  * somebody with no team is not offered at all.
  */
+/**
+ * P11-11 — the candidate list, split into one entry per department.
+ *
+ * A WALK, NOT A MAP. `vizserve_pms_reliever_candidates` orders by department
+ * name then person, so consecutive rows sharing a department already ARE the
+ * group — this only draws the boundaries. Keying an object by department id
+ * instead would hand the order of the headings over to key iteration, which is
+ * not the sort the server chose.
+ */
+function groupByDepartment(people: RelieverCandidate[]) {
+  const groups: { id: string; name: string; people: RelieverCandidate[] }[] = [];
+
+  for (const person of people) {
+    const last = groups.at(-1);
+    if (last && last.id === person.department_id) last.people.push(person);
+    else groups.push({ id: person.department_id, name: person.department_name, people: [person] });
+  }
+
+  return groups;
+}
 export type RelieverCandidate = {
   id: string;
   full_name: string;
@@ -892,27 +913,27 @@ export function NewRequestDialog({
                                   apart. The heading is the only thing on screen
                                   that distinguishes them.
 
-                                  Built by WALKING the list, not by grouping into a
-                                  map: the function orders by department then name,
-                                  so consecutive rows sharing a department are the
-                                  group. An object keyed by department id would
-                                  hand the order over to whatever key iteration
-                                  gives, which is not the sort the server chose.
+                                  ⚠️ `SelectLabel` MUST BE INSIDE A `SelectGroup`.
+                                  It reads `SelectGroupContext`, so a label emitted
+                                  as a loose sibling throws at render: "Base UI:
+                                  SelectGroupContext is missing." The first version
+                                  of this walked the flat list and printed a label
+                                  whenever the department changed, which is the
+                                  natural shape and the one that does not work.
+                                  Grouping is also the correct ARIA: each team
+                                  becomes a labelled group rather than a heading a
+                                  screen reader reads as another option.
                                 */}
-                                {people.map((person, at) => {
-                                  const first =
-                                    at === 0 ||
-                                    people[at - 1]!.department_id !== person.department_id;
-
-                                  return (
-                                    <Fragment key={person.id}>
-                                      {first ? (
-                                        <SelectLabel>{person.department_name}</SelectLabel>
-                                      ) : null}
-                                      <SelectItem value={person.id}>{person.full_name}</SelectItem>
-                                    </Fragment>
-                                  );
-                                })}
+                                {groupByDepartment(people).map((group) => (
+                                  <SelectGroup key={group.id}>
+                                    <SelectLabel>{group.name}</SelectLabel>
+                                    {group.people.map((person) => (
+                                      <SelectItem key={person.id} value={person.id}>
+                                        {person.full_name}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectGroup>
+                                ))}
                               </SelectContent>
                             </Select>
                           </div>
