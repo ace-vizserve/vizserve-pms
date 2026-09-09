@@ -63,6 +63,35 @@ export type { ActionResult };
  * `revalidatePath` does NOT execute a route; it marks it stale, and the cost
  * lands on the next visit. So listing `/` and `/dashboard` here is close to free
  * and is what stops the badge counts lying after a move.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * P12-02 — THE AUDIT THAT HAD TO HAPPEN BEFORE ANY MORE `router.refresh()`
+ * CALLS COULD GO. Every control that calls an action in this file was traced to
+ * the routes it can be pressed from, because a route missing from the list above
+ * used to be rescued by the control's own second fetch:
+ *
+ *   `transition.tsx` / `status-select.tsx` / `[id]/task-actions.tsx`,
+ *   `assignees.tsx`, `inline.tsx`, `task-composer.tsx` / `add-task.tsx`,
+ *   `delete-task-dialog.tsx`
+ *      → rendered ONLY by `/tasks`, `/tasks/board` and `/tasks/[id]`, through
+ *        `tasks-table.tsx`, `task-status-groups.tsx`, `board/page.tsx` and
+ *        `[id]/task-header.tsx`. `/dashboard` renders task SUMMARIES and no
+ *        control; the timesheet only mentions these files in comments. All three
+ *        routes are covered.
+ *   `nav-personal.tsx` → `savePersonalList`, and this one is in the app SHELL,
+ *        so it can be pressed from every authenticated route including ones not
+ *        listed above (`/inbox`, `/timesheet`, `/requests`, `/settings`, …). It
+ *        is still covered, and NOT by adding fifteen paths here: if an action
+ *        revalidates ANY path, Next re-renders the CURRENT url from the root and
+ *        returns that tree with the action's response, layout included. The
+ *        paths above decide what is stale for the NEXT visit; they do not gate
+ *        the payload you get back now.
+ *
+ * ⚠️ ONE REAL GAP WAS FOUND AND FIXED, and it was not in this list — it was in
+ * `deleteTask`/`deleteTasks`, which wrote their own shorter list and left out
+ * `/tasks/lists`. That page carries a task count per list. Both now call this
+ * helper. If you ever write `revalidatePath` inline again instead of calling
+ * `refresh()`, this is the failure you are re-creating.
  */
 function refresh(taskId?: string) {
   revalidatePath("/tasks");
@@ -1626,12 +1655,19 @@ export async function deleteTask(taskId: string): Promise<ActionResult> {
 
   if (error) return { ok: false, error: readableError(error) };
 
-  // No `refresh(taskId)` — that path is gone, and revalidating a deleted task's
-  // page would only re-render a 404.
-  revalidatePath("/tasks");
-  revalidatePath("/tasks/board");
-  revalidatePath("/");
-  revalidatePath("/dashboard");
+  /*
+   * `refresh()` WITH NO ARGUMENT, not the hand-written list this used to be.
+   * The point of the no-arg form is exactly the case here: no `refresh(taskId)`,
+   * because that path is gone and revalidating a deleted task's page would only
+   * re-render a 404.
+   *
+   * ⚠️ THE HAND-WRITTEN LIST WAS MISSING `/tasks/lists`, WHICH CARRIES A TASK
+   * COUNT PER LIST (`tasks/lists/page.tsx` aggregates `taskCounts`). Deleting a
+   * task left that number one too high until something else revalidated the
+   * page. Found by the P12-02 route audit — the same class of omission as
+   * `/tasks/board`, and the reason the shared helper exists at all.
+   */
+  refresh();
   return { ok: true, data: undefined };
 }
 
@@ -1661,10 +1697,9 @@ export async function deleteTasks(
     else deleted += 1;
   }
 
-  revalidatePath("/tasks");
-  revalidatePath("/tasks/board");
-  revalidatePath("/");
-  revalidatePath("/dashboard");
+  // As above: no task id to revalidate, and `/tasks/lists` was missing from the
+  // list this replaced.
+  refresh();
 
   return { ok: true, data: { deleted, failures: [...new Set(failures)] } };
 }

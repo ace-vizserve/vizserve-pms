@@ -452,10 +452,18 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
         progress bar here. One channel shape across all four pages also
         means one thing to reason about rather than four.
 
-        The cost is refreshes this page did not need: a card moving on a
-        colleague's board re-runs this render. It is a cheap RSC re-fetch,
+        The cost WAS refreshes this page did not need: a card moving on a
+        colleague's board re-ran this render. It was a cheap RSC re-fetch,
         debounced, and the alternative was a second channel shape whose
         coverage gaps would have to be worked out per component.
+
+        ⚠️ P12-02 REMOVED THAT COST AND THE BENEFIT WITH IT, FOR NOW. The
+        ping invalidates `qk.tasks()` and `qk.snapshot()` instead of calling
+        `router.refresh()`, and this page still reads everything in RSC — so
+        somebody else's edit no longer repaints it until you navigate. Your
+        own edits still repaint, from each action's `revalidatePath`. Phase 3
+        moves this page onto `qk.task(id)` / `qk.taskPart(id, part)` and the
+        subscription starts paying again.
       */}
       <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
 

@@ -9,11 +9,17 @@ import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
  *
  * ⚠️ EVERY COMPONENT HERE RENDERS NOTHING AND RETURNS `null`. That is not a
  * placeholder. The four pages that go live and the app shell are all SERVER
- * components, and a server component cannot hold a websocket or call
- * `router.refresh()` — so each needs a client component in its tree whose only
- * job is to run the hook. Making the pages themselves client components to avoid
- * these three files would have cost the RSC data fetching that the whole
+ * components, and a server component cannot hold a websocket or reach the query
+ * cache — so each needs a client component in its tree whose only job is to run
+ * the hook. Making the pages themselves client components to avoid these three
+ * files would have cost the RSC data fetching that the whole
  * refresh-through-RLS design depends on.
+ *
+ * ⚠️ AND THEY MUST STAY INSIDE `<QueryProvider>`. P12-02 swapped the hook's
+ * reaction from `router.refresh()` to `queryClient.invalidateQueries`, so
+ * `useQueryClient()` now runs in every one of these. The provider is mounted at
+ * the top of `app/(app)/layout.tsx`, above both call sites; moving either one
+ * outside it throws on mount rather than degrading.
  *
  * ⚠️ THE FILTER IS COMPUTED ON THE SERVER AND PASSED IN AS A PROP. It cannot be
  * computed here: `lib/auth/authorization.ts` is `server-only`, deliberately, and
@@ -45,6 +51,14 @@ import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
  * tab they left open is stale until they touch it. That was the pre-P8-03
  * behaviour of every number in this app, so nothing regresses.
  *
+ * ⚠️ THE BADGE STILL MOVES AFTER P12-02, and it is worth saying which half does
+ * the work now. The ping no longer re-renders the layout; it invalidates
+ * `qk.snapshot()`, which `sidebar-snapshot.tsx` is observing — so the rail
+ * refetches and the count changes with no server render at all. Since P12-01 the
+ * unread count is a field INSIDE that snapshot, which is why
+ * `lib/query/realtime.ts` lists `qk.snapshot()` on the notifications row and why
+ * dropping it would silently switch this feature off.
+ *
  * The channel is keyed on the user id, which is also the filter value — so the
  * topic is unique per subscriber and cannot collide with the task channel below.
  */
@@ -60,8 +74,8 @@ export function RealtimeNotifications({ userId }: { userId: string }) {
        * is sitting in the payload and is exactly what must not be rendered: the
        * payload is never read (see `useRealtimeRefresh`), and a toast built from
        * it would be the one place in the app showing a row that never passed
-       * through the RSC render. The unread badge and /inbox — both re-fetched by
-       * the refresh this fires alongside — say what it actually was.
+       * through a scoped read. The unread badge and /inbox — both invalidated by
+       * the ping this fires alongside — say what it actually was.
        *
        * One toast per burst, not per row: the hook's debounce collapses a
        * transaction that writes several notifications into a single ping, which
@@ -91,6 +105,17 @@ export function RealtimeNotifications({ userId }: { userId: string }) {
  * departments from two routes is the same subscription — the routes never
  * co-exist, but keying on the filter rather than on the pathname means the topic
  * is a function of what is being watched, which is the property that has to hold.
+ *
+ * ⚠️ P12-02 NARROWED WHAT THIS ACTUALLY REPAINTS, AND THE GAP IS TEMPORARY BUT
+ * REAL. A task event now invalidates `qk.tasks()` and `qk.snapshot()` instead of
+ * re-rendering the route. Only the second of those has an observer today, so the
+ * RAIL's counts move live and the ROWS on /tasks, /tasks/board and /tasks/[id]
+ * do not — those four pages still read in RSC, and they get their new rows from
+ * the Server Action's own `revalidatePath` when YOU are the one who changed
+ * something. What is lost until Phase 3 moves them onto `qk.taskList` /
+ * `qk.taskBoard` / `qk.task` is a COLLEAGUE's change repainting your open board
+ * without a navigation. Deliberate: the alternative is `router.refresh()` back
+ * in the hook, which is the three-renders-per-mutation storm P12-02 removed.
  */
 export function RealtimeTasks({ filter }: { filter: string | null }) {
   useRealtimeRefresh({

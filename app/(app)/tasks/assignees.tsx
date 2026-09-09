@@ -277,7 +277,13 @@ export function AssigneePicker({
         toast.error(result.error ?? "That did not go through.");
         return;
       }
-      /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
+      /*
+       * ⚠️ NOT A DUPLICATE ROUND TRIP — KEEPS THE TRANSITION PENDING UNTIL THE
+       * FRESH DATA IS APPLIED. Without it `useOptimistic` reverts the instant the
+       * action resolves and the value snaps back until the payload lands. Removed
+       * once and restored (`a64b06c` → `ded2244`); P12-02 re-checked it against
+       * Next 16's action queue and kept it. Full account in `tasks/inline.tsx`.
+       */
       router.refresh();
       toast.success(success);
     });

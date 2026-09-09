@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import Link from "next/link";
-import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { ChevronDown, ChevronRight, Folder, ListChecks, MoreHorizontal, Plus } from "lucide-react";
 
 import { toast } from "@/components/ui/toast";
@@ -495,7 +495,6 @@ function PersonalListDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const router = useRouter();
   const [name, setName] = useState(list?.name ?? "");
   // A new list starts active; an existing one starts wherever it already is, so
   // opening this on an archived list offers Restore rather than silently
@@ -520,13 +519,29 @@ function PersonalListDialog({
       toast.success(list ? "List saved." : "List created.");
 
       /*
-       * `router.refresh()` as well as the action's `revalidatePath`, and both
-       * are needed. The action marks `/tasks` and friends stale; THIS GROUP
-       * lives in the app layout, which those paths do not cover — so without the
-       * refresh the list you just made would not appear until the next full
-       * navigation.
+       * ⚠️ THE `router.refresh()` THAT USED TO BE HERE IS GONE (P12-02), AND THE
+       * COMMENT DEFENDING IT WAS WRONG. It claimed the action's `revalidatePath`
+       * list — `/tasks`, `/tasks/board`, `/tasks/lists`, `/`, `/dashboard` —
+       * could not cover this group because the group lives in the app LAYOUT,
+       * and this dialog can be opened from any authenticated route.
+       *
+       * That is not how a Server Action response works. If the action revalidated
+       * ANY path, Next re-renders the current URL FROM THE ROOT and ships that
+       * tree back with the action's own response — the layout included, whatever
+       * route you are standing on and whether or not it was in the list. The
+       * paths in `refresh()` decide what goes stale for the NEXT visit; they do
+       * not gate the payload you get back now. `savePersonalList` calls
+       * `refresh()`, so `sidebar-panel.tsx` re-runs, `serverRenderedAt` changes,
+       * and `useRefetchOnServerRender` invalidates `qk.snapshot()` — which is
+       * what actually puts the new list in the rail. The refresh was fetching
+       * the same route a second time to arrive at the same place.
+       *
+       * ⚠️ AND UNLIKE THE FIVE IN `app/(app)/tasks/`, NOTHING OPTIMISTIC HANGS
+       * OFF THIS TRANSITION. There is no `useOptimistic` value here to snap back
+       * while the payload lands — the dialog closes and a toast fires. That is
+       * the whole test for whether one of these is removable; see the long note
+       * in `app/(app)/tasks/inline.tsx`.
        */
-      router.refresh();
     });
   }
 

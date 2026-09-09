@@ -92,9 +92,46 @@ function usePatch(taskId: string) {
       return;
     }
 
-    // Keeps the action pending until the fresh payload is applied, so the
-    // optimistic value is replaced by the real one rather than blinking back to
-    // the old one in between.
+    /*
+     * ⚠️ THIS LOOKS LIKE A DUPLICATE ROUND TRIP AND IT IS NOT. IT HAS BEEN
+     * REMOVED ONCE AND HAD TO BE PUT BACK. Read this before deleting it again —
+     * the other four optimistic controls point here rather than repeating it:
+     * `transition.tsx`, `assignees.tsx`, `delete-task-dialog.tsx` and
+     * `task-composer.tsx`.
+     *
+     * THE CLAIM IT ANSWERS. `updateTaskField` calls `revalidatePath` itself, so
+     * the fresh RSC payload comes back WITH the action's response and a second
+     * fetch is pure waste. That is true of the RESPONSE and false of the TIMING,
+     * which is the only thing that matters here.
+     *
+     * WHAT ACTUALLY HAPPENS, from Next 16's own action queue. The server action
+     * reducer resolves the promise your `await` is sitting on — `resolve(
+     * actionResult)` — and only THEN returns the next router state, which the
+     * queue commits a further tick later. So the caller's async transition ends
+     * BEFORE the new tree is on screen, `useOptimistic` drops its value the
+     * instant the transition ends, and the field snaps back to the old server
+     * value for that gap. Under PPR the gap can be a whole extra fetch, because
+     * a seeded navigation may still have to go back for dynamic segments.
+     *
+     * The visible symptom, recorded when it shipped: THE TOAST ARRIVED BEFORE
+     * THE UI CHANGED. The value you had just typed reverted, the toast said it
+     * had saved, and then it changed again. `ded2244` restored this line in
+     * eighteen files after `a64b06c` removed it.
+     *
+     * WHY THIS FIXES IT. `router.refresh()` puts a PENDING promise into the
+     * router's state inside a transition, so the tree above suspends and React
+     * cannot commit the optimistic-revert render until that promise settles —
+     * transitions entangle. The optimistic value therefore holds until the real
+     * one is there to replace it. The cost is one extra round trip; a field that
+     * flickers back to its old value on every inline edit is worse.
+     *
+     * ⚠️ P12-02 LEFT ALL FIVE OF THESE IN PLACE FOR EXACTLY THIS REASON, and
+     * removed only the sites with no optimistic value behind them
+     * (`nav-personal.tsx`). THE REAL FIX IS PHASE 3: `useMutation` with
+     * `onMutate`/`onSettled` against the query cache holds its own optimistic
+     * value across the settle, so the hold stops needing a route render at all
+     * and these lines go with `optimistic-move.tsx`.
+     */
     router.refresh();
 
     if (success) toast.success(success);

@@ -98,12 +98,19 @@ export function useTaskTransition({
    *
    * ⚠️ AND THE OPTIMISM IS THE SMALLER HALF. Painting early hides latency; it
    * does not remove it, and a move that still takes two round trips is still
-   * slow — it just looks better while it is. `router.refresh()` used to run
-   * after the action and fetch the same route a second time. It is gone: the
-   * Server Action calls `revalidatePath` itself, so the fresh RSC payload comes
-   * back WITH the action's response, inside this transition. One trip, not two,
-   * and the optimistic value holds until the real one arrives because both are
-   * in the same transition.
+   * slow — it just looks better while it is.
+   *
+   * ⚠️ THIS PARAGRAPH USED TO CLAIM `router.refresh()` WAS GONE FROM `commit`
+   * BELOW, ON THE GROUND THAT THE SERVER ACTION'S OWN `revalidatePath` BRINGS
+   * THE FRESH PAYLOAD BACK INSIDE THIS TRANSITION. It said that while the call
+   * was still there four lines down, which is how a wrong comment survives: the
+   * argument is right about the RESPONSE and wrong about the TIMING. Next
+   * resolves the action's promise BEFORE the router commits the new tree, so
+   * this transition ends first and the chip reverts for the gap between them.
+   * It was removed once (`a64b06c`) and restored across eighteen files
+   * (`ded2244`) after the chip visibly snapped back. P12-02 re-checked it
+   * against Next 16's action queue and KEPT it; the full account is the long
+   * note in `inline.tsx`, and Phase 3's `useMutation` is what retires it.
    *
    * ⚠️ THAT MAKES `refresh()` IN `actions.ts` THE ONLY THING THAT REPAINTS.
    * A route missing from its list now goes stale instead of being quietly
@@ -177,7 +184,13 @@ export function useTaskTransition({
         return;
       }
 
-      /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
+      /*
+       * ⚠️ NOT A DUPLICATE ROUND TRIP — KEEPS THE TRANSITION PENDING UNTIL THE
+       * FRESH DATA IS APPLIED. Without it `useOptimistic` reverts the instant the
+       * action resolves and the value snaps back until the payload lands. Removed
+       * once and restored (`a64b06c` → `ded2244`); P12-02 re-checked it against
+       * Next 16's action queue and kept it. Full account in `tasks/inline.tsx`.
+       */
       router.refresh();
       toast.success(transition.label);
       setPrompt(null);

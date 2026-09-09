@@ -2,7 +2,7 @@ import type { PostgrestError } from "@supabase/supabase-js";
 import { describe, expect, it } from "vitest";
 
 import { normalize, qk } from "@/lib/query/keys";
-import { invalidatedBy } from "@/lib/query/realtime";
+import { invalidatedBy, invalidateForTable } from "@/lib/query/realtime";
 import { ActionError, fieldErrorsOf, fromAction } from "@/lib/query/mutate";
 import { isPermanent, read, ReadError } from "@/lib/query/read";
 
@@ -202,5 +202,76 @@ describe("invalidatedBy", () => {
 
   it("a comment moves the task it is on, not just the lists", () => {
     expect(invalidatedBy("vizserve_pms_task_comments")).toContainEqual(["task"]);
+  });
+});
+
+/**
+ * P12-02 — the realtime callback.
+ *
+ * ⚠️ THIS IS THE HALF THAT CHANGED, AND IT IS THE ONLY HALF WORTH TESTING.
+ * `use-realtime-refresh.ts` used to call `router.refresh()`; it now calls
+ * `invalidateForTable`. Everything else in that hook — channel-topic
+ * sequencing, `setAuth` rotation, degrade-once-then-go-quiet, the 300ms
+ * debounce, the StrictMode `cancelled` flag — is untouched, and none of it is
+ * exercised here: testing it would mean a websocket and a renderer, which is
+ * how the plumbing gets rewritten to suit a harness.
+ *
+ * The client is a parameter, so an object literal that records its calls is a
+ * complete double. No mocking framework — the rule at the top of this file.
+ */
+describe("invalidateForTable — what a realtime ping does now", () => {
+  /** Records what was asked for. Structurally a `QueryClient` for this purpose. */
+  function recorder() {
+    const calls: unknown[][] = [];
+    return {
+      calls,
+      invalidateQueries({ queryKey }: { queryKey: readonly unknown[] }) {
+        calls.push([...queryKey]);
+      },
+    };
+  }
+
+  it("invalidates every key the table maps to, and nothing else", () => {
+    const client = recorder();
+    const keys = invalidateForTable(client, "vizserve_pms_tasks");
+
+    expect(client.calls).toEqual([[...qk.tasks()], [...qk.snapshot()]]);
+    expect(keys).toHaveLength(2);
+  });
+
+  it("a notification invalidates the rail, which is what moves the unread badge", () => {
+    const client = recorder();
+    invalidateForTable(client, "vizserve_pms_notifications");
+    expect(client.calls).toContainEqual([...qk.snapshot()]);
+  });
+
+  /*
+   * ⚠️ THE ONE THAT GUARDS THE REGRESSION THE SWAP INTRODUCES.
+   *
+   * Under `router.refresh()` an unmapped table still repainted the whole route,
+   * so forgetting a row in `INVALIDATES` cost nothing and left no trace. Under
+   * invalidation it is a channel that joins, receives events and does NOTHING.
+   * The hook reads this empty return and reports it (`reportUnmapped`), and
+   * `RealtimeTable` stops it at the typecheck — this asserts the value those two
+   * depend on.
+   */
+  it("an unmapped table invalidates nothing and SAYS SO by returning no keys", () => {
+    const client = recorder();
+    const keys = invalidateForTable(client, "vizserve_pms_audit_log");
+
+    expect(keys).toEqual([]);
+    expect(client.calls).toEqual([]);
+  });
+
+  it("every table a subscription names is mapped", () => {
+    /*
+     * The two live subscriptions in `components/realtime-refresh.tsx`. Written
+     * out rather than parsed out of the file: this is a short list that changes
+     * when somebody adds a channel, and the point is that adding one WITHOUT a
+     * row in `INVALIDATES` fails here as well as in `tsc`.
+     */
+    for (const table of ["vizserve_pms_tasks", "vizserve_pms_notifications"]) {
+      expect(invalidatedBy(table).length).toBeGreaterThan(0);
+    }
   });
 });

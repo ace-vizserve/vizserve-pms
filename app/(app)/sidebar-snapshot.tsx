@@ -105,13 +105,32 @@ function withUnknownCounts(space: ProjectSpace): ProjectSpace {
  * ⚠️ THE FIRST VALUE IS SKIPPED. Without the ref, mount would invalidate the
  * query it just started and buy a second round trip on every page load.
  *
- * ⚠️ PHASE 2 DELETES THIS. When `use-realtime-refresh.ts` stops calling
- * `router.refresh()` and starts calling `invalidatedBy(table)` — which already
- * maps tasks, lists, folders, requests and notifications onto `qk.snapshot()`
- * (`lib/query/realtime.ts`) — the events themselves carry the signal and this
- * bridge is dead weight. It is here so Phase 1 can ship on its own without
- * reaching into Phase 2's file, whose degrade path and channel sequencing are
- * to be moved verbatim rather than edited in passing.
+ * ⚠️ PHASE 2 WAS SUPPOSED TO DELETE THIS AND DELIBERATELY DID NOT. P12-02
+ * landed: `use-realtime-refresh.ts` now calls `invalidatedBy(table)` instead of
+ * `router.refresh()`, and the notifications and tasks rows both carry
+ * `qk.snapshot()`. That is a SECOND path to the same invalidation, not a
+ * replacement for this one, and the difference is what a realtime event cannot
+ * promise:
+ *
+ *   1. REALTIME DEGRADES TO OFF FOR THE REST OF THE PAGE VIEW, BY DESIGN. One
+ *      `CHANNEL_ERROR` or `TIMED_OUT` — a network blip, a publication that has
+ *      not been pasted yet, Realtime switched off for the project — and the
+ *      channel is removed with no retry (see that file's degrade note). Delete
+ *      this bridge now and the rail freezes after every mutation for anybody
+ *      whose socket is down, with nothing on screen admitting it.
+ *   2. NOTHING INVALIDATES `qk.snapshot()` FROM A MUTATION YET. Task writes stay
+ *      on Server Actions called from bare transitions until Phase 3 moves them
+ *      to `useMutation`, where an explicit `onSettled` invalidation makes the
+ *      rail YOUR OWN write's responsibility rather than a round trip through
+ *      Postgres and back over a websocket.
+ *   3. `realtimeDepartmentFilter` IS NARROWER THAN WHAT THE RAIL COUNTS. A task
+ *      assigned to you in a department you are not mapped to never pushes, and
+ *      somebody mapped to no department subscribes to nothing at all.
+ *
+ * ⚠️ SO IT GOES IN PHASE 3, WITH THE `useMutation` CONVERSION, AND NOT BEFORE.
+ * The cost of keeping it is one extra invalidation on renders that came from the
+ * server anyway; the cost of removing it early is a rail that silently stops
+ * counting. Do not delete it because a plan document says Phase 2.
  */
 function useRefetchOnServerRender(serverRenderedAt: number) {
   const client = useQueryClient();

@@ -34,13 +34,21 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
           Renders nothing. It subscribes to `vizserve_pms_notifications` filtered
           to `user_id=eq.<me>` — the same predicate as the "notifications read
-          own" policy — and calls `router.refresh()`, which re-runs this layout
-          and therefore re-runs the count inside `<SidebarPanel>`. No count is
-          computed in the browser and there is no second source of truth for it.
+          own" policy. No count is computed in the browser and there is no second
+          source of truth for it: the payload is thrown away unread and the
+          number comes back through a scoped read.
 
-          ⚠️ P11-05 moved that query behind a Suspense boundary, which does not
-          change this: a refresh still re-renders the panel, it just no longer
-          holds the page back while it does.
+          ⚠️ P11-05 moved that query behind a Suspense boundary, which did not
+          change this: a refresh still re-rendered the panel, it just no longer
+          held the page back while it did.
+
+          ⚠️ P12-02 CHANGED WHAT THE PING DOES, AND THIS LAYOUT NO LONGER
+          RE-RENDERS FOR IT. The hook called `router.refresh()` — a full server
+          render of the shell for every notification anybody received. It now
+          invalidates `qk.snapshot()`, which `sidebar-snapshot.tsx` is observing,
+          so the rail refetches its own numbers and nothing on the server runs at
+          all. `<QueryProvider>` above is what makes that legal here: the hook
+          calls `useQueryClient()`, so this component must stay inside it.
         */}
         <RealtimeNotifications userId={context.userId} />
 

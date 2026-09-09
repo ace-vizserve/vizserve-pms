@@ -145,8 +145,11 @@ function useComposer({
 
       // Cleared only on success, and the composer stays open: adding tasks is
       // something people do in runs of five.
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
+      /* ⚠️ NOT A DUPLICATE ROUND TRIP — holds the transition open until the
+         fresh data lands. Without it `useOptimistic` reverts the moment the
+         action resolves and the placeholder row vanishes before the real one
+         arrives. Removed once and restored (`a64b06c` → `ded2244`); P12-02
+         re-checked it against Next 16's action queue and kept it. See
          `tasks/inline.tsx` for the full account. */
       router.refresh();
       setDraft(EMPTY);

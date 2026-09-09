@@ -22,7 +22,20 @@ import type { QueryKey } from "@tanstack/react-query";
 
 import { qk } from "./keys";
 
-export const INVALIDATES: Record<string, readonly QueryKey[]> = {
+/*
+ * ⚠️ `satisfies`, NOT `: Record<string, …>`, AND THE DIFFERENCE IS THE WHOLE
+ * SAFETY NET FOR THIS FILE.
+ *
+ * An annotation would widen the keys to `string`, and `RealtimeTable` below
+ * would then be `string` — which is how a subscription on a table nobody mapped
+ * becomes a SILENT NO-OP. Under `router.refresh()` an unmapped table still
+ * worked, because the refresh re-rendered everything regardless of which table
+ * had moved; under invalidation it moves nothing at all, and nothing on screen
+ * or in the console says so. `satisfies` keeps the keys literal, so the union is
+ * the real list and `useRealtimeRefresh` refuses an unmapped table AT COMPILE
+ * TIME. Adding a subscription now forces you to add the row here.
+ */
+export const INVALIDATES = {
   vizserve_pms_tasks: [qk.tasks(), qk.snapshot()],
   /*
    * ⚠️ BOTH ROOTS, AND THE SINGULAR ONE IS THE EASY MISS. A comment lives at
@@ -48,7 +61,17 @@ export const INVALIDATES: Record<string, readonly QueryKey[]> = {
    * notification arriving would have moved nothing at all.
    */
   vizserve_pms_notifications: [qk.snapshot(), qk.unread(), ["inbox"]],
-};
+} satisfies Record<string, readonly QueryKey[]>;
+
+/**
+ * Every table a subscription is allowed to name.
+ *
+ * ⚠️ THIS UNION IS THE LOUD VERSION OF THE GAP. `useRealtimeRefresh` takes this
+ * type rather than `string`, so watching a table with no row above is a
+ * typecheck failure in `npm run verify` instead of a channel that opens, joins,
+ * receives events and invalidates nothing.
+ */
+export type RealtimeTable = keyof typeof INVALIDATES;
 
 /**
  * The keys one table event invalidates.
@@ -56,7 +79,49 @@ export const INVALIDATES: Record<string, readonly QueryKey[]> = {
  * An unlisted table returns nothing rather than sweeping the cache. A table
  * nobody has mapped is a table nobody is displaying live, and guessing wide
  * would make every unmapped write refetch the whole app.
+ *
+ * ⚠️ STILL TAKES A PLAIN `string`, ON PURPOSE. The compile-time guard lives on
+ * `RealtimeTable`; this function is the runtime half, and it has to be able to
+ * answer for a name that got past the type — a cast, a value read from a
+ * migration, a table dropped from the map while a subscription still names it.
+ * `[]` is the honest answer and `invalidateForTable` is what makes it audible.
  */
 export function invalidatedBy(table: string): readonly QueryKey[] {
-  return INVALIDATES[table] ?? [];
+  return (INVALIDATES as Record<string, readonly QueryKey[]>)[table] ?? [];
+}
+
+/**
+ * What a realtime ping does now: invalidate the keys, fetch nothing.
+ *
+ * ⚠️ EXTRACTED FROM THE HOOK SO IT CAN BE TESTED WITHOUT RENDERING ONE. The
+ * client is a parameter and it is structurally typed, so a hand-written object
+ * literal that records its calls is a complete test double — no mocking
+ * framework, which `tests/unit/query-layer.test.ts` explains is a rule here and
+ * not a preference. `QueryClient` satisfies this shape as it stands.
+ *
+ * ⚠️ INVALIDATION IS NOT A FETCH. `invalidateQueries` marks matching entries
+ * stale and refetches only the ones something is currently OBSERVING — so a ping
+ * for a key no mounted component reads costs a cache flag and no round trip.
+ * That is the entire difference from `router.refresh()`, which re-rendered the
+ * whole route whether anything on screen cared or not.
+ *
+ * Returns the keys it touched so the caller can tell "invalidated nothing"
+ * apart from "invalidated something", which is the distinction the old
+ * refresh-everything behaviour made impossible to see.
+ */
+export type RealtimeInvalidator = {
+  invalidateQueries: (filters: { queryKey: QueryKey }) => unknown;
+};
+
+export function invalidateForTable(
+  client: RealtimeInvalidator,
+  table: string,
+): readonly QueryKey[] {
+  const keys = invalidatedBy(table);
+  for (const queryKey of keys) {
+    // Deliberately not awaited: `invalidateQueries` resolves when the refetches
+    // it triggered settle, and a realtime ping has nobody to report that to.
+    void client.invalidateQueries({ queryKey });
+  }
+  return keys;
 }

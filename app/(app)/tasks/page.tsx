@@ -296,11 +296,20 @@ export default async function TasksPage({
         P8-03 — the list refreshes itself when a task in one of this
         person's departments changes.
 
-        Renders nothing. On a row event it calls `router.refresh()`, which
-        re-runs THIS server component — so every query above runs again
-        under RLS, with the same filters and the same sort, and the rows
-        that come back are the rows a navigation would have produced. No
-        row is patched into client state.
+        Renders nothing, and patches no row into client state — the payload
+        is thrown away unread and the data comes back through a scoped read.
+
+        ⚠️ P12-02 NARROWED THIS AND THE NARROWING IS TEMPORARY. The ping
+        used to call `router.refresh()`, which re-ran THIS server component
+        so every query above went again under RLS. It now invalidates
+        `qk.tasks()` and `qk.snapshot()` (`lib/query/realtime.ts`). Only the
+        rail observes the second one today, so a COLLEAGUE's change moves
+        the counts in the sidebar and does NOT repaint these rows until you
+        navigate. Your own changes still repaint, from the Server Action's
+        `revalidatePath`. Phase 3 moves this page onto `qk.taskList` and the
+        rows come back live; do not put `router.refresh()` back in the hook
+        to close the gap early — that is the three-renders-per-mutation
+        storm P12-02 removed.
 
         The scope comes from `realtimeDepartmentFilter`, which is narrower
         than the SELECT policy on purpose: a task assigned to you in

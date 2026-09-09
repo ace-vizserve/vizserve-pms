@@ -160,14 +160,25 @@ export default async function TaskBoardPage({
     <PageShell className="h-[calc(100svh-3.5rem)] min-h-0 gap-3 overflow-hidden">
       {/*
         P8-03 — the board is the screen this matters most on, because it is
-        the one people leave open. A colleague moving a card, or a Gate 1
-        approval creating a task, now redraws it within a moment instead of
-        on the next navigation.
+        the one people leave open.
 
-        Renders nothing, and patches nothing into the columns: the ping
-        triggers `router.refresh()` and the whole board is re-queried under
-        RLS. That is why a card can never appear here that the policy would
-        have refused — the payload is thrown away unread.
+        Renders nothing, and patches nothing into the columns: the payload
+        is thrown away unread, so a card can never appear here that the
+        policy would have refused.
+
+        ⚠️ P12-02 IS A REGRESSION ON THIS PARTICULAR SCREEN AND IT IS KNOWN.
+        The ping used to call `router.refresh()` and the whole board was
+        re-queried under RLS, so a colleague moving a card redrew it within
+        a moment. It now invalidates `qk.tasks()` and `qk.snapshot()`, and
+        nothing on this page observes `qk.tasks()` yet — the board still
+        reads its columns in RSC. So the rail's counts stay live and the
+        CARDS wait for a navigation unless you were the one who moved them
+        (the Server Action's `revalidatePath` still repaints for you).
+
+        Phase 3 puts the board on `qk.taskBoard` and this comes back. The
+        trade was deliberate: restoring the refresh here means every
+        notification anybody receives costs a full server render of the
+        shell, which is the storm P12-02 exists to stop.
       */}
       <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
 

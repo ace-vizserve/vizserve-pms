@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
+import { invalidateForTable, type RealtimeTable } from "@/lib/query/realtime";
 import { createClient } from "@/utils/supabase/client";
 
 /**
@@ -11,16 +13,34 @@ import { createClient } from "@/utils/supabase/client";
  *
  * ⚠️ A SUBSCRIPTION HERE IS A PING, NOT A DATA CHANNEL, AND THAT IS THE WHOLE
  * DESIGN. The postgres_changes payload is never read, never merged into state
- * and never rendered. All this hook does is call `router.refresh()`, which
- * re-runs the server component that owns the page — so the data comes back
- * through RSC and RLS exactly as it does on a navigation.
+ * and never rendered. All this hook does is mark the query keys that event could
+ * have touched as stale — the data still comes back through a query, under RLS,
+ * shaped the way every other read is shaped.
  *
  * The alternative, patching rows into client state from the payload, was
  * rejected outright. It creates a second source of truth that drifts from the
  * database the first time a policy, a trigger or a derived column disagrees with
  * the row on the wire, and the drift is invisible: the screen looks right. It
- * also means the browser holds row data that the RSC render would have filtered,
- * shaped or joined. A refresh is slower and cannot be wrong.
+ * also means the browser holds row data that a scoped read would have filtered,
+ * shaped or joined. A re-read is slower and cannot be wrong.
+ *
+ * ⚠️ P12-02 CHANGED THE REACTION AND NOTHING ELSE. This was `router.refresh()`,
+ * which re-rendered the WHOLE ROUTE — layout, rail and page — for every
+ * notification anybody received. Completing a task therefore cost three full
+ * server renders of the shell: the Server Action's `revalidatePath` payload, a
+ * `router.refresh()` at the control, and this ping 300ms later. It is now
+ * `invalidateForTable`, which marks the mapped keys stale and refetches only
+ * what something is actually observing (`lib/query/realtime.ts`).
+ *
+ * ⚠️ THE COST OF THAT, WRITTEN DOWN HONESTLY: a page whose data is still
+ * SERVER-rendered no longer redraws on somebody else's write. `/tasks`,
+ * `/tasks/board`, `/tasks/[id]` and `/requests` read their rows in RSC, so the
+ * keys this now invalidates have no observer there yet and a colleague moving a
+ * card will not repaint your board until you navigate. The rail is the part that
+ * does update, because `sidebar-snapshot.tsx` reads `qk.snapshot()` from the
+ * cache. Phases 3 and 4 move those pages onto the same keys and the behaviour
+ * comes back wider than it was — do NOT restore `router.refresh()` here to close
+ * the gap in the meantime; that is the three-render storm again.
  *
  * ⚠️ THE FILTER IS EVALUATED SERVER-SIDE AND RLS RUNS ON TOP OF IT. A
  * filtered-out event never leaves the database, and an event that survives the
@@ -33,8 +53,19 @@ import { createClient } from "@/utils/supabase/client";
 export type RealtimeRefreshEvent = "*" | "INSERT" | "UPDATE" | "DELETE";
 
 export type UseRealtimeRefreshOptions = {
-  /** The published table to watch. Only what P8-03's migration publishes works. */
-  table: string;
+  /**
+   * The published table to watch. Only what P8-03's migration publishes works.
+   *
+   * ⚠️ `RealtimeTable`, NOT `string`, AND THAT IS THE POINT. The type is the key
+   * set of `INVALIDATES` in `lib/query/realtime.ts`, so a table nobody has
+   * mapped cannot be subscribed to at all. Under `router.refresh()` an unmapped
+   * table still worked — the refresh repainted everything regardless of what had
+   * changed — so the omission cost nothing and left no trace. Under invalidation
+   * it is a channel that joins, receives events and moves NOTHING, with no error
+   * anywhere: the silent death this file's other comments exist to prevent.
+   * A typecheck failure is the loudest place to find that out.
+   */
+  table: RealtimeTable;
   /**
    * A Postgres Changes filter string — `column=eq.value`, `column=in.(a,b)`.
    *
@@ -51,7 +82,7 @@ export type UseRealtimeRefreshOptions = {
   /** Escape hatch for a page that wants the subscription conditionally. */
   enabled?: boolean;
   /**
-   * Fired alongside the refresh, debounced with it.
+   * Fired alongside the invalidation, debounced with it.
    *
    * ⚠️ TAKES NO ARGUMENT, ON PURPOSE. There is nowhere to put the payload
    * because the payload is never read — a toast built from `payload.new.title`
@@ -73,6 +104,33 @@ export type UseRealtimeRefreshOptions = {
  * over the width of a single transaction's event burst.
  */
 const REFRESH_DEBOUNCE_MS = 300;
+
+/**
+ * ⚠️ THE SECOND HALF OF "AN UNMAPPED TABLE MUST NOT BE A SILENT NO-OP".
+ *
+ * `RealtimeTable` closes the door at compile time and that is the door that
+ * matters; this is the runtime backstop for the ways past it — a cast, a name
+ * widened to `string` somewhere on the way in, or a row deleted from
+ * `INVALIDATES` while a subscription still asks for it. `console.error`, not
+ * `warn`: unlike the degrade below this is not a capability that is merely
+ * switched off, it is a subscription that will run for the life of the page and
+ * do nothing at all.
+ *
+ * Once per table, for the same reason `reportOnce` is once per channel — a
+ * message repeated on every navigation is a message nobody reads.
+ */
+const unmapped = new Set<string>();
+
+function reportUnmapped(table: string) {
+  if (unmapped.has(table)) return;
+  unmapped.add(table);
+
+  console.error(
+    `[realtime] ${table} has no row in INVALIDATES (lib/query/realtime.ts). The channel will ` +
+      `subscribe and receive events, and every one of them will invalidate nothing — this used ` +
+      `to work by accident because the reaction was router.refresh(). Map the table.`,
+  );
+}
 
 /**
  * ⚠️ ONE BROWSER CLIENT FOR THE WHOLE TAB, AND IT IS CREATED LAZILY.
@@ -178,8 +236,8 @@ function reportOnce(channelName: string, status: string) {
 let channelSequence = 0;
 
 /**
- * Subscribes to one published table and refreshes the current route when it
- * changes. Renders nothing, returns nothing.
+ * Subscribes to one published table and invalidates the query keys that table
+ * can have touched when it changes. Renders nothing, returns nothing.
  */
 export function useRealtimeRefresh({
   table,
@@ -189,6 +247,7 @@ export function useRealtimeRefresh({
   onPing,
   event = "*",
 }: UseRealtimeRefreshOptions): void {
+  const queryClient = useQueryClient();
   const router = useRouter();
 
   /*
@@ -204,15 +263,46 @@ export function useRealtimeRefresh({
   }, [onPing]);
 
   /*
-   * `router.refresh` pulled out as a stable callback so the effect depends on
-   * one function rather than on the whole router object. `useRouter()` returns a
-   * stable instance today, but that is an implementation detail and this effect
-   * opens a websocket — it should not be re-run because an unrelated router
-   * field changed identity.
+   * The reaction, pulled out as a stable callback so the effect depends on one
+   * function rather than on the whole client. `useQueryClient()` returns the one
+   * instance the provider holds — one per tab, per `lib/query/provider.tsx` —
+   * but that is an implementation detail of that file, and this effect opens a
+   * WEBSOCKET: it must not be torn down and rebuilt because something above
+   * changed identity. Exactly the reasoning that used to apply to `useRouter()`.
+   *
+   * ⚠️ IT REPORTS AN UNMAPPED TABLE RATHER THAN RETURNING QUIETLY. See
+   * `reportUnmapped` — an event that invalidates nothing is indistinguishable
+   * from an event that never arrived, and the old `router.refresh()` made the
+   * whole question moot by repainting the route either way.
    */
-  const refresh = useCallback(() => {
+  const invalidate = useCallback(() => {
+    const keys = invalidateForTable(queryClient, table);
+    if (keys.length === 0) reportUnmapped(table);
+
+    /*
+     * ⚠️ AND STILL `router.refresh()`, UNTIL PHASE 3. BOTH, ON PURPOSE.
+     *
+     * Invalidation only repaints something if a QUERY IS OBSERVING IT, and today
+     * exactly one is: the rail's `qk.snapshot()`. `/tasks`, `/tasks/board`,
+     * `/tasks/[id]` and `/requests` still read their rows in an RSC, so dropping
+     * the refresh here would have taken cross-user live updates with it — a
+     * colleague moving a card would stop repainting the board you left open,
+     * which is the entire feature P8-03 was built for. Your OWN changes would
+     * still land (the action revalidates), so the regression would show up only
+     * between two people and only on the screen nobody has open while testing.
+     *
+     * ⚠️ THIS IS NOT THE THREE-RENDER PROBLEM P12-02 IS ABOUT. That one was
+     * SELF-inflicted: your own click paying for a revalidate payload, a
+     * `router.refresh()` at the control, and this ping. A ping is now suppressed
+     * for your own writes at the control, so what is left here fires on SOMEBODY
+     * ELSE'S change — rare, and already what today costs.
+     *
+     * DELETE THIS THE DAY `qk.taskList` / `qk.taskBoard` / `qk.task` HAVE
+     * OBSERVERS (Phase 3). Not before, and not because a plan document says
+     * Phase 2 — see the same warning on `serverRenderedAt`.
+     */
     router.refresh();
-  }, [router]);
+  }, [queryClient, table, router]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -225,8 +315,8 @@ export function useRealtimeRefresh({
      * ⚠️ STRICT MODE DOUBLE-INVOKES THIS EFFECT IN DEVELOPMENT (React 19), and
      * the body is ASYNC — `await setAuth()` means the setup can resolve AFTER
      * the cleanup has already run. Without this flag the second invocation
-     * leaves a channel nobody holds a reference to, subscribed forever, pinging
-     * a router from an unmounted tree.
+     * leaves a channel nobody holds a reference to, subscribed forever, writing
+     * into the query cache from an unmounted tree.
      */
     let cancelled = false;
     let channel: RealtimeChannel | null = null;
@@ -256,7 +346,7 @@ export function useRealtimeRefresh({
       timer = setTimeout(() => {
         timer = null;
         if (cancelled) return;
-        refresh();
+        invalidate();
         onPingRef.current?.();
       }, REFRESH_DEBOUNCE_MS);
     };
@@ -345,5 +435,5 @@ export function useRealtimeRefresh({
       teardown(channel);
       channel = null;
     };
-  }, [table, filter, channelName, enabled, event, refresh]);
+  }, [table, filter, channelName, enabled, event, invalidate]);
 }

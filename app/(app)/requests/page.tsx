@@ -225,10 +225,18 @@ export default async function RequestsPage({
         THIS QUEUE GOES LIVE ANYWAY BECAUSE APPROVING AT GATE 1 CREATES A
         TASK. `vizserve_pms_approve_request` inserts into
         `vizserve_pms_tasks` in the request's department, and that INSERT
-        is an event the filtered task stream already carries. The refresh
-        it triggers re-runs this whole server component, so the request
-        rows come back fresh through their own RLS — the task channel is
-        only the doorbell.
+        is an event the filtered task stream already carries — the task
+        channel is only the doorbell.
+
+        ⚠️ P12-02 MUTED THAT DOORBELL FOR THIS PAGE, DELIBERATELY AND
+        TEMPORARILY. The ping used to `router.refresh()`, which re-ran this
+        whole server component so the request rows came back fresh through
+        their own RLS. It now invalidates `qk.tasks()` and `qk.snapshot()`,
+        and this page reads its rows in RSC — so the RAIL's awaiting-review
+        count still moves live and the TABLE below waits for a navigation.
+        The subscription stays mounted rather than being deleted: Phase 4
+        puts this page on `qk.requests(f)`, at which point the same event
+        moves the rows again with no code change here.
 
         ⚠️ THE HONEST GAP: a second Team Leader RETURNING or REJECTING a
         request writes no task, so nothing is published and this page will

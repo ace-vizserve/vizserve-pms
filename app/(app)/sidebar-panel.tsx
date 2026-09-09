@@ -105,8 +105,18 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
     <SidebarFromSnapshot
       sections={sections}
       /*
-       * ⚠️ THE OLD REFRESH SIGNAL, FORWARDED — and it is load-bearing until
-       * Phase 2 swaps `use-realtime-refresh.ts` onto the cache.
+       * ⚠️ THE OLD REFRESH SIGNAL, FORWARDED — and it is STILL load-bearing
+       * after P12-02, which is not what the plan said would happen.
+       *
+       * Phase 2 was meant to retire this once `use-realtime-refresh.ts` stopped
+       * calling `router.refresh()`. It has stopped, and this stays anyway:
+       * realtime degrades to "off for the rest of this page view" on a single
+       * `CHANNEL_ERROR` by design, task mutations do not get their own
+       * `onSettled` invalidation until Phase 3, and the realtime task filter is
+       * narrower than what the rail counts. Delete it now and the rail freezes
+       * after every mutation for anybody whose socket is down. The full argument
+       * is above `useRefetchOnServerRender` in `sidebar-snapshot.tsx`; it goes
+       * in PHASE 3, with the `useMutation` conversion.
        *
        * Every mutation here ends in `revalidatePath` and `router.refresh()`,
        * which re-runs this server component. That is how the rail's counts used
