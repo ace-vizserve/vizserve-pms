@@ -339,9 +339,16 @@ export function TaskStatusSelect({
                   </p>
 
                   {showsCurrent ? (
-                    <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium">
+                    <div className="flex items-center gap-2 px-3 py-1.5 text-xs">
                       <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
-                      {TASK_STATUS_LABELS[status]}
+                      {/* ⚠️ THE SAME BADGE THE ROW, THE CARD AND THE HEADER DRAW.
+                          Ace, 9 Sep. This list was the one place a stage was
+                          plain text, so the thing you are picking looked like a
+                          different kind of object from the thing you get — and
+                          the tone is how people find a stage without reading.
+                          `TaskStatusBadge` carries its label, so the colour is
+                          never the only signal. */}
+                      <TaskStatusBadge status={status} />
                       <span className="ml-auto text-2xs text-muted-foreground">now</span>
                     </div>
                   ) : null}
@@ -378,12 +385,23 @@ export function TaskStatusSelect({
                         {/* Indented to sit under the tick rather than beside
                           it, so the current row reads as the odd one out. */}
                         <span className="size-3.5 shrink-0" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate">
-                          {/* The transition's OWN wording where it has one —
-                            "Send for QA" says more than "For QA". Free
-                            movement has no wording of its own, and there
-                            `label` is already the status name. */}
-                          {transition.label}
+                        {/*
+                          ⚠️ THE BADGE IS THE DESTINATION; THE WORDING IS THE ACT.
+                          They are not the same sentence and the row needs both.
+                          "Send for QA" says more than "For QA" — it names what
+                          pressing this does — but the badge is what makes the
+                          stage recognisable at a glance and matches the chip the
+                          row, the card and the page header already draw.
+
+                          Where the transition has no wording of its own the
+                          label IS the status name, so printing both would say it
+                          twice; the badge alone carries it.
+                        */}
+                        <span className="flex min-w-0 flex-1 items-center gap-2">
+                          <TaskStatusBadge status={transition.to} className="shrink-0" />
+                          {transition.label === TASK_STATUS_LABELS[transition.to] ? null : (
+                            <span className="min-w-0 truncate">{transition.label}</span>
+                          )}
                         </span>
                         {blocked ? (
                           <span className="shrink-0 text-2xs text-muted-foreground">

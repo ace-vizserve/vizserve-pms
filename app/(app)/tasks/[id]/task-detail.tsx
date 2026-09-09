@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, ArrowRight, ChevronRight } from "lucide-react";
 import Link from "next/link";
@@ -9,14 +10,8 @@ import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { RealtimeTasks } from "@/components/realtime-refresh";
 import { Chip } from "@/components/status-badge";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { RichTextClient } from "@/components/ui/rich-text-client";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
@@ -33,14 +28,10 @@ import {
   fetchVisibleLists,
 } from "@/lib/query/fetchers/task";
 import { qk } from "@/lib/query/keys";
-import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
 import { richTextToPlainText } from "@/lib/rich-text";
-import {
-  TASK_STATUS_LABELS,
-  availableTransitions,
-  isTerminal,
-  taskCategory,
-} from "@/lib/schemas/tasks";
+import { cn } from "@/lib/utils";
+import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
+import { TASK_STATUS_LABELS, availableTransitions, isTerminal, taskCategory } from "@/lib/schemas/tasks";
 
 import { CommentThread, type TaskActivityEvent } from "../comment-thread";
 import { AddSubtask } from "../inline";
@@ -108,6 +99,16 @@ import { TaskSurface } from "./task-surface";
  * capitals): hiding a control protects nobody, and every rule here is re-checked
  * in `vizserve_pms_transition_task` and in both tasks policies.
  */
+/**
+ * How many History rows a collapsed panel shows.
+ *
+ * Twelve, because a task that has been round QA twice is already about that
+ * long — so the common case shows the WHOLE trail and the button never appears.
+ * It is a ceiling on the pathological task, not a default that hides the
+ * ordinary one.
+ */
+const HISTORY_COLLAPSED = 12;
+
 export type TaskSeat = {
   userId: string;
   /**
@@ -177,6 +178,25 @@ export function TaskDetail({
   const coverage = taskQuery.data?.coverage ?? [];
 
   const hasRequest = Boolean(task?.request_id);
+
+  /*
+   * ⚠️ THE AUDIT LOG IS THE ONE PANEL WITH NO CEILING. Ace, 9 Sep. Every move a
+   * task ever made is a row, and unlike Activity or the comment thread it never
+   * stops growing — a task that has been round QA a few times runs past a
+   * screenful, and the cards below it get pushed off the page for somebody who
+   * only wanted the last three moves.
+   *
+   * A "Show more" button rather than paging. Paging an audit trail is the wrong
+   * shape: there is no page anybody wants to be on, the interesting rows are
+   * always the newest, and a reader who genuinely needs the whole thing wants it
+   * as one column they can scroll and search with the browser — not eight at a
+   * time with the trail broken across boundaries.
+   *
+   * Collapsed state only. It resets when the panel unmounts, which is right for
+   * a log: expanding it is a thing you do to answer one question, not a
+   * preference about how you read every task.
+   */
+  const [historyExpanded, setHistoryExpanded] = useState(false);
 
   const historyQuery = useQuery({
     queryKey: qk.taskPart(taskId, "history"),
@@ -290,9 +310,7 @@ export function TaskDetail({
   const commentRows = commentsQuery.data ?? [];
   const children = subtasksQuery.data ?? [];
   const outputs = attachmentsQuery.data ?? [];
-  const lists = (listsQuery.data ?? []).filter(
-    (list) => list.department_id === task.department_id,
-  );
+  const lists = (listsQuery.data ?? []).filter((list) => list.department_id === task.department_id);
   const people = peopleQuery.data ?? [];
 
   /*
@@ -304,8 +322,7 @@ export function TaskDetail({
    * panel exists precisely to say that somebody HAS.
    */
   const briefDiffers = Boolean(
-    brief?.description &&
-      richTextToPlainText(brief.description) !== richTextToPlainText(task.description ?? ""),
+    brief?.description && richTextToPlainText(brief.description) !== richTextToPlainText(task.description ?? ""),
   );
 
   const nameOf = new Map(people.map((person) => [person.id, person.full_name]));
@@ -357,9 +374,7 @@ export function TaskDetail({
    * with no user row, and attributing their decision to whoever happened to be
    * signed in would be a lie in the one record a dispute turns on.
    */
-  const clientNameAt = new Map(
-    decisions.map((decision) => [decision.created_at, decision.approver_name]),
-  );
+  const clientNameAt = new Map(decisions.map((decision) => [decision.created_at, decision.approver_name]));
 
   const activity: TaskActivityEvent[] = history
     /*
@@ -373,8 +388,7 @@ export function TaskDetail({
     .map((entry) => {
       const returnedByClient = entry.from_status === "FOR_CLIENT_APPROVAL";
       const returnedByQa =
-        (entry.from_status === "FOR_QA" || entry.from_status === "QA_IN_PROGRESS") &&
-        entry.to_status === "ONGOING";
+        (entry.from_status === "FOR_QA" || entry.from_status === "QA_IN_PROGRESS") && entry.to_status === "ONGOING";
 
       const kind = returnedByClient ? "client" : returnedByQa ? "qa" : "note";
 
@@ -470,8 +484,7 @@ export function TaskDetail({
    * who could legally fix a wrong due date opened the task and found it
    * read-only. A permission nobody can reach is not a permission.
    */
-  const canWork =
-    viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment;
+  const canWork = viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment;
 
   /**
    * Who this work can be given to. The department's own people, which is the
@@ -518,7 +531,7 @@ export function TaskDetail({
       <BreadcrumbLabel value={task.title} />
 
       <Link
-        href="/tasks"
+        href={`/tasks?list=${task.list_id}`}
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-3.5" />
         All tasks
@@ -540,8 +553,8 @@ export function TaskDetail({
       */}
       {peopleQuery.isError ? (
         <p role="alert" className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs">
-          Names could not be loaded, so people on this page are shown as unnamed. Nobody has been
-          unassigned — this is a fault. {peopleQuery.error.message}
+          Names could not be loaded, so people on this page are shown as unnamed. Nobody has been unassigned — this is a
+          fault. {peopleQuery.error.message}
         </p>
       ) : null}
 
@@ -599,10 +612,8 @@ export function TaskDetail({
           <p className="rounded-sm border border-info/30 bg-info-subtle px-3 py-2 text-xs">
             {coverage.map((row) => (
               <span key={row.reliever_id}>
-                Covered by{" "}
-                <span className="font-medium">{nameOf.get(row.reliever_id) ?? "a colleague"}</span>{" "}
-                until {formatDate(row.end_date)}, while{" "}
-                {nameOf.get(row.absent_user_id) ?? "the assignee"} is on leave.
+                Covered by <span className="font-medium">{nameOf.get(row.reliever_id) ?? "a colleague"}</span> until{" "}
+                {formatDate(row.end_date)}, while {nameOf.get(row.absent_user_id) ?? "the assignee"} is on leave.
               </span>
             ))}
           </p>
@@ -642,9 +653,7 @@ export function TaskDetail({
                     submittedAt: brief?.submitted_at ?? request?.submitted_at ?? null,
                     requesterName: request?.requester_name ?? null,
                     reviewedAt: request?.reviewed_at ?? null,
-                    reviewedByName: request?.reviewed_by
-                      ? (nameOf.get(request.reviewed_by) ?? null)
-                      : null,
+                    reviewedByName: request?.reviewed_by ? (nameOf.get(request.reviewed_by) ?? null) : null,
                   }
                 : null
             }
@@ -796,9 +805,7 @@ export function TaskDetail({
                           when they asked, and whether anything is attached. */}
                         <p className="mt-0.5 text-2xs text-muted-foreground">
                           {[
-                            brief.submitted_at
-                              ? `submitted ${formatDate(brief.submitted_at)}`
-                              : null,
+                            brief.submitted_at ? `submitted ${formatDate(brief.submitted_at)}` : null,
                             brief.attachments.length > 0
                               ? `${brief.attachments.length} ${brief.attachments.length === 1 ? "file" : "files"}`
                               : null,
@@ -879,9 +886,7 @@ export function TaskDetail({
                                 {field.label}
                                 {/* A historical answer must keep rendering with
                                   its label after the field is retired (D20/R5). */}
-                                {!field.is_active ? (
-                                  <span className="ml-1 text-2xs">(archived)</span>
-                                ) : null}
+                                {!field.is_active ? <span className="ml-1 text-2xs">(archived)</span> : null}
                               </dt>
                               <dd className="min-w-0 wrap-break-word">{rendered}</dd>
                             </div>
@@ -903,10 +908,7 @@ export function TaskDetail({
                               {brief.attachments.length === 1 ? "Attached file" : "Attached files"}
                             </dt>
                             <dd className="min-w-0">
-                              <RequestAttachmentList
-                                taskId={task.id}
-                                attachments={brief.attachments}
-                              />
+                              <RequestAttachmentList taskId={task.id} attachments={brief.attachments} />
                             </dd>
                           </div>
                         ) : null}
@@ -946,11 +948,7 @@ export function TaskDetail({
                     <p className="text-xs text-muted-foreground">Loading…</p>
                   </section>
                 ) : (
-                  <SubtaskList
-                    subtasks={children}
-                    nameOf={nameOf}
-                    canAdd={canWork && !isTerminal(task.status)}
-                  />
+                  <SubtaskList subtasks={children} nameOf={nameOf} canAdd={canWork && !isTerminal(task.status)} />
                 )
               }
               actions={
@@ -980,9 +978,7 @@ export function TaskDetail({
             <Card size="sm">
               <CardHeader>
                 <CardTitle>Activity</CardTitle>
-                <CardDescription className="text-xs">
-                  Comments, QA and client replies
-                </CardDescription>
+                <CardDescription className="text-xs">Comments, QA and client replies</CardDescription>
                 {/* The count in the header, so the rail is scannable without
                   reading the thread — and so an empty one says so before you
                   look for a composer.
@@ -992,10 +988,7 @@ export function TaskDetail({
                   the two halves arrive from two different keys. */}
                 <CardAction>
                   <span className="text-2xs text-muted-foreground">
-                    {commentsQuery.isError ||
-                    historyQuery.isError ||
-                    commentsQuery.isPending ||
-                    historyQuery.isPending
+                    {commentsQuery.isError || historyQuery.isError || commentsQuery.isPending || historyQuery.isPending
                       ? null
                       : commentRows.length + activity.length === 0
                         ? "Nothing yet"
@@ -1092,8 +1085,17 @@ export function TaskDetail({
                   /* The longest thing on the page — a task round QA twice already
                    runs a dozen entries, each a single line unless it carries a
                    comment, so `space-y-3` spent more height on gaps than trail. */
-                  <ol className="space-y-1.5">
-                    {history.map((entry) => (
+                  /* `max-h-96` collapsed, and it SCROLLS rather than clipping —
+                     an audit trail that silently ends mid-row would be worse
+                     than a long one. Expanded it takes whatever height it
+                     needs, because the point of expanding is to read it. */
+                  <ol
+                    className={cn(
+                      "space-y-1.5",
+                      !historyExpanded && history.length > HISTORY_COLLAPSED && "max-h-96 overflow-y-auto pr-1",
+                    )}
+                  >
+                    {(historyExpanded ? history : history.slice(0, HISTORY_COLLAPSED)).map((entry) => (
                       <li key={entry.id} className="border-l-2 pl-2.5 text-sm">
                         <div className="flex flex-wrap items-baseline gap-x-2">
                           {/* An icon, never a typed arrow. A glyph in a text run
@@ -1106,10 +1108,7 @@ export function TaskDetail({
                             {entry.from_status ? (
                               <>
                                 {TASK_STATUS_LABELS[entry.from_status]}
-                                <ArrowRight
-                                  className="size-3.5 shrink-0 text-foreground-faint"
-                                  aria-hidden
-                                />
+                                <ArrowRight className="size-3.5 shrink-0 text-foreground-faint" aria-hidden />
                                 {TASK_STATUS_LABELS[entry.to_status]}
                               </>
                             ) : (
@@ -1132,14 +1131,31 @@ export function TaskDetail({
                           A forced move's reason has nowhere else to be, and it is
                           the half of the record an audit turns on. */}
                         {entry.is_override && entry.comment ? (
-                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-muted-foreground">
-                            {entry.comment}
-                          </p>
+                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-muted-foreground">{entry.comment}</p>
                         ) : null}
                       </li>
                     ))}
                   </ol>
                 )}
+
+                {/* ⚠️ IT SAYS HOW MANY, because "Show more" alone does not tell
+                    somebody whether the answer they are looking for is two rows
+                    down or forty. Rendered only when there is more — a button
+                    that reveals nothing is a button that teaches people to stop
+                    pressing it. */}
+                {!historyQuery.isPending && !historyQuery.isError && history.length > HISTORY_COLLAPSED ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2 w-full text-xs"
+                    onClick={() => setHistoryExpanded((shown) => !shown)}
+                  >
+                    {historyExpanded
+                      ? "Show fewer"
+                      : `Show all ${history.length} moves`}
+                  </Button>
+                ) : null}
               </CardContent>
             </Card>
           </div>
