@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useMemo, useOptimistic, useState, useTransition } from "react";
+import { useCallback, useMemo, useOptimistic, useState, useTransition } from "react";
 import { Check, Search, UserPlus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -91,10 +91,26 @@ export function Monogram({
 /**
  * The assignee cell: a stack of monograms that opens a searchable picker.
  *
- * Grouped the way the reference groups it — who is already on the task, then
- * everybody who could be. Somebody already on it is shown TICKED rather than
- * filtered out of the list, because a name missing from a picker reads as "not
- * allowed" when the answer is "already there".
+ * Somebody already on the task is shown TICKED rather than filtered out of the
+ * list, because a name missing from a picker reads as "not allowed" when the
+ * answer is "already there".
+ *
+ * ⚠️ P11-11 — THE LIST DOES NOT MOVE AND NOTHING IS DISABLED WHILE IT SAVES.
+ *
+ * Two halves of one bug. Every row and the trigger itself carried
+ * `disabled={pending}`, so one click froze the whole picker for a round trip —
+ * and the row you had just pressed was the focused element, so disabling it
+ * dropped focus to `<body>` and took the popover down with it. Meanwhile the
+ * person you had added was filtered out of "People" and re-rendered in a group
+ * above, which pulled every remaining row up by its own height. Adding three
+ * people meant three round trips, three reopenings, and three chances to hit
+ * the wrong name on the way back.
+ *
+ * So membership of the list comes from `candidates` — the department, which a
+ * click does not change — and being on the task is a tick on a row that stays
+ * where it is. Nothing mounts, unmounts or moves on a click: focus never leaves
+ * the button, the popover cannot close underneath the pointer, and the clicks
+ * queue instead of taking turns.
  */
 export function AssigneePicker({
   taskId,
@@ -136,45 +152,99 @@ export function AssigneePicker({
   const [query, setQuery] = useState("");
 
   /*
-   * P11-05 — THE MONOGRAM APPEARS ON THE CLICK.
+   * P11-05 — THE TICK MOVES ON THE CLICK.
    *
    * Adding somebody used to leave the picker unchanged for a round trip: the row
-   * you had just pressed still sat under "People", so the natural reading was
-   * that the click had missed and the natural response was to press it again.
+   * you had just pressed sat there unmarked, so the natural reading was that the
+   * click had missed and the natural response was to press it again.
    *
-   * Only the OTHERS list is optimistic. The person in charge is `assignee_id`,
-   * a different column changed by a different control (P7-14), and predicting a
-   * reassignment here would draw a rank the data does not claim.
+   * WHO is on the task is optimistic; WHERE the row sits is not. The set is
+   * carried as ids rather than people so that the person in charge belongs to it
+   * on an internal task (P7-43), where they are removable like anybody else and
+   * the tick has to clear on the click too.
    */
-  const [shownOthers, applyChange] = useOptimistic(
-    others,
-    (state: Person[], change: { person: Person; add: boolean }) =>
+  const serverOnTask = useMemo(
+    () => [...(pic ? [pic.id] : []), ...others.map((person) => person.id)],
+    [pic, others],
+  );
+
+  const [onTaskIds, applyChange] = useOptimistic(
+    serverOnTask,
+    (state: string[], change: { person: Person; add: boolean }) =>
       change.add
-        ? [...state, change.person]
-        : state.filter((row) => row.id !== change.person.id),
+        ? state.includes(change.person.id)
+          ? state
+          : [...state, change.person.id]
+        : state.filter((id) => id !== change.person.id),
   );
 
-  const onTask = useMemo(
-    () => new Set([pic?.id, ...shownOthers.map((person) => person.id)].filter(Boolean) as string[]),
-    [pic, shownOthers],
+  const onTask = useMemo(() => new Set(onTaskIds), [onTaskIds]);
+
+  /** Every person this control can name, so an optimistic id resolves to a face. */
+  const byId = useMemo(() => {
+    const map = new Map<string, Person>();
+    for (const person of [...(pic ? [pic] : []), ...others, ...candidates]) {
+      map.set(person.id, person);
+    }
+    return map;
+  }, [pic, others, candidates]);
+
+  /*
+   * THE LIST, and it is built from `candidates` — never from who is on the task.
+   * That is the whole point: a click flips a tick and moves nothing, so the name
+   * under the pointer is still the name under the pointer.
+   *
+   * `others` only contributes somebody the department list does not already
+   * carry — an assignee who has since moved department, who still has to be
+   * visible and removable rather than stranded on the row with no way off it.
+   */
+  const people = useMemo(() => {
+    const seen = new Set<string>();
+    const rows: Person[] = [];
+    for (const person of [...candidates, ...(pic ? [pic] : []), ...others]) {
+      // The person in charge of a CLIENT task is drawn above, not in the list:
+      // they are not removable here, so a tick that cannot be cleared would be
+      // a control that does nothing.
+      if (showPic && person.id === pic?.id) continue;
+      if (seen.has(person.id)) continue;
+      seen.add(person.id);
+      rows.push(person);
+    }
+    return rows;
+  }, [candidates, others, pic, showPic]);
+
+  const matches = useCallback(
+    (person: Person) => {
+      const needle = query.trim().toLowerCase();
+      return !needle || person.full_name.toLowerCase().includes(needle);
+    },
+    [query],
   );
 
-  const available = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return candidates
-      .filter((person) => !onTask.has(person.id))
-      .filter((person) => !needle || person.full_name.toLowerCase().includes(needle));
-  }, [candidates, onTask, query]);
+  const visible = useMemo(() => people.filter(matches), [people, matches]);
 
-  const assigned = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    const all = [
-      ...(pic ? [{ ...pic, isPic: showPic }] : []),
-      ...shownOthers.map((p) => ({ ...p, isPic: false })),
-    ];
-    return all.filter((person) => !needle || person.full_name.toLowerCase().includes(needle));
-  }, [pic, shownOthers, query, showPic]);
+  /** The monogram stack, PIC first — optimistic, so a click shows immediately. */
+  const stack = useMemo(
+    () =>
+      onTaskIds
+        .filter((id) => id !== pic?.id)
+        .map((id) => byId.get(id))
+        .filter((person): person is Person => Boolean(person)),
+    [onTaskIds, pic, byId],
+  );
 
+  const picOnTask = pic ? onTask.has(pic.id) : false;
+
+  /*
+   * ⚠️ THIS RETURNS BEFORE THE ROUND TRIP AND IS MEANT TO BE CALLED AGAIN.
+   *
+   * `startTransition` with an async body returns immediately, so a second click
+   * starts a second transition rather than queueing behind the first, and React
+   * holds BOTH optimistic changes until each one's own payload lands. That is
+   * how three people go on to a task in three clicks instead of three waits —
+   * and it only works because nothing in the picker is disabled while `pending`
+   * is true.
+   */
   function run(
     action: () => Promise<{ ok: boolean; error?: string }>,
     success: string,
@@ -198,7 +268,7 @@ export function AssigneePicker({
 
   const trigger = (
     <span className="inline-flex items-center">
-      {pic ? (
+      {pic && picOnTask ? (
         <Monogram
           id={pic.id}
           name={pic.full_name}
@@ -207,21 +277,21 @@ export function AssigneePicker({
           label={showPic ? `${pic.full_name} — person in charge` : pic.full_name}
         />
       ) : null}
-      {shownOthers.slice(0, 2).map((person, index) => (
+      {stack.slice(0, 2).map((person, index) => (
         <Monogram
           key={person.id}
           id={person.id}
           name={person.full_name}
           // Overlapped, with a surface ring so two tiles never read as one shape.
-          className={cn("ring-2 ring-card", pic || index > 0 ? "-ml-1.5" : undefined)}
+          className={cn("ring-2 ring-card", picOnTask || index > 0 ? "-ml-1.5" : undefined)}
         />
       ))}
-      {shownOthers.length > 2 ? (
+      {stack.length > 2 ? (
         <span className="-ml-1.5 flex size-6 shrink-0 items-center justify-center rounded-full border bg-muted text-2xs font-semibold tabular-nums text-muted-foreground ring-2 ring-card">
-          +{shownOthers.length - 2}
+          +{stack.length - 2}
         </span>
       ) : null}
-      {!pic && shownOthers.length === 0 ? (
+      {!picOnTask && stack.length === 0 ? (
         <span
           className={cn(
             "flex size-6 shrink-0 items-center justify-center rounded-full border border-dashed text-muted-foreground",
@@ -245,17 +315,19 @@ export function AssigneePicker({
         if (!next) setQuery("");
       }}
     >
+      {/* ⚠️ NOT `disabled={pending}`. Disabling the trigger of an OPEN popover
+          pulls focus out of the popup, and Base UI closes on the way out — the
+          picker vanished mid-click and the page jumped back to the restored
+          focus. `aria-busy` says the same thing without taking the control
+          away. */}
       <PopoverTrigger
-        disabled={pending}
+        aria-busy={pending}
         aria-label={
-          pic || shownOthers.length
-            ? `Assignees: ${[pic?.full_name, ...shownOthers.map((p) => p.full_name)].filter(Boolean).join(", ")}. Change them.`
+          picOnTask || stack.length
+            ? `Assignees: ${[picOnTask ? pic?.full_name : null, ...stack.map((p) => p.full_name)].filter(Boolean).join(", ")}. Change them.`
             : "Unassigned. Add somebody."
         }
-        className={cn(
-          "rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          "disabled:cursor-not-allowed disabled:opacity-60",
-        )}
+        className="rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
       >
         {trigger}
       </PopoverTrigger>
@@ -282,75 +354,86 @@ export function AssigneePicker({
             carrying its own `formAction`, so add and remove are real form
             actions with React owning the transition — without a form per row
             inside a scrolling list. */}
-        <form className="max-h-72 overflow-y-auto py-1">
-          {assigned.length > 0 ? (
+        <form className="max-h-72 overflow-y-auto py-1" aria-busy={pending}>
+          {/* The accountable name on a CLIENT task, above the list and out of
+              it. The word, not a tint: taking it off is a reassignment, a
+              different act with its own control and its own department rule
+              (P7-14). On an INTERNAL task `showPic` is false, this is skipped,
+              and that person is a row in the list like everybody else (P7-43). */}
+          {showPic && pic && matches(pic) ? (
             <>
-              <p className={GROUP}>Assignees</p>
-              {assigned.map((person) => (
-                <div key={person.id} className={cn(ROW, "cursor-default")}>
-                  <Monogram id={person.id} name={person.full_name} />
-                  <span className="min-w-0 flex-1 truncate font-medium">{person.full_name}</span>
-
-                  {person.isPic ? (
-                    // The word, not a tint. Removing the accountable name is a
-                    // reassignment and does not belong in this control.
-                    //
-                    // P7-43: reached only on a CLIENT task. On an internal one
-                    // `showPic` is false, this branch never runs, and the same
-                    // person gets the remove button below like everybody else.
-                    <span className="shrink-0 text-2xs text-muted-foreground">PIC</span>
-                  ) : (
-                    <button
-                      type="submit"
-                      disabled={pending}
-                      formAction={() =>
-                        run(
-                          () => removeTaskAssignee(taskId, person.id),
-                          `${person.full_name} is no longer on this task`,
-                          { person, add: false },
-                        )
-                      }
-                      aria-label={`Remove ${person.full_name} from this task`}
-                      className="shrink-0 rounded-sm p-1 text-muted-foreground hover:bg-destructive-subtle hover:text-destructive disabled:opacity-50"
-                    >
-                      <X className="size-3.5" aria-hidden />
-                    </button>
-                  )}
-                </div>
-              ))}
+              <p className={GROUP}>Person in charge</p>
+              <div className={cn(ROW, "cursor-default")}>
+                <Monogram id={pic.id} name={pic.full_name} />
+                <span className="min-w-0 flex-1 truncate font-medium">{pic.full_name}</span>
+                <span className="shrink-0 text-2xs text-muted-foreground">PIC</span>
+              </div>
             </>
           ) : null}
 
           <p className={GROUP}>People</p>
 
-          {candidates.length === 0 ? (
+          {people.length === 0 ? (
             <p className="px-3 py-1.5 text-2xs text-muted-foreground">
               Nobody else in this task&rsquo;s department.
             </p>
-          ) : available.length === 0 ? (
-            <p className="px-3 py-1.5 text-2xs text-muted-foreground">
-              {query.trim() ? "Nobody by that name." : "Everybody is already on this task."}
-            </p>
+          ) : visible.length === 0 ? (
+            <p className="px-3 py-1.5 text-2xs text-muted-foreground">Nobody by that name.</p>
           ) : (
-            available.map((person) => (
-              <button
-                key={person.id}
-                type="submit"
-                disabled={pending}
-                formAction={() =>
-                  run(
-                    () => addTaskAssignee(taskId, person.id),
-                    `${person.full_name} added to this task`,
-                    { person, add: true },
-                  )
-                }
-                className={cn(ROW, "hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none")}
-              >
-                <Monogram id={person.id} name={person.full_name} />
-                <span className="min-w-0 flex-1 truncate text-left">{person.full_name}</span>
-                <Check className="size-3.5 shrink-0 opacity-0" aria-hidden />
-              </button>
-            ))
+            visible.map((person) => {
+              const on = onTask.has(person.id);
+              return (
+                /* One row, two directions. It is the SAME button whether the
+                   person is on the task or not, so a click never unmounts the
+                   element it landed on. */
+                <button
+                  key={person.id}
+                  type="submit"
+                  aria-pressed={on}
+                  formAction={() =>
+                    on
+                      ? run(
+                          () => removeTaskAssignee(taskId, person.id),
+                          `${person.full_name} is no longer on this task`,
+                          { person, add: false },
+                        )
+                      : run(
+                          () => addTaskAssignee(taskId, person.id),
+                          `${person.full_name} added to this task`,
+                          { person, add: true },
+                        )
+                  }
+                  className={cn(
+                    ROW,
+                    "group hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none",
+                  )}
+                >
+                  <Monogram id={person.id} name={person.full_name} />
+                  <span className={cn("min-w-0 flex-1 truncate text-left", on && "font-medium")}>
+                    {person.full_name}
+                  </span>
+                  {/* A tick, not a tint — and it becomes the × that removes
+                      them on hover or focus, so the way off the task is where
+                      the way on to it was. Both are shapes; neither is the only
+                      carrier, because `aria-pressed` states it outright. */}
+                  <span className="relative size-3.5 shrink-0">
+                    <Check
+                      className={cn(
+                        "absolute inset-0 size-3.5 text-primary",
+                        on ? "group-hover:opacity-0 group-focus-visible:opacity-0" : "opacity-0",
+                      )}
+                      aria-hidden
+                    />
+                    {on ? (
+                      <X
+                        className="absolute inset-0 size-3.5 text-destructive opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100"
+                        aria-hidden
+                      />
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })
           )}
         </form>
 
