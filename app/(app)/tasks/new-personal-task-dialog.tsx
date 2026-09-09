@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -28,6 +28,18 @@ import type { TaskPriority } from "@/lib/schemas/tasks";
 
 import { createPersonalTask, createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
+import { ChevronsUpDown } from "lucide-react";
+
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
 import { PriorityPicker } from "./priority-picker";
 import { FieldError } from "@/components/ui/field-error";
 
@@ -67,9 +79,16 @@ export function NewPersonalTaskDialog({
   departmentId,
   trigger = "toolbar",
   requireList = false,
+  requirePriority = false,
 }: {
   /** The member's own department's lists. Optional — a task needs no list. */
-  lists: { id: string; name: string }[];
+  /**
+   * ⚠️ `owner_id` IS FOR GROUPING, NOT FILTERING. RLS returns exactly two kinds
+   * of row: the department's lists (`owner_id is null`) and the reader's OWN
+   * personal lists. Nobody else's can come back. Optional so the callers that
+   * do not select it keep working — they simply get one ungrouped run.
+   */
+  lists: { id: string; name: string; owner_id?: string | null }[];
   /**
    * The list the reader is already filtered to, from `?list=`. Pre-selected so
    * a task created while looking at a list lands IN that list — see the note in
@@ -104,6 +123,18 @@ export function NewPersonalTaskDialog({
    * no tasks at all, where the option is a trap.
    */
   requireList?: boolean;
+  /**
+   * Ace, 9 Sep, alongside `requireList` and for the neighbouring reason: a
+   * quick-filed task with no priority is one nobody will rank later. The home
+   * page is where work is created in a hurry and never revisited, so the two
+   * fields that decide whether it is FINDABLE and whether it is ORDERED are
+   * both asked for there.
+   *
+   * Opt-in, like `requireList`. On `/tasks` an unranked task is fine — the
+   * reader is looking at the list and can set it inline in one click, which is
+   * what `InlinePriority` is for.
+   */
+  requirePriority?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
@@ -137,6 +168,42 @@ export function NewPersonalTaskDialog({
    * its own, so it joins the controlled-state-plus-hidden-input arrangement
    * the paragraph above describes.
    */
+  const [listOpen, setListOpen] = useState(false);
+  const [listQuery, setListQuery] = useState("");
+
+  /*
+   * ⚠️ GROUPED THE WAY THE RAIL GROUPS, and the heading is the same words.
+   * `nav-personal.tsx` calls the fixed node "Personal Space"; a picker that
+   * called it something else would be a second name for one thing. A personal
+   * list is not part of the department's shape — it is in no folder, nobody
+   * else can see it — so mixing it into one alphabetical run is how somebody
+   * files team work into a private list by mistake.
+   *
+   * `owner_id` is optional on the prop, so a caller that does not select it
+   * gets every list under the department heading rather than a crash.
+   */
+  const listGroups = useMemo(() => {
+    const term = listQuery.trim().toLowerCase();
+    const matching = term
+      ? lists.filter((list) => list.name.toLowerCase().includes(term))
+      : lists;
+
+    return [
+      { heading: "Lists", lists: matching.filter((list) => !list.owner_id) },
+      { heading: SPACE_NAME, lists: matching.filter((list) => Boolean(list.owner_id)) },
+    ];
+  }, [lists, listQuery]);
+
+  const listMatches = useMemo(
+    () => listGroups.flatMap((group) => group.lists),
+    [listGroups],
+  );
+
+  const listLabel =
+    listId === NO_LIST
+      ? "No list"
+      : (lists.find((list) => list.id === listId)?.name ?? "No list");
+
   const [description, setDescription] = useState("");
   // Optional on this dialog, so both start empty and stay clearable.
   const [startDate, setStartDate] = useState<string | null>(null);
@@ -145,13 +212,6 @@ export function NewPersonalTaskDialog({
   const assigneeItems = {
     [MINE]: "Myself",
     ...Object.fromEntries(colleagues.map((person) => [person.id, person.full_name])),
-  };
-  const listItems = {
-    // The option is absent, not disabled, when a list is required — a control
-    // that offers a choice it will then refuse is worse than one that does not
-    // offer it.
-    ...(requireList ? {} : { [NO_LIST]: "No list" }),
-    ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
   };
   const [pending, startTransition] = useTransition();
 
@@ -182,8 +242,24 @@ export function NewPersonalTaskDialog({
      * says why instead of posting a null the server would file into nowhere.
      * The database is unchanged: `list_id` is nullable and legitimately so.
      */
+    const missing: Record<string, string[]> = {};
+
     if (requireList && !String(formData.get("list_id") ?? "")) {
-      setErrors({ list_id: ["Pick a list — a task with no list will not appear in the sidebar."] });
+      missing.list_id = ["Pick a list — a task with no list will not appear in the sidebar."];
+    }
+
+    if (requirePriority && priority === null) {
+      missing.priority = ["Pick a priority."];
+    }
+
+    /*
+     * ⚠️ BOTH AT ONCE, NOT THE FIRST ONE. Returning on the earlier failure alone
+     * would make somebody fix the list, submit again, and only then be told
+     * about the priority — the two-round-trip form the rest of this dialog
+     * avoids by collecting `fieldErrors` from the server in one pass.
+     */
+    if (Object.keys(missing).length > 0) {
+      setErrors(missing);
       return;
     }
 
@@ -372,29 +448,98 @@ export function NewPersonalTaskDialog({
                   name="list_id"
                   value={listId === NO_LIST ? "" : listId}
                 />
-                <Select
-                  items={listItems}
-                  value={listId}
-                  onValueChange={(value) => value !== null && setListId(value)}
-                >
-                  <SelectTrigger id="list_id" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={NO_LIST}>No list</SelectItem>
-                    {lists.map((list) => (
-                      <SelectItem key={list.id} value={list.id}>
-                        {list.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/*
+                  ⚠️ A COMBOBOX, NOT A SELECT, AND THE REASON IS THE LENGTH.
+                  A department with thirty lists is a scroll with no way to
+                  narrow it, and this dialog is the QUICK action — the one place
+                  somebody is not already looking at the list they mean. The
+                  reliever picker (P11-11) made the same move for the same
+                  reason and is the pattern this follows: `shouldFilter={false}`
+                  with a plain substring test, headings while browsing, one flat
+                  run while searching.
+
+                  `h-72` on the panel, per Ace. `max-h-full` on the list so the
+                  input stays pinned and only the rows scroll under it.
+                */}
+                <Popover open={listOpen} onOpenChange={setListOpen}>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        id="list_id"
+                        type="button"
+                        variant="outline"
+                        disabled={pending}
+                        className="w-full justify-between font-normal"
+                      >
+                        <span className={listId === NO_LIST ? "text-muted-foreground" : "truncate"}>
+                          {listLabel}
+                        </span>
+                        <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" aria-hidden />
+                      </Button>
+                    }
+                  />
+                  <PopoverContent className="h-72 w-[min(28rem,100vw)] p-0" align="start">
+                    <Command shouldFilter={false}>
+                      <CommandInput
+                        placeholder="Search lists"
+                        value={listQuery}
+                        onValueChange={setListQuery}
+                      />
+                      <CommandList className="max-h-full">
+                        {listMatches.length === 0 ? (
+                          <CommandEmpty>No list matches &ldquo;{listQuery.trim()}&rdquo;.</CommandEmpty>
+                        ) : null}
+
+                        {/* Offered only when a list is optional — see `requireList`. */}
+                        {!requireList && !listQuery.trim() ? (
+                          <CommandItem
+                            value={NO_LIST}
+                            onSelect={() => {
+                              setListId(NO_LIST);
+                              setListOpen(false);
+                            }}
+                          >
+                            <span aria-hidden className="w-3 shrink-0 text-center">
+                              {listId === NO_LIST ? "✓" : ""}
+                            </span>
+                            <span className="text-muted-foreground">No list</span>
+                          </CommandItem>
+                        ) : null}
+
+                        {listGroups.map((group) =>
+                          group.lists.length === 0 ? null : (
+                            <CommandGroup key={group.heading} heading={group.heading}>
+                              {group.lists.map((list) => (
+                                <CommandItem
+                                  key={list.id}
+                                  value={list.id}
+                                  onSelect={() => {
+                                    setListId(list.id);
+                                    setListOpen(false);
+                                  }}
+                                >
+                                  <span aria-hidden className="w-3 shrink-0 text-center">
+                                    {list.id === listId ? "✓" : ""}
+                                  </span>
+                                  <span className="truncate">{list.name}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          ),
+                        )}
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
                 <FieldError messages={errors.list_id} />
               </div>
             ) : null}
           </div>
 
-          <PriorityPicker value={priority} onChange={setPriority} disabled={pending} />
+          <div className="space-y-2">
+            <PriorityPicker value={priority} onChange={setPriority} disabled={pending} />
+            <FieldError messages={errors.priority} />
+          </div>
 
           {errors.form?.length ? <FieldError messages={errors.form} /> : null}
 
@@ -430,4 +575,11 @@ const MINE = "__mine__";
  * is not this component's to change.
  */
 const NO_LIST = "__none__";
+
+/**
+ * ⚠️ THE SAME WORDS THE RAIL USES. `components/app-shell/nav-personal.tsx`
+ * names its fixed node "Personal Space"; two names for one thing is how
+ * somebody concludes they are two things.
+ */
+const SPACE_NAME = "Personal Space";
 

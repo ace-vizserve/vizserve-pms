@@ -40,7 +40,21 @@ export async function HomeNewTaskAction() {
     await Promise.all([
     // RLS scopes this to the reader's own department — no filter needed here,
     // and adding one would imply the policy were optional.
-    supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
+    /*
+     * ⚠️ `owner_id` IS SELECTED SO THE PICKER CAN GROUP, not so it can filter.
+     * RLS already returns exactly two kinds of row here — the department's
+     * lists (`lists readable in department`, which carries `owner_id is null`)
+     * and the reader's OWN personal lists (`personal lists belong to their
+     * owner`). Nobody else's personal list can come back. The column is what
+     * lets the dialog put the second kind under "Personal Space", the way the
+     * rail does, instead of mixing them into one alphabetical run where a
+     * private list is indistinguishable from a team one.
+     */
+    supabase
+      .from("vizserve_pms_lists")
+      .select("id, name, owner_id")
+      .eq("is_active", true)
+      .order("name"),
     // `.neq` on themselves: "Myself" is the dialog's default rather than a row
     // in the picker, because the two choices call two different functions and
     // produce two different `is_personal` values.
@@ -90,6 +104,7 @@ export async function HomeNewTaskAction() {
        * appears in the view the reader is already looking at.
        */
       requireList
+      requirePriority
     />
   );
 }
