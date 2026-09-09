@@ -50,8 +50,10 @@
  */
 import type { QueryClient, QueryKey } from "@tanstack/react-query";
 
+import type { CacheSnapshot } from "./write-cache";
+
 import { qk, type TaskPart } from "./keys";
-import { markLocalWrite } from "./local-write";
+import { beginWrite, cancelRefetches, rollbackWrite } from "./write-cache";
 
 /**
  * The columns a control writes, as they are named in the database.
@@ -70,7 +72,7 @@ export type TaskFields = Record<string, unknown>;
  * references, so restoring is a pointer swap rather than a rebuild, and a
  * refused write leaves the cache indistinguishable from before it was pressed.
  */
-export type TaskCacheSnapshot = readonly (readonly [QueryKey, unknown])[];
+export type TaskCacheSnapshot = CacheSnapshot;
 
 /**
  * THE TWO ROOTS A TASK LIVES UNDER, and both are needed.
@@ -93,71 +95,31 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /* -------------------------------------------------------------------------- */
 
 /**
- * Stop the refetches that would overwrite the paint, then remember what was
- * there.
+ * ⚠️ P12-16 — THE THREE BELOW ARE NOW THIN NAMED WRAPPERS OVER
+ * `lib/query/write-cache.ts`, WHICH HOLDS THEIR BODIES AND THEIR REASONING.
  *
- * ⚠️ `cancelQueries` FIRST, AND IT IS NOT CEREMONY. A refetch already in flight
- * resolves with rows written BEFORE this mutation and would land on top of the
- * optimistic value a beat later — the field flicks to the new value, then back
- * to the old one, then forward again when `onSettled` lands. It is the same
- * visible symptom as `ded2244` arriving through a completely different door.
+ * Nothing about the behaviour changed and nothing about the ordering did: the
+ * snapshot is still synchronous, `cancelTaskRefetches` is still fired after the
+ * patch rather than awaited before it, and `rollbackTaskWrite` is still the
+ * whole of `onError`. Read that file for WHY each of those is the way round it
+ * is — both were paid for here.
  *
- * Awaited, and it is the only await in the optimistic path: cancellation is
- * local bookkeeping, not a round trip.
+ * They kept their task-shaped names because eighteen call sites read them, and
+ * because `TASK_ROOTS` is the part that is genuinely about tasks. Phase 4 added
+ * four more domains needing exactly this bookkeeping over different roots, and
+ * five copies of a rollback is five chances at the one failure in the optimistic
+ * path that is completely silent when it is wrong.
  */
 export function beginTaskWrite(client: QueryClient): TaskCacheSnapshot {
-  /*
-   * ⚠️ MARKED HERE BECAUSE EVERY OPTIMISTIC WRITE STARTS HERE. The realtime
-   * ping this write is about to produce is our own echo, and re-fetching what
-   * `onSettled` has already asked for doubled every mutation. See
-   * `lib/query/local-write.ts`.
-   */
-  markLocalWrite();
-
-  /*
-   * ⚠️ SYNCHRONOUS, AND `cancelQueries` IS DELIBERATELY NOT AWAITED HERE.
-   *
-   * This function used to open with
-   * `await Promise.all(TASK_ROOTS.map(k => client.cancelQueries(k)))`, which is
-   * what TanStack's guide shows — and it put the visible update BEHIND A
-   * NETWORK CANCELLATION. Something is almost always in flight (the rail RPC
-   * alone takes ~1.3s), so the click waited on that before the cache was
-   * touched at all. Ace's report was exact: "why is state update taking so
-   * long? not instant?"
-   *
-   * The cancellation is still needed — it stops an in-flight refetch landing
-   * after the patch and overwriting it — but it does NOT have to happen before
-   * the patch. It only has to happen before that refetch resolves. So the
-   * snapshot and the patch are synchronous, and `cancelTaskRefetches` below is
-   * fired immediately after by the caller.
-   */
-  return TASK_ROOTS.flatMap((queryKey) => client.getQueriesData({ queryKey }));
+  return beginWrite(client, TASK_ROOTS);
 }
 
-/**
- * Stop an in-flight refetch landing on top of a patch that has already been
- * applied.
- *
- * ⚠️ FIRED, NEVER AWAITED, AND CALLED AFTER THE PATCH. Awaiting it is what made
- * the click feel slow; see `beginTaskWrite`. The race it closes is a refetch
- * that STARTED before the patch and RESOLVES after it — and that resolution is
- * milliseconds away at best, so firing this in the same tick is early enough.
- */
 export function cancelTaskRefetches(client: QueryClient): void {
-  for (const queryKey of TASK_ROOTS) void client.cancelQueries({ queryKey });
+  cancelRefetches(client, TASK_ROOTS);
 }
 
-/**
- * Put every entry back exactly as it was.
- *
- * ⚠️ THIS IS THE WHOLE OF `onError`, AND LEAVING IT OUT IS SILENT. A refused
- * write with no rollback leaves the browser showing a value the database
- * refused, with a toast that scrolls away — the inline editors' own rule
- * (`inline.tsx`) says a refusal must PUT THE OLD VALUE BACK, because an editor
- * holding the new one is lying about the state of the database.
- */
 export function rollbackTaskWrite(client: QueryClient, snapshot: TaskCacheSnapshot): void {
-  for (const [queryKey, data] of snapshot) client.setQueryData(queryKey, data);
+  rollbackWrite(client, snapshot);
 }
 
 /* -------------------------------------------------------------------------- */

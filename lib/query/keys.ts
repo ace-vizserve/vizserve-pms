@@ -102,7 +102,26 @@ export const qk = {
   task: (id: string) => ["task", id] as const,
   taskPart: (id: string, part: TaskPart) => ["task", id, part] as const,
 
-  /** Lists and folders for the management screen. Department-scoped by policy. */
+  /**
+   * One department's lists.
+   *
+   * ⚠️ DEFINED, AND STILL READ BY NOTHING AFTER PHASE 4 — which is a statement
+   * about the shape rather than an oversight, so it is written down here instead
+   * of being rediscovered a third time. Two consumers have now looked at this
+   * key and both needed a different row set:
+   *
+   *   * `/tasks`, `/tasks/board` and `/tasks/[id]` want every ACTIVE list the
+   *     reader may see, across departments → `listsVisible()` below.
+   *   * `/tasks/lists` wants every DEPARTMENT list in scope, archived ones
+   *     included and personal ones excluded → `listsManaged()` below.
+   *
+   * Neither is "department x's lists", and writing either here would have meant
+   * whichever fetcher ran last won the entry. It is kept rather than deleted
+   * because a genuinely per-department read is a plausible thing to want (a
+   * picker on a screen that already knows its department), and because the
+   * `["lists"]` prefix it sits under is what `realtime.ts` invalidates — so the
+   * day something does use it, the plumbing is already right.
+   */
   lists: (departmentId: string) => ["lists", departmentId] as const,
 
   /**
@@ -130,6 +149,38 @@ export const qk = {
    * `qk.lists(…)` together.
    */
   listsVisible: () => ["lists", "visible"] as const,
+
+  /**
+   * P12-16 — THE LIST MANAGEMENT SCREEN'S ROW SET. `/tasks/lists`, and only it.
+   *
+   * ⚠️ A THIRD ENTRY UNDER `["lists"]` RATHER THAN A REUSE OF EITHER SIBLING,
+   * for the same reason `listsVisible` is not `lists(departmentId)`: the rows
+   * differ, not merely the columns.
+   *
+   *   * ARCHIVED LISTS AND ARCHIVED FOLDERS ARE INCLUDED. This is the only
+   *     screen from which an archived list or folder can be brought back, so
+   *     filtering them out here would make that impossible from the one place it
+   *     is offered. `listsVisible()` filters `is_active = true` on purpose — an
+   *     archived list must not appear in the `/tasks` filter dropdown — so the
+   *     two row sets are not a subset either way round.
+   *   * PERSONAL LISTS ARE EXCLUDED (P11-06). This screen is how a DEPARTMENT is
+   *     organised; a personal list is in no folder and belongs to a person, and
+   *     is made and renamed from the sidebar's Personal lists group instead.
+   *     ⚠️ NOT REDUNDANT WITH RLS — the policy lets the caller read their OWN
+   *     personal lists, so without the `owner_id is null` filter a lead would
+   *     find their private lists sitting in their department's tree here,
+   *     offered a folder picker the check constraint refuses.
+   *
+   * ONE ENTRY FOR EVERY DEPARTMENT IN SCOPE, not one per department, because
+   * this screen renders them all at once — a lead of two departments sees two
+   * sections. The whole payload is folders, lists and open counts together,
+   * since a rename, an archive and a move all touch more than one of the three
+   * and three keys would be three refetches with nothing to tell them apart.
+   *
+   * Under `["lists"]` so `realtime.ts` sweeps it with the rest: it maps both
+   * `vizserve_pms_lists` and `vizserve_pms_task_groups` to that prefix.
+   */
+  listsManaged: () => ["lists", "managed"] as const,
 
   // ── the two approval domains ────────────────────────────────────────────────
   // Separate prefixes on purpose. Client forms and internal approvals look

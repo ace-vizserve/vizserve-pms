@@ -5,7 +5,12 @@ import { redirect } from "next/navigation";
 
 import { createClient } from "@/utils/supabase/server";
 import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
-import { ROLE_ORDER, roleAtLeast, type Role } from "@/lib/auth/roles";
+import {
+  ROLE_ORDER,
+  canAccessDepartmentScope,
+  roleAtLeast,
+  type Role,
+} from "@/lib/auth/roles";
 
 /**
  * P0-05 — the single server-side authorization layer.
@@ -562,13 +567,17 @@ export async function requireAuthContextOrThrow(): Promise<AuthContext> {
  * as zero rows on a page that offered the button.
  *
  * Same reasoning, same rung, as `canDoHr` — see the note there.
+ *
+ * ⚠️ P12-15 — THE BODY MOVED TO `lib/auth/roles.ts` AND THIS DELEGATES. It is
+ * not a second implementation: `waitingOnMe` needed the same predicate in a
+ * CLIENT component once `/approvals` started reading from the query cache, and
+ * this module is `server-only` by design. `roles.ts` already holds the role
+ * ordering for exactly that reason. The decision still belongs here — every
+ * server caller keeps this name and this signature, and nothing about the scope
+ * rule was changed on the way.
  */
 export function canAccessDepartment(context: AuthContext, departmentId: string | null): boolean {
-  if (roleAtLeast(context.role, "owner")) return true;
-  if (!departmentId) return false;
-  return (
-    roleAtLeast(context.role, "team_leader") && context.managedDepartmentIds.includes(departmentId)
-  );
+  return canAccessDepartmentScope(context, departmentId);
 }
 
 export function assertDepartmentAccess(context: AuthContext, departmentId: string | null): void {

@@ -16,13 +16,35 @@ import { ListManager } from "./list-manager";
 export const metadata: Metadata = { title: "Lists" };
 
 /**
- * P3-01 — managing lists.
+ * P3-01 / P12-16 — managing lists: the SERVER half, which is auth and the
+ * department scope and nothing else.
  *
- * The table and the save action shipped with Phase 3; this screen did not, and
- * `revalidatePath("/tasks/lists")` was pointing at a route that returned 404 —
- * the same shape of gap `/admin/users` had. Without it a list can only be
- * created by hand in SQL, which makes the list filter on the task board and the
- * form's default list both permanently empty.
+ * ------------------------------------------------------------------------
+ * ⚠️ THIS FILE USED TO CARRY THE WHOLE SCREEN'S DATA — four queries whose
+ * results became four props, re-run in full by `revalidatePath("/tasks/lists")`
+ * every time somebody renamed a list. P12-16 moved them into the TanStack cache
+ * (`list-manager.tsx`, `lib/query/fetchers/lists.ts`) and left behind exactly
+ * the two things that must not move:
+ *
+ *   1. `requireAuthContext()` — the temporary-password wall, the `app_access`
+ *      gate and the deactivation check. Authentication does not go through the
+ *      cache, in any phase. It also runs in `app/(app)/layout.tsx` above this;
+ *      calling it here is what gives this file the CONTEXT, not what enforces
+ *      the gate.
+ *   2. THE DEPARTMENT SCOPE. `departmentTreeScope` lives in a `server-only`
+ *      module, so which departments this person may file a folder or list under
+ *      has to be resolved on this side of the wire and travel as a prop. That is
+ *      the same rule `/tasks` follows with its `viewer` — a client component
+ *      deciding its own scope is precisely the "scattered `if (role ===
+ *      'admin')`" CLAUDE.md exists to forbid.
+ *
+ * ⚠️ ONE QUERY SURVIVES HERE AND IT IS THE DEPARTMENTS, because it is the scope
+ * itself: `allowed` is the intersection of what RLS returns with what the tree
+ * scope permits, and the second half is server-only. It is the same read the
+ * client cache files as `qk.ref("departments")`; running it here is what makes
+ * the *filtered* list a fact this file is willing to assert rather than a rule
+ * the browser reapplies.
+ * ------------------------------------------------------------------------
  *
  * Team-leader and above: a list is how a department organises its own work
  * (Amier ~33:00), so the people who lead it own the shape of it.
@@ -55,51 +77,13 @@ export default async function ListsPage() {
   }
   const supabase = await createClient();
 
-  // All four are RLS-scoped: a TL sees the departments they lead and those
-  // departments' lists. No `.in()` needed, and restating it here would imply
-  // the policy were optional.
-  //
-  // The task counts used to be awaited on their own, after the department
-  // scoping below — but they depend on nothing computed there, so waiting was
-  // a round trip spent on nothing. Four independent reads, one wave.
-  const [{ data: lists }, { data: departments }, { data: groups }, { data: taskCounts }] =
-    await Promise.all([
-      supabase
-        .from("vizserve_pms_lists")
-        .select("id, name, description, department_id, is_active, sort_order, group_id, form_id")
-        // P11-06. This screen is how a DEPARTMENT is organised — folders, sort
-        // order, which team a list belongs to. None of it applies to a personal
-        // list, which is in no folder and belongs to a person; those are made and
-        // renamed from the sidebar's Personal lists group instead.
-        //
-        // ⚠️ NOT REDUNDANT WITH RLS. The policy lets the caller read their OWN
-        // personal lists, so without this a lead would find their private lists
-        // sitting in their department's tree here, offered a folder picker the
-        // check constraint refuses.
-        .is("owner_id", null)
-        .order("sort_order")
-        .order("name"),
-      supabase
-        .from("vizserve_pms_departments")
-        .select("id, name")
-        .eq("is_active", true)
-        .order("name"),
-      // P7-18. NO `is_active` FILTER, deliberately — same as the lists query above.
-      // This is the screen where an archived folder is un-archived, so filtering it
-      // out here would make that impossible from the only place it is offered.
-      supabase
-        .from("vizserve_pms_task_groups")
-        .select("id, name, description, department_id, is_active, sort_order, is_system")
-        .order("sort_order")
-        .order("name"),
-      // How many tasks each list holds, so nobody archives a list that is
-      // carrying live work without knowing.
-      supabase
-        .from("vizserve_pms_tasks")
-        .select("list_id")
-        .not("list_id", "is", null)
-        .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
-    ]);
+  // RLS-scoped: a TL sees the departments they lead. No `.in()` needed, and
+  // restating it here would imply the policy were optional.
+  const { data: departments } = await supabase
+    .from("vizserve_pms_departments")
+    .select("id, name")
+    .eq("is_active", true)
+    .order("name");
 
   /*
    * Which departments the pickers on this screen may file a folder or list
@@ -123,12 +107,6 @@ export default async function ListsPage() {
         ? []
         : (departments ?? []).filter((department) => scope.ids.includes(department.id));
 
-  const openByList = new Map<string, number>();
-  for (const row of taskCounts ?? []) {
-    if (!row.list_id) continue;
-    openByList.set(row.list_id, (openByList.get(row.list_id) ?? 0) + 1);
-  }
-
   return (
     <PageShell className="mx-auto w-full max-w-4xl">
       <div>
@@ -147,12 +125,7 @@ export default async function ListsPage() {
         </p>
       </div>
 
-      <ListManager
-        lists={lists ?? []}
-        groups={groups ?? []}
-        departments={allowed}
-        openCounts={Object.fromEntries(openByList)}
-      />
+      <ListManager departments={allowed} />
     </PageShell>
   );
 }

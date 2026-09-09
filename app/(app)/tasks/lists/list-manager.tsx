@@ -1,10 +1,13 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useMemo, useOptimistic, useState, useTransition } from "react";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 import { FolderPlus, Pencil, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
+import { QueryError } from "@/components/query-error";
+import { TableSkeleton } from "@/components/skeletons";
 import { Badge } from "@/components/ui/badge";
 import { Chip } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -28,30 +31,60 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
+import { browserClient } from "@/lib/query/browser-client";
+import { fetchManagedLists, type ManagedLists } from "@/lib/query/fetchers/lists";
+import { qk } from "@/lib/query/keys";
+import { fromAction } from "@/lib/query/mutate";
+import { beginWrite, cancelRefetches, rollbackWrite } from "@/lib/query/write-cache";
+import type { ManagedGroup, ManagedList } from "@/lib/schemas/lists";
+
 import { saveList, saveTaskGroup } from "../actions";
 
-type ListRow = {
-  id: string;
-  name: string;
-  description: string;
-  department_id: string;
-  is_active: boolean;
-  sort_order: number;
-  /** P7-18. Null is the top level — a folderless list. */
-  group_id: string | null;
-  /** P7-18. Set only on a form's auto-created inbox list. */
-  form_id: string | null;
-};
+/**
+ * P3-01 / P12-16 — managing lists, reading from the cache.
+ *
+ * ------------------------------------------------------------------------
+ * ⚠️ WHAT MOVED, AND WHAT THIS FILE STOPPED BEING.
+ *
+ * This was the largest client component in the repo and most of it was a
+ * hand-rolled cache: the whole tree arrived as four props from an RSC, a
+ * `useOptimistic` reducer patched a local copy of the list array so a rename
+ * would show before the round trip, and every save ended in `router.refresh()`
+ * held open inside a `startTransition` — because `useOptimistic` DROPS ITS VALUE
+ * the instant the transition that set it ends, so the transition had to outlive
+ * a full server re-render of four queries.
+ *
+ * All three of those are gone and one mechanism replaced them. `qk.listsManaged()`
+ * holds the tree, `onMutate` patches the entry (which keeps its value until
+ * something replaces it — nothing reverts, because nothing about it is scoped to
+ * a transition), and `onSettled` invalidates. The rename is instant and the
+ * refetch lands underneath a screen that already shows the right thing.
+ *
+ * ⚠️ AND `onError` IS NOW REAL CODE. React used to put the old name back for
+ * free. `rollbackWrite` restores the snapshot; without it a refused save would
+ * leave the new name on screen with a toast that scrolls away, which is exactly
+ * the failure `tasks/inline.tsx` forbids in capitals.
+ *
+ * ⚠️ THE DEPARTMENTS DID NOT MOVE AND MUST NOT. `departmentTreeScope()` lives in
+ * a `server-only` module, so which departments this person may file a folder or
+ * list under is resolved in `page.tsx` and arrives as a prop. No decision about
+ * what anybody may see or do is made in this file; `saveList` and `saveTaskGroup`
+ * re-check the department, and the lists and folders policies re-check it again.
+ * ------------------------------------------------------------------------
+ */
 
-type GroupRow = {
-  id: string;
-  name: string;
-  description: string;
-  department_id: string;
-  is_active: boolean;
-  sort_order: number;
-  is_system: boolean;
-};
+/*
+ * ⚠️ THE THREE ROW TYPES ARE THE CONTRACT'S NOW, NOT LOCAL DECLARATIONS.
+ *
+ * `ListRow` and `GroupRow` were written out by hand at the top of this file and
+ * had to match, field for field, a `.select()` string in a different file that
+ * nothing checked them against. They are `ManagedList` and `ManagedGroup` in
+ * `lib/schemas/lists.ts` now — parsed on arrival, so a dropped column is a
+ * sentence rather than an `undefined` that quietly reorganises a department.
+ * The aliases are kept because this file names them forty times.
+ */
+type ListRow = ManagedList;
+type GroupRow = ManagedGroup;
 
 type Department = { id: string; name: string };
 
@@ -63,33 +96,81 @@ type Department = { id: string; name: string };
  */
 const NO_FOLDER = "__none__";
 
-export function ListManager({
-  lists,
-  groups,
-  departments,
-  openCounts,
-}: {
-  lists: ListRow[];
-  groups: GroupRow[];
-  departments: Department[];
-  openCounts: Record<string, number>;
-}) {
+/** The Server Actions, as promises TanStack can drive `onError` off. */
+const writeList = fromAction(saveList);
+const writeGroup = fromAction(saveTaskGroup);
+
+/**
+ * ⚠️ ONE ROOT, AND IT IS THE PREFIX RATHER THAN THIS SCREEN'S KEY.
+ *
+ * `["lists"]` covers `qk.listsManaged()`, `qk.listsVisible()` and
+ * `qk.lists(departmentId)`. Snapshotting and rolling back the whole prefix is
+ * what makes a refused save put back everything a successful one would have
+ * moved — and `listsVisible` is genuinely in that set: archiving a list here
+ * removes it from the `/tasks` filter dropdown, and a rollback that restored
+ * only this screen's entry would leave the two disagreeing until the next
+ * refetch.
+ */
+const LIST_ROOTS = [["lists"]] as const;
+
+/*
+ * ⚠️ MODULE-SCOPED, AND THE IDENTITY IS THE POINT. `treeQuery.data?.lists ?? []`
+ * builds a NEW array on every render while the query is still pending, which
+ * makes the `useMemo`s below re-bucket the whole tree every time — the exact
+ * thing eslint's exhaustive-deps rule reports and the exact reason a stable
+ * reference matters more here than the allocation does.
+ */
+const NO_LISTS: ManagedList[] = [];
+const NO_GROUPS: ManagedGroup[] = [];
+const NO_COUNTS: Record<string, number> = {};
+
+/**
+ * Apply an edit to one row inside the cached tree.
+ *
+ * ⚠️ THE PATCH IS PARTIAL ON PURPOSE, exactly as the `useOptimistic` reducer it
+ * replaces was. A save can change a name, a description, whether it is archived
+ * and which folder it sits in, and spreading only what was sent leaves
+ * everything else exactly as the server last said it was.
+ *
+ * ⚠️ AN UNCHANGED ENTRY IS RETURNED BY REFERENCE. `setQueryData` notifies its
+ * observers whenever the value is not identical, so rebuilding an entry that did
+ * not contain the row would re-render the whole tree for nothing.
+ */
+function patchRow<K extends "lists" | "groups">(
+  client: QueryClient,
+  which: K,
+  id: string,
+  fields: Partial<ManagedLists[K][number]>,
+): void {
+  client.setQueryData<ManagedLists>(qk.listsManaged(), (current) => {
+    if (!current) return current;
+    let touched = false;
+    const rows = current[which].map((row) => {
+      if (row.id !== id) return row;
+      touched = true;
+      return { ...row, ...fields };
+    });
+    return touched ? { ...current, [which]: rows } : current;
+  });
+}
+
+export function ListManager({ departments }: { departments: Department[] }) {
   /*
-   * P11-05 — a renamed list carries its new name out of the dialog.
+   * ⚠️ ONE QUERY WHERE FOUR PROPS USED TO ARRIVE, and the folders, the lists and
+   * the open counts share the entry deliberately — `qk.listsManaged()` in
+   * `keys.ts` argues why at length. The short version: a rename, an archive and
+   * a move each touch more than one of the three.
    *
-   * ⚠️ THE OPTIMISTIC STATE LIVES HERE, NOT IN THE FORM, and it has to: the
-   * form is inside a dialog and the row it changes is behind that dialog. A
-   * `useOptimistic` in the form would repaint nothing anybody can see.
-   *
-   * The patch is partial on purpose — a save can change a name, a description,
-   * whether it is archived and which folder it sits in, and spreading only what
-   * was sent leaves everything else exactly as the server last said it was.
+   * ⚠️ `browserClient()` IS CALLED INSIDE THE `queryFn`, NEVER IN THIS BODY. A
+   * `"use client"` component is still RENDERED ON THE SERVER for its initial
+   * HTML, and `createBrowserClient` reaches for `document.cookie` — which is why
+   * that helper is lazy, and why calling it up here would move that reach into
+   * the server pass. A `queryFn` only ever runs in the browser.
    */
-  const [shownLists, patchList] = useOptimistic(
-    lists,
-    (state: ListRow[], patch: Partial<ListRow> & { id: string }) =>
-      state.map((row) => (row.id === patch.id ? { ...row, ...patch } : row)),
-  );
+  const treeQuery = useQuery({
+    queryKey: qk.listsManaged(),
+    queryFn: () => fetchManagedLists(browserClient()),
+  });
 
   const [editingList, setEditingList] = useState<ListRow | null>(null);
   const [listOpen, setListOpen] = useState(false);
@@ -97,6 +178,20 @@ export function ListManager({
   const [seedFolder, setSeedFolder] = useState<GroupRow | null>(null);
   const [editingGroup, setEditingGroup] = useState<GroupRow | null>(null);
   const [groupOpen, setGroupOpen] = useState(false);
+
+  /*
+   * ⚠️ THE THREE ARE READ OFF THE ENTRY, AND THE `?? []`S HERE ARE NOT THE
+   * `?? []`S P12-01 REMOVED.
+   *
+   * A failed read is caught below and renders `QueryError` before any of this is
+   * drawn — that is the whole rule (`lib/query/read.ts`). These defaults cover
+   * the FIRST RENDER, where `data` is `undefined` because nothing has come back
+   * yet, and the skeleton branch below is what is actually on screen for it. An
+   * empty tree can never reach the empty state by way of a failure.
+   */
+  const lists = treeQuery.data?.lists ?? NO_LISTS;
+  const groups = treeQuery.data?.groups ?? NO_GROUPS;
+  const openCounts = treeQuery.data?.openCounts ?? NO_COUNTS;
 
   /**
    * Lists bucketed by `${department}:${folder}`, folderless under `:none`.
@@ -106,14 +201,14 @@ export function ListManager({
    */
   const listsByGroup = useMemo(() => {
     const buckets = new Map<string, ListRow[]>();
-    for (const list of shownLists) {
+    for (const list of lists) {
       const key = `${list.department_id}:${list.group_id ?? "none"}`;
       const bucket = buckets.get(key) ?? [];
       bucket.push(list);
       buckets.set(key, bucket);
     }
     return buckets;
-  }, [shownLists]);
+  }, [lists]);
 
   /**
    * Folders per department, ORDERED WITH THE SYSTEM ONE LAST.
@@ -186,7 +281,32 @@ export function ListManager({
     );
   }
 
-  const nothingYet = shownLists.length === 0 && groups.every((group) => group.is_system);
+  /*
+   * ⚠️ THE FAILED READ IS SAID OUT LOUD, AND ON THIS SCREEN IT HAS TO BE. The
+   * empty state below reads "Nothing organised yet" and offers a button to
+   * create the first list — so a broken query would not merely mislead, it would
+   * invite somebody to make a duplicate of a list they already have. This branch
+   * is the whole reason `fetchManagedLists` throws instead of returning `[]`.
+   *
+   * BEFORE the pending branch: an entry that has data and is refetching in the
+   * background must keep drawing its rows, but an entry that FAILED has nothing
+   * to draw and must not sit on a skeleton forever.
+   */
+  if (treeQuery.isError) {
+    return <QueryError what="your department's lists" message={treeQuery.error.message} />;
+  }
+
+  /*
+   * ⚠️ `isPending` IS "NO DATA YET", NOT "FETCHING". A background refetch over
+   * data we already have must NOT throw the tree away and redraw a skeleton,
+   * which is the flicker the whole cache exists to remove — and on this screen
+   * it would happen after every single save.
+   */
+  if (treeQuery.isPending) {
+    return <TableSkeleton columns={3} rows={6} />;
+  }
+
+  const nothingYet = lists.length === 0 && groups.every((group) => group.is_system);
 
   return (
     <>
@@ -333,7 +453,6 @@ export function ListManager({
               groups={groups}
               openCount={editingList ? (openCounts[editingList.id] ?? 0) : 0}
               onDone={() => setListOpen(false)}
-              onSaved={patchList}
             />
           ) : null}
         </DialogContent>
@@ -413,7 +532,6 @@ function ListForm({
   groups,
   openCount,
   onDone,
-  onSaved,
 }: {
   list: ListRow | null;
   /**
@@ -429,11 +547,8 @@ function ListForm({
   groups: GroupRow[];
   openCount: number;
   onDone: () => void;
-  /** Reports the saved fields upward, so the row repaints before the round trip. */
-  onSaved?: (patch: Partial<ListRow> & { id: string }) => void;
 }) {
-  const [pending, startTransition] = useTransition();
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [name, setName] = useState(list?.name ?? "");
   const [description, setDescription] = useState(list?.description ?? "");
@@ -494,15 +609,46 @@ function ListForm({
     ...Object.fromEntries(folders.map((folder) => [folder.id, folder.name])),
   };
 
-  function submit() {
-    setError(null);
+  /*
+   * ------------------------------------------------------------------------
+   * P12-16 — THE ROW MOVES WHEN YOU SAVE, AND THE DIALOG CLOSES WHEN THE WRITE
+   * RETURNS. Those used to be one moment about a second apart, in that order.
+   *
+   * The paint was already instant (P11-05, a `useOptimistic` in the PARENT —
+   * the row this changes is behind the dialog, so state in here would have
+   * repainted nothing anybody could see). But `useOptimistic` DROPS ITS VALUE
+   * WHEN ITS TRANSITION ENDS, so the transition had to be held open across a
+   * `router.refresh()`: a full server re-render of four queries, including the
+   * scan of every open task in scope, before the dialog would close.
+   *
+   * ⚠️ THE HOLD IS NOT REMOVED, IT IS RELOCATED. `onMutate` writes the new
+   * fields into the CACHED TREE — the same entry the rows behind this dialog
+   * render from — so the value survives on its own and there is nothing left to
+   * hold. It does not revert, because nothing about it is scoped to a
+   * transition.
+   *
+   * ⚠️ ONLY AN EDIT CAN BE PREDICTED. A new list has no id yet, and inventing
+   * one would put a row on screen that no control could open. A creation paints
+   * nothing and waits for `onSettled` — which is honest: until the server
+   * answers, there is no list.
+   * ------------------------------------------------------------------------
+   */
+  const save = useMutation({
+    mutationFn: () =>
+      writeList(list?.id ?? null, {
+        department_id: departmentId,
+        name,
+        description,
+        is_active: isActive,
+        sort_order: sortOrder,
+        group_id: groupId === NO_FOLDER ? null : groupId,
+      }),
 
-    startTransition(async () => {
-      /* ⚠️ ONLY AN EDIT CAN BE PREDICTED. A new list has no id yet, and
-         inventing one would put a row on screen that no control could open. */
+    onMutate: () => {
+      const snapshot = beginWrite(queryClient, LIST_ROOTS);
+
       if (list) {
-        onSaved?.({
-          id: list.id,
+        patchRow(queryClient, "lists", list.id, {
           name,
           description,
           is_active: isActive,
@@ -513,27 +659,49 @@ function ListForm({
         });
       }
 
-      const result = await saveList(list?.id ?? null, {
-        department_id: departmentId,
-        name,
-        description,
-        is_active: isActive,
-        sort_order: sortOrder,
-        group_id: groupId === NO_FOLDER ? null : groupId,
-      });
+      // Fired, not awaited, and AFTER the patch — see `cancelRefetches`.
+      cancelRefetches(queryClient, LIST_ROOTS);
 
-      if (!result.ok) {
-        setError(result.error);
-        return;
-      }
+      return snapshot;
+    },
 
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
+    /* ⚠️ THE SNAPSHOT GOES BACK. A refused save that leaves the new name on the
+       row behind the dialog is the browser lying about the database, and the
+       toast saying so scrolls away. `useOptimistic` did this for free; this
+       does not. */
+    onError: (mutationError, _vars, snapshot) => {
+      if (snapshot) rollbackWrite(queryClient, snapshot);
+      setError(mutationError.message);
+    },
+
+    onSuccess: () => {
+      // Reports the WRITE, which has already happened. Nothing is awaited before
+      // it, so it is not reporting a refetch.
       toast.success(list ? "List saved" : "List created");
       onDone();
-    });
+    },
+
+    /*
+     * ⚠️ FIRED, NEVER AWAITED, ON BOTH PATHS — TanStack's documented shape, so
+     * the optimistic guess is always reconciled against the server.
+     *
+     * `["lists"]` is the prefix over this screen's entry AND `qk.listsVisible()`,
+     * which is what `/tasks`, `/tasks/board` and `/tasks/[id]` read their list
+     * names and their filter dropdown from — archiving a list here has to
+     * remove it from there. `qk.snapshot()` is the rail, which draws the same
+     * tree with counts: a new list is a new line in the sidebar.
+     */
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["lists"] });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+    },
+  });
+
+  const pending = save.isPending;
+
+  function submit() {
+    setError(null);
+    save.mutate();
   }
 
   return (
@@ -713,8 +881,7 @@ function GroupForm({
   listCount: number;
   onDone: () => void;
 }) {
-  const [pending, startTransition] = useTransition();
-  const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [name, setName] = useState(group?.name ?? "");
   const [description, setDescription] = useState(group?.description ?? "");
@@ -728,30 +895,70 @@ function GroupForm({
     departments.map((department) => [department.id, department.name]),
   );
 
-  function submit() {
-    setError(null);
-
-    startTransition(async () => {
-      const result = await saveTaskGroup(group?.id ?? null, {
+  /*
+   * The same shape as `ListForm`'s `save` above, one level up, and for the same
+   * reasons — read the block there rather than a second copy of it here.
+   *
+   * ⚠️ ONE DIFFERENCE THAT IS NOT COSMETIC: a folder rename moves the LISTS
+   * INSIDE IT as well as the heading, because a list row quotes its folder's
+   * name in the sidebar. That is why the invalidation is the `["lists"]` prefix
+   * rather than this entry, and why `qk.ref("task-groups")` is in it too — the
+   * `/tasks` filter panel reads the folder list from there under a ten-minute
+   * `REF_STALE_TIME`, so without that key a renamed folder would keep its old
+   * name in that dropdown for the rest of the session. `realtime.ts` records
+   * exactly the same three keys for a `vizserve_pms_task_groups` event, and
+   * keeping the two lists in step is the point of naming them from one place.
+   */
+  const save = useMutation({
+    mutationFn: () =>
+      writeGroup(group?.id ?? null, {
         department_id: departmentId,
         name,
         description,
         is_active: isActive,
         sort_order: sortOrder,
-      });
+      }),
 
-      if (!result.ok) {
-        setError(result.error);
-        return;
+    onMutate: () => {
+      const snapshot = beginWrite(queryClient, LIST_ROOTS);
+
+      /* Only an edit can be predicted — a new folder has no id. See `ListForm`. */
+      if (group) {
+        patchRow(queryClient, "groups", group.id, {
+          name,
+          description,
+          is_active: isActive,
+          sort_order: Number(sortOrder) || 0,
+        });
       }
 
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      cancelRefetches(queryClient, LIST_ROOTS);
+
+      return snapshot;
+    },
+
+    onError: (mutationError, _vars, snapshot) => {
+      if (snapshot) rollbackWrite(queryClient, snapshot);
+      setError(mutationError.message);
+    },
+
+    onSuccess: () => {
       toast.success(group ? "Folder saved" : "Folder created");
       onDone();
-    });
+    },
+
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["lists"] });
+      void queryClient.invalidateQueries({ queryKey: qk.ref("task-groups") });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+    },
+  });
+
+  const pending = save.isPending;
+
+  function submit() {
+    setError(null);
+    save.mutate();
   }
 
   return (
