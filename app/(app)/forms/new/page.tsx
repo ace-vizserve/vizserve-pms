@@ -1,16 +1,12 @@
+import { ArrowLeft, ArrowRight, Globe, Users } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowLeft, ArrowRight, Globe, Users } from "lucide-react";
 
+import { PageShell } from "@/components/page-shell";
 import { requireDepartmentShape } from "@/lib/auth/authorization";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
+import { FORM_PURPOSES, FORM_PURPOSE_LABELS, type FormPurpose } from "@/lib/schemas/forms";
 import { createClient } from "@/utils/supabase/server";
-import { PageShell } from "@/components/page-shell";
-import {
-  FORM_PURPOSES,
-  FORM_PURPOSE_LABELS,
-  type FormPurpose,
-} from "@/lib/schemas/forms";
 import { ClientFormSettings } from "../form-settings";
 import { loadRoutableDepartments, type RoutableDepartment } from "../routable-departments";
 import { InternalCreate } from "./internal-create";
@@ -22,8 +18,7 @@ function BackToForms() {
   return (
     <Link
       href="/forms"
-      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
-    >
+      className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
       <ArrowLeft className="size-3.5" />
       Forms
     </Link>
@@ -68,9 +63,7 @@ function parsePurpose(raw: string | string[] | undefined): FormPurpose | null {
 // ordering rather than an equality — the top rung is now `owner`, and
 // `=== "admin"` would offer the internal card to nobody at all.
 function purposesFor(role: Role): readonly FormPurpose[] {
-  return roleAtLeast(role, "owner")
-    ? FORM_PURPOSES
-    : FORM_PURPOSES.filter((purpose) => purpose !== "INTERNAL");
+  return roleAtLeast(role, "owner") ? FORM_PURPOSES : FORM_PURPOSES.filter((purpose) => purpose !== "INTERNAL");
 }
 
 const PURPOSE_ICON = { CLIENT_REQUEST: Globe, INTERNAL: Users } as const;
@@ -107,10 +100,7 @@ const PURPOSE_ICON = { CLIENT_REQUEST: Globe, INTERNAL: Users } as const;
  * until somebody picks. `InternalCreate` says so on screen rather than
  * leaving it to be discovered at the Publish switch.
  */
-function defaultDepartmentId(
-  primaryDepartmentId: string | null,
-  departments: RoutableDepartment[],
-): string | null {
+function defaultDepartmentId(primaryDepartmentId: string | null, departments: RoutableDepartment[]): string | null {
   if (primaryDepartmentId && departments.some((d) => d.id === primaryDepartmentId)) {
     return primaryDepartmentId;
   }
@@ -148,8 +138,7 @@ export default async function NewFormPage({
         <div>
           <BackToForms />
           <p className="mt-2 text-xs text-muted-foreground">
-            What is this form for? It decides who fills it in, and what happens
-            to the answers.
+            What is this form for? It decides who fills it in, and what happens to the answers.
           </p>
         </div>
 
@@ -164,19 +153,14 @@ export default async function NewFormPage({
               <Link
                 key={value}
                 href={`/forms/new?purpose=${value}`}
-                className="group flex flex-col gap-3 rounded-lg border bg-card grade-surface p-5 text-left shadow-raised-lg transition-colors hover:border-accent-border hover:bg-accent"
-              >
+                className="group flex flex-col gap-3 rounded-lg border bg-card grade-surface p-5 text-left shadow-raised-lg transition-colors hover:border-accent-border hover:bg-accent">
                 {/* The house icon tile: 32px, on the radius scale, raised.
                     Same shape as StatTile's and the nav user's. */}
                 <span className="flex size-8 items-center justify-center rounded-md border bg-muted grade-chip text-foreground-muted shadow-raised">
                   <Icon aria-hidden className="size-4" />
                 </span>
-                <span className="text-lg font-semibold tracking-tight">
-                  {FORM_PURPOSE_LABELS[value].label}
-                </span>
-                <span className="text-sm text-muted-foreground">
-                  {FORM_PURPOSE_LABELS[value].hint}
-                </span>
+                <span className="text-lg font-semibold tracking-tight">{FORM_PURPOSE_LABELS[value].label}</span>
+                <span className="text-sm text-muted-foreground">{FORM_PURPOSE_LABELS[value].hint}</span>
                 <span className="mt-auto inline-flex items-center gap-1.5 pt-2 text-xs font-medium text-primary">
                   {value === "CLIENT_REQUEST" ? "Set it up" : "Name it and start"}
                   <ArrowRight aria-hidden className="size-3.5" />
@@ -214,15 +198,12 @@ export default async function NewFormPage({
         <div>
           <BackToForms />
           <p className="mt-2 text-xs text-muted-foreground">
-            An internal form. Colleagues fill it in signed in, and the
-            answers are collected rather than approved.
+            An internal form. Colleagues fill it in signed in, and the answers are collected rather than approved.
           </p>
         </div>
 
         <div className="rounded-lg border bg-card grade-surface p-6 shadow-raised-lg">
-          <InternalCreate
-            departmentId={defaultDepartmentId(context.primaryDepartmentId, departments)}
-          />
+          <InternalCreate departmentId={defaultDepartmentId(context.primaryDepartmentId, departments)} />
         </div>
       </PageShell>
     );
@@ -256,17 +237,11 @@ export default async function NewFormPage({
         {/* No <h1> — the breadcrumb reads "Forms / New". This line survives
             because it says what happens next, which the crumb cannot. */}
         <p className="mt-2 text-xs text-muted-foreground">
-          A client request form. Set it up here, then add the fields. It stays a
-          draft until you publish it.
+          A client request form. Set it up here, then add the fields. It stays a draft until you publish it.
         </p>
       </div>
 
-      <div className="rounded-lg border bg-card grade-surface p-6 shadow-raised-lg">
-        {/* P7-66 Phase 4 — no `initial`, and no purpose to state. This branch is
-            already the client-request one (`?purpose=`), and the card is now
-            client-only: it hard-codes the purpose it sends. */}
-        <ClientFormSettings departments={departments} lists={lists ?? []} />
-      </div>
+      <ClientFormSettings departments={departments} lists={lists ?? []} />
     </PageShell>
   );
 }

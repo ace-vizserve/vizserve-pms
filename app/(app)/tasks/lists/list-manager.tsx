@@ -1,15 +1,15 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import type { QueryClient } from "@tanstack/react-query";
-import { FolderPlus, Pencil, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
+import type { QueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { FolderPlus, Pencil, Plus } from "lucide-react";
+import { useMemo, useState } from "react";
 
 import { QueryError } from "@/components/query-error";
 import { TableSkeleton } from "@/components/skeletons";
-import { Badge } from "@/components/ui/badge";
 import { Chip } from "@/components/status-badge";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,13 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -228,9 +222,7 @@ export function ListManager({ departments }: { departments: Department[] }) {
     for (const bucket of buckets.values()) {
       bucket.sort(
         (a, b) =>
-          Number(a.is_system) - Number(b.is_system) ||
-          a.sort_order - b.sort_order ||
-          a.name.localeCompare(b.name),
+          Number(a.is_system) - Number(b.is_system) || a.sort_order - b.sort_order || a.name.localeCompare(b.name),
       );
     }
     return buckets;
@@ -322,12 +314,12 @@ export function ListManager({ departments }: { departments: Department[] }) {
       </div>
 
       {nothingYet ? (
-        <div className="rounded-lg border border-dashed p-10 text-center">
+        <div className="rounded-lg border border-dashed p-10 text-center bg-card grade-raised">
           <p className="text-sm font-medium">Nothing organised yet</p>
           <p className="mx-auto mt-1 max-w-sm text-xs text-muted-foreground">
-            Tasks work fine without any of this. Add a list when a department has enough going on
-            that &ldquo;which project is this?&rdquo; becomes a real question, and a folder when it
-            has enough lists that the same is true of them.
+            Tasks work fine without any of this. Add a list when a department has enough going on that &ldquo;which
+            project is this?&rdquo; becomes a real question, and a folder when it has enough lists that the same is true
+            of them.
           </p>
           <Button size="sm" className="mt-4" onClick={createList}>
             Create the first list
@@ -351,7 +343,7 @@ export function ListManager({ departments }: { departments: Department[] }) {
             if (!worthShowing) return null;
 
             return (
-              <section key={department.id}>
+              <section className="bg-card grade-surface rounded-lg p-4" key={department.id}>
                 <h2 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   {department.name}
                 </h2>
@@ -359,9 +351,7 @@ export function ListManager({ departments }: { departments: Department[] }) {
                 {/* Folderless lists first. After P7-18 every list that already
                     existed is one of these, so putting folders above would bury
                     the whole company's work under an empty heading. */}
-                {loose.length > 0 ? (
-                  <ListRows lists={loose} openCounts={openCounts} onEdit={editList} />
-                ) : null}
+                {loose.length > 0 ? <ListRows lists={loose} openCounts={openCounts} onEdit={editList} /> : null}
 
                 {folders.map((folder) => {
                   const folderLists = listsByGroup.get(`${department.id}:${folder.id}`) ?? [];
@@ -390,12 +380,7 @@ export function ListManager({ departments }: { departments: Department[] }) {
                             unconditional. It is the pencil's neighbour rather
                             than a row at the bottom of the folder: the heading
                             is what you are pointing at when you decide. */}
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="size-6 p-0"
-                          onClick={() => addListTo(folder)}
-                        >
+                        <Button variant="ghost" size="sm" className="size-6 p-0" onClick={() => addListTo(folder)}>
                           <Plus className="size-3.5" />
                           <span className="sr-only">Add a list to {folder.name}</span>
                         </Button>
@@ -411,8 +396,7 @@ export function ListManager({ departments }: { departments: Department[] }) {
                             onClick={() => {
                               setEditingGroup(folder);
                               setGroupOpen(true);
-                            }}
-                          >
+                            }}>
                             <Pencil className="size-3" />
                             <span className="sr-only">Edit folder {folder.name}</span>
                           </Button>
@@ -420,11 +404,7 @@ export function ListManager({ departments }: { departments: Department[] }) {
                       </div>
 
                       {folderLists.length > 0 ? (
-                        <ListRows
-                          lists={folderLists}
-                          openCounts={openCounts}
-                          onEdit={editList}
-                        />
+                        <ListRows lists={folderLists} openCounts={openCounts} onEdit={editList} />
                       ) : (
                         <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
                           Empty. Put a list in it from the New list button.
@@ -466,10 +446,7 @@ export function ListManager({ departments }: { departments: Department[] }) {
               group={editingGroup}
               departments={departments}
               listCount={
-                editingGroup
-                  ? (listsByGroup.get(`${editingGroup.department_id}:${editingGroup.id}`) ?? [])
-                      .length
-                  : 0
+                editingGroup ? (listsByGroup.get(`${editingGroup.department_id}:${editingGroup.id}`) ?? []).length : 0
               }
               onDone={() => setGroupOpen(false)}
             />
@@ -491,12 +468,9 @@ function ListRows({
   onEdit: (list: ListRow) => void;
 }) {
   return (
-    <ul className="overflow-hidden rounded-lg border">
+    <ul className="overflow-hidden rounded-lg border bg-card grade-raised">
       {lists.map((list) => (
-        <li
-          key={list.id}
-          className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b p-3 last:border-0"
-        >
+        <li key={list.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b p-3 last:border-0">
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-sm font-medium">{list.name}</span>
@@ -506,14 +480,10 @@ function ListRows({
                   change, so it is a `Badge` and carries no status dot. */}
               {list.form_id ? <Badge variant="secondary">From a form</Badge> : null}
             </div>
-            {list.description ? (
-              <p className="mt-0.5 text-xs text-muted-foreground">{list.description}</p>
-            ) : null}
+            {list.description ? <p className="mt-0.5 text-xs text-muted-foreground">{list.description}</p> : null}
           </div>
 
-          <span className="shrink-0 text-2xs text-muted-foreground">
-            {openCounts[list.id] ?? 0} open
-          </span>
+          <span className="shrink-0 text-2xs text-muted-foreground">{openCounts[list.id] ?? 0} open</span>
 
           <Button variant="ghost" size="sm" onClick={() => onEdit(list)}>
             <Pencil />
@@ -583,9 +553,7 @@ function ListForm({
    * a guaranteed rejection — the guard answers "That folder belongs to another
    * department."
    */
-  const folders = groups.filter(
-    (group) => group.department_id === departmentId && group.is_active,
-  );
+  const folders = groups.filter((group) => group.department_id === departmentId && group.is_active);
 
   /*
    * value → label maps for BOTH Selects below.
@@ -600,9 +568,7 @@ function ListForm({
    * popup, the map populates the trigger, and labelling only one is how the two
    * drift apart.
    */
-  const departmentItems = Object.fromEntries(
-    departments.map((department) => [department.id, department.name]),
-  );
+  const departmentItems = Object.fromEntries(departments.map((department) => [department.id, department.name]));
 
   const folderItems = {
     [NO_FOLDER]: "No folder — top level",
@@ -708,9 +674,7 @@ function ListForm({
     <>
       <DialogHeader>
         <DialogTitle>{list ? "Edit list" : "New list"}</DialogTitle>
-        <DialogDescription>
-          Lists group a department&apos;s work. Tasks can sit in one, or in none.
-        </DialogDescription>
+        <DialogDescription>Lists group a department&apos;s work. Tasks can sit in one, or in none.</DialogDescription>
       </DialogHeader>
 
       <div className="space-y-4 py-2">
@@ -746,8 +710,7 @@ function ListForm({
               }}
               // Moving a list between departments would strand every task in it
               // under a team that cannot see them.
-              disabled={Boolean(list)}
-            >
+              disabled={Boolean(list)}>
               <SelectTrigger id="department">
                 <SelectValue />
               </SelectTrigger>
@@ -760,9 +723,7 @@ function ListForm({
               </SelectContent>
             </Select>
             {list ? (
-              <p className="text-xs text-muted-foreground">
-                Fixed — tasks in this list belong to this department.
-              </p>
+              <p className="text-xs text-muted-foreground">Fixed — tasks in this list belong to this department.</p>
             ) : null}
           </div>
 
@@ -784,8 +745,7 @@ function ListForm({
             items={folderItems}
             value={groupId}
             onValueChange={(v) => v !== null && setGroupId(v)}
-            disabled={isFormList || folders.length === 0}
-          >
+            disabled={isFormList || folders.length === 0}>
             <SelectTrigger id="group">
               <SelectValue />
             </SelectTrigger>
@@ -839,8 +799,7 @@ function ListForm({
         {error ? (
           <p
             role="alert"
-            className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-          >
+            className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {error}
           </p>
         ) : null}
@@ -851,12 +810,7 @@ function ListForm({
           Cancel
         </Button>
         <form id="save-list" action={submit} className="hidden" />
-        <Button
-          type="submit"
-          form="save-list"
-          loading={pending}
-          disabled={name.trim().length === 0}
-        >
+        <Button type="submit" form="save-list" loading={pending} disabled={name.trim().length === 0}>
           {list ? "Save" : "Create list"}
         </Button>
       </DialogFooter>
@@ -891,9 +845,7 @@ function GroupForm({
   const [error, setError] = useState<string | null>(null);
 
   // Without this the trigger shows a bare UUID — see the note in ListForm.
-  const departmentItems = Object.fromEntries(
-    departments.map((department) => [department.id, department.name]),
-  );
+  const departmentItems = Object.fromEntries(departments.map((department) => [department.id, department.name]));
 
   /*
    * The same shape as `ListForm`'s `save` above, one level up, and for the same
@@ -1001,8 +953,7 @@ function GroupForm({
               // Same rule as a list, one level up: moving a folder would take
               // every list in it to a team that cannot see them. The database
               // refuses it too.
-              disabled={Boolean(group)}
-            >
+              disabled={Boolean(group)}>
               <SelectTrigger id="group_department">
                 <SelectValue />
               </SelectTrigger>
@@ -1055,8 +1006,7 @@ function GroupForm({
         {error ? (
           <p
             role="alert"
-            className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive"
-          >
+            className="rounded-sm border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">
             {error}
           </p>
         ) : null}
@@ -1067,12 +1017,7 @@ function GroupForm({
           Cancel
         </Button>
         <form id="save-folder" action={submit} className="hidden" />
-        <Button
-          type="submit"
-          form="save-folder"
-          loading={pending}
-          disabled={name.trim().length === 0}
-        >
+        <Button type="submit" form="save-folder" loading={pending} disabled={name.trim().length === 0}>
           {group ? "Save" : "Create folder"}
         </Button>
       </DialogFooter>
