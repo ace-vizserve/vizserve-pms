@@ -213,6 +213,23 @@ export function AssigneePicker({
     return rows;
   }, [candidates, others, pic, showPic]);
 
+  /*
+   * The search box takes focus on open, and THE PAGE DOES NOT MOVE.
+   *
+   * `autoFocus` is the wrong tool here: React calls `.focus()` for it with no
+   * options, and a plain focus scrolls the element into view. The popup lives in
+   * a portal on `<body>` and is placed a frame later, so "into view" is measured
+   * against a box that is not where you can see it — the document scrolled and
+   * the row you had just clicked went with it.
+   *
+   * A `useCallback` ref rather than an inline one: an inline callback ref is
+   * torn down and re-run on EVERY render, so it would drag focus back off a row
+   * you had tabbed to each time the list re-rendered. This one runs on mount.
+   */
+  const focusSearch = useCallback((node: HTMLInputElement | null) => {
+    node?.focus({ preventScroll: true });
+  }, []);
+
   const matches = useCallback(
     (person: Person) => {
       const needle = query.trim().toLowerCase();
@@ -332,7 +349,15 @@ export function AssigneePicker({
         {trigger}
       </PopoverTrigger>
 
-      <PopoverContent align={align} className="w-64 p-0">
+      {/* ⚠️ `initialFocus={false}` — WE FOCUS THE SEARCH BOX, BASE UI MUST NOT.
+          Its default resolves to the first tabbable element in the popup, which
+          IS this search box, and it focuses it WITHOUT `preventScroll`: that
+          flag is only set when the thing being focused is the popup itself
+          (`FloatingFocusManager`). The popup is portaled to `<body>`, so the
+          browser scrolls the document to wherever it thinks that box is and the
+          row you clicked leaves the screen. Returning focus on close already
+          passes `preventScroll: true`, which is why only opening jumped. */}
+      <PopoverContent align={align} className="w-64 p-0" initialFocus={false}>
         <div className="border-b p-2">
           <div className="relative">
             <Search
@@ -340,7 +365,7 @@ export function AssigneePicker({
               aria-hidden
             />
             <Input
-              autoFocus
+              ref={focusSearch}
               value={query}
               placeholder="Search people"
               aria-label="Search people"
