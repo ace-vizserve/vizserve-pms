@@ -123,6 +123,20 @@ async function departmentOf(userId: string): Promise<string> {
 
 const SPAN = { p_start_date: "2026-12-07", p_end_date: "2026-12-11" };
 
+/**
+ * P11-13 — a date relative to NOW, because one of its rules is about now.
+ *
+ * ⚠️ NOT a fixed string like `SPAN` above. "This leave has already started" is
+ * decided against `now() at time zone 'Asia/Manila'` inside the function, so a
+ * hard-coded past date is a test that stops testing the day it stops being
+ * past. Two days back is far enough that the UTC/Manila offset cannot flip it.
+ */
+function daysFromToday(delta: number): string {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
+
 describe.skipIf(!run)("submitting a hand-over", () => {
   it("refuses vacation with no reliever, and says so in a sentence", async () => {
     const { client } = await signIn("member1VizBytes");
@@ -458,7 +472,76 @@ describe.skipIf(!run)("withdrawal", () => {
     expect(row!.status).toBe("WITHDRAWN");
   });
 
-  it("refuses once anybody has answered", async () => {
+  /*
+   * P11-13 — the optional note, and both halves of "optional".
+   *
+   * One test rather than two, because the pair is the point: the same call
+   * must work with a note and without one. The arity trap in the migration
+   * header is what makes the second half worth asserting — if the
+   * one-argument function is ever left in place beside the two-argument one,
+   * PostgREST resolves `{ p_id }` against both and the note-less withdrawal
+   * fails with an ambiguity error while the one WITH a note keeps working.
+   */
+  it("records an optional note, and withdraws without one", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const withNote = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "LEAVE",
+      p_reason: "Flu.",
+      ...SPAN,
+      p_leave_type_id: await leaveTypeId("SICK"),
+    });
+    const noted = (withNote.data as unknown as { id: string }).id;
+    created.push(noted);
+
+    const { error: notedError } = await client.rpc("vizserve_pms_withdraw_internal_request", {
+      p_id: noted,
+      p_note: "<p>Wrong dates — refiling for next week.</p>",
+    });
+    expect(notedError).toBeNull();
+
+    const bare = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "LEAVE",
+      p_reason: "Flu.",
+      ...SPAN,
+      p_leave_type_id: await leaveTypeId("SICK"),
+    });
+    const plain = (bare.data as unknown as { id: string }).id;
+    created.push(plain);
+
+    // No `p_note` at all — the SQL default carries it, and this is the call
+    // every caller written before P11-13 still makes.
+    const { error: bareError } = await client.rpc("vizserve_pms_withdraw_internal_request", {
+      p_id: plain,
+    });
+    expect(bareError).toBeNull();
+
+    const { data: rows } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("id, status, withdrawn_note, decision_reason")
+      .in("id", [noted, plain]);
+
+    const byId = new Map(rows!.map((row) => [row.id, row]));
+    expect(byId.get(noted)!.withdrawn_note).toMatch(/Wrong dates/);
+    // ⚠️ The requester's words must NOT land in the approver's column. Phase 6
+    // reports on `decision_reason` as a decision, and a withdrawal is not one.
+    expect(byId.get(noted)!.decision_reason).toBeNull();
+    // '' would satisfy `is not null` and render as an empty paragraph.
+    expect(byId.get(plain)!.withdrawn_note).toBeNull();
+    expect(byId.get(plain)!.status).toBe("WITHDRAWN");
+  });
+
+  /*
+   * ⚠️ P11-13 REVERSED WHAT THIS TEST USED TO ASSERT, and the old version is
+   * left in the git history rather than deleted quietly.
+   *
+   * It used to expect `/already answered/i` for exactly this case: leave, a
+   * reliever who has accepted, dates still in the future. P9-03 refused it
+   * outright. P11-13 allows it — but only with a note, because the person who
+   * accepted arranged something on the strength of it. The refusal moved from
+   * the act to the empty box.
+   */
+  it("lets leave be taken back after a reliever accepts — but only with a note", async () => {
     const { client, userId } = await signIn("member1VizBytes");
     const department = await departmentOf(userId);
     const { userId: r1 } = await signIn("member2VizBytes");
@@ -480,12 +563,86 @@ describe.skipIf(!run)("withdrawal", () => {
       p_decision: "approved",
     });
 
-    // Still PENDING_REVIEW — one reliever accepted and the chain moved on. The
-    // shallower rule "while it is pending" would have allowed this, and pulling
-    // a request out from under somebody who has already signed is the surprise
-    // the stricter rule exists to prevent.
-    const { error } = await client.rpc("vizserve_pms_withdraw_internal_request", { p_id: id });
+    // No note. Refused — and the message names the box, not the act, because
+    // the act is now legal.
+    const bare = await client.rpc("vizserve_pms_withdraw_internal_request", { p_id: id });
+    expect(bare.error?.message).toMatch(/say why/i);
+
+    const { error } = await client.rpc("vizserve_pms_withdraw_internal_request", {
+      p_id: id,
+      p_note: "<p>Trip is off — the flights were cancelled.</p>",
+    });
+    expect(error).toBeNull();
+
+    const { data: row } = await adminClient()
+      .from("vizserve_pms_internal_requests")
+      .select("status, withdrawn_note")
+      .eq("id", id)
+      .single();
+    expect(row!.status).toBe("WITHDRAWN");
+    expect(row!.withdrawn_note).toMatch(/flights were cancelled/);
+  });
+
+  /*
+   * P11-13's scope limit, and the one worth a test of its own.
+   *
+   * Leave is withdrawable after approval because every consequence of approved
+   * leave is a `status = 'APPROVED'` filter somewhere else, so the flip undoes
+   * all of it. An approved OVERTIME has written a DTR row that no status flip
+   * reaches — so for it, and for the four corrections and reimbursement,
+   * P9-03's rule stands exactly as it was.
+   */
+  it("still refuses a non-leave request once it has been answered", async () => {
+    const { client } = await signIn("member1VizBytes");
+    const { data } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "OVERTIME",
+      p_reason: "Release night.",
+      p_work_date: "2026-09-01",
+      p_overtime_minutes: 120,
+    });
+    const id = (data as unknown as { id: string }).id;
+    created.push(id);
+
+    await (await signIn("tlVizBytes")).client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+    });
+
+    // A note does NOT unlock it. The rule is about the type, not the box.
+    const { error } = await client.rpc("vizserve_pms_withdraw_internal_request", {
+      p_id: id,
+      p_note: "<p>Logged it twice by mistake.</p>",
+    });
     expect(error?.message).toMatch(/already answered/i);
+  });
+
+  it("refuses leave that has already started", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    // A leave that is running right now. It goes in through the ordinary
+    // submit path rather than the admin client, because the point is that the
+    // real function refuses it — and submit has never refused a past start
+    // date, which is what makes back-dated sick leave possible at all.
+    const { data } = await client.rpc("vizserve_pms_submit_internal_request", {
+      p_request_type: "LEAVE",
+      p_reason: "Emergency.",
+      p_start_date: daysFromToday(-2),
+      p_end_date: daysFromToday(1),
+      p_leave_type_id: await leaveTypeId("SICK"),
+    });
+    const id = (data as unknown as { id: string }).id;
+    created.push(id);
+
+    await (await signIn("tlVizBytes")).client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "approved",
+    });
+
+    const { error } = await client.rpc("vizserve_pms_withdraw_internal_request", {
+      p_id: id,
+      p_note: "<p>Came in after all.</p>",
+    });
+    expect(error?.message).toMatch(/already started/i);
   });
 
   it("refuses a lead trying to withdraw somebody else's request", async () => {

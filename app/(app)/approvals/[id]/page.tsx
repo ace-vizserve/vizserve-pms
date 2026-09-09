@@ -6,7 +6,13 @@ import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import { timesheetWeekHref, waitingOnMe } from "@/lib/approvals-queue-server";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import type { InternalRequestRow, VizservePmsTimesheetWeekStatus } from "@/lib/database.types";
-import { formatDate, formatDateTime, formatWeekRange, weeksSpanned } from "@/lib/dates";
+import {
+  formatDate,
+  formatDateTime,
+  formatWeekRange,
+  todayInAppZone,
+  weeksSpanned,
+} from "@/lib/dates";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import {
   APPROVAL_STAGE_LABELS,
@@ -374,21 +380,55 @@ export default async function InternalRequestPage({ params }: { params: Promise<
     request.status === "PENDING_REVIEW" && waitingOnMe(request, context, owedAsReliever);
 
   /*
-   * P9-03 — may the author take it back?
+   * P9-03 / P11-13 — may the author take it back?
    *
-   * Only while NOBODY has answered. Not "while it is pending": a leave request
-   * whose three relievers have all accepted is still PENDING_REVIEW, and
-   * pulling it out from under people who have already signed is the surprise
-   * this rule exists to prevent. `vizserve_pms_withdraw_internal_request`
-   * enforces it against both decision logs; this mirrors the reliever half,
-   * which is the one visible from here.
+   * TWO ROUTES, and which one applies turns on whether anybody has signed.
+   *
+   *   nobody has  — P9-03 unchanged. Any type, any date, note optional.
+   *   somebody has — P11-13. LEAVE ONLY, and only before its first day. Every
+   *                  consequence of approved leave is a `status = 'APPROVED'`
+   *                  filter elsewhere, so withdrawing it undoes all of them and
+   *                  leaves nothing half-undone. Nothing else in this module is
+   *                  like that: approving a correction or overtime rewrites a
+   *                  DTR row, which a status flip does not reach.
+   *
+   * `vizserve_pms_withdraw_internal_request` enforces all of it. This only
+   * decides whether to render a button, and it is deliberately no more generous
+   * than the function — an offered control that fails on click is worse than an
+   * absent one.
    */
   const anyRelieverAnswered = relievers.some((row) => row.decision !== null);
+
+  /*
+   * ⚠️ `approval_stage > 2` IS IN HERE ON PURPOSE, and it is not redundant with
+   * `decisions`. The approvals read is scoped by the `p11_01` audience rule, so
+   * a requester who cannot see the rows gets an empty array — and reading that
+   * as "nobody has signed" would offer a note-less withdrawal on a request a
+   * team leader had already approved. The stage lives on the request row, which
+   * the requester can always read, and stage 3 can only be reached by a
+   * signature at stage 2.
+   */
+  const signed =
+    request.status === "APPROVED" ||
+    anyRelieverAnswered ||
+    decisions.length > 0 ||
+    (request.approval_stage ?? 0) > 2;
+
   const canWithdraw =
     isOwn &&
-    request.status === "PENDING_REVIEW" &&
-    !anyRelieverAnswered &&
-    (request.approval_stage ?? 0) <= 2;
+    (signed
+      ? (request.status === "APPROVED" || request.status === "PENDING_REVIEW") &&
+        request.request_type === "LEAVE" &&
+        Boolean(request.start_date) &&
+        // String comparison, because both sides are bare `YYYY-MM-DD` and that
+        // sorts correctly. Parsing them would drag in the midday-UTC rule
+        // `lib/dates.ts` exists to contain, for no gain.
+        request.start_date! > todayInAppZone()
+      : request.status === "PENDING_REVIEW");
+
+  /* The database requires a note on this route; the dialog says so up front
+     rather than letting somebody write nothing and be refused. */
+  const withdrawNeedsNote = signed;
 
   return (
     <PageShell className="mx-auto w-full max-w-3xl">
@@ -542,7 +582,47 @@ export default async function InternalRequestPage({ params }: { params: Promise<
             </dd>
           </div>
 
-          {request.status !== "PENDING_REVIEW" ? (
+          {/*
+           * P11-13 — A WITHDRAWAL IS NOT A DECISION, so it is not filed under
+           * one. This block used to be the "Decision" block below, which read
+           * "Decision · No reason given" on every withdrawn request: a heading
+           * naming an act nobody performed, over a sentence blaming somebody
+           * for not explaining it.
+           *
+           * `withdrawn_note` is the REQUESTER's own words and `decision_reason`
+           * is an approver's. They are different columns for that reason and
+           * they get different headings for the same one.
+           */}
+          {request.status === "WITHDRAWN" ? (
+            <div className="mt-5 border-t pt-4">
+              <dt className="text-2xs tracking-wide text-muted-foreground uppercase">Withdrawn</dt>
+              <dd className="mt-1">
+                {request.withdrawn_note ? (
+                  <RichText html={request.withdrawn_note} />
+                ) : (
+                  // Not "no reason given". Nobody was owed one — see P9-03.
+                  <span className="text-sm text-muted-foreground">
+                    Taken back by {request.vizserve_pms_users?.full_name ?? "the requester"}, with
+                    no note.
+                  </span>
+                )}
+                {/*
+                 * P11-13 — WITHDRAWN FROM APPROVED, which `status` alone cannot
+                 * say. `reviewed_at` survives the withdrawal precisely so this
+                 * line can exist: a request that was signed off and then taken
+                 * back reads completely differently from one nobody ever
+                 * looked at, and anyone auditing the leave calendar for a gap
+                 * needs to see which of the two this was.
+                 */}
+                {request.reviewed_at ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    It had been approved on {formatDateTime(request.reviewed_at)}, and was taken
+                    back before it started.
+                  </p>
+                ) : null}
+              </dd>
+            </div>
+          ) : request.status !== "PENDING_REVIEW" ? (
             <div className="mt-5 border-t pt-4">
               <dt className="text-2xs tracking-wide text-muted-foreground uppercase">
                 Decision {request.reviewed_at ? `· ${formatDateTime(request.reviewed_at)}` : ""}
@@ -723,20 +803,32 @@ export default async function InternalRequestPage({ params }: { params: Promise<
         </>
       ) : null}
 
-      {isOwn && request.status === "PENDING_REVIEW" ? (
+      {isOwn && (request.status === "PENDING_REVIEW" || canWithdraw) ? (
         <div className="flex flex-wrap items-center justify-between gap-3">
           <p className="text-xs text-muted-foreground">
-            {/* P9-04. "Waiting on your department lead" was true of every
-                request until the chain and is now true of some of them. Saying
-                it of one sitting with three relievers sends the requester to
-                chase the wrong person. */}
-            {APPROVAL_STAGE_LABELS[(request.approval_stage ?? 0) as ApprovalStage]}. You cannot
-            decide your own request.
+            {request.status === "PENDING_REVIEW" ? (
+              <>
+                {/* P9-04. "Waiting on your department lead" was true of every
+                    request until the chain and is now true of some of them.
+                    Saying it of one sitting with three relievers sends the
+                    requester to chase the wrong person. */}
+                {APPROVAL_STAGE_LABELS[(request.approval_stage ?? 0) as ApprovalStage]}. You cannot
+                decide your own request.
+              </>
+            ) : (
+              /* P11-13. The window, stated, because it closes on a date rather
+                 than on an event the requester can see coming. Somebody who
+                 discovers on the Tuesday morning that the button has gone
+                 should have been told on the Monday that it would. */
+              <>Approved. You can still take it back until {formatDate(request.start_date)}.</>
+            )}
           </p>
-          {/* P9-03. Only while nobody has answered — see `canWithdraw`. Once
-              somebody has, the way out is a rejection, which is their decision
-              and reads as one. */}
-          {canWithdraw ? <WithdrawButton requestId={request.id} /> : null}
+          {/* P9-03 / P11-13 — see `canWithdraw` for which of the two routes
+              this is. The dialog changes its own words based on the same
+              question the note requirement turns on. */}
+          {canWithdraw ? (
+            <WithdrawButton requestId={request.id} needsNote={withdrawNeedsNote} />
+          ) : null}
         </div>
       ) : null}
     </PageShell>

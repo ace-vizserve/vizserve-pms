@@ -8,6 +8,7 @@ import {
   internalDecisionSchema,
   internalRequestSchema,
   isTimeCorrectionRequest,
+  withdrawNoteSchema,
 } from "@/lib/schemas/internal-requests";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import { createClient } from "@/utils/supabase/server";
@@ -166,12 +167,31 @@ export async function decideInternalRequest(
  */
 export async function withdrawInternalRequest(
   requestId: string,
+  input?: unknown,
 ): Promise<ActionResult<{ status: string }>> {
   await requireAuthContextOrThrow();
+
+  /*
+   * P11-13 — the optional note, and it is OPTIONAL here too.
+   *
+   * `input` is undefined for a caller that predates the note, and the schema's
+   * own default turns a missing `note` into "". Neither is an error: refusing a
+   * withdrawal because nobody typed a reason would be exactly the demand P9-03
+   * declined to make. The only thing that can fail here is a note over the cap.
+   */
+  const parsed = withdrawNoteSchema.safeParse(input ?? {});
+  if (!parsed.success) {
+    return { ok: false, error: "Check the form.", fieldErrors: flattenIssues(parsed.error) };
+  }
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("vizserve_pms_withdraw_internal_request", {
     p_id: requestId,
+    // Sanitised on write, like every other rich column reaching the database
+    // from this file. Null rather than "" so the column reads as "no note"
+    // rather than as an empty one — the CHECK allows either, the reader does not
+    // have to know that.
+    p_note: parsed.data.note ? sanitizeRichText(parsed.data.note) : null,
   });
 
   if (error) return { ok: false, error: readableError(error) };

@@ -1957,6 +1957,16 @@ export type Database = {
           /** P9-01. When the requester ticked the turn-over confirmation. */
           turnover_confirmed_at: string | null;
           decision_reason: string | null;
+          /**
+           * P11-13. Optional rich text from the REQUESTER saying why they took
+           * the request back.
+           *
+           * ⚠️ NOT `decision_reason`, which is an APPROVER's words about their
+           * own decision. A withdrawal is not a decision — a CHECK keeps this
+           * null on every status but WITHDRAWN, and Phase 6 must not count one
+           * as the other.
+           */
+          withdrawn_note: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
           created_at: string;
@@ -1989,6 +1999,8 @@ export type Database = {
         Update: Partial<{
           status: VizservePmsInternalRequestStatus;
           decision_reason: string | null;
+          /** P11-13. Written only by vizserve_pms_withdraw_internal_request. */
+          withdrawn_note: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
         }>;
@@ -2576,8 +2588,17 @@ export type Database = {
        * P9-03. The submitter takes their own request back. Legal only while
        * nobody — lead, manager or reliever — has answered it.
        */
+      /**
+       * P11-13 TOOK THIS FROM ONE ARGUMENT TO TWO. `p_note` is optional in SQL,
+       * so it is optional here — a caller omitting it withdraws with no note,
+       * which is still the ordinary case.
+       *
+       * ⚠️ The one-argument version is DROPPED by the same migration. PostgREST
+       * resolves overloads by argument name, so leaving both in place would
+       * make every note-less withdrawal ambiguous rather than defaulting.
+       */
       vizserve_pms_withdraw_internal_request: {
-        Args: { p_id: string };
+        Args: { p_id: string; p_note?: string | null };
         Returns: Json;
       };
       /**
