@@ -645,8 +645,15 @@ async function TeamSubmitted({
 }
 
 /** The punch card's one waiting part. The card and its link are already drawn. */
-async function DashboardPunch({ punchState }: { punchState: ReturnType<typeof loadPunchState> }) {
-  return <PunchPanel initial={await punchState} compact />;
+async function DashboardPunch({
+  punchState,
+  viewerId,
+}: {
+  punchState: ReturnType<typeof loadPunchState>;
+  /** P12-23 — names the `qk.punchState()` entry this panel shares with `/dtr`. */
+  viewerId: string;
+}) {
+  return <PunchPanel initial={await punchState} viewerId={viewerId} compact />;
 }
 
 /** The greeting's second line, which cannot be written until the queue is counted. */
@@ -847,7 +854,7 @@ export default async function DashboardPage() {
               </Streaming>
             }
           >
-            <DashboardPunch punchState={punchState} />
+            <DashboardPunch punchState={punchState} viewerId={context.userId} />
           </Suspense>
           <Link
             href="/dtr"

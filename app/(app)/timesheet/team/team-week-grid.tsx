@@ -1,6 +1,7 @@
 "use client";
 
-import { Fragment, useState, useTransition } from "react";
+import { Fragment, useState } from "react";
+import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import Link from "next/link";
 import { Check, ChevronRight, Clock, Undo2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -23,7 +24,19 @@ import {
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
+import { invalidateTimesheetWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import {
+  beginTimesheetWrite,
+  cancelTimesheetRefetches,
+  patchTeamWeekDecision,
+  rollbackTimesheetWrite,
+} from "@/lib/query/timesheet-cache";
+
 import { decideTimesheetWeek } from "../actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const decideWeek = fromAction(decideTimesheetWeek);
 import { CharacterCount } from "@/components/ui/character-count";
 import { WEEK_RETURN_REASON_MAX, WEEK_RETURN_REASON_MIN } from "@/lib/schemas/timesheet";
 
@@ -132,12 +145,22 @@ export function TeamWeekGrid({
   days,
   today,
   rows,
+  teamKey,
   punchesLoaded = true,
 }: {
   monday: string;
   days: string[];
   today: string;
   rows: TeamRow[];
+  /**
+   * `qk.teamWeekVisible(weekStart)` — the entry a decision is painted into.
+   *
+   * ⚠️ THE KEY IS A PROP RATHER THAN BUILT HERE for the same reason it is on the
+   * member's grid: building it would put a client component in the business of
+   * naming whose data it is looking at, and no decision about scope is made in
+   * this file. `team-view.tsx` builds it from the week `page.tsx` resolved.
+   */
+  teamKey: QueryKey;
   /**
    * P8-07 — false when the DTR read failed.
    *
@@ -377,7 +400,7 @@ export function TeamWeekGrid({
 
                     <td className="border-l px-3 py-2">
                       <div className="space-y-1.5">
-                        <WeekDecision row={row} loggedMinutes={logged} />
+                        <WeekDecision row={row} loggedMinutes={logged} teamKey={teamKey} />
                         <PunchedVsLogged
                           name={row.name}
                           punches={punches}
@@ -872,28 +895,77 @@ function PunchedVsLogged({
  * hours somebody worked. A week with a wrong Tuesday needs fixing and
  * resubmitting; that is what returning means.
  */
-function WeekDecision({ row, loggedMinutes }: { row: TeamRow; loggedMinutes: number }) {
-  const [pending, startTransition] = useTransition();
+function WeekDecision({
+  row,
+  loggedMinutes,
+  teamKey,
+}: {
+  row: TeamRow;
+  loggedMinutes: number;
+  teamKey: QueryKey;
+}) {
   const [returning, setReturning] = useState(false);
   const [reason, setReason] = useState("");
 
-  function decide(input: { decision: "approved" } | { decision: "returned"; reason: string }) {
-    if (!row.weekId) return;
+  const queryClient = useQueryClient();
 
-    startTransition(async () => {
-      const result = await decideTimesheetWeek(row.weekId!, input);
+  /*
+   * P12-23 — THE CHIP MOVES ON THE CLICK.
+   *
+   * ⚠️ THE PAINT IS THE STATUS AND THE REASON TOGETHER, never the status alone.
+   * `vizserve_pms_timesheet_weeks` has a constraint guaranteeing a RETURNED week
+   * carries a reason, and the row prints it under the chip — so painting
+   * "Returned" without it would show a state the database cannot produce, for
+   * the length of a round trip, on the one row where the reason IS the message.
+   *
+   * ⚠️ AND `onError` PUTS THE CHIP BACK. There is no role check in the action —
+   * deliberately, because `vizserve_pms_can_approve` decides scope inside
+   * `vizserve_pms_record_decision` and the self-approval guard lives in the
+   * decide function — so a refusal here is the ENGINE refusing, which is exactly
+   * the case where a lead must not be left looking at an approval that did not
+   * happen.
+   */
+  const decision = useMutation({
+    mutationFn: (input: { decision: "approved" } | { decision: "returned"; reason: string }) =>
+      decideWeek(row.weekId!, input),
 
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
+    onMutate: (input) => {
+      const snapshot = beginTimesheetWrite(queryClient);
 
+      patchTeamWeekDecision(queryClient, teamKey, row.weekId!, {
+        status: input.decision === "approved" ? "APPROVED" : "RETURNED",
+        decisionReason: input.decision === "returned" ? input.reason : null,
+      });
+
+      cancelTimesheetRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _input, snapshot) => {
+      if (snapshot) rollbackTimesheetWrite(queryClient, snapshot);
+      toast.error(error.message || "That decision did not go through.");
+    },
+
+    onSuccess: (_data, input) => {
       toast.success(
         input.decision === "approved" ? `${row.name}'s week approved.` : `Sent back to ${row.name}.`,
       );
       setReturning(false);
       setReason("");
-    });
+    },
+
+    /* Fired, never awaited. `["timesheet", "week"]` goes too: a lead deciding
+       their OWN week from this grid has to see the lock move on `/timesheet`. */
+    onSettled: () => {
+      invalidateTimesheetWrite(queryClient);
+    },
+  });
+
+  const pending = decision.isPending;
+
+  function decide(input: { decision: "approved" } | { decision: "returned"; reason: string }) {
+    if (!row.weekId) return;
+    decision.mutate(input);
   }
 
   if (!row.status) {

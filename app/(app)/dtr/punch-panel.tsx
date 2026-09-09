@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -11,8 +12,16 @@ import {
   type Deviation,
   type WorkSchedule,
 } from "@/lib/dtr-schedule";
+import { browserClient } from "@/lib/query/browser-client";
+import { fetchPunchState } from "@/lib/query/fetchers/dtr";
+import { invalidatePunch } from "@/lib/query/invalidate";
+import { qk } from "@/lib/query/keys";
+import { fromAction } from "@/lib/query/mutate";
 import { OffScheduleDialog } from "./off-schedule-dialog";
 import { punch } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const capturePunch = fromAction(punch);
 
 export type PunchState = {
   today: { work_date: string; time_in: string | null; time_out: string | null } | null;
@@ -45,97 +54,182 @@ export type PunchState = {
  */
 export function PunchPanel({
   initial,
+  viewerId,
   compact = false,
 }: {
+  /**
+   * P12-23 — THE SERVER'S FIRST READ, AND NOW ONLY THAT.
+   *
+   * ⚠️ IT SEEDS `qk.punchState()` RATHER THAN BEING THE STATE. `/`, `/dashboard`
+   * and `/dtr` all render this panel and all three still call `loadPunchState`
+   * in their own RSC — which is Next's own SPA guidance applied to the one card
+   * that is on three screens: start the read on the server so the first paint
+   * has no client waterfall, and let the cache own everything after it. Those
+   * three pages therefore did not change shape, and the clock reminder in the
+   * app shell reads the same entry rather than a fourth copy of it.
+   */
   initial: PunchState;
+  /**
+   * Whose punches these are, from `requireAuthContext()` on each of the three
+   * pages that render this.
+   *
+   * ⚠️ IT NAMES WHAT A CACHE ENTRY HOLDS, IT DOES NOT AUTHORISE ANYTHING. The
+   * `.eq("user_id", …)` it feeds NARROWS a policy result — the DTR policy is
+   * owner-or-department-lead, so a lead reading their own panel would otherwise
+   * get their whole team's rows back. No decision about what anybody may see is
+   * made in this file.
+   */
+  viewerId: string;
   compact?: boolean;
 }) {
-  const [state, setState] = useState(initial);
-  const [pending, startTransition] = useTransition();
+  const queryClient = useQueryClient();
+
   const [offSchedule, setOffSchedule] = useState<{
     deviation: Deviation;
     workDate: string;
     punchedAt: string;
   } | null>(null);
 
+  /*
+   * ⚠️ ONE ENTRY FOR THE WHOLE TAB, SHARED WITH THE CLOCK REMINDER IN THE SHELL.
+   * P8-12 moved that reminder OUT of the layout because its six queries on every
+   * authenticated page contributed to a request burst that failed with
+   * `TypeError: fetch failed`. On this key it costs nothing at all on a page
+   * that already draws this panel, and one read on the ones that do not.
+   *
+   * `initialData` rather than a fetch on mount: the server has already read this
+   * for the first paint, milliseconds ago, so it counts as fetched NOW and the
+   * ordinary 30s `staleTime` applies from here. `initialDataUpdatedAt: 0` would
+   * mark it stale on arrival and refetch immediately, which is the seed doing no
+   * work at all.
+   */
+  const punchQuery = useQuery({
+    queryKey: qk.punchState(),
+    queryFn: () => fetchPunchState(browserClient(), viewerId),
+    initialData: initial,
+  });
+
+  /*
+   * ⚠️ STILL NEVER PREDICTED, AND THAT IS THE ONE RULE OF THIS PANEL. There is
+   * no `onMutate` below and there must not be: the panel shows what the server
+   * already recorded, because a DTR that says "timed in" because a button was
+   * pressed, while the server captured nothing, is worse than no shortcut at
+   * all. `vizserve_pms_punch` owns earliest-in / latest-out, the
+   * today-or-yesterday window and the 18-hour cut-off, and it can legitimately
+   * IGNORE a press — `captured: false` — which no optimistic paint could
+   * anticipate.
+   *
+   * What changed in P12-23 is only where the returned row goes: into the cache
+   * instead of into local state, so the shell's clock reminder and the copy of
+   * this panel on `/dashboard` see it too. That is what the fire-and-forget
+   * refresh this replaces was trying to do.
+   */
+  /*
+   * ⚠️ `?? initial` IS NOT BELT AND BRACES, IT IS A RACE THIS COMPONENT LOSES.
+   *
+   * `initialData` seeds a query only when the ENTRY DOES NOT EXIST YET, and the
+   * clock reminder in `app/(app)/layout.tsx` observes this same key — the shell
+   * renders above `children`, so on a hard load of `/dtr` the reminder builds
+   * the query first, with no seed, and this component's `initialData` is then
+   * ignored. TanStack still TYPES `data` as non-optional because the option was
+   * passed, which is the dangerous half: without this fallback the first paint
+   * of the panel would read `state.today` off `undefined`.
+   *
+   * The fallback is also the right answer rather than merely a safe one — it is
+   * the server's own read of this exact record, taken moments ago, which is what
+   * the seed was carrying anyway.
+   */
+  const state = punchQuery.data ?? initial;
+
   const timeIn = state.today?.time_in ?? null;
   const timeOut = state.today?.time_out ?? null;
 
   const scheduledEnd = effectiveEnd(state.schedule.workEnd, state.approvedOvertimeMinutes);
 
-  function run(direction: "in" | "out", workDate?: string) {
-    startTransition(async () => {
-      const result = await punch(
-        direction === "in"
+  const capture = useMutation({
+    mutationFn: (vars: { direction: "in" | "out"; workDate?: string }) =>
+      capturePunch(
+        vars.direction === "in"
           ? { direction: "in" }
-          : { direction: "out", work_date: workDate ?? null },
-      );
+          : { direction: "out", work_date: vars.workDate ?? null },
+      ),
 
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
+    onError: (error) => toast.error(error.message),
 
-      const punched = result.data;
-
+    onSuccess: (punched, vars) => {
       // `captured: false` means the punch was deliberately ignored — a second
       // time-in. Said out loud, because silence looks like a broken button and
       // the next thing someone does is press it again.
       if (punched.captured) toast.success(punched.message);
       else toast.info(punched.message);
 
-      setState((previous) =>
-        punched.work_date === previous.today?.work_date || !previous.today
+      /*
+       * The SERVER'S row, written into the cache. The same arithmetic as the
+       * `setState` this replaces: a punch that closed YESTERDAY leaves today
+       * untouched and clears the open-yesterday offer.
+       */
+      queryClient.setQueryData(qk.punchState(), (previous: PunchState | undefined) => {
+        const base = previous ?? state;
+        return punched.work_date === base.today?.work_date || !base.today
           ? {
-              ...previous,
+              ...base,
               today: {
                 work_date: punched.work_date,
                 time_in: punched.time_in,
                 time_out: punched.time_out,
               },
             }
-          : // The punch closed yesterday, so today is untouched and yesterday is
-            // no longer open.
-            { ...previous, today: previous.today, openYesterday: null },
-      );
+          : { ...base, today: base.today, openYesterday: null };
+      });
 
       /*
-       * P8-12 — TELL THE SHELL, not just this panel.
+       * ⚠️ ONLY ON A PUNCH THAT WAS ACTUALLY CAPTURED, and only for today.
        *
-       * The local `setState` above is what keeps the button honest without a
-       * round trip, and it stays. But since P8-12 the app shell holds its own
-       * copy of "have they timed in yet", because that is what decides whether
-       * the clock reminder fires — and the shell only re-renders on navigation.
-       * Somebody who times in early at 08:40 and then sits on this page would
-       * be reminded to clock in at 08:45, which is the exact false alarm that
-       * gets a reminder switched off for good.
+       * ⚠️ THIS GUARD WAS DEAD CODE UNTIL P12-23, AND THE COMMENT BELOW HAS BEEN
+       * DESCRIBING BEHAVIOUR THE CODE DID NOT HAVE. It read
+       * `if (punched.captured) if (!punched.captured) return;` — an outer `if`
+       * whose entire body was an inner `if` that could never be true — so the
+       * lines after it ran on every punch, an ignored one included. Pressing
+       * Time in twice therefore prompted about the punch made hours earlier,
+       * which is exactly what this says must not happen.
        *
-       * Fire-and-forget, and NOT awaited: the off-schedule dialog below must
-       * open on the punch that just happened, not after a network round trip.
+       * `captured: false` means the server kept an earlier time-in and ignored
+       * this press — judging the value it kept would prompt about a punch made
+       * hours ago every time somebody pressed the button twice.
+       *
+       * Closing YESTERDAY is skipped too: `approvedOvertimeMinutes` was loaded
+       * for today, so a yesterday deviation would be measured against the wrong
+       * end time. That day still offers the correction link in the DTR table,
+       * which is the quieter surface and the right one for a shift somebody is
+       * only now getting round to closing.
        */
-      if (punched.captured)
-      // ⚠️ ONLY ON A PUNCH THAT WAS ACTUALLY CAPTURED, and only for today.
-      //
-      // `captured: false` means the server kept an earlier time-in and ignored
-      // this press — judging the value it kept would prompt about a punch made
-      // hours ago every time somebody pressed the button twice.
-      //
-      // Closing YESTERDAY is skipped too: approvedOvertimeMinutes was loaded for
-      // today, so a yesterday deviation would be measured against the wrong end
-      // time. That day still offers the correction link in the DTR table, which
-      // is the quieter surface and the right one for a shift somebody is only
-      // now getting round to closing.
       if (!punched.captured) return;
-      if (punched.work_date !== initial.today?.work_date) return;
+      if (punched.work_date !== state.today?.work_date) return;
 
-      const punchedAt = direction === "in" ? punched.time_in : punched.time_out;
-      const target = direction === "in" ? state.schedule.workStart : scheduledEnd;
-      const found = computeDeviation(direction, punchedAt, target, state.graceMinutes);
+      const punchedAt = vars.direction === "in" ? punched.time_in : punched.time_out;
+      const target = vars.direction === "in" ? state.schedule.workStart : scheduledEnd;
+      const found = computeDeviation(vars.direction, punchedAt, target, state.graceMinutes);
 
       if (found && punchedAt) {
         setOffSchedule({ deviation: found, workDate: punched.work_date, punchedAt });
       }
-    });
+    },
+
+    /*
+     * ⚠️ FIRED, NEVER AWAITED, AND AFTER THE DIALOG HAS ALREADY BEEN DECIDED.
+     * The off-schedule prompt has to open on the punch that just happened, not
+     * after a network round trip — which is what the fire-and-forget note this
+     * replaces was protecting. `invalidatePunch` re-reads this key and the DTR
+     * list; it deliberately leaves `qk.reminderSetup()` alone, because a punch
+     * changes neither a preference nor a signed sound URL.
+     */
+    onSettled: () => invalidatePunch(queryClient),
+  });
+
+  const pending = capture.isPending;
+
+  function run(direction: "in" | "out", workDate?: string) {
+    capture.mutate({ direction, workDate });
   }
 
   const worked = workedMinutes(timeIn, timeOut);

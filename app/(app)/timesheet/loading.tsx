@@ -1,39 +1,26 @@
 import { PageShell } from "@/components/page-shell";
+import { WeekGridSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
 
+/**
+ * ⚠️ THE GRID HALF IS SHARED WITH THE LOADED PAGE (`WeekGridSkeleton`), which is
+ * the whole point of it being in `components/skeletons.tsx`. There are TWO waits
+ * on this route now — this one while the server component runs, then the query's
+ * own — and two hand-rolled shapes for one screen is how the page visibly
+ * rearranges itself between them.
+ *
+ * The week navigation is the part that is NOT shared: `timesheet-view.tsx`
+ * renders under a real one, built from the URL by the server component, and only
+ * here has the URL not been read yet.
+ */
 export default function Loading() {
   return (
-    // The same shape the loaded page uses — week bar, then the grid.
-    <PageShell className="gap-3" aria-hidden>
-      <div className="rounded-lg border bg-card grade-surface p-2 shadow-raised-lg">
+    <PageShell className="gap-3">
+      <div className="rounded-lg border bg-card grade-surface p-2 shadow-raised-lg" aria-hidden>
         <Skeleton className="mx-auto h-5 w-40" />
       </div>
 
-      <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
-        <div className="flex items-center gap-2 border-b px-3 py-2">
-          <Skeleton className="h-4 w-16" />
-          <div className="ml-auto flex gap-2">
-            {Array.from({ length: 7 }, (_, day) => (
-              <Skeleton key={day} className="h-4 w-8" />
-            ))}
-          </div>
-        </div>
-
-        {Array.from({ length: 4 }, (_, row) => (
-          <div key={row} className="flex items-center gap-2 border-b px-3 py-2.5">
-            <Skeleton className="h-4 w-40" />
-            <div className="ml-auto flex gap-2">
-              {Array.from({ length: 7 }, (_, day) => (
-                <Skeleton key={day} className="h-4 w-8" />
-              ))}
-            </div>
-          </div>
-        ))}
-
-        <div className="px-3 py-2.5">
-          <Skeleton className="h-4 w-24" />
-        </div>
-      </div>
+      <WeekGridSkeleton />
     </PageShell>
   );
 }

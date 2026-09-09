@@ -286,8 +286,97 @@ export const qk = {
   teamWeek: (departmentId: string, weekStart: string) =>
     ["timesheet", "team", departmentId, weekStart] as const,
 
+  /**
+   * P12-23 — EVERY WEEK THE VIEWER MAY REVIEW, for one week start.
+   *
+   * ⚠️ THIS EXISTS BECAUSE `qk.teamWeek(departmentId, weekStart)` COULD NOT
+   * HOLD IT, and it is the same distinction `listsVisible()` records against
+   * `lists(departmentId)`. That key is keyed BY DEPARTMENT, so an entry under it
+   * holds one department's rows. `/timesheet/team` renders every person the
+   * policies will show this lead — someone who leads two departments sees both,
+   * in one grid, sorted by name — which is not a superset of any single entry,
+   * it is a different row set. Writing it to `qk.teamWeek(x, w)` would have
+   * meant whichever fetcher ran last won the entry and the other consumer
+   * silently lost people, on a screen whose whole job is to notice who is
+   * missing.
+   *
+   * ⚠️ AND THE SCREEN HAS NO DEPARTMENT ID TO KEY ON IN THE FIRST PLACE. Every
+   * query on it carries no department filter at all — the policies scope it
+   * through the person the row belongs to — so a department id in the key would
+   * be a value the page had to invent in order to file a result that was never
+   * about one department.
+   *
+   * Under the `["timesheet"]` prefix with `week` so a decision on somebody's
+   * week sweeps both grids together.
+   */
+  teamWeekVisible: (weekStart: string) => ["timesheet", "team", "visible", weekStart] as const,
+
+  /**
+   * P12-23 — the tasks the timesheet picker offers before anybody types.
+   *
+   * ⚠️ NOT `qk.ref(...)`, AND NOT `qk.tasks()`. It is neither reference data
+   * (it is the caller's OWN twenty most recent, and nobody else's) nor a task
+   * view (it carries no filters, no status grouping and a `where` string
+   * resolved server-side). `lib/timesheet-tasks.ts` owns the scope rule —
+   * `vizserve_pms_is_on_task`, which is what `vizserve_pms_may_log_time`
+   * enforces on write — so the picker cannot offer a row the insert would
+   * refuse.
+   *
+   * ONE ENTRY PER TAB, NOT ONE PER WEEK. The list is the same whatever week is
+   * on screen; the week is what decides which of them are already ROWS, and
+   * that subtraction happens in the browser against `qk.week(...)`. Keying it by
+   * week would refetch the picker on every arrow press for a list that did not
+   * change.
+   *
+   * The picker's SEARCH is deliberately not here: it stays a Server Action, one
+   * debounced request per query, with the last reply winning. A key per search
+   * term is a cache of things nobody will read twice.
+   */
+  loggableTasks: () => ["timesheet", "loggable"] as const,
+
   punchState: () => ["dtr", "punch-state"] as const,
+  /**
+   * ⚠️ DEFINED, AND STILL READ BY NOTHING AFTER PHASE 5 — the same statement
+   * about shape that `qk.lists(departmentId)` carries, written down here rather
+   * than rediscovered. `/dtr` is a RANGE with a person filter and a sort, not a
+   * day: the screen exists to be read backwards from the most recent day, and
+   * one entry per day would be thirty entries for one render with no way to ask
+   * for the thirty-first. `qk.dtrView` below is what the page uses.
+   *
+   * It is kept rather than deleted because a genuinely per-day read is a
+   * plausible thing to want — a calendar cell, a dashboard tile — and because
+   * the `["dtr"]` prefix it sits under is what a punch invalidates, so the day
+   * something does use it the plumbing is already right.
+   */
   dtrDay: (date: string) => ["dtr", "day", date] as const,
+  /**
+   * P12-23 — the DTR list, keyed on the whole filter bag.
+   *
+   * The range, the person and the sort all change which ROWS come back and in
+   * what order — the query is capped at `DTR_PAGE_SIZE + 1` and Postgres does
+   * the ordering, so a re-sort is genuinely a different result set rather than
+   * the same rows rearranged. `normalize` is what stops an absent `?user=` and
+   * one set to `""` becoming two entries for one screen.
+   */
+  dtrView: (filters: Record<string, string | undefined>) =>
+    ["dtr", "view", normalize(filters)] as const,
+  /**
+   * P12-23 — the half of the clock reminder that cannot be read in the browser.
+   *
+   * ⚠️ ITS OWN KEY BECAUSE IT IS THE ONE READ IN THIS PHASE THAT STAYS ON A
+   * SERVER ACTION, and splitting it is what keeps the other half honest. The
+   * punch state is a plain policy-scoped read and lives on `qk.punchState()`
+   * with the punch panel, shared; what is left here is a signed URL for an
+   * uploaded ringtone, which needs the SERVICE ROLE (`user-sounds` is a private
+   * bucket with no policy for `authenticated`, and `signAttachmentUrl` uses the
+   * admin client). See `app/(app)/reminder-actions.ts`.
+   *
+   * Read once per tab on a long `staleTime`: it moves when somebody changes
+   * their preferences on `/settings`, and at midnight when the working-day
+   * answer changes. It is mounted in the SHELL, on every page, so anything
+   * shorter is a cost every route pays.
+   */
+  reminderSetup: () => ["dtr", "reminder-setup"] as const,
 
   // ── reference ───────────────────────────────────────────────────────────────
   ref: (table: RefTable) => ["ref", table] as const,

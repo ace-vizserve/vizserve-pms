@@ -170,3 +170,53 @@ export async function invalidateTaskPart(
 export function markTaskStale(client: Invalidator, taskId: string): void {
   void client.invalidateQueries({ queryKey: qk.task(taskId), refetchType: "none" });
 }
+
+/* -------------------------------------------------------------------------- */
+/* P12-23 — the time surfaces.                                                 */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A write that changed an HOUR: a cell typed, an entry moved, a week handed in,
+ * a week decided.
+ *
+ * ⚠️ TWO PREFIXES, NOT THE `["timesheet"]` ROOT, and the third key under it is
+ * why. `qk.loggableTasks()` is the picker's twenty most recent tasks, and
+ * nothing about logging an hour against one of them changes that list — sweeping
+ * the root would re-run its two queries on every keystroke that leaves a cell.
+ *
+ * ⚠️ THE TEAM GRID IS SWEPT BY A MEMBER'S OWN EDIT, ON PURPOSE. A lead logs
+ * their own hours from `/timesheet` and reviews their team on `/timesheet/team`,
+ * and both can be in one tab — their own row on the team grid is built from the
+ * same entries. Leaving it out is how a lead's own total disagrees with itself
+ * across two screens.
+ *
+ * ⚠️ FIRED, NEVER AWAITED. The predicted value is already in the cache
+ * (`lib/query/timesheet-cache.ts`), so there is nothing on screen that a refetch
+ * has to arrive in time to protect. Awaiting it is what used to make a status
+ * change on the tasks surface feel like a page load; `invalidateTaskWrite` above
+ * carries the full argument.
+ */
+export function invalidateTimesheetWrite(client: Invalidator): void {
+  fire(client, [
+    ["timesheet", "week"],
+    ["timesheet", "team"],
+  ]);
+}
+
+/**
+ * A punch.
+ *
+ * `qk.punchState()` is the panel and the clock reminder, on every page.
+ * `["dtr", "view"]` is the record itself — a captured punch is a new row in it,
+ * or a time-out written onto an existing one, and a DTR left open beside the
+ * dashboard would otherwise keep yesterday's shape until a navigation.
+ *
+ * ⚠️ `qk.reminderSetup()` IS DELIBERATELY NOT HERE, which is why this does not
+ * sweep the `["dtr"]` root. That key holds a signed sound URL and a
+ * preferences read; a punch changes neither, and re-minting an eight-hour
+ * storage signature every time somebody clocks in is a Server Action round trip
+ * bought for nothing.
+ */
+export function invalidatePunch(client: Invalidator): void {
+  fire(client, [qk.punchState(), ["dtr", "view"]]);
+}

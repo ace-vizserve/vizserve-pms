@@ -14,8 +14,8 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition, useOptimistic } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import type { QueryKey } from "@tanstack/react-query";
 
 import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
 import { TaskStatusBadge } from "@/components/status-badge";
@@ -57,14 +57,17 @@ import {
   withEnd,
   withStart,
 } from "@/lib/schemas/timesheet";
+import { isPlaceholder } from "@/lib/query/placeholder";
+import type { TimesheetEntryRow } from "@/lib/schemas/time-records";
+import type { NamedRow } from "@/lib/schemas/time-records";
 import { cn } from "@/lib/utils";
 
 import { searchLoggableTasks } from "./actions";
 
-import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
 import { CellDetail } from "./cell-detail";
 import { ClockSelect, clockLabel, normaliseClock } from "./clock-select";
 import { DurationSuggestion } from "./duration-suggestion";
+import { insertWrite, useEntryWrite, type EntryWrite } from "./use-entry-write";
 
 export type PickableTask = {
   id: string;
@@ -108,6 +111,118 @@ export type TaskRow = {
 
 function sum(entries: CellEntry[] | undefined): number {
   return (entries ?? []).reduce((total, entry) => total + entry.minutes, 0);
+}
+
+/**
+ * `09:30:00` → `09:30`, and null stays null.
+ *
+ * `<input type="time">` accepts the seconds form but normalises it away the
+ * moment somebody touches the field, which would make an untouched row and a
+ * touched-but-unchanged one compare as different and fire a pointless UPDATE on
+ * blur. Trimming on the way in removes the difference instead.
+ */
+function toClock(value: string | null): string | null {
+  return value ? value.slice(0, 5) : null;
+}
+
+/**
+ * P12-23 — THE WEEK'S ENTRIES, AS THE GRID DRAWS THEM.
+ *
+ * ⚠️ THIS IS THE RSC's OWN DERIVATION, MOVED AND EXTENDED IN EXACTLY ONE PLACE.
+ * A task appears ONCE however many days it spans — that collapse is the
+ * difference between a week grid and a list of entries, and it is the reason the
+ * shape was asked for. Everything about it is unchanged except how a row learns
+ * its NAME.
+ *
+ * ⚠️ THE NAME NOW HAS THREE SOURCES, IN ORDER, AND THE ORDER IS THE POINT:
+ *
+ *   1. THE FIRST ENTRY THAT CARRIES AN EMBED. Not the first entry — an
+ *      optimistic one has `vizserve_pms_tasks: null` because PostgREST is what
+ *      resolves that join and the browser has nothing to resolve it from.
+ *      Reading position zero would have let a predicted row overwrite a real
+ *      title with a placeholder.
+ *   2. THE PICKER'S OWN COPY of the task, which is where a row with no hours yet
+ *      came from in the first place (the twenty, a search result, or the
+ *      sessionStorage list of rows added but not yet logged against).
+ *   3. "Task no longer visible to you" — which is a REAL STATE and not a
+ *      fallback of last resort dressed up. The entries policy is wider than the
+ *      tasks policy, so a task reassigned away from somebody who already logged
+ *      against it comes back with a null embed forever. The hours stay theirs
+ *      and stay counted; only the name of the work is no longer theirs to read.
+ */
+function taskRowsFrom({
+  entries,
+  departments,
+  lists,
+  known,
+}: {
+  entries: TimesheetEntryRow[];
+  departments: NamedRow[];
+  lists: NamedRow[];
+  /** The picker's twenty plus the sessionStorage rows. Source 2 above. */
+  known: PickableTask[];
+}): TaskRow[] {
+  const departmentName = new Map(departments.map((row) => [row.id, row.name]));
+  const listName = new Map(lists.map((row) => [row.id, row.name]));
+  const byId = new Map(known.map((task) => [task.id, task]));
+
+  const rows = new Map<string, TaskRow>();
+
+  for (const entry of entries) {
+    let row = rows.get(entry.task_id);
+
+    if (!row) {
+      row = {
+        taskId: entry.task_id,
+        title: "",
+        status: null,
+        where: "",
+        finished: false,
+        cells: {},
+      };
+      rows.set(entry.task_id, row);
+    }
+
+    (row.cells[entry.work_date] ??= []).push({
+      id: entry.id,
+      minutes: entry.minutes,
+      note: entry.note,
+      started_at: toClock(entry.started_at),
+      ended_at: toClock(entry.ended_at),
+    });
+  }
+
+  /* Source 1, then 2, then 3 — resolved after the pass above rather than during
+     it, so an entry arriving in any order cannot decide the name. */
+  const embedFor = new Map<string, TimesheetEntryRow["vizserve_pms_tasks"]>();
+  for (const entry of entries) {
+    if (entry.vizserve_pms_tasks && !embedFor.has(entry.task_id)) {
+      embedFor.set(entry.task_id, entry.vizserve_pms_tasks);
+    }
+  }
+
+  for (const row of rows.values()) {
+    const embed = embedFor.get(row.taskId) ?? null;
+    const fallback = byId.get(row.taskId) ?? null;
+
+    row.title = embed?.title ?? fallback?.title ?? "Task no longer visible to you";
+    row.status = embed?.status ?? fallback?.status ?? null;
+    row.where = embed
+      ? [
+          embed.department_id ? departmentName.get(embed.department_id) : null,
+          embed.list_id ? listName.get(embed.list_id) : null,
+        ]
+          .filter(Boolean)
+          .join(" / ")
+      : (fallback?.where ?? "");
+    // Marks the row, nothing more. An hour spent on something since completed is
+    // still an hour that was spent, and the picker offers finished tasks too.
+    row.finished = isTerminal((row.status ?? "OPEN") as Parameters<typeof isTerminal>[0]);
+  }
+
+  // Alphabetical. The alternative — first-logged-first — reorders the grid under
+  // the cursor as soon as somebody fills a cell on a row that had none.
+  return [...rows.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +323,10 @@ export function WeekGrid({
   monday,
   days,
   today,
-  rows,
+  weekKey,
+  entries,
+  departments,
+  lists,
   tasks,
   taskLists,
   locked,
@@ -217,8 +335,33 @@ export function WeekGrid({
   monday: string;
   days: string[];
   today: string;
-  rows: TaskRow[];
-  /** The picker's first page — the 20 most recently created, from the server. */
+  /**
+   * P12-23 — `qk.week(userId, weekStart)`, the EXACT cache entry every control
+   * in this file patches.
+   *
+   * ⚠️ THE KEY IS A PROP RATHER THAN BUILT HERE, because building it would mean
+   * this component holding the viewer's id in order to name a cache entry — and
+   * the one thing a client component must not do in this app is decide anything
+   * about whose data it is looking at. `timesheet-view.tsx` builds it from the
+   * id `page.tsx` resolved through `requireAuthContext()`.
+   */
+  weekKey: QueryKey;
+  /**
+   * P12-23 — THE ROWS AS THEY CAME BACK, not the grid.
+   *
+   * ⚠️ THE ENTRY LIST IS WHAT A TYPED CELL PATCHES, and it is why this prop is
+   * entries rather than the `TaskRow[]` the RSC used to hand down. A typed cell
+   * is FOUR numbers — the cell, its row total, its day total in the header and
+   * the week total in the footer — and all four are summed from here, so one
+   * `onMutate` moves all four and they cannot disagree. That is the invariant
+   * the old `useOptimistic` in this file existed to hold, minus the part where
+   * it dropped its value when the transition ended.
+   */
+  entries: TimesheetEntryRow[];
+  /** Name lookups for the line under each task. See `taskRowsFrom`. */
+  departments: NamedRow[];
+  lists: NamedRow[];
+  /** The picker's first page — the 20 most recently created, from `qk.loggableTasks()`. */
   tasks: PickableTask[];
   /** The List filter's options: lists this person actually has work in. */
   taskLists: { id: string; name: string }[];
@@ -267,6 +410,24 @@ export function WeekGrid({
 
   const remember = useCallback((next: PickableTask[]) => writeRows(storageKey, next), [storageKey]);
 
+  /*
+   * P12-23 — ENTRIES INTO GRID ROWS, HERE RATHER THAN IN THE PAGE.
+   *
+   * ⚠️ IT MOVED BECAUSE THIS IS THE ONLY PLACE THAT KNOWS EVERY SOURCE OF A
+   * TASK'S NAME. The RSC resolved a row's title from the entries embed and
+   * nothing else, which was complete while every entry on screen had come back
+   * from the server. An OPTIMISTIC entry has not: PostgREST resolves that embed
+   * and there is nothing to resolve it from in the browser, so a cell typed into
+   * a row that had no hours yet would have painted itself
+   * "Task no longer visible to you" for the length of a round trip. The picker
+   * and the sessionStorage rows are the copy of the task that row was built
+   * from in the first place, and both live here.
+   */
+  const rows = useMemo(
+    () => taskRowsFrom({ entries, departments, lists, known: [...tasks, ...extraTasks] }),
+    [entries, departments, lists, tasks, extraTasks],
+  );
+
   const logged = new Set(rows.map((row) => row.taskId));
 
   /**
@@ -304,29 +465,32 @@ export function WeekGrid({
   const pickable = tasks.filter((task) => !logged.has(task.id) && !extraTaskIds.includes(task.id));
 
   /*
-   * P11-05 — THE CELL'S OPTIMISTIC MINUTES LIVE HERE, NOT IN THE CELL.
+   * P11-05 / P12-23 — THE CELL'S PREDICTED MINUTES USED TO LIVE HERE. THEY LIVE
+   * IN THE CACHE NOW, AND THE INVARIANT THEY EXISTED FOR IS UNCHANGED.
    *
    * ⚠️ A TYPED CELL IS FOUR NUMBERS, NOT ONE. The cell itself, its row total,
    * its day total in the header and the week total in the footer are the same
-   * fact drawn in four places — and three of them are computed HERE, from
+   * fact drawn in four places, and three of them are computed HERE, from
    * `cells`. While the optimistic minutes sat inside `TimeCell` the cell
    * repainted on the keystroke and the three totals around it held the old
-   * figure until the server answered, so the grid visibly disagreed with
-   * itself. Half-instant is worse than slow: the eye goes straight to the
-   * number that did not move.
+   * figure until the server answered, so the grid visibly disagreed with itself.
+   * Half-instant is worse than slow: the eye goes straight to the number that
+   * did not move. Lifting them to a `useOptimistic` in this component fixed
+   * that.
    *
-   * Keyed `taskId|day`, because that pair is what a cell IS. React drops the
-   * whole map when the transition that filled it ends, so a refused write needs
-   * no rollback — `sum(...)` has been underneath it the entire time.
+   * ⚠️ WHAT `useOptimistic` COULD NOT FIX IS THAT IT DROPS ITS VALUE WHEN THE
+   * TRANSITION THAT SET IT ENDS. So the cell fell back to the SERVER total the
+   * moment the write returned and jumped forward again when `router.refresh()`
+   * landed — on a slow connection a whole row of typed numbers reverted one by
+   * one and then re-appeared, which reads as the grid losing work.
+   *
+   * `onMutate` patches the cached ENTRY that `rows` above is built from, so the
+   * prediction is in the same array all four numbers are summed from and stays
+   * there until a refetch replaces it. There is nothing left to hold, and
+   * nothing here to hold it — which is why this is a comment and not a hook.
+   * `use-entry-write.ts` owns the paint and the rollback.
    */
-  const [pendingMinutes, setPendingMinutes] = useOptimistic<
-    Record<string, number>,
-    { taskId: string; day: string; minutes: number }
-  >({}, (state, next) => ({ ...state, [`${next.taskId}|${next.day}`]: next.minutes }));
-
-  /** What a cell holds RIGHT NOW: the number being saved, else the server's. */
-  const cellTotal = (row: TaskRow, day: string) =>
-    pendingMinutes[`${row.taskId}|${day}`] ?? sum(row.cells[day]);
+  const cellTotal = (row: TaskRow, day: string) => sum(row.cells[day]);
 
   const dayTotal = (day: string) => allRows.reduce((total, row) => total + cellTotal(row, day), 0);
   const rowTotal = (row: TaskRow) => days.reduce((total, day) => total + cellTotal(row, day), 0);
@@ -657,9 +821,7 @@ export function WeekGrid({
                         day={day}
                         entries={row.cells[day] ?? []}
                         total={cellTotal(row, day)}
-                        onOptimisticTotal={(minutes) =>
-                          setPendingMinutes({ taskId: row.taskId, day, minutes })
-                        }
+                        weekKey={weekKey}
                         future={day > today}
                         locked={locked}
                         onEmptied={() => keepRow(row)}
@@ -706,6 +868,7 @@ export function WeekGrid({
                           days={days}
                           today={today}
                           tasks={pickable}
+                          weekKey={weekKey}
                           locked={locked}
                         />
                       ))
@@ -870,6 +1033,7 @@ function EntryRow({
   days,
   today,
   tasks,
+  weekKey,
   locked,
 }: {
   entry: CellEntry;
@@ -881,9 +1045,30 @@ function EntryRow({
   /** What "move to task" may offer — the same list the picker uses, which is
       the same list RLS will accept a write against. */
   tasks: PickableTask[];
+  /** `qk.week(userId, weekStart)`. See `WeekGrid`. */
+  weekKey: QueryKey;
   locked: boolean;
 }) {
-  const [pending, startTransition] = useTransition();
+  const write = useEntryWrite(weekKey);
+  const pending = write.isPending;
+
+  /*
+   * ⚠️ A PREDICTED ENTRY IS INERT AND THIS ROW IS WHERE THAT MATTERS.
+   *
+   * Between a cell being typed into and the server answering, the breakdown
+   * holds a row whose id is `optimistic-4` rather than a uuid. Every control
+   * below sends that id to an action typed `uuid` — the clocks, the length, the
+   * menu's change-date and move-to-task, the delete. The tasks surface shipped
+   * exactly this and got `invalid input syntax for type uuid: "optimistic-0"`
+   * out of Postgres, from a hover.
+   *
+   * So a pending row shows what it is and offers nothing. It is the same
+   * treatment `comment-thread.tsx` gives a comment that has not landed, and for
+   * the same reason: predicting that an hour WILL be accepted is fine,
+   * pretending it already has been is not.
+   */
+  const saving = isPlaceholder(entry.id);
+  const readOnly = locked || saving;
 
   const [draft, setDraft] = useState<EntryDraft>(() => ({
     duration: formatCellDuration(entry.minutes),
@@ -904,7 +1089,7 @@ function EntryRow({
 
   function commit(next: EntryDraft) {
     setDraft(next);
-    if (locked) return;
+    if (readOnly) return;
 
     const built = draftToEntry(next);
 
@@ -931,35 +1116,38 @@ function EntryRow({
       return;
     }
 
-    startTransition(async () => {
-      const result = await updateTimeEntry({
-        id: entry.id,
-        task_id: taskId,
-        work_date: day,
-        ...built.entry,
-      });
-
-      if (!result.ok) {
-        toast.error(result.error);
-        setDraft(saved());
-        return;
-      }
-
-    });
+    write.mutate(
+      {
+        kind: "update",
+        input: { id: entry.id, task_id: taskId, work_date: day, ...built.entry },
+      },
+      {
+        /*
+         * ⚠️ THE DRAFT GOES BACK TOO, and the hook's rollback is not enough on
+         * its own. That one restores the CACHE; this input is holding local
+         * state on top of it, so without this the row would keep showing the
+         * refused length beside a total that had already reverted — the two
+         * halves of the same number disagreeing on one line.
+         */
+        onError: () => setDraft(saved()),
+      },
+    );
   }
 
   return (
-    <tr className={cn("border-b bg-muted", pending && "opacity-60")}>
+    <tr className={cn("border-b bg-muted", (pending || saving) && "opacity-60")}>
       <th scope="row" className="sticky left-0 z-10 max-w-0 bg-muted py-1 pr-3 pl-11 text-left font-normal">
         <span className="flex min-w-0 items-center gap-2 text-xs">
           <Clock className="size-3.5 shrink-0 text-foreground-faint" aria-hidden />
 
-          {locked ? (
+          {readOnly ? (
             /* The record, still readable. An entry logged before a typed
                duration carried a clock has only its length, and a blank here
                would read as a rendering fault rather than a fact. */
             <span className="shrink-0 tabular-nums text-foreground-muted">
-              {draft.start && draft.end ? `${clockLabel(draft.start)} – ${clockLabel(draft.end)}` : "No times recorded"}
+              {draft.start && draft.end
+                ? `${clockLabel(draft.start)} – ${clockLabel(draft.end)}`
+                : "No times recorded"}
             </span>
           ) : (
             <>
@@ -992,7 +1180,7 @@ function EntryRow({
 
       {days.map((column) => (
         <td key={column} className="border-l bg-muted px-1 py-1 text-center">
-          {column !== day ? null : locked ? (
+          {column !== day ? null : readOnly ? (
             <span className="text-sm tabular-nums text-foreground-muted">{draft.duration}</span>
           ) : (
             /* A raw input, like the cell above it and for the same reason: a
@@ -1023,7 +1211,13 @@ function EntryRow({
       ))}
 
       <td className="border-l bg-muted px-1 py-1 text-right">
-        {locked ? null : (
+        {/* ⚠️ SAYS WHICH READ-ONLY THIS IS. A locked week is somebody else's
+            decision and `WeekStatusBar` explains it above; a pending row is
+            this browser waiting, and silence there reads as a menu that
+            vanished. The two look identical without the caption. */}
+        {saving ? (
+          <span className="text-2xs text-muted-foreground">Saving…</span>
+        ) : locked ? null : (
           <EntryMenu
             entry={entry}
             taskId={taskId}
@@ -1032,6 +1226,7 @@ function EntryRow({
             days={days}
             today={today}
             tasks={tasks}
+            weekKey={weekKey}
             pending={pending}
           />
         )}
@@ -1075,6 +1270,7 @@ function EntryMenu({
   days,
   today,
   tasks,
+  weekKey,
   pending,
 }: {
   entry: CellEntry;
@@ -1084,13 +1280,25 @@ function EntryMenu({
   days: string[];
   today: string;
   tasks: PickableTask[];
+  /** `qk.week(userId, weekStart)`. See `WeekGrid`. */
+  weekKey: QueryKey;
   pending: boolean;
 }) {
-  const [working, startTransition] = useTransition();
+  const write = useEntryWrite(weekKey);
+  const working = write.isPending;
 
   function move(next: { work_date?: string; task_id?: string }) {
-    startTransition(async () => {
-      const result = await updateTimeEntry({
+    /*
+     * ⚠️ THE ROW MOVES ON THE CLICK NOW, and a change of DATE is the one place
+     * that visibly matters: the cached entry's `work_date` is what decides which
+     * column it is summed into, so patching it slides the hour from Tuesday to
+     * Wednesday and moves both day totals at once. Under `revalidatePath` the
+     * menu closed onto a grid that still showed Tuesday until the route
+     * re-rendered.
+     */
+    write.mutate({
+      kind: "update",
+      input: {
         id: entry.id,
         task_id: next.task_id ?? taskId,
         work_date: next.work_date ?? day,
@@ -1100,15 +1308,7 @@ function EntryMenu({
         note: entry.note,
         started_at: entry.started_at,
         ended_at: entry.ended_at,
-      });
-
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      // Nothing to call back to: `saveTimesheetEntry` revalidates /timesheet
-      // itself, so the grid repaints from the action's own response.
+      },
     });
   }
 
@@ -1166,16 +1366,7 @@ function EntryMenu({
 
         <DropdownMenuItem
           variant="destructive"
-          onClick={() =>
-            startTransition(async () => {
-              const result = await deleteTimeEntry(entry.id);
-              if (!result.ok) {
-                toast.error(result.error);
-                return;
-              }
-              // `deleteTimeEntry` revalidates /timesheet itself.
-            })
-          }>
+          onClick={() => write.mutate({ kind: "delete", id: entry.id })}>
           <Trash2 />
           Delete entry
         </DropdownMenuItem>
@@ -1202,7 +1393,7 @@ function TimeCell({
   day,
   entries,
   total,
-  onOptimisticTotal,
+  weekKey,
   future,
   locked,
   onEmptied,
@@ -1212,45 +1403,51 @@ function TimeCell({
   day: string;
   entries: CellEntry[];
   /**
-   * The minutes this cell holds — the optimistic figure while a write is in
-   * flight, the server's the rest of the time. Owned by the grid, because the
-   * row, day and week totals are drawn from the same number.
+   * The minutes this cell holds.
+   *
+   * ⚠️ ALWAYS THE CACHE'S FIGURE NOW, WHICH IS THE PREDICTED ONE WHILE A WRITE
+   * IS IN FLIGHT. It is still summed by the GRID, from the same entry list the
+   * row, day and week totals are summed from — so the four numbers cannot
+   * disagree, which is what the removed `onOptimisticTotal` prop existed to
+   * guarantee.
    */
   total: number;
-  /** Paints the parsed minutes everywhere at once. Call it inside a transition. */
-  onOptimisticTotal: (minutes: number) => void;
+  /** `qk.week(userId, weekStart)`. See `WeekGrid`. */
+  weekKey: QueryKey;
   future: boolean;
   locked: boolean;
   onEmptied: () => void;
 }) {
-  const [pending, startTransition] = useTransition();
+  const save = useEntryWrite(weekKey);
+  const pending = save.isPending;
   const [draft, setDraft] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
   /*
-   * P11-05 — THE CELL KEEPS THE NUMBER IT IS ABOUT TO SAVE.
+   * P11-05 / P12-23 — THE CELL KEEPS THE NUMBER IT IS ABOUT TO SAVE.
    *
-   * ⚠️ THE OPTIMISTIC VALUE IS THE PARSED ONE, NEVER WHAT WAS TYPED, and that
+   * ⚠️ THE PREDICTED VALUE IS THE PARSED ONE, NEVER WHAT WAS TYPED, and that
    * distinction is the whole reason this was not optimistic before. `cellCommit`
    * REINTERPRETS input — "1.5" becomes 90m, "90m" becomes 1h 30m — so echoing the
    * keystrokes back would show a number the server was never going to store, and
    * a timesheet that displays a figure nobody saved is worse than a slow one.
-   * `plan.minutes` is what will be written, so it is what is shown.
+   * The MINUTES that go into the write are what is painted, which is why
+   * `use-entry-write.ts` takes the finished payload rather than the draft.
    *
-   * Before this the cell dropped back to the SERVER total the moment focus left,
-   * so on a slow connection a whole row of typed numbers reverted one by one and
-   * then re-appeared. That reads as the grid losing work.
+   * ⚠️ AND THE VALUE LIVES IN THE CACHE, not here and no longer in the grid's
+   * state. `total` is still a prop, and still summed by the parent, because this
+   * number is also a row total, a day total and a week total. What changed is
+   * where the prediction is written: `onMutate` patches the cached ENTRY, the
+   * grid re-derives all four numbers from it, and the value stays until a
+   * refetch replaces it.
    *
-   * ⚠️ AND THE VALUE ITSELF LIVES IN THE GRID, not here. `total` and
-   * `onOptimisticTotal` are props for one reason: this number is also a row
-   * total, a day total and a week total, and those three are summed by the
-   * parent. See `pendingMinutes`.
-   *
-   * React drops the value if the write is refused and the server total returns,
-   * with the toast explaining it. No rollback to write.
+   * ⚠️ THERE IS A ROLLBACK TO WRITE NOW AND IT IS NOT HERE. React used to drop
+   * the optimistic value when the transition ended, which doubled as a rollback
+   * for free. `use-entry-write.ts` restores the snapshot in `onError`; this cell
+   * only has to put its own DRAFT back, which it does by never keeping one past
+   * a commit.
    */
-  const router = useRouter();
   const split = entries.length > 1;
 
   // Three reasons a cell cannot be typed into, and they are not the same reason:
@@ -1302,18 +1499,26 @@ function TimeCell({
   const [saved, setSaved] = useState(false);
 
   /**
-   * The write itself, with no React state in it.
+   * The payload for a plan, built with no React state in it.
    *
-   * Shared by the ordinary blur path and by `flush`. Keeping it state-free is
-   * what makes it safe to call from a cleanup: a `setState` after unmount is a
-   * no-op, but a `startTransition` wrapping an await that then calls
-   * `router.refresh()` on a torn-down tree is not something to rely on.
+   * ⚠️ STATE-FREE AND READING `cellRef`, WHICH IS WHAT MAKES IT SAFE TO CALL
+   * FROM A CLEANUP. `flush` below runs from an unmount and from a
+   * `visibilitychange` listener, and a cell can be re-rendered with different
+   * entries — somebody else logged against the same task and day — between the
+   * keystroke and the tab closing, so the cell is read at flush time rather than
+   * captured.
+   *
+   * ⚠️ ONE OBJECT, TWO CONSUMERS. What comes back is exactly what the Server
+   * Action receives AND exactly what `onMutate` paints, which is the whole
+   * argument in `use-entry-write.ts`: `cellCommit` reinterprets what was typed,
+   * so a paint built from anything but the finished payload would show a number
+   * the server was never going to store.
    */
-  const persist = useCallback(async (plan: CellCommit) => {
+  const writeFor = useCallback((plan: CellCommit): EntryWrite | null => {
     const cell = cellRef.current;
 
     if (plan.kind === "insert") {
-      return logTime({
+      return insertWrite({
         task_id: cell.taskId,
         work_date: cell.day,
         minutes: plan.minutes,
@@ -1327,28 +1532,31 @@ function TimeCell({
     }
 
     if (plan.kind === "delete") {
-      return deleteTimeEntry(cell.entries[0]!.id);
+      return { kind: "delete", id: cell.entries[0]!.id };
     }
 
     if (plan.kind === "update") {
-      return updateTimeEntry({
-        id: cell.entries[0]!.id,
-        task_id: cell.taskId,
-        work_date: cell.day,
-        minutes: plan.minutes,
-        // The note survives a change of length. They answer different questions,
-        // and retyping the note to correct the hours is the reason people stop
-        // writing notes.
-        note: cell.entries[0]!.note,
-        // The START survives, and the end moves to match the new length —
-        // correcting 1h to 2h says the work ran an hour longer, not that it
-        // began an hour earlier. An entry that never had times gets them now,
-        // so every duration in the grid ends up carrying a pair either way.
-        ...spanFrom(cell.entries[0]!.started_at ?? clockAt(), plan.minutes),
-      });
+      return {
+        kind: "update",
+        input: {
+          id: cell.entries[0]!.id,
+          task_id: cell.taskId,
+          work_date: cell.day,
+          minutes: plan.minutes,
+          // The note survives a change of length. They answer different
+          // questions, and retyping the note to correct the hours is the reason
+          // people stop writing notes.
+          note: cell.entries[0]!.note,
+          // The START survives, and the end moves to match the new length —
+          // correcting 1h to 2h says the work ran an hour longer, not that it
+          // began an hour earlier. An entry that never had times gets them now,
+          // so every duration in the grid ends up carrying a pair either way.
+          ...spanFrom(cell.entries[0]!.started_at ?? clockAt(), plan.minutes),
+        },
+      };
     }
 
-    return { ok: true as const, data: undefined };
+    return null;
   }, []);
 
   function commit() {
@@ -1366,33 +1574,39 @@ function TimeCell({
     }
 
     // The draft goes; `total` below carries the value from here on, and it is
-    // the PARSED one rather than the keystrokes.
+    // the PARSED one rather than the keystrokes — it is read out of the cached
+    // entry `onMutate` is about to patch.
     setDraft(null);
 
-    if (plan.kind === "noop") return;
+    const write = writeFor(plan);
+    if (!write) return;
 
-    startTransition(async () => {
-      onOptimisticTotal(plan.kind === "delete" ? 0 : plan.minutes);
-
-      const result = await persist(plan);
-
-      if (!result.ok) {
-        // The failure stays LOUD. A refused write is worth interrupting for; a
-        // successful one is not, which is the whole shape of this slice.
-        toast.error(result.error);
-        return;
-      }
-
-      // Not a toast. A toast per cell makes filling in a week feel like an alarm
-      // going off, and it appears in the corner rather than on the number that
-      // changed.
-      /* Holds the transition until the server's own figure lands, so the
-         optimistic total does not blink back to the old one first. */
-      router.refresh();
-
-      setSaved(true);
-
-      if (plan.kind === "delete") onEmptied();
+    /*
+     * ⚠️ NO `router.refresh()`, AND ITS ABSENCE IS THE POINT OF THE PHASE.
+     *
+     * The old code held the transition open across one, with the comment "holds
+     * the transition until the server's own figure lands, so the optimistic
+     * total does not blink back to the old one first" — which was true and was
+     * the cost: every cell save re-rendered the whole route, ten queries, to
+     * confirm a number already on screen. `useOptimistic` needed that hold
+     * because it dropped its value when the transition ended. The cache does
+     * not, so the interaction is over when the write returns.
+     *
+     * ⚠️ `setSaved` IS A PER-CALL CALLBACK AND `onEmptied` IS TOO, deliberately.
+     * Both are about THIS MOUNTED CELL — a tick that fades, and keeping an
+     * emptied row on screen so a mistyped 8 can be retyped where it was typed.
+     * Neither means anything after an unmount, which is exactly the case a
+     * per-call callback does not run in. Everything that must happen regardless
+     * — the rollback, the invalidation — is declared in the hook.
+     */
+    save.mutate(write, {
+      onSuccess: () => {
+        // Not a toast. A toast per cell makes filling in a week feel like an
+        // alarm going off, and it appears in the corner rather than on the
+        // number that changed.
+        setSaved(true);
+        if (plan.kind === "delete") onEmptied();
+      },
     });
   }
 
@@ -1404,8 +1618,16 @@ function TimeCell({
    * of the slice that was genuinely missing rather than merely quiet.
    *
    * `visibilitychange` covers the phone and the closed tab; the cleanup covers
-   * navigation and the row unmounting. Both go through `persist`, which touches
+   * navigation and the row unmounting. Both go through `writeFor`, which touches
    * no state — by the time the cleanup runs there is nothing left to render into.
+   *
+   * ⚠️ AND THE MUTATION SURVIVES THE UNMOUNT, which is the part that had to be
+   * checked rather than assumed. TanStack runs the callbacks declared in
+   * `useMutation` off the MUTATION, not off the mounted observer, so the
+   * optimistic patch, the rollback on a refusal and the invalidation all still
+   * happen for a cell that is already gone. Per-call callbacks do not — which is
+   * why `commit` puts only the tick and `onEmptied` in one, and why nothing is
+   * passed here.
    *
    * NOT `beforeunload`. It is unreliable on mobile Safari, it cannot await, and it
    * is the hook that produces "leave site?" dialogues — which would be a prompt
@@ -1427,7 +1649,9 @@ function TimeCell({
       if (plan.kind === "invalid" || plan.kind === "noop") return;
 
       draftRef.current = null;
-      void persist(plan);
+
+      const write = writeFor(plan);
+      if (write) save.mutate(write);
     }
 
     function onVisibility() {
@@ -1440,7 +1664,12 @@ function TimeCell({
       document.removeEventListener("visibilitychange", onVisibility);
       flush();
     };
-  }, [persist]);
+    /* `writeFor` is stable and `save` is TanStack's own object; listing them
+       would re-register the listener on every render, and a listener that
+       re-registers on every keystroke is a listener that misses the keystroke it
+       was registered for. */
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   /** The tick fades after a beat. Long enough to notice, short enough to ignore. */
   useEffect(() => {
@@ -1527,6 +1756,7 @@ function TimeCell({
           taskTitle={taskTitle}
           day={day}
           entries={entries}
+          weekKey={weekKey}
         />
       )}
     </td>

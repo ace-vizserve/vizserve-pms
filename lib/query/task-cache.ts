@@ -250,47 +250,18 @@ export function dropTaskRow(client: QueryClient, taskId: string): void {
 /* The placeholder row.                                                        */
 /* -------------------------------------------------------------------------- */
 
-/*
- * THE PLACEHOLDER ID — AND WHY IT IS NOT A UUID.
- *
- * An optimistic row stands for a task the server has not created yet, so it has
- * no id to carry. React still needs a key, and the key has to be one nothing can
- * mistake for a real id.
- *
- * ⚠️ THE MISTAKE IT GUARDS AGAINST IS REAL AND WAS SHIPPED: the placeholder row
- * rendered the ordinary task row, link and all, and
- * `<HoverPrefetchLink href={`/tasks/optimistic-0`}>` fetched that page on hover
- * — which reached Postgres and came back `invalid input syntax for type uuid:
- * "optimistic-0"`. Every control on that row had the same hole: a priority, a
- * date or a delete pressed before the server answered would have sent this
- * string to an action typed `uuid`.
- *
- * So the rule is: a placeholder row is INERT. It shows what was typed and says
- * it is still going in. `isPlaceholder` is how every renderer asks.
- */
-const PLACEHOLDER_PREFIX = "optimistic-";
-
 /**
- * A counter rather than the array length it used to be.
+ * ⚠️ P12-23 — THE TWO BELOW MOVED TO `lib/query/placeholder.ts` AND ARE
+ * RE-EXPORTED HERE, unchanged, because five call sites in the tasks area import
+ * them from this module and because the reasoning behind the prefix is worth
+ * exactly one home. Phase 5 gives a timesheet entry the same treatment, and a
+ * second `optimistic-` prefix minted from a second counter is two sequences
+ * that can produce one string in one tick.
  *
- * ⚠️ THE LENGTH WAS ONLY EVER UNIQUE BECAUSE `useOptimistic` THREW THE ROW AWAY
- * A MOMENT LATER. The cache keeps it until the refetch replaces it, so two rows
- * typed in quick succession would both be `optimistic-0` and React would warn
- * about a duplicate key — and, worse, `dropPlaceholders` below would take the
- * wrong one.
+ * Read that file for WHY a placeholder id is deliberately not a uuid and why
+ * a placeholder row has to be inert.
  */
-let placeholderSeq = 0;
-
-/** The key for the next pending row. Never reaches the database. */
-export function placeholderId(): string {
-  placeholderSeq += 1;
-  return `${PLACEHOLDER_PREFIX}${placeholderSeq}`;
-}
-
-/** True for a row that exists only in this browser. Nothing may be sent about it. */
-export function isPlaceholder(id: string): boolean {
-  return id.startsWith(PLACEHOLDER_PREFIX);
-}
+export { isPlaceholder, placeholderId } from "./placeholder";
 
 /**
  * A row for a task that does not exist yet.

@@ -182,3 +182,106 @@ export function BoardColumnSkeleton({ columns = 6 }: { columns?: number }) {
     </>
   );
 }
+
+/**
+ * P12-23 — the week grid, while its query is still `isPending`.
+ *
+ * ⚠️ SHARED WITH `app/(app)/timesheet/loading.tsx` RATHER THAN COPIED, and the
+ * duplication it removes is the one the header of this file warns about. That
+ * file renders while the route's (now trivial) server component runs; this
+ * renders while the browser's query is in flight. Two shapes for one screen is
+ * how a page visibly rearranges itself between two consecutive waits.
+ *
+ * ⚠️ IT STANDS IN FOR THE STATUS BAR AND THE GRID, NOT FOR THE WEEK NAVIGATION.
+ * The arrows and the date range are derived from the URL and are rendered for
+ * real by the server component, so they are on screen before this ever appears —
+ * `loading.tsx` draws its own placeholder for them because at that moment even
+ * the URL has not been read yet.
+ */
+export function WeekGridSkeleton({ rows = 4 }: { rows?: number }) {
+  return (
+    <>
+      {/* `WeekStatusBar`: a status chip, a sentence, and the submit button. */}
+      <div
+        className="flex items-center gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg"
+        aria-hidden>
+        <Skeleton className="h-7 w-28 rounded-md" />
+        <Skeleton className="h-4 flex-1" />
+      </div>
+
+      <div
+        role="status"
+        aria-busy="true"
+        className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
+        <span className="sr-only">Loading this week…</span>
+
+        <div className="flex items-center gap-2 border-b px-3 py-2" aria-hidden>
+          <Skeleton className="h-4 w-16" />
+          <div className="ml-auto flex gap-2">
+            {Array.from({ length: 7 }, (_, day) => (
+              <Skeleton key={day} className="h-4 w-8" />
+            ))}
+          </div>
+        </div>
+
+        {Array.from({ length: rows }, (_, row) => (
+          <div key={row} className="flex items-center gap-2 border-b px-3 py-2.5" aria-hidden>
+            <Skeleton className="h-4 w-40" />
+            <div className="ml-auto flex gap-2">
+              {Array.from({ length: 7 }, (_, day) => (
+                <Skeleton key={day} className="h-4 w-8" />
+              ))}
+            </div>
+          </div>
+        ))}
+
+        <div className="px-3 py-2.5" aria-hidden>
+          <Skeleton className="h-4 w-24" />
+        </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * P12-23 — the lead's week.
+ *
+ * A row per PERSON and a total column, which is the difference `team/loading.tsx`
+ * exists to record: the personal grid's skeleton promised the wrong layout here
+ * and the page rearranged itself the moment the data landed.
+ */
+export function TeamWeekGridSkeleton({ people = 6 }: { people?: number }) {
+  return (
+    <div
+      role="status"
+      aria-busy="true"
+      className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
+      <span className="sr-only">Loading the team&rsquo;s week…</span>
+
+      <div className="flex items-center gap-2 border-b px-3 py-2" aria-hidden>
+        <Skeleton className="h-4 w-28" />
+        <div className="ml-auto flex gap-2">
+          {Array.from({ length: 7 }, (_, day) => (
+            <Skeleton key={day} className="h-4 w-9" />
+          ))}
+          <Skeleton className="h-4 w-12" />
+        </div>
+      </div>
+
+      {Array.from({ length: people }, (_, person) => (
+        <div
+          key={person}
+          className="flex items-center gap-2 border-b px-3 py-2.5 last:border-b-0"
+          aria-hidden>
+          <Skeleton className="h-4 w-36" />
+          <div className="ml-auto flex gap-2">
+            {Array.from({ length: 7 }, (_, day) => (
+              <Skeleton key={day} className="h-4 w-9" />
+            ))}
+            <Skeleton className="h-4 w-12" />
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}

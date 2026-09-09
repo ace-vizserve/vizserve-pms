@@ -1,7 +1,8 @@
 "use client";
 
 import { AlignLeft, Clock, MessageSquareText, Plus, Trash2 } from "lucide-react";
-import { useRef, useState, useTransition } from "react";
+import { useRef, useState } from "react";
+import type { QueryKey } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -20,9 +21,10 @@ import {
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
-import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
+import { isPlaceholder } from "@/lib/query/placeholder";
 import { ClockSelect, clockLabel, normaliseClock } from "./clock-select";
 import { DurationSuggestion } from "./duration-suggestion";
+import { insertWrite, useEntryWrite } from "./use-entry-write";
 import type { CellEntry } from "./week-grid";
 
 /**
@@ -55,6 +57,7 @@ export function CellDetail({
   taskTitle,
   day,
   entries,
+  weekKey,
   locked = false,
 }: {
   open: boolean;
@@ -63,6 +66,8 @@ export function CellDetail({
   taskTitle: string;
   day: string;
   entries: CellEntry[];
+  /** `qk.week(userId, weekStart)` — the cache entry every write here patches. */
+  weekKey: QueryKey;
   /**
    * P7-05 — the week has been handed in.
    *
@@ -159,6 +164,7 @@ export function CellDetail({
                 <EntryRow
                   entry={entry}
                   locked={locked}
+                  weekKey={weekKey}
                   selected={editing === entry.id}
                   onEdit={() => setEditing(editing === entry.id ? null : entry.id)}
                 />
@@ -191,6 +197,7 @@ export function CellDetail({
             entry={entries.find((entry) => entry.id === editing) ?? null}
             taskId={taskId}
             day={day}
+            weekKey={weekKey}
             canCancel={entries.length > 0}
             onDone={() => {
               setEditing(null);
@@ -213,15 +220,27 @@ export function CellDetail({
 function EntryRow({
   entry,
   locked,
+  weekKey,
   selected,
   onEdit,
 }: {
   entry: CellEntry;
   locked: boolean;
+  weekKey: QueryKey;
   selected: boolean;
   onEdit: () => void;
 }) {
-  const [pending, startTransition] = useTransition();
+  const write = useEntryWrite(weekKey);
+  const pending = write.isPending;
+
+  /*
+   * ⚠️ AN ENTRY THAT HAS NOT LANDED IS NOT EDITABLE AND NOT DELETABLE. Between
+   * a cell being typed into and the server answering, this list holds a row
+   * whose id is `optimistic-4` rather than a uuid — and both controls below
+   * would send it to an action typed `uuid`. The tasks surface shipped exactly
+   * that and got `invalid input syntax for type uuid` out of Postgres.
+   */
+  const saving = isPlaceholder(entry.id);
 
   const span =
     entry.started_at && entry.ended_at ? `${clockLabel(entry.started_at)} – ${clockLabel(entry.ended_at)}` : null;
@@ -237,8 +256,8 @@ function EntryRow({
   );
 
   return (
-    <div className="flex items-center gap-1">
-      {locked ? (
+    <div className={cn("flex items-center gap-1", saving && "opacity-60")}>
+      {locked || saving ? (
         <div className="flex flex-1 items-center gap-2 px-2 py-1.5 text-sm">{body}</div>
       ) : (
         <button
@@ -258,20 +277,14 @@ function EntryRow({
       {/* The bin goes away entirely on a locked week. Greying it out would
           leave the one control in this row whose whole meaning is "this is gone
           now" sitting on a week that cannot lose anything. */}
-      {locked ? null : (
+      {saving ? (
+        <span className="px-1 text-2xs text-muted-foreground">Saving…</span>
+      ) : locked ? null : (
         <Button
           variant="ghost"
           size="icon-xs"
           disabled={pending}
-          onClick={() =>
-            startTransition(async () => {
-              const result = await deleteTimeEntry(entry.id);
-              if (!result.ok) {
-                toast.error(result.error);
-                return;
-              }
-            })
-          }>
+          onClick={() => write.mutate({ kind: "delete", id: entry.id })}>
           <Trash2 />
           <span className="sr-only">Remove this entry</span>
         </Button>
@@ -346,12 +359,15 @@ function EntryForm({
   entry,
   taskId,
   day,
+  weekKey,
   canCancel,
   onDone,
 }: {
   entry: CellEntry | null;
   taskId: string;
   day: string;
+  /** `qk.week(userId, weekStart)`. See `CellDetail`. */
+  weekKey: QueryKey;
   /**
    * Whether there is anything to go back TO.
    *
@@ -362,7 +378,8 @@ function EntryForm({
   canCancel: boolean;
   onDone: () => void;
 }) {
-  const [pending, startTransition] = useTransition();
+  const write = useEntryWrite(weekKey);
+  const pending = write.isPending;
   const durationRef = useRef<HTMLInputElement>(null);
 
   const [draft, setDraft] = useState<EntryDraft>(() => ({
@@ -405,15 +422,19 @@ function EntryForm({
 
     const payload = { task_id: taskId, work_date: day, ...built.entry };
 
-    startTransition(async () => {
-      const result = entry ? await updateTimeEntry({ id: entry.id, ...payload }) : await logTime(payload);
-
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      onDone();
+    /*
+     * ⚠️ `onDone` IS A PER-CALL CALLBACK ON PURPOSE. It resets the form and
+     * remounts it, which is about THIS popover and nothing else — the rollback
+     * and the invalidation are declared in `useEntryWrite` because they have to
+     * happen whether this component is still on screen or not.
+     *
+     * ⚠️ AND IT STILL WAITS FOR THE SERVER RATHER THAN CLOSING ON THE CLICK.
+     * The list above the form is repainted optimistically, so the new entry is
+     * already visible; what this callback does is clear the fields, and clearing
+     * them before a refusal would take away the text somebody has to retype.
+     */
+    write.mutate(entry ? { kind: "update", input: { id: entry.id, ...payload } } : insertWrite(payload), {
+      onSuccess: () => onDone(),
     });
   }
 

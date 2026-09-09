@@ -274,8 +274,15 @@ async function PunchChip({ punchState }: { punchState: ReturnType<typeof loadPun
 }
 
 /** The DTR cell's body. The "My DTR" link beside it never waited for anything. */
-async function HomePunch({ punchState }: { punchState: ReturnType<typeof loadPunchState> }) {
-  return <PunchPanel initial={await punchState} compact />;
+async function HomePunch({
+  punchState,
+  viewerId,
+}: {
+  punchState: ReturnType<typeof loadPunchState>;
+  /** P12-23 — names the `qk.punchState()` entry this panel shares with `/dtr`. */
+  viewerId: string;
+}) {
+  return <PunchPanel initial={await punchState} viewerId={viewerId} compact />;
 }
 
 /** The greeting's second half. `formatDate(today)` beside it needs no read at all. */
@@ -976,7 +983,7 @@ export default async function DashboardPage({
                   </Streaming>
                 }
               >
-                <HomePunch punchState={punchState} />
+                <HomePunch punchState={punchState} viewerId={context.userId} />
               </Suspense>
               <Link
                 href="/dtr"

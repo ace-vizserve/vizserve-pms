@@ -1,6 +1,6 @@
 "use client";
 
-import { useTransition } from "react";
+import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { Send } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -12,9 +12,21 @@ import {
   formatCellDuration,
   isWeekLocked,
 } from "@/lib/schemas/timesheet";
+import { invalidateTimesheetWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { placeholderId } from "@/lib/query/placeholder";
+import {
+  beginTimesheetWrite,
+  cancelTimesheetRefetches,
+  patchWeekSubmitted,
+  rollbackTimesheetWrite,
+} from "@/lib/query/timesheet-cache";
 import { cn } from "@/lib/utils";
 
 import { submitTimesheetWeek } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const handIn = fromAction(submitTimesheetWeek);
 
 export type WeekState = {
   status: TimesheetWeekStatus;
@@ -41,12 +53,15 @@ export type WeekState = {
  */
 export function WeekStatusBar({
   weekStart,
+  weekKey,
   week,
   weekTotalMinutes,
   scheduledWeek = null,
   weekHasEnded = false,
 }: {
   weekStart: string;
+  /** `qk.week(userId, weekStart)` — the entry the lock is painted into. */
+  weekKey: QueryKey;
   week: WeekState;
   weekTotalMinutes: number;
   /**
@@ -82,7 +97,60 @@ export function WeekStatusBar({
    */
   weekHasEnded?: boolean;
 }) {
-  const [pending, start] = useTransition();
+  const queryClient = useQueryClient();
+
+  /*
+   * P12-23 — SUBMITTING LOCKS THE GRID NOW, RATHER THAN AFTER A ROUND TRIP.
+   *
+   * ⚠️ THE LOCK IS THE HONEST OPTIMISTIC PAINT HERE, and it is the only one this
+   * control makes. `isWeekLocked` decides whether the cells accept a keystroke,
+   * and every entry policy calls `vizserve_pms_timesheet_week_locked` — so a
+   * number typed in the gap between pressing Submit and the server answering
+   * would have been refused anyway, SILENTLY: a refused UPDATE comes back as
+   * success with zero rows, so the figure simply springs back with no
+   * explanation. Painting the lock closes that gap rather than opening one.
+   *
+   * ⚠️ AND A REFUSAL PUTS THE GRID BACK. The database refuses a week below its
+   * scheduled minimum, which is exactly the case this bar exists to warn about
+   * in advance — so it is the likeliest refusal on the screen, and leaving a
+   * read-only grid behind after one would take somebody's week away from them
+   * over a message they can no longer act on.
+   */
+  const submitWeek = useMutation({
+    mutationFn: () => handIn({ week_start: weekStart }),
+
+    onMutate: () => {
+      const snapshot = beginTimesheetWrite(queryClient);
+
+      patchWeekSubmitted(queryClient, weekKey, {
+        // Never sent anywhere and replaced by the refetch — there may be no week
+        // row at all before this write, because no row IS the draft state.
+        id: placeholderId(),
+        status: "SUBMITTED",
+        submitted_at: new Date().toISOString(),
+      });
+
+      cancelTimesheetRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTimesheetWrite(queryClient, snapshot);
+      toast.error(error.message || "That week could not be handed in.");
+    },
+
+    onSuccess: () => {
+      toast.success("Week sent to your department lead.");
+    },
+
+    /* Fired, never awaited. The lead's grid moves too — see
+       `invalidateTimesheetWrite`. */
+    onSettled: () => {
+      invalidateTimesheetWrite(queryClient);
+    },
+  });
+
+  const pending = submitWeek.isPending;
 
   const status = week?.status ?? null;
   const locked = isWeekLocked(status);
@@ -149,17 +217,6 @@ export function WeekStatusBar({
       : status === "RETURNED"
         ? "border-warning-border bg-warning-subtle text-warning"
         : "border-accent-border bg-accent text-accent-foreground";
-
-  function submit() {
-    start(async () => {
-      const result = await submitTimesheetWeek({ week_start: weekStart });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success("Week sent to your department lead.");
-    });
-  }
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
@@ -248,7 +305,10 @@ export function WeekStatusBar({
       {/* Hidden rather than disabled once locked: there is no second submission
           to make, so a greyed button would only invite the question. */}
       {locked ? null : (
-        <Button onClick={submit} loading={pending} disabled={weekTotalMinutes <= 0}>
+        <Button
+          onClick={() => submitWeek.mutate()}
+          loading={pending}
+          disabled={weekTotalMinutes <= 0}>
           <Send />
           {status === "RETURNED" ? "Resubmit week" : "Submit for approval"}
         </Button>

@@ -59,15 +59,23 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           looking at their own time record is a reminder for the one person who
           does not need it.
 
-          ⚠️ IT TAKES NO PROPS AND THIS LAYOUT READS NOTHING FOR IT — a
-          correction, not the original design. It was first fed from here, which
-          put `loadPunchState`'s six queries plus a preferences read on the
-          critical path of EVERY authenticated page. `/timesheet` and `/dtr`
-          issue large batches of their own, and the combined burst started
-          failing with `TypeError: fetch failed`. The component fetches its own
-          state after mount now; see `app/(app)/reminder-actions.ts`.
+          ⚠️ THIS LAYOUT READS NOTHING FOR IT — a correction, not the original
+          design. It was first fed from here, which put `loadPunchState`'s six
+          queries plus a preferences read on the critical path of EVERY
+          authenticated page. `/timesheet` and `/dtr` issue large batches of
+          their own, and the combined burst started failing with
+          `TypeError: fetch failed`. The component fetches its own state after
+          mount; see `app/(app)/reminder-actions.ts`.
+
+          ⚠️ P12-23 GAVE IT ONE PROP AND THAT IS NOT A REGRESSION OF THE ABOVE.
+          `context.userId` is already in hand from the `requireAuthContext()`
+          this layout runs for the auth gate, so passing it costs no query — the
+          thing that had to stay gone. It names the row the reminder's punch
+          query narrows to, and that query is `qk.punchState()`, the SAME cache
+          entry the punch panel reads on `/`, `/dashboard` and `/dtr`. On those
+          three pages the reminder now costs nothing at all.
         */}
-        <ShiftReminder />
+        <ShiftReminder viewerId={context.userId} />
 
         <SidebarProvider>
           {/*
