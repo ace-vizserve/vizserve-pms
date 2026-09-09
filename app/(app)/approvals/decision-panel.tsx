@@ -170,9 +170,23 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
             formAction={() => decide("approved")}>
             Approve
           </Button>
+          {/*
+            ⚠️ QUIET, NOT RED, AND NOT `outline` EITHER. Ace's rule, 9 Sep: red
+            for DESTRUCTION, quiet for REJECTION. `outline` put Reject at the
+            same visual weight as a neutral secondary action sitting beside a
+            primary Approve, which is an invitation.
+
+            `requests/[id]/review-panel.tsx` already had this hierarchy and its
+            comment states it — "Quiet, and last. Rejection is the exception."
+            The two approval gates disagreed; they do not now.
+
+            ⚠️ AND IT IS NOT `destructive`. Refusing a request destroys nothing:
+            the row stays, the trail stays, and the requester can file again.
+            Red belongs to acts that remove something.
+          */}
           <Button
             type="submit"
-            variant="outline"
+            variant="ghost"
             className="flex-1"
             loading={pending}
             formAction={() => decide("rejected")}>

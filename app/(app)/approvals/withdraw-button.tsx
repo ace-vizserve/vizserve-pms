@@ -152,7 +152,15 @@ export function WithdrawButton({
           Withdrawing…
         </p>
       ) : (
-        <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+        <Button
+          // ⚠️ RED, BECAUSE WITHDRAWING DESTROYS THE REQUEST. Ace's rule, 9 Sep:
+          // red for destruction, quiet for rejection. This is not a refusal — it
+          // takes your own filed request out of everybody's queue, and the
+          // confirm dialog behind it has said `destructive` all along while the
+          // thing you press to reach it looked like an ordinary secondary action.
+          variant="destructive"
+          size="sm"
+          onClick={() => setOpen(true)}>
           <Undo2 className="size-3.5" aria-hidden />
           Withdraw
         </Button>
