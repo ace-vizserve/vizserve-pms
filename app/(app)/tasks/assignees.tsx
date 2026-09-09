@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { invalidateDerived } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
 import { beginTaskWrite, patchTaskAssignee, rollbackTaskWrite } from "@/lib/query/task-cache";
 
@@ -307,7 +307,14 @@ export function AssigneePicker({
      * longer does is stand between the click and the tick.
      */
     onSettled: () => {
-      void invalidateTaskWrite(queryClient, taskId);
+      /*
+       * ⚠️ `alsoRow` HERE AND NOWHERE ELSE. Removing an assignee is the one
+       * write in this file where the SERVER decides something the patch cannot:
+       * `vizserve_pms_remove_task_assignee` promotes the next assignee into
+       * `assignee_id`, and guessing which one it picks would be wrong about
+       * half the time.
+       */
+      invalidateDerived(queryClient, taskId, { alsoRow: true });
     },
   });
 

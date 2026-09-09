@@ -26,7 +26,7 @@ import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 import { DeleteTaskDialog } from "./delete-task-dialog";
 
-import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { invalidateDerived } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
 import { beginTaskWrite, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
@@ -133,8 +133,9 @@ function usePatch(taskId: string) {
      * showing it until this refetch replaces it with the server's own. Awaiting
      * it is what put the whole surface in front of a one-field edit.
      */
+    // Derived data only -- the field is patched and confirmed. See `invalidateDerived`.
     onSettled: () => {
-      void invalidateTaskWrite(queryClient, taskId);
+      invalidateDerived(queryClient, taskId);
     },
   });
 

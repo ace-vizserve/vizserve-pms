@@ -170,3 +170,44 @@ export async function invalidateTaskPart(
 export function markTaskStale(client: Invalidator, taskId: string): void {
   void client.invalidateQueries({ queryKey: qk.task(taskId), refetchType: "none" });
 }
+
+/**
+ * What a write changed that the OPTIMISTIC PATCH COULD NOT KNOW.
+ *
+ * ⚠️ DO NOT INVALIDATE WHAT YOU JUST PATCHED. `onMutate` already put the new
+ * value in the cache and the server confirmed it; asking for the row back is
+ * asking a question we have the answer to. Worse, it is not free: `qk.tasks()`
+ * prefix-matches the list view, whose key bundles the rows AND their six
+ * `.in("task_id", …)` lookups, so one status change fired about fourteen
+ * background requests — and when the list one landed, TanStack replaced the
+ * cached data and RE-RENDERED EVERY ROW ON THE PAGE over the top of a patch
+ * that was already right. Ace felt that as the page lagging on a status update.
+ *
+ * So this invalidates only DERIVED data — the things a client cannot predict:
+ *
+ *   history   a move writes a `vizserve_pms_task_status_history` row, and may
+ *             write a `client_decisions` row alongside it
+ *   snapshot  the rail's open-task counts are aggregates over the whole
+ *             department; the patch changed one row and cannot know the total
+ *
+ * ⚠️ THE ROW ITSELF IS DELIBERATELY ABSENT, and that is only safe because the
+ * patch is precise. If a write ever changes a column the patch does not set —
+ * a trigger writing `updated_at` into something displayed, a derived column —
+ * it must be added here or the screen will hold a value that is quietly wrong.
+ * `vizserve_pms_transition_task` promotes nothing and computes nothing the row
+ * shows; `remove_task_assignee` DOES promote `assignee_id`, which is why the
+ * seat control passes `alsoRow`.
+ */
+export function invalidateDerived(
+  client: Invalidator,
+  taskId: string,
+  options: { alsoRow?: boolean } = {},
+): void {
+  const keys: QueryKey[] = [qk.taskPart(taskId, "history"), qk.snapshot()];
+
+  // The one case where the server decides something the client cannot: removing
+  // an assignee promotes the next one into `assignee_id`.
+  if (options.alsoRow) keys.push(qk.tasks());
+
+  fire(client, keys);
+}

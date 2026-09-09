@@ -19,7 +19,7 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { isRichTextEmpty } from "@/lib/rich-text";
 import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/tasks";
 
-import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { invalidateDerived } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
 import { beginTaskWrite, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
@@ -167,9 +167,15 @@ export function useTaskTransition({
      * task. None of it is on screen yet, and none of it is what the person is
      * waiting for.
      */
+    /*
+     * ⚠️ DERIVED DATA ONLY. The row is already patched and confirmed; what a
+     * move changes that the patch cannot know is the history row it writes and
+     * the rail's counts. Invalidating the row instead refetched the list — and
+     * re-rendered every row on the page over a patch that was already right.
+     */
     onSettled: () => {
       setActive(null);
-      void invalidateTaskWrite(queryClient, taskId);
+      invalidateDerived(queryClient, taskId);
     },
   });
 
