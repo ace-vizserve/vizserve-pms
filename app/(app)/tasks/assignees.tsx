@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useOptimistic, useState, useTransition } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Search, UserPlus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -11,8 +11,14 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { cn } from "@/lib/utils";
 
 import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { beginTaskWrite, patchTaskAssignee, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { addTaskAssignee, removeTaskAssignee } from "./actions";
+
+/** The two Server Actions, as promises TanStack can drive `onError` off. */
+const joinTask = fromAction(addTaskAssignee);
+const leaveTask = fromAction(removeTaskAssignee);
 
 /**
  * P7-13 / K1 — several people on one task.
@@ -148,50 +154,38 @@ export function AssigneePicker({
   showPic?: boolean;
   align?: "start" | "center" | "end";
 }) {
-  /*
-   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
-   *
-   * This control is shared: the detail header renders it, every list row renders
-   * it and every board card renders it. `/tasks/[id]` reads `qk.task(id)` from
-   * the cache now, so a write has to invalidate; `/tasks` and `/tasks/board`
-   * read their rows from the cache too since P12-07, so P12-09 took the
-   * `router.refresh()` out: one mechanism, not two. The AWAITED invalidate is
-   * what holds the optimistic value across the settle — see the note at the
-   * call site, and `lib/query/invalidate.ts` for what `ded2244` cost.
-   */
   const queryClient = useQueryClient();
-  const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
   /*
-   * P11-05 — THE TICK MOVES ON THE CLICK.
+   * P11-05 / P12-10 — THE TICK MOVES ON THE CLICK.
    *
    * Adding somebody used to leave the picker unchanged for a round trip: the row
    * you had just pressed sat there unmarked, so the natural reading was that the
    * click had missed and the natural response was to press it again.
    *
-   * WHO is on the task is optimistic; WHERE the row sits is not. The set is
-   * carried as ids rather than people so that the person in charge belongs to it
-   * on an internal task (P7-43), where they are removable like anybody else and
-   * the tick has to clear on the click too.
+   * ⚠️ THE PREDICTION MOVED OUT OF THIS COMPONENT AND INTO THE CACHE. It was a
+   * `useOptimistic` over the ids — which meant it lived only while the
+   * transition that set it was pending, which is why an awaited
+   * `invalidateTaskWrite` sat inside that transition and why adding one person
+   * waited on the whole list refetching. `onMutate` writes the link into
+   * `TaskListView.assignees` instead, which is the array `others` is derived
+   * from, so this list re-renders from the patched entry and nothing has to be
+   * held open.
+   *
+   * WHO is on the task is predicted; WHERE the row sits is not — membership of
+   * the list comes from `candidates`, which a click does not change (P11-12).
+   * The set is carried as ids rather than people so that the person in charge
+   * belongs to it on an internal task (P7-43), where they are removable like
+   * anybody else and the tick has to clear on the click too.
    */
-  const serverOnTask = useMemo(
-    () => [...(pic ? [pic.id] : []), ...others.map((person) => person.id)],
+  const onTask = useMemo(
+    () => new Set([...(pic ? [pic.id] : []), ...others.map((person) => person.id)]),
     [pic, others],
   );
 
-  const [onTaskIds, applyChange] = useOptimistic(
-    serverOnTask,
-    (state: string[], change: { person: Person; add: boolean }) =>
-      change.add
-        ? state.includes(change.person.id)
-          ? state
-          : [...state, change.person.id]
-        : state.filter((id) => id !== change.person.id),
-  );
-
-  const onTask = useMemo(() => new Set(onTaskIds), [onTaskIds]);
+  const onTaskIds = useMemo(() => [...onTask], [onTask]);
 
   /** Every person this control can name, so an optimistic id resolves to a face. */
   const byId = useMemo(() => {
@@ -268,70 +262,59 @@ export function AssigneePicker({
   /*
    * ⚠️ THIS RETURNS BEFORE THE ROUND TRIP AND IS MEANT TO BE CALLED AGAIN.
    *
-   * `startTransition` with an async body returns immediately, so a second click
-   * starts a second transition rather than queueing behind the first, and React
-   * holds BOTH optimistic changes until each one's own payload lands. That is
-   * how three people go on to a task in three clicks instead of three waits —
-   * and it only works because nothing in the picker is disabled while `pending`
-   * is true.
+   * `mutate` is fire-and-forget, so a second click starts a second write rather
+   * than queueing behind the first, and each one's patch is already in the cache
+   * — three people go on to a task in three clicks instead of three waits. It
+   * only works because nothing in the picker is disabled while a write is in
+   * flight (P11-12); `aria-busy` says so instead.
+   *
+   * ⚠️ EACH CLICK SNAPSHOTS THE CACHE AS IT FINDS IT, which is what makes
+   * overlapping writes safe: a refusal on the second click restores the state
+   * that included the first, not the state before either.
    */
-  function run(
-    action: () => Promise<{ ok: boolean; error?: string }>,
-    success: string,
-    change?: { person: Person; add: boolean },
-  ) {
-    startTransition(async () => {
-      // Inside the transition, before the await: this is the paint. React drops
-      // it if the action is refused, so there is no rollback to write.
-      if (change) applyChange(change);
+  const seat = useMutation({
+    mutationFn: (vars: { person: Person; add: boolean; success: string }) =>
+      vars.add ? joinTask(taskId, vars.person.id) : leaveTask(taskId, vars.person.id),
 
-      const result = await action();
-      if (!result.ok) {
-        toast.error(result.error ?? "That did not go through.");
-        return;
-      }
+    onMutate: async (vars) => {
+      const snapshot = await beginTaskWrite(queryClient);
       /*
-       * ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-       * the WRITE, which has already happened; scheduled after the invalidation
-       * it reported the refetch instead, and arrived up to a second late on a
-       * screen that had already moved. See `lib/query/invalidate.ts`.
-       */
-      toast.success(success);
-
-      /*
-       * ⚠️ P12-09 — `router.refresh()` WAS HERE, AND THE AWAITED INVALIDATE
-       * BELOW IS WHAT REPLACED IT. Read this before putting it back.
-       *
-       * The refresh existed to HOLD THE TRANSITION OPEN. `useOptimistic` drops
-       * its value the instant the transition that set it ends, and Next resolves
-       * an action's promise BEFORE the router commits the revalidated tree — so
-       * without something pending, the value snapped back to the old one with
-       * the success toast firing in the gap. That is `ded2244`, which reverted
-       * this same removal across eighteen files in a day. The full account is
-       * the long note in `app/(app)/tasks/inline.tsx`.
-       *
-       * What changed is not the argument, it is the data path. `/tasks`,
-       * `/tasks/board` and `/tasks/[id]` all read from the cache now, so
-       * `invalidateTaskWrite` refetches the very rows this control is rendered
-       * over — and it is AWAITED, inside the same transition, which is exactly
-       * the hold the refresh was providing. One mechanism instead of two, and
-       * the route render that ran beside every click is gone.
-       *
-       * ⚠️ SO THE AWAIT IS NOT OPTIONAL AND MUST NOT BECOME A FIRE-AND-FORGET.
-       * Removing it is `ded2244` again, through a different door.
-       */
-      /*
-       * `qk.task(id)` prefix-matches `["task", id, "assignees"]`, so one call
-       * covers the seat and the row — and the row matters, because
+       * ⚠️ THE JOIN TABLE, NOT `assignee_id`. The stack this picker draws comes
+       * from `TaskListView.assignees` — one `.in("task_id", …)` query for the
+       * whole list, handed out per row — so the tick moves by patching that
+       * array. Who ends up ACCOUNTABLE is the database's decision:
        * `vizserve_pms_remove_task_assignee` promotes the next assignee into
-       * `assignee_id` on the way out.
-       *
-       * ⚠️ AND THIS FUNCTION IS MEANT TO BE CALLED AGAIN BEFORE IT RETURNS. See
-       * the note above: three clicks start three transitions, and each awaits
-       * its own invalidation rather than queueing behind the last.
+       * `assignee_id` on the way out, and guessing which one it picks would be
+       * a prediction that is wrong about half the time.
        */
-      await invalidateTaskWrite(queryClient, taskId);
-    });
+      patchTaskAssignee(queryClient, taskId, vars.person.id, vars.add);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      toast.error(error.message || "That did not go through.");
+    },
+
+    onSuccess: (_data, vars) => {
+      toast.success(vars.success);
+    },
+
+    /*
+     * ⚠️ FIRED, NOT AWAITED. `qk.task(id)` prefix-matches
+     * `["task", id, "assignees"]`, so one call covers the seat and the row — and
+     * the row matters, because of the promotion described above. What it no
+     * longer does is stand between the click and the tick.
+     */
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
+
+  const pending = seat.isPending;
+
+  function run(person: Person, add: boolean, success: string) {
+    seat.mutate({ person, add, success });
   }
 
   const trigger = (
@@ -468,16 +451,8 @@ export function AssigneePicker({
                   aria-pressed={on}
                   formAction={() =>
                     on
-                      ? run(
-                          () => removeTaskAssignee(taskId, person.id),
-                          `${person.full_name} is no longer on this task`,
-                          { person, add: false },
-                        )
-                      : run(
-                          () => addTaskAssignee(taskId, person.id),
-                          `${person.full_name} added to this task`,
-                          { person, add: true },
-                        )
+                      ? run(person, false, `${person.full_name} is no longer on this task`)
+                      : run(person, true, `${person.full_name} added to this task`)
                   }
                   className={cn(
                     ROW,

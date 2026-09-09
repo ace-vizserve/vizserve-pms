@@ -1,7 +1,7 @@
 "use client";
 
-import { useOptimistic, useState, useTransition } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
 import { toneButtonVariant } from "@/components/status-badge";
@@ -17,12 +17,16 @@ import {
 import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { isRichTextEmpty } from "@/lib/rich-text";
-import { useOptimisticMove } from "./optimistic-move";
 import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/tasks";
 
 import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { beginTaskWrite, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { transitionTask } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const moveTask = fromAction(transitionTask);
 
 /**
  * P7-61 — MOVING A TASK, ONCE, FOR EVERY CONTROL THAT MOVES ONE.
@@ -47,8 +51,13 @@ export function useTaskTransition({
 }: {
   taskId: string;
   /**
-   * The status the SERVER last confirmed. Only used as the base for the
-   * optimistic value below — nothing here writes it.
+   * The status on screen.
+   *
+   * ⚠️ IT IS ALREADY OPTIMISTIC AND THIS HOOK NO LONGER SHADOWS IT. It comes
+   * from the cached row, and `onMutate` writes the new status into that row
+   * before the request leaves — so the caller's prop moves on the click. This
+   * used to be "the status the SERVER last confirmed", with a `useOptimistic`
+   * over it; see the note in `commit` for why that had to go.
    */
   status: TaskStatus;
   /** The detail page has local state to reset; a list row only needs the refresh. */
@@ -77,166 +86,103 @@ export function useTaskTransition({
   const [active, setActive] = useState<Transition | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  /*
-   * P11-05 — `useActionState`, THE ARTICLE'S SHAPE FOR REPEATED MUTATIONS.
-   *
-   * This was `useTransition` plus a bare call. `useActionState` gives the same
-   * pending flag and QUEUES: moves dispatched while one is in flight run in
-   * order rather than racing, which matters on a list where somebody clears a
-   * column by moving four rows in four seconds. Two `transitionTask` calls
-   * arriving out of order against the same task would be refused by the state
-   * machine and reported as an error the person did not cause.
-   */
-  /*
-   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
-   *
-   * This control is shared: the detail header renders it, every list row renders
-   * it and every board card renders it. `/tasks/[id]` reads `qk.task(id)` from
-   * the cache now, so a write has to invalidate; `/tasks` and `/tasks/board`
-   * read their rows from the cache too since P12-07, so P12-09 took the
-   * `router.refresh()` out: one mechanism, not two. What holds the optimistic
-   * value across the settle is the AWAITED invalidate — see the note at the
-   * call site, and `lib/query/invalidate.ts` for what `ded2244` cost.
-   */
   const queryClient = useQueryClient();
-  const [pending, startTransition] = useTransition();
 
   /*
-   * P11-05 — THE CHIP MOVES WHEN YOU PICK, NOT WHEN THE SERVER ANSWERS.
+   * ------------------------------------------------------------------------
+   * P12-10 — THE CHIP MOVES WHEN YOU PICK, AND THE CONTROL COMES BACK WHEN THE
+   * WRITE RETURNS. Those used to be two different moments about a second apart.
    *
    * This control is on the detail header, every list row and every board card,
-   * which makes it the most-pressed thing in the product. It used to freeze the
-   * dropdown for a full round trip and only then repaint — so the one
-   * interaction people do dozens of times a day was the one that felt slowest.
+   * which makes it the most-pressed thing in the product. The paint was already
+   * instant (P11-05, `useOptimistic`) — but `useOptimistic` DROPS ITS VALUE WHEN
+   * ITS TRANSITION ENDS, so the transition had to be held open across an awaited
+   * `invalidateTaskWrite`, and that awaits `qk.tasks()`: the whole list and the
+   * whole board, seven queries in two waves, before the dropdown was usable
+   * again. Half-instant, which is what Ace reported as lag.
    *
-   * ⚠️ AND THE OPTIMISM IS THE SMALLER HALF. Painting early hides latency; it
-   * does not remove it, and a move that still takes two round trips is still
-   * slow — it just looks better while it is.
+   * ⚠️ THE HOLD IS NOT REMOVED, IT IS RELOCATED. `onMutate` writes the new
+   * status into the CACHED ROW — the same row this control renders from — so the
+   * value survives on its own and there is nothing left to hold. `a64b06c`
+   * removed the hold with nothing in its place and `ded2244` reverted it the
+   * same day across eighteen files; this is not that. The row does not revert,
+   * because nothing about it is scoped to a transition.
    *
-   * ⚠️ THIS PARAGRAPH USED TO CLAIM `router.refresh()` WAS GONE FROM `commit`
-   * BELOW, ON THE GROUND THAT THE SERVER ACTION'S OWN `revalidatePath` BRINGS
-   * THE FRESH PAYLOAD BACK INSIDE THIS TRANSITION. It said that while the call
-   * was still there four lines down, which is how a wrong comment survives: the
-   * argument is right about the RESPONSE and wrong about the TIMING. Next
-   * resolves the action's promise BEFORE the router commits the new tree, so
-   * this transition ends first and the chip reverts for the gap between them.
-   * It was removed once (`a64b06c`) and restored across eighteen files
-   * (`ded2244`) after the chip visibly snapped back. P12-02 re-checked it
-   * against Next 16's action queue and KEPT it; the full account is the long
-   * note in `inline.tsx`, and Phase 3's `useMutation` is what retires it.
+   * ⚠️ THE ROW ALSO CHANGES GROUP, WITH NO SEPARATE MECHANISM. On `/tasks` the
+   * rows are bucketed under status headings, and a repainted chip in the wrong
+   * group is half an update. `TaskStatusGroups` buckets from the cached rows, so
+   * patching `status` moves the row AND the chip AND the heading count — which
+   * is what the `OptimisticMoveContext` existed to do and no longer has to.
    *
-   * ⚠️ THAT MAKES `refresh()` IN `actions.ts` THE ONLY THING THAT REPAINTS.
-   * A route missing from its list now goes stale instead of being quietly
-   * rescued by the second fetch — `/tasks/board` was missing and has been
-   * added.
-   *
-   * ⚠️ AND IT REVERTS ON FAILURE FOR FREE. A refused move needs no rollback
-   * code: React drops the optimistic value, the chip returns to what the server
-   * still says, and `error` below is what explains it. That is the half the
-   * hand-rolled `usePatch` in `inline.tsx` has to write out by hand.
+   * ⚠️ AND A REFUSED MOVE NEEDS REAL ROLLBACK CODE NOW. React used to put the
+   * chip back for free. `onError` restores the snapshot; without it the row
+   * would sit in a group the database refused to move it to.
+   * ------------------------------------------------------------------------
    */
-  const [shownStatus, setShownStatus] = useOptimistic(status);
+  const move = useMutation({
+    mutationFn: async (vars: { transition: Transition; comment?: string }) =>
+      moveTask(taskId, {
+        to_status: vars.transition.to,
+        ...(vars.comment ? { comment: vars.comment } : {}),
+      }),
 
-  /*
-   * ⚠️ THE CHIP IS NOT THE ONLY THING THAT HAS TO MOVE. On `/tasks` the rows
-   * are bucketed under status headings, so a repainted chip in the wrong group
-   * is half an update — and half-instant is worse than not instant, because the
-   * eye goes straight to the thing that did not move.
-   *
-   * Null on the detail page and the board, which render this control with no
-   * groups around them. Optional by construction rather than by check.
-   */
-  const moveRow = useOptimisticMove();
+    onMutate: async (vars) => {
+      /*
+       * ⚠️ BEFORE THE SNAPSHOT, NOT AFTER IT. The task detail commits its
+       * debounced resolution here, and that write invalidates the task — so
+       * running it after the paint would let its refetch land on top of the new
+       * status. `beginTaskWrite` cancels anything still in flight when it is
+       * finally called, which only works if the flush has already been issued.
+       *
+       * The reason it is awaited at all is unchanged: clicking blurs the
+       * textarea and SCHEDULES a save, which is a round trip racing this one,
+       * and losing it produces the worst failure on the page — "Send for QA"
+       * refused for an empty column with the text plainly on screen.
+       */
+      await beforeMove?.();
+
+      const snapshot = await beginTaskWrite(queryClient);
+      patchTaskRow(queryClient, taskId, { status: vars.transition.to });
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      setError(error.message || "That did not go through.");
+    },
+
+    onSuccess: (_data, vars) => {
+      // Reports the WRITE, which has already happened. Nothing is awaited before
+      // it, so it is not reporting a refetch.
+      toast.success(vars.transition.label);
+      setPrompt(null);
+      setError(null);
+      onMoved?.();
+    },
+
+    /*
+     * ⚠️ FIRED, NOT AWAITED. The whole task, not one part: a move writes a
+     * `task_status_history` row, may write a `client_decisions` row, and changes
+     * the counts in the rail. `qk.task(id)` prefix-matches every panel of this
+     * task. None of it is on screen yet, and none of it is what the person is
+     * waiting for.
+     */
+    onSettled: () => {
+      setActive(null);
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
+
+  const pending = move.isPending;
 
   /**
    * The one entry point, whether it came from a form submit or the comment
    * dialog.
-   *
-   * ⚠️ THE OPTIMISTIC WRITES AND THE DISPATCH ARE IN ONE TRANSITION, and they
-   * have to be. `useOptimistic` shows its value only while the transition that
-   * set it is pending, so setting it outside — or dispatching outside — gives a
-   * chip that flickers to the new status and back before the server has been
-   * asked anything.
    */
   function commit(transition: Transition, comment?: string) {
     setError(null);
     setActive(transition);
-
-    /*
-     * ⚠️ THE CALLBACK IS ASYNC AND THE ACTION IS AWAITED INSIDE IT. THAT IS THE
-     * WHOLE REASON THE OPTIMISM WORKS.
-     *
-     * This was `useActionState` with a SYNCHRONOUS callback that called
-     * `dispatch` and returned. A transition ends when its callback finishes, so
-     * that one ended immediately — React dropped the optimistic status a frame
-     * after it was set, and the only thing left to repaint the screen was the
-     * server payload. The visible symptom was exact and is worth recording: THE
-     * TOAST ARRIVED BEFORE THE UI CHANGED, because by then the toast and the new
-     * data were the same event.
-     *
-     * Awaiting inside the transition keeps it pending for the whole round trip,
-     * which is what holds `shownStatus` and the moved row on screen until the
-     * real ones arrive to replace them.
-     */
-    startTransition(async () => {
-      // The paint: the chip, and the group the row sits in.
-      setShownStatus(transition.to);
-      moveRow?.({ kind: "move", id: taskId, status: transition.to });
-
-      await beforeMove?.();
-
-      const result = await transitionTask(taskId, {
-        to_status: transition.to,
-        ...(comment ? { comment } : {}),
-      });
-
-      setActive(null);
-
-      if (!result.ok) {
-        setError(result.error ?? "That did not go through.");
-        return;
-      }
-
-      /*
-       * ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-       * the WRITE, which has already happened; scheduled after the invalidation
-       * it reported the refetch instead, and arrived up to a second late on a
-       * screen that had already moved. See `lib/query/invalidate.ts`.
-       */
-      toast.success(transition.label);
-
-      /*
-       * ⚠️ P12-09 — `router.refresh()` WAS HERE, AND THE AWAITED INVALIDATE
-       * BELOW IS WHAT REPLACED IT. Read this before putting it back.
-       *
-       * The refresh existed to HOLD THE TRANSITION OPEN. `useOptimistic` drops
-       * its value the instant the transition that set it ends, and Next resolves
-       * an action's promise BEFORE the router commits the revalidated tree — so
-       * without something pending, the value snapped back to the old one with
-       * the success toast firing in the gap. That is `ded2244`, which reverted
-       * this same removal across eighteen files in a day. The full account is
-       * the long note in `app/(app)/tasks/inline.tsx`.
-       *
-       * What changed is not the argument, it is the data path. `/tasks`,
-       * `/tasks/board` and `/tasks/[id]` all read from the cache now, so
-       * `invalidateTaskWrite` refetches the very rows this control is rendered
-       * over — and it is AWAITED, inside the same transition, which is exactly
-       * the hold the refresh was providing. One mechanism instead of two, and
-       * the route render that ran beside every click is gone.
-       *
-       * ⚠️ SO THE AWAIT IS NOT OPTIONAL AND MUST NOT BECOME A FIRE-AND-FORGET.
-       * Removing it is `ded2244` again, through a different door.
-       */
-      /*
-       * The whole task, not one part: a move writes a `task_status_history`
-       * row, may write a `client_decisions` row, and changes the counts in the
-       * rail. `qk.task(id)` prefix-matches every panel of this task.
-       */
-      await invalidateTaskWrite(queryClient, taskId);
-      setPrompt(null);
-      setError(null);
-      onMoved?.();
-    });
+    move.mutate({ transition, comment });
   }
 
   /**
@@ -263,6 +209,16 @@ export function useTaskTransition({
   function isRunning(transition: Transition) {
     return pending && active?.from === transition.from && active?.to === transition.to;
   }
+
+  /*
+   * ⚠️ THE PROP, NOT A SHADOW OF IT. `shownStatus` was a `useOptimistic` over
+   * `status`; the cached row carries the prediction now, so the two are the same
+   * value and keeping both would be two things to disagree. The NAME is kept
+   * because `status-select.tsx` reads it in four places and says in a comment
+   * why it must not read a second source — which is still the right rule, now
+   * satisfied by there only being one.
+   */
+  const shownStatus = status;
 
   return { pending, error, prompt, choose, commit, dismiss, isRunning, shownStatus } as const;
 }

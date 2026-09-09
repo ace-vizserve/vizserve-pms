@@ -17,23 +17,26 @@ import { qk, type TaskPart } from "./keys";
  * the one that was not. P12-07 moved all three onto the cache and P12-09 removed
  * the refresh. One mechanism.
  *
- * ⚠️ AND `ded2244` IS WHY THE AWAIT BELOW IS NOT NEGOTIABLE. Removing the
- * refresh from these controls (`a64b06c`) had to be reverted the same day across
- * eighteen files: `useOptimistic` drops its value the instant the transition
- * that set it ENDS, and Next resolves the action's promise BEFORE the router
- * commits the revalidated tree — so the value snapped back to the old one, with
- * the success toast firing in the gap. What made the removal safe this time is
- * that an AWAITED invalidate holds the same transition open, over data the
- * control is actually rendered on top of. The full account is the long note in
- * `app/(app)/tasks/inline.tsx`. Do not repeat it.
+ * ⚠️ `ded2244` IS WHY THE AWAIT USED TO BE NON-NEGOTIABLE, AND P12-10 IS WHY IT
+ * IS GONE. Removing the refresh from these controls (`a64b06c`) had to be
+ * reverted the same day across eighteen files: `useOptimistic` drops its value
+ * the instant the transition that set it ENDS, so SOMETHING had to stay pending
+ * for the whole round trip, and an awaited invalidate was that something. It
+ * worked, and it cost the entire surface: `qk.tasks()` is the prefix over the
+ * list AND the board, so a one-field edit waited on seven queries in two waves
+ * before the controls came back.
  *
- * ⚠️ WHICH IS ALSO WHY EVERY FUNCTION HERE IS `async` AND MUST BE AWAITED
- * INSIDE THE TRANSITION. `invalidateQueries` returns a promise that settles when
- * the refetches it triggered have landed. An un-awaited call lets the caller's
- * transition end before the fresh data arrives, which is `ded2244` again through
- * a different door — the optimistic value reverts, the cache repaints a beat
- * later, and the field visibly flickers. The one deliberate exception is
- * `markTaskStale` at the bottom, which is documented where it is used.
+ * ⚠️ `onMutate` REMOVED THE REASON FOR IT. The predicted value now lives in the
+ * QUERY CACHE (`lib/query/task-cache.ts`), which keeps it until a refetch
+ * replaces it — nothing reverts when a transition ends, because nothing about it
+ * is scoped to one. So every call below is FIRED, not awaited, and the
+ * interaction ends when the write returns.
+ *
+ * ⚠️ THE FUNCTIONS ARE STILL `async`, AND THAT IS NOT AN INVITATION. They return
+ * the promise `invalidateQueries` returns so that a caller with a genuine reason
+ * to wait can — `useTaskAutosave.flush()` is the one, and it says why at its
+ * call site. Awaiting one from inside a click handler puts the refetch back in
+ * front of the person, which is the whole of what this phase removed.
  * ------------------------------------------------------------------------
  */
 
@@ -61,22 +64,11 @@ async function sweep(client: Invalidator, keys: readonly QueryKey[]): Promise<vo
  * made a status change feel like a page load: 0.5–1s of nothing, then the row
  * moved, then the toast. The write had landed in the first 150ms of that.
  *
- * ⚠️ WHAT MUST BE AWAITED IS ONLY WHAT AN OPTIMISTIC VALUE IS STANDING IN FOR.
- * `useOptimistic` drops its value the instant the transition that set it ends,
- * so the transition has to stay open until the REAL data for the thing on screen
- * has landed — that is `ded2244`, and it is not negotiable. It says nothing
- * about the other surfaces.
- *
- * ⚠️ AND "THE OTHER SURFACES" COSTS NOTHING TO AWAIT ANYWAY, WHICH IS THE PART
- * THAT MAKES THIS SPLIT SIMPLE. `invalidateQueries` refetches only what a
- * mounted component is OBSERVING; an unobserved key is marked stale and resolves
- * immediately. So `qk.tasks()` awaited from `/tasks/[id]` is free (no list is
- * mounted), and `qk.task(id)` awaited from `/tasks` is free for the mirror
- * reason. The one key that is ALWAYS observed is the rail's `qk.snapshot()` —
- * every page in the product renders it — and it is the one whose refetch is a
- * whole-tree aggregate. That is why it, and only it, is fired rather than
- * awaited: the rail has no optimistic value to protect, so nothing on screen
- * reverts while its counts catch up a beat later.
+ * ⚠️ P12-10 MADE THIS THE ONLY MODE. What used to be awaited was whatever an
+ * optimistic value was standing in for — `useOptimistic` drops its value when
+ * its transition ends, so the transition had to outlive the refetch. The value
+ * lives in the cache now, so there is nothing left to hold and `sweep` below has
+ * one caller with a stated reason rather than eleven with an inherited one.
  */
 function fire(client: Invalidator, keys: readonly QueryKey[]): void {
   for (const queryKey of keys) void client.invalidateQueries({ queryKey });
@@ -99,13 +91,11 @@ function fire(client: Invalidator, keys: readonly QueryKey[]): void {
  * and it moves the rail's open-task counts. Keeping the two lists in step is the
  * point of naming them both from one place.
  *
- * ⚠️ P12-08 — THE RAIL IS FIRED, THE SURFACES ARE AWAITED. See `fire` above for
- * the argument; the short version is that `qk.snapshot()` is the only key here
- * that is observed on EVERY page, so awaiting it put a whole-tree aggregate in
- * front of every status change, and the rail has no optimistic value that could
- * revert while it catches up. The caller's `toast` belongs BEFORE this call
- * either way: the write it is reporting has already happened, and a toast
- * scheduled after an awaited refetch is reporting the refetch.
+ * ⚠️ P12-08 FIRED THE RAIL AND AWAITED THE SURFACES; P12-10 FIRES BOTH. The
+ * predicted row is in the cache, so there is no value on screen that a refetch
+ * has to arrive in time to protect. Call this from `onSettled` and do not await
+ * it — the interaction is over by then, and the refetch lands underneath a
+ * screen that already shows the right thing.
  */
 export async function invalidateTaskWrite(
   client: Invalidator,

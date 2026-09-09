@@ -2,11 +2,10 @@
 
 import { toast } from "@/components/ui/toast";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
-import { useOptimistic, useState, type ReactNode } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState, type ReactNode } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { focusWithoutScroll } from "@/lib/focus";
-import { useOptimisticMove } from "./optimistic-move";
 
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -28,6 +27,8 @@ import { cn } from "@/lib/utils";
 import { DeleteTaskDialog } from "./delete-task-dialog";
 
 import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { beginTaskWrite, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { updateTaskField } from "./actions";
 import { ComposerCard, type Assignable } from "./task-composer";
@@ -51,136 +52,115 @@ import { ComposerCard, type Assignable } from "./task-composer";
  * about the state of the database.
  */
 
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const writeField = fromAction(updateTaskField);
+
 /**
- * Shared: write one field, report it, and re-read.
+ * Shared: write one field, paint it, report it, and re-read in the background.
  *
- * ⚠️ IT OPENS NO TRANSITION, AND THAT IS THE POINT. Every caller is a form
- * action, and React already runs those in one — so this is simply awaited inside
- * the caller's own action. Two transitions was the bug: the optimistic value was
- * set in the form action's and awaited in this one, and `useOptimistic` shows
- * its value only while the transition THAT SET IT is pending, so it was dropped
- * a frame later and the chip waited for the server.
+ * ------------------------------------------------------------------------
+ * P12-10 — `useMutation` WITH `onMutate`, AND WHAT THAT REPLACED.
  *
- * One transition. Set, await, done — all in the caller.
+ * ⚠️ THE OLD SHAPE WAITED FOR THE WHOLE SURFACE BEFORE THE CONTROL CAME BACK,
+ * AND IT HAD TO. Every caller here is a form action, React runs those in a
+ * transition, and `useOptimistic` shows its value only while THAT transition is
+ * pending — so the awaited `invalidateTaskWrite` was the only thing holding the
+ * new value on screen. It also awaited `qk.tasks()`, the prefix over the list
+ * AND the board, so ticking a priority waited on seven queries in two waves. The
+ * chip moved instantly and the interaction stayed pending for about a second
+ * afterwards, which is exactly what Ace reported. The removal was tried once
+ * (`a64b06c`) and reverted across eighteen files the same day (`ded2244`),
+ * because with `useOptimistic` there was nothing else to hold it.
+ *
+ * ⚠️ THE VALUE NOW LIVES IN THE CACHE, WHICH IS WHERE THE ROW ITSELF COMES FROM.
+ * `onMutate` patches `qk.taskList` / `qk.taskBoard` / `qk.task(id)` directly, so
+ * the row on screen IS the optimistic row; nothing is scoped to a transition and
+ * nothing reverts when one ends. `onSettled` therefore fires the invalidation
+ * without awaiting it, and the interaction is over as soon as the write returns.
+ *
+ * ⚠️ AND THE ROLLBACK IS NO LONGER FREE. React used to put the old value back on
+ * a refusal with no code at all; `onError` and the snapshot are what replace it,
+ * and dropping either leaves the screen showing a value the database refused —
+ * the exact thing this file's header forbids in capitals.
+ *
+ * ⚠️ IT PATCHES THE ROW RATHER THAN REFETCHING THE SURFACE. A priority tick used
+ * to re-read every row on screen plus its six `.in("task_id", …)` lookups, and
+ * those go through the `vizserve_pms_task_assignees` policy that P12-03 could
+ * not hoist into an InitPlan. See `lib/query/task-cache.ts`.
+ * ------------------------------------------------------------------------
  */
 function usePatch(taskId: string) {
-
-  /*
-   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
-   *
-   * This control is shared: the detail header renders it, every list row renders
-   * it and every board card renders it. `/tasks/[id]` reads `qk.task(id)` from
-   * the cache now, so a write has to invalidate; `/tasks` and `/tasks/board`
-   * read their rows from the cache too since P12-07, so P12-09 took the
-   * `router.refresh()` out: one mechanism, not two. The AWAITED invalidate is
-   * what holds the optimistic value across the settle now — see the long note
-   * at the call site below, which is this repo's account of `ded2244`.
-   */
   const queryClient = useQueryClient();
 
-  /*
-   * ⚠️ THE ROW IS PATCHED, NOT JUST THIS CONTROL'S OWN STATE.
-   *
-   * `InlinePriority` is rendered TWICE in one task row — beside the title and as
-   * the priority column — and `TaskRowActions` reads the field a third time.
-   * Three component instances with three separate local values: the one you
-   * clicked moved and the other two sat on the old value until the server
-   * answered. The optimistic value has to live on the ROW, held by the parent
-   * that renders it and read by every cell as a prop.
-   *
-   * Null on the board and the task detail page, which render these controls with
-   * no optimistic row list around them. There the control's own value is the
-   * only one on screen, so nothing is missing.
-   */
-  const patchRow = useOptimisticMove();
+  const mutation = useMutation({
+    mutationFn: (vars: PatchVars) => writeField(taskId, vars.fields),
 
-  async function patch(field: Record<string, unknown>, { success }: { success?: string } = {}) {
-    // The ROW, so every cell that renders this field moves together.
-    patchRow?.({ kind: "patch", id: taskId, fields: field });
+    onMutate: async (vars) => {
+      const snapshot = await beginTaskWrite(queryClient);
+      /*
+       * ⚠️ THE ROW, NOT THIS CONTROL'S OWN STATE. `InlinePriority` is rendered
+       * TWICE in one task row — beside the title and as the priority column —
+       * and `TaskRowActions` reads the field a third time. Three component
+       * instances with three separate local values was the bug: the one you
+       * clicked moved and the other two sat on the old value until the server
+       * answered. All three render from the cached row, so one patch reaches
+       * all three by construction.
+       */
+      patchTaskRow(queryClient, taskId, vars.cache ?? vars.fields);
+      return snapshot;
+    },
 
-    const result = await updateTaskField(taskId, field);
+    onError: (error, _vars, snapshot) => {
+      /*
+       * ⚠️ THE ONE RULE THIS FILE'S HEADER STATES: a policy-refused UPDATE is
+       * success with zero rows (trap 9), `updateTaskField` turns that into a
+       * sentence, and the editor PUTS THE OLD VALUE BACK. An editor keeping the
+       * new value after a refusal is lying about the state of the database.
+       */
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      toast.error(error.message);
+    },
 
-    if (!result.ok) {
-      // No rollback to write: React drops the optimistic value when the form
-      // action finishes, and the field goes back to what the server still says.
-      toast.error(result.error);
-      return;
-    }
-
-    /*
-     * ⚠️ THIS LOOKS LIKE A DUPLICATE ROUND TRIP AND IT IS NOT. IT HAS BEEN
-     * REMOVED ONCE AND HAD TO BE PUT BACK. Read this before deleting it again —
-     * the other four optimistic controls point here rather than repeating it:
-     * `transition.tsx`, `assignees.tsx`, `delete-task-dialog.tsx` and
-     * `task-composer.tsx`.
-     *
-     * THE CLAIM IT ANSWERS. `updateTaskField` calls `revalidatePath` itself, so
-     * the fresh RSC payload comes back WITH the action's response and a second
-     * fetch is pure waste. That is true of the RESPONSE and false of the TIMING,
-     * which is the only thing that matters here.
-     *
-     * WHAT ACTUALLY HAPPENS, from Next 16's own action queue. The server action
-     * reducer resolves the promise your `await` is sitting on — `resolve(
-     * actionResult)` — and only THEN returns the next router state, which the
-     * queue commits a further tick later. So the caller's async transition ends
-     * BEFORE the new tree is on screen, `useOptimistic` drops its value the
-     * instant the transition ends, and the field snaps back to the old server
-     * value for that gap. Under PPR the gap can be a whole extra fetch, because
-     * a seeded navigation may still have to go back for dynamic segments.
-     *
-     * The visible symptom, recorded when it shipped: THE TOAST ARRIVED BEFORE
-     * THE UI CHANGED. The value you had just typed reverted, the toast said it
-     * had saved, and then it changed again. `ded2244` restored this line in
-     * eighteen files after `a64b06c` removed it.
-     *
-     * WHY THIS FIXES IT. `router.refresh()` puts a PENDING promise into the
-     * router's state inside a transition, so the tree above suspends and React
-     * cannot commit the optimistic-revert render until that promise settles —
-     * transitions entangle. The optimistic value therefore holds until the real
-     * one is there to replace it. The cost is one extra round trip; a field that
-     * flickers back to its old value on every inline edit is worse.
-     *
-     * ⚠️ P12-02 LEFT ALL FIVE OF THESE IN PLACE FOR EXACTLY THIS REASON, and
-     * removed only the sites with no optimistic value behind them
-     * (`nav-personal.tsx`).
-     *
-     * ⚠️ AND P12-09 IS WHEN IT FINALLY CAME OUT. Everything above this line is
-     * still true about `router.refresh()`; what changed is that there is now
-     * something ELSE holding the transition open. `/tasks`, `/tasks/board` and
-     * `/tasks/[id]` all read from the cache since P12-07, so the AWAITED
-     * `invalidateTaskWrite` below refetches the very rows this control is
-     * rendered over, inside the same transition — which is the entangled
-     * pending promise the paragraph above describes, arrived at from the data
-     * rather than from the router. The optimistic value holds until the real one
-     * replaces it, and the route render that used to run beside every inline
-     * edit is gone.
-     *
-     * ⚠️ THE AWAIT IS THEREFORE LOAD-BEARING AND MUST NOT BECOME A
-     * FIRE-AND-FORGET. Dropping it is `a64b06c` again, and `ded2244` is what
-     * that costs. The remaining step is `useMutation` with `onMutate` /
-     * `onSettled`, which holds its own optimistic value across the settle and
-     * retires `optimistic-move.tsx` with it — deliberately left for a later
-     * pass rather than folded into this one.
-     */
-    /*
-     * ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-     * the WRITE, which has already happened; scheduled after the invalidation it
-     * reported the refetch instead. See `lib/query/invalidate.ts`.
-     */
-    if (success) toast.success(success);
+    onSuccess: (_data, vars) => {
+      // Reports the WRITE, which has already happened — so it is not scheduled
+      // behind anything. See `lib/query/invalidate.ts`.
+      if (vars.success) toast.success(vars.success);
+    },
 
     /*
-     * ⚠️ AWAITED, AND STILL INSIDE THE CALLER'S FORM ACTION — which is a
-     * transition, per this hook's own header ("it opens no transition, and that
-     * is the point"). An un-awaited invalidate would let that transition end
-     * before the refetch lands and the field would snap back to its old value,
-     * which is the whole of `ded2244` in one line.
+     * ⚠️ NOT AWAITED, AND THAT IS THE POINT OF THE PHASE. Nothing on screen
+     * depends on it landing: the row already shows the new value and will keep
+     * showing it until this refetch replaces it with the server's own. Awaiting
+     * it is what put the whole surface in front of a one-field edit.
      */
-    await invalidateTaskWrite(queryClient, taskId);
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
+
+  function patch(fields: Record<string, unknown>, options: Omit<PatchVars, "fields"> = {}) {
+    mutation.mutate({ fields, ...options });
   }
 
   return { patch };
 }
+
+type PatchVars = {
+  /** What goes to the server, exactly as `updateTaskField` expects it. */
+  fields: Record<string, unknown>;
+  /**
+   * What goes into the CACHE, where it differs from what goes to the server.
+   *
+   * ⚠️ ONE CALLER AND ONE REASON: a cleared date is sent as `""`, because that
+   * is what the action's schema turns into `null`. Writing `""` into the row
+   * would leave the cell holding an empty string where every reader expects
+   * `null` — falsy either way today, which is exactly the kind of accident that
+   * survives until somebody writes `value === null`.
+   */
+  cache?: Record<string, unknown>;
+  /** Toasted on success. Omitted where the change speaks for itself. */
+  success?: string;
+};
 
 /**
  * The hover strip on a row or a card: rename, priority, add a subtask.
@@ -324,27 +304,23 @@ export function InlinePriority({
 }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  /*
-   * ⚠️ `useOptimistic`, NOT `useState`, AND THE REASON IS THE FORM ACTION.
-   *
-   * These rows are `formAction={() => choose(option)}` now, and React runs a
-   * form action inside a TRANSITION. A plain `setState` in a transition is a
-   * deferred update — React holds the old UI until the transition finishes — so
-   * the chip stopped changing on click and only moved when the server answered.
-   * The symptom was exact: the toast arrived first and the chip followed two
-   * seconds later.
-   *
-   * `useOptimistic` is the one hook that renders immediately INSIDE a
-   * transition. That is its whole purpose, and it is why the manual rollback
-   * below is gone: React puts the old value back by itself when the transition
-   * ends, refused or not.
-   */
-  const [shown, setShown] = useOptimistic(value);
 
-  async function choose(next: TaskPriority | null) {
+  /*
+   * ⚠️ THE PROP, AND IT IS OPTIMISTIC BECAUSE THE CACHE IS.
+   *
+   * This was a `useOptimistic` over the same value, and before that a `useState`
+   * that did not repaint at all — a plain `setState` inside a form action's
+   * transition is a DEFERRED update, so the chip only moved when the server
+   * answered. Neither is needed now: `onMutate` writes `priority` into the cached
+   * ROW, and this component renders that row. What it buys over `useOptimistic`
+   * is that the OTHER TWO instances of this control on the same row move with it
+   * — see `usePatch` above.
+   */
+  const shown = value;
+
+  function choose(next: TaskPriority | null) {
     setOpen(false);
-    setShown(next);
-    await patch(
+    patch(
       { priority: next },
       { success: next === null ? "Priority cleared" : `Priority: ${TASK_PRIORITY_LABELS[next]}` },
     );
@@ -434,18 +410,19 @@ export function InlineDate({
 }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  /*
-   * ⚠️ `useOptimistic`, NOT `useState` — see the note on `InlinePriority`. The
-   * rows here are form actions, and a plain setState inside a transition is a
-   * DEFERRED update: React holds the old UI until the action finishes.
-   */
-  const [shown, setShown] = useOptimistic(value);
+  /* The cached row is the optimistic value — see the note on `InlinePriority`. */
+  const shown = value;
 
-  async function commit(next: string) {
+  function commit(next: string) {
     // "" from a cleared input means no date. The action turns it into null.
     setOpen(false);
-    setShown(next || null);
-    await patch({ [field]: next }, { success: next ? `${label} ${formatDate(next)}` : `${label} cleared` });
+    patch(
+      { [field]: next },
+      {
+        cache: { [field]: next || null },
+        success: next ? `${label} ${formatDate(next)}` : `${label} cleared`,
+      },
+    );
   }
 
   return (
@@ -499,23 +476,18 @@ export function InlineDate({
 export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: number | null }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  /*
-   * ⚠️ `useOptimistic`, NOT `useState` — see the note on `InlinePriority`. The
-   * rows here are form actions, and a plain setState inside a transition is a
-   * DEFERRED update: React holds the old UI until the action finishes.
-   */
-  const [shown, setShown] = useOptimistic(minutes);
+  /* The cached row is the optimistic value — see the note on `InlinePriority`. */
+  const shown = minutes;
   const [raw, setRaw] = useState(minutes === null ? "" : formatCellDuration(minutes));
   const [error, setError] = useState<string | null>(null);
 
-  async function commit() {
+  function commit() {
     const trimmed = raw.trim();
 
     if (!trimmed) {
       setError(null);
       setOpen(false);
-      setShown(null);
-      await patch({ estimate_minutes: null }, { success: "Estimate cleared" });
+      patch({ estimate_minutes: null }, { success: "Estimate cleared" });
       return;
     }
 
@@ -528,8 +500,7 @@ export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: n
     setError(null);
     setRaw(formatCellDuration(parsed));
     setOpen(false);
-    setShown(parsed);
-    await patch({ estimate_minutes: parsed }, { success: `Estimate ${formatCellDuration(parsed)}` });
+    patch({ estimate_minutes: parsed }, { success: `Estimate ${formatCellDuration(parsed)}` });
   }
 
   return (
@@ -598,19 +569,14 @@ export function InlineList({
 }) {
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
-  /*
-   * ⚠️ `useOptimistic`, NOT `useState` — see the note on `InlinePriority`. The
-   * rows here are form actions, and a plain setState inside a transition is a
-   * DEFERRED update: React holds the old UI until the action finishes.
-   */
-  const [shown, setShown] = useOptimistic(value);
+  /* The cached row is the optimistic value — see the note on `InlinePriority`. */
+  const shown = value;
 
   const nameOf = (id: string | null) => lists.find((list) => list.id === id)?.name ?? null;
 
-  async function choose(next: string | null) {
+  function choose(next: string | null) {
     setOpen(false);
-    setShown(next);
-    await patch({ list_id: next }, { success: next ? `Filed under ${nameOf(next)}` : "Removed from its list" });
+    patch({ list_id: next }, { success: next ? `Filed under ${nameOf(next)}` : "Removed from its list" });
   }
 
   const label = nameOf(shown);

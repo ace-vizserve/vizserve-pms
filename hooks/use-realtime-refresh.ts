@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 
+import { isLocalEcho } from "@/lib/query/local-write";
 import { invalidateForTable, type RealtimeTable } from "@/lib/query/realtime";
 import { createClient } from "@/utils/supabase/client";
 
@@ -347,6 +348,18 @@ export function useRealtimeRefresh({
       timer = setTimeout(() => {
         timer = null;
         if (cancelled) return;
+
+        /*
+         * ⚠️ OUR OWN ECHO IS NOT NEWS. A write in this tab already invalidated
+         * what it changed; the event it produced arrives ~300ms later and
+         * would invalidate all of it a second time. Ace measured one status
+         * change fetching the rail three times and every surface query twice.
+         *
+         * Per-tab, so a colleague's change and this person's other tabs still
+         * repaint — see `lib/query/local-write.ts` for the bounded cost.
+         */
+        if (isLocalEcho()) return;
+
         invalidate();
         onPingRef.current?.();
       }, REFRESH_DEBOUNCE_MS);
