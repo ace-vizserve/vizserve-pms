@@ -228,9 +228,20 @@ export default async function NewFormPage({
     );
   }
 
-  // P2-06 — a brand-new form can point at an existing list straight away. Read
-  // only on the client-request branch: `default_list_id` is where an APPROVED
-  // request files, and an internal form never has one.
+  /*
+   * P2-06 — a brand-new form can point at an existing list straight away. Read
+   * only on the client-request branch: `default_list_id` is where an APPROVED
+   * request files, and an internal form never has one.
+   *
+   * ⚠️ P12-22 — CLASSIFIED, AND IT IS A LEGAL DEFAULT RATHER THAN A SILENT
+   * FAILURE. Every `?? []` in the app was re-examined in this migration, and the
+   * departments note above is the whole argument for this one too: the picker
+   * stands on a form that does not exist yet, so an empty list writes nothing
+   * over anything. `default_list_id` is nullable and unset is a real, fixable
+   * state — /forms/[id] is where an empty list CAN be written back over a live
+   * form, and that page groups this exact read into `readFailure` for precisely
+   * that reason.
+   */
   const { data: lists } = await supabase
     .from("vizserve_pms_lists")
     .select("id, name, department_id")
