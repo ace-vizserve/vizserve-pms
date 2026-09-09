@@ -4,6 +4,7 @@ import NextTopLoader from "nextjs-toploader";
 import { Toaster } from "@/components/ui/toast";
 
 import { ThemeProvider } from "@/components/theme-provider";
+import { QueryProvider } from "@/lib/query/provider";
 import "./globals.css";
 
 // The design refresh: Figtree.
@@ -56,12 +57,39 @@ export default function RootLayout({
     >
       <body className="flex min-h-full flex-col">
         <ThemeProvider>
-          <NextTopLoader color="#4359A5" height={2} showSpinner={false} />
-          {children}
-          {/* Position, theme and every visual decision live in the wrapper —
-              see `components/ui/toast.tsx`. Nothing in the app imports the
-              toast library directly, so replacing it costs that one file. */}
-          <Toaster />
+          {/*
+            ⚠️ THE QUERY CACHE LIVES AT THE ROOT, NOT IN `app/(app)/layout.tsx`,
+            AND IT HAD TO MOVE. Ace hit `Error: No QueryClient set` on the index
+            page in a production build.
+
+            `app/page.tsx` is at the ROOT — it is not inside the `(app)` route
+            group — so the provider that used to sit in `(app)`'s layout never
+            wrapped it. P12-23 converted `PunchPanel` to `useQuery` and the index
+            page renders one, which is the crash. `/forms/[id]` had the same hole
+            from the other direction: the `(builder)` group unmounted the
+            provider on every visit and threw the whole cache away, rebuilding
+            the rail, every reference entry and every task view from nothing on
+            the way back. One provider fixes both.
+
+            ⚠️ THE COST, STATED RATHER THAN HIDDEN: this layout also covers the
+            pages with NO SESSION — `/request/[slug]`, `/approve/[token]`,
+            `/status/[token]`, `/feedback/[token]` and `/login` — so the TanStack
+            runtime is now in their bundles. None of them runs a query and none
+            ever should: `anon` holds no table privileges at all and those pages
+            reach the database only through `SECURITY DEFINER` functions. It buys
+            a client with no cache entries, which is cheap but not free. If the
+            public form's bundle ever matters, the answer is a second provider
+            scoped to the authenticated groups — NOT moving this one back, which
+            re-breaks the index page.
+          */}
+          <QueryProvider>
+            <NextTopLoader color="#4359A5" height={2} showSpinner={false} />
+            {children}
+            {/* Position, theme and every visual decision live in the wrapper —
+                see `components/ui/toast.tsx`. Nothing in the app imports the
+                toast library directly, so replacing it costs that one file. */}
+            <Toaster />
+          </QueryProvider>
         </ThemeProvider>
       </body>
     </html>

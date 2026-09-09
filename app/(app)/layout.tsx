@@ -13,14 +13,12 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-import { QueryProvider } from "@/lib/query/provider";
 
 import { SidebarPanel } from "./sidebar-panel";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContext();
   return (
-    <QueryProvider>
     <TooltipProvider>
       <BreadcrumbLabelProvider>
         {/*
@@ -47,8 +45,11 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           render of the shell for every notification anybody received. It now
           invalidates `qk.snapshot()`, which `sidebar-snapshot.tsx` is observing,
           so the rail refetches its own numbers and nothing on the server runs at
-          all. `<QueryProvider>` above is what makes that legal here: the hook
-          calls `useQueryClient()`, so this component must stay inside it.
+          all. `<QueryProvider>` is what makes that legal here: the hook calls
+          `useQueryClient()`, so this component must stay inside it. It sits in
+          `app/layout.tsx` rather than this file — `app/page.tsx` is at the ROOT
+          and needs it too, and moving it here again crashes the index page with
+          `No QueryClient set`.
         */}
         <RealtimeNotifications userId={context.userId} />
 
@@ -141,6 +142,5 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </SidebarProvider>
       </BreadcrumbLabelProvider>
     </TooltipProvider>
-    </QueryProvider>
   );
 }
