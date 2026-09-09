@@ -105,7 +105,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * Awaited, and it is the only await in the optimistic path: cancellation is
  * local bookkeeping, not a round trip.
  */
-export async function beginTaskWrite(client: QueryClient): Promise<TaskCacheSnapshot> {
+export function beginTaskWrite(client: QueryClient): TaskCacheSnapshot {
   /*
    * ⚠️ MARKED HERE BECAUSE EVERY OPTIMISTIC WRITE STARTS HERE. The realtime
    * ping this write is about to produce is our own echo, and re-fetching what
@@ -114,9 +114,37 @@ export async function beginTaskWrite(client: QueryClient): Promise<TaskCacheSnap
    */
   markLocalWrite();
 
-  await Promise.all(TASK_ROOTS.map((queryKey) => client.cancelQueries({ queryKey })));
-
+  /*
+   * ⚠️ SYNCHRONOUS, AND `cancelQueries` IS DELIBERATELY NOT AWAITED HERE.
+   *
+   * This function used to open with
+   * `await Promise.all(TASK_ROOTS.map(k => client.cancelQueries(k)))`, which is
+   * what TanStack's guide shows — and it put the visible update BEHIND A
+   * NETWORK CANCELLATION. Something is almost always in flight (the rail RPC
+   * alone takes ~1.3s), so the click waited on that before the cache was
+   * touched at all. Ace's report was exact: "why is state update taking so
+   * long? not instant?"
+   *
+   * The cancellation is still needed — it stops an in-flight refetch landing
+   * after the patch and overwriting it — but it does NOT have to happen before
+   * the patch. It only has to happen before that refetch resolves. So the
+   * snapshot and the patch are synchronous, and `cancelTaskRefetches` below is
+   * fired immediately after by the caller.
+   */
   return TASK_ROOTS.flatMap((queryKey) => client.getQueriesData({ queryKey }));
+}
+
+/**
+ * Stop an in-flight refetch landing on top of a patch that has already been
+ * applied.
+ *
+ * ⚠️ FIRED, NEVER AWAITED, AND CALLED AFTER THE PATCH. Awaiting it is what made
+ * the click feel slow; see `beginTaskWrite`. The race it closes is a refetch
+ * that STARTED before the patch and RESOLVES after it — and that resolution is
+ * milliseconds away at best, so firing this in the same tick is early enough.
+ */
+export function cancelTaskRefetches(client: QueryClient): void {
+  for (const queryKey of TASK_ROOTS) void client.cancelQueries({ queryKey });
 }
 
 /**

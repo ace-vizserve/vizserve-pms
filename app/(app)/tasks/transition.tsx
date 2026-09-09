@@ -21,7 +21,7 @@ import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/
 
 import { invalidateDerived } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
-import { beginTaskWrite, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
+import { beginTaskWrite, cancelTaskRefetches, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { transitionTask } from "./actions";
 
@@ -128,21 +128,34 @@ export function useTaskTransition({
 
     onMutate: async (vars) => {
       /*
-       * ⚠️ BEFORE THE SNAPSHOT, NOT AFTER IT. The task detail commits its
-       * debounced resolution here, and that write invalidates the task — so
-       * running it after the paint would let its refetch land on top of the new
-       * status. `beginTaskWrite` cancels anything still in flight when it is
-       * finally called, which only works if the flush has already been issued.
+       * ⚠️ THE PAINT COMES FIRST. NOTHING IS AWAITED IN FRONT OF IT.
        *
-       * The reason it is awaited at all is unchanged: clicking blurs the
-       * textarea and SCHEDULES a save, which is a round trip racing this one,
-       * and losing it produces the worst failure on the page — "Send for QA"
-       * refused for an empty column with the text plainly on screen.
+       * This block used to open with `await beforeMove?.()`, so on the task
+       * detail the chip waited on the resolution autosave — a whole round trip
+       * — before the cache was touched. That is the "why is state update taking
+       * so long? not instant?" Ace reported. An optimistic paint that waits on
+       * the network is not an optimistic paint.
+       */
+      const snapshot = beginTaskWrite(queryClient);
+      patchTaskRow(queryClient, taskId, { status: vars.transition.to });
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+
+      /*
+       * ⚠️ STILL AWAITED, AND STILL BEFORE THE WRITE REACHES THE SERVER — only
+       * after the paint. The reason is unchanged: clicking blurs the textarea
+       * and SCHEDULES a save, which is a round trip racing this one, and losing
+       * it produces the worst failure on the page — "Send for QA" refused for an
+       * empty column with the text plainly on screen. `mutationFn` does not run
+       * until this resolves, so the precondition still holds.
+       *
+       * Its own invalidation can no longer land on top of the new status:
+       * `cancelTaskRefetches` above has already been fired, and
+       * `invalidateDerived` does not touch the row.
        */
       await beforeMove?.();
 
-      const snapshot = await beginTaskWrite(queryClient);
-      patchTaskRow(queryClient, taskId, { status: vars.transition.to });
       return snapshot;
     },
 

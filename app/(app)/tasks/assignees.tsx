@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
 
 import { invalidateDerived } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
-import { beginTaskWrite, patchTaskAssignee, rollbackTaskWrite } from "@/lib/query/task-cache";
+import { beginTaskWrite, cancelTaskRefetches, patchTaskAssignee, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { addTaskAssignee, removeTaskAssignee } from "./actions";
 
@@ -277,7 +277,7 @@ export function AssigneePicker({
       vars.add ? joinTask(taskId, vars.person.id) : leaveTask(taskId, vars.person.id),
 
     onMutate: async (vars) => {
-      const snapshot = await beginTaskWrite(queryClient);
+      const snapshot = beginTaskWrite(queryClient);
       /*
        * ⚠️ THE JOIN TABLE, NOT `assignee_id`. The stack this picker draws comes
        * from `TaskListView.assignees` — one `.in("task_id", …)` query for the
@@ -288,6 +288,9 @@ export function AssigneePicker({
        * a prediction that is wrong about half the time.
        */
       patchTaskAssignee(queryClient, taskId, vars.person.id, vars.add);
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
       return snapshot;
     },
 

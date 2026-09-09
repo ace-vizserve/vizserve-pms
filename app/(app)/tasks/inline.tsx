@@ -28,7 +28,7 @@ import { DeleteTaskDialog } from "./delete-task-dialog";
 
 import { invalidateDerived } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
-import { beginTaskWrite, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
+import { beginTaskWrite, cancelTaskRefetches, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { updateTaskField } from "./actions";
 import { ComposerCard, type Assignable } from "./task-composer";
@@ -96,7 +96,7 @@ function usePatch(taskId: string) {
     mutationFn: (vars: PatchVars) => writeField(taskId, vars.fields),
 
     onMutate: async (vars) => {
-      const snapshot = await beginTaskWrite(queryClient);
+      const snapshot = beginTaskWrite(queryClient);
       /*
        * ⚠️ THE ROW, NOT THIS CONTROL'S OWN STATE. `InlinePriority` is rendered
        * TWICE in one task row — beside the title and as the priority column —
@@ -107,6 +107,9 @@ function usePatch(taskId: string) {
        * all three by construction.
        */
       patchTaskRow(queryClient, taskId, vars.cache ?? vars.fields);
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
       return snapshot;
     },
 
