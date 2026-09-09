@@ -80,6 +80,16 @@ export async function HomeNewTaskAction() {
       colleagues={colleagues ?? []}
       departmentId={myDepartment}
       trigger="quick"
+      /*
+       * ⚠️ REQUIRED HERE AND NOWHERE ELSE. Ace, 9 Sep: a task filed from this
+       * page with no list is a task you cannot find again. The rail only shows
+       * and counts tasks that HAVE a list — `sidebar-panel`'s open-task read is
+       * `.not("list_id", "is", null)` — and this page shows no task list of its
+       * own, so nothing on screen would reveal what was just created. On
+       * `/tasks` the same dialog keeps "No list", because there the new row
+       * appears in the view the reader is already looking at.
+       */
+      requireList
     />
   );
 }

@@ -66,6 +66,7 @@ export function NewPersonalTaskDialog({
   colleagues,
   departmentId,
   trigger = "toolbar",
+  requireList = false,
 }: {
   /** The member's own department's lists. Optional — a task needs no list. */
   lists: { id: string; name: string }[];
@@ -90,6 +91,19 @@ export function NewPersonalTaskDialog({
    * button on the page.
    */
   trigger?: "toolbar" | "column" | "row" | "quick";
+  /**
+   * ⚠️ WITHOUT THIS, A TASK CAN BE CREATED AND THEN LOST. Ace, 9 Sep: the home
+   * page's quick action let you file a task with no list — and the rail only
+   * shows and counts tasks that HAVE one (`sidebar-panel`'s open-task read is
+   * `.not("list_id", "is", null)`). So the task existed, in your department, in
+   * no list, reachable only from `?view=mine` or a link you no longer had.
+   *
+   * Opt-in rather than the default, because "No list" is legitimate where the
+   * reader can see what they made: on `/tasks` the row appears in the view they
+   * are already looking at. It is the QUICK action, fired from a page that shows
+   * no tasks at all, where the option is a trap.
+   */
+  requireList?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
@@ -111,9 +125,13 @@ export function NewPersonalTaskDialog({
    * dialog that cannot be submitted at all. Falling back to "No list" keeps a
    * bad parameter to a missing convenience rather than a broken form.
    */
-  const [listId, setListId] = useState(
-    defaultListId && lists.some((list) => list.id === defaultListId) ? defaultListId : NO_LIST,
-  );
+  const [listId, setListId] = useState(() => {
+    if (defaultListId && lists.some((list) => list.id === defaultListId)) return defaultListId;
+    // Required and unspecified: start on the first list rather than on a value
+    // the form will refuse. `lists` is ordered by name, so this is stable.
+    if (requireList && lists.length > 0) return lists[0]!.id;
+    return NO_LIST;
+  });
   /*
    * P7-56 — the notes are a rich-text editor now, which has no form value of
    * its own, so it joins the controlled-state-plus-hidden-input arrangement
@@ -129,7 +147,10 @@ export function NewPersonalTaskDialog({
     ...Object.fromEntries(colleagues.map((person) => [person.id, person.full_name])),
   };
   const listItems = {
-    [NO_LIST]: "No list",
+    // The option is absent, not disabled, when a list is required — a control
+    // that offers a choice it will then refuse is worse than one that does not
+    // offer it.
+    ...(requireList ? {} : { [NO_LIST]: "No list" }),
     ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
   };
   const [pending, startTransition] = useTransition();
@@ -153,6 +174,18 @@ export function NewPersonalTaskDialog({
 
   function submit(formData: FormData) {
     setErrors({});
+
+    /*
+     * ⚠️ A CLIENT GUARD, AND IT IS NOT THE ENFORCEMENT. The picker cannot be set
+     * to "No list" when `requireList` is on — the option is not rendered — so
+     * this only catches the case where the caller passed no lists at all, and
+     * says why instead of posting a null the server would file into nowhere.
+     * The database is unchanged: `list_id` is nullable and legitimately so.
+     */
+    if (requireList && !String(formData.get("list_id") ?? "")) {
+      setErrors({ list_id: ["Pick a list — a task with no list will not appear in the sidebar."] });
+      return;
+    }
 
     const common = {
       title: String(formData.get("title") ?? ""),

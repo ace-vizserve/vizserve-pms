@@ -2,95 +2,254 @@
 
 import Link from "next/link";
 import { CheckCheck } from "lucide-react";
-import { useRouter } from "next/navigation";
-import { startTransition, useOptimistic } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import type { QueryClient } from "@tanstack/react-query";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { useColumnVisibility } from "@/components/data-table-columns";
-import type { VizservePmsNotificationType } from "@/lib/database.types";
 import { formatDateTime } from "@/lib/dates";
 import { NOTIFICATION_TYPE_LABELS } from "@/lib/notifications";
+import { qk } from "@/lib/query/keys";
+import { fromAction } from "@/lib/query/mutate";
+import { beginWrite, cancelRefetches, rollbackWrite } from "@/lib/query/write-cache";
+import type { InboxPage } from "@/lib/query/fetchers/inbox";
+import type { NotificationRow } from "@/lib/schemas/inbox";
 import { richTextToPlainText } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
 
-import { markNotificationRead } from "./actions";
+import { markAllNotificationsRead, markNotificationRead } from "./actions";
 
 /**
- * P7-64 — the columns, in a client component, because the table is one now.
+ * P7-64 / P12-17 — the columns and the two writes.
  *
- * `cell` is a function and a function cannot cross the RSC boundary. The server
- * page keeps the auth, the query, the searchParams narrowing and the paginator.
+ * `cell` is a function and a function cannot cross the RSC boundary, which is
+ * why this file exists at all. `inbox-view.tsx` owns the queries, the filters
+ * and the paginator; this knows how to draw a row and how to mark one read.
  *
  * ⚠️ `urlSort` IS SET, AND ON THIS PAGE IT IS LOAD-BEARING. The inbox renders
  * one `.range()` of a much longer list, so sorting in the browser would reorder
  * 25 rows and present it as an ordering of all of them.
+ *
+ * ------------------------------------------------------------------------
+ * ⚠️ BOTH `useOptimistic`S ARE GONE AND ONE MECHANISM REPLACED THEM.
+ *
+ * There were two — `allRead` for the button and `readIds` for the rows — plus a
+ * third that had already been hoisted out of `MarkReadTitle` because a title
+ * turning plain while the dot beside it stayed blue is one field rendered as two
+ * pieces of state. All three were the same problem: `useOptimistic` drops its
+ * value when its transition ends, so every one of them had to be set inside a
+ * `startTransition` that then AWAITED the action and a `router.refresh()` —
+ * a full server re-render of the route and the layout to change one `read_at`.
+ *
+ * The cached rows carry the prediction now. Patching `read_at` moves the dot,
+ * the weight of the title, the `sr-only` "(unread)", the Read column and the
+ * button's own visibility, because every one of them reads the same field off
+ * the same row. Nothing reverts, because nothing about it is scoped to a
+ * transition.
+ *
+ * ⚠️ AND `onError` IS REAL CODE NOW. React used to put the row back for free.
+ * `rollbackWrite` restores the snapshot; without it a refused write would leave
+ * a row looking read that the database still calls unread, and the badge in the
+ * rail would disagree with the page it links to.
+ * ------------------------------------------------------------------------
  */
 
-export type Notification = {
-  id: string;
-  title: string;
-  body: string | null;
-  link_path: string | null;
-  type: VizservePmsNotificationType;
-  read_at: string | null;
-  emailed_at: string | null;
-  created_at: string;
-};
+/** The row this table draws. The contract's, parsed on arrival. */
+export type Notification = NotificationRow;
+
+/** The Server Actions, as promises TanStack can drive `onError` off. */
+const readOne = fromAction(markNotificationRead);
+const readAll = fromAction(markAllNotificationsRead);
 
 /**
- * P11-05 — "Mark all read", as a client control rather than a bare server form.
- *
- * ⚠️ IT LIVES IN HERE BECAUSE ONE OPTIMISTIC VALUE HAS TO COVER BOTH THE BUTTON
- * AND EVERY ROW. It used to be a `<form action={markAllRead}>` in the page — a
- * server component, a sibling of this table, with no state either could share.
- * Optimism there would have hidden the button while forty rows stayed bold,
- * which is the half-update that reads worse than no update at all.
+ * ⚠️ TWO ROOTS, AND THE SECOND IS THE ONE THAT IS EASY TO MISS. `["inbox"]` is
+ * every page and filter combination of the list; `qk.unread()` is the count in
+ * the header strip, which is a DIFFERENT root and cannot be prefix-matched by
+ * the first however long you stare at the pair. A read receipt moves both, so a
+ * rollback has to restore both — otherwise a refused write leaves the row bold
+ * again beside a count that has already come down.
  */
+const INBOX_ROOTS = [["inbox"], qk.unread()] as const;
+
+/**
+ * Mark rows read across EVERY cached page of the inbox.
+ *
+ * ⚠️ `setQueriesData` OVER THE PREFIX, NOT `setQueryData` ON ONE KEY, and the
+ * reason is that this tab can hold several: page 1 unfiltered, page 1 filtered
+ * to unread, the entry from before somebody typed in the search box. The row
+ * just clicked can be in more than one of them, and patching only the entry the
+ * click came from would leave it bold everywhere else — visible the moment
+ * anybody pressed Back.
+ *
+ * ⚠️ AN UNCHANGED ENTRY IS RETURNED BY REFERENCE. `setQueryData` notifies its
+ * observers whenever the value is not identical, so rebuilding an entry that did
+ * not contain the row would re-render a table for nothing.
+ *
+ * `matches` picks the rows: one id, or every unread row for "mark all". Rows
+ * that are ALREADY read are skipped either way, which mirrors the action — both
+ * writes end in `.is("read_at", null)`, so re-stamping a row read last week is
+ * something neither layer does.
+ */
+function patchRead(client: QueryClient, matches: (row: Notification) => boolean): void {
+  const readAt = new Date().toISOString();
+  let marked = 0;
+
+  client.setQueriesData<InboxPage>({ queryKey: ["inbox"] }, (current) => {
+    if (!current) return current;
+    let touched = false;
+    const rows = current.rows.map((row) => {
+      if (row.read_at !== null || !matches(row)) return row;
+      touched = true;
+      marked += 1;
+      return { ...row, read_at: readAt };
+    });
+    return touched ? { ...current, rows } : current;
+  });
+
+  /*
+   * ⚠️ THE COUNT IS DECREMENTED, NOT RECOMPUTED FROM THE ROWS, and that is the
+   * whole reason it is a separate key. `qk.unread()` counts the WHOLE inbox;
+   * the rows on screen are one `.range()` of it. Deriving the badge from them
+   * would report "3 unread" meaning "3 on this page", which is the bug
+   * `fetchUnreadCount` records the RSC having shipped.
+   *
+   * ⚠️ `marked` COUNTS ONLY WHAT WAS CACHED, so a "mark all" over an inbox with
+   * unread rows on page 2 undershoots. `onSettled` refetches the real number a
+   * beat later; the guess is only there so the badge does not sit still while
+   * every row on screen goes plain. `undefined` is left alone — a count that has
+   * not loaded must not be invented.
+   */
+  client.setQueryData<number>(qk.unread(), (current) =>
+    current === undefined ? current : Math.max(0, current - marked),
+  );
+}
+
 export function InboxTable({
   rows,
   empty,
   toolbar,
   count,
-  markAllAction,
+  canMarkAll,
 }: {
   rows: Notification[];
   /**
-   * P11-05 — "Mark all read", moved in here from the page.
+   * P11-05 — whether "Mark all read" is worth offering.
    *
-   * ⚠️ IT HAD TO MOVE, because ONE optimistic value has to cover the button AND
-   * every row. It was a `<form action={markAllRead}>` in the page — a server
+   * ⚠️ THE CONTROL LIVES IN HERE BECAUSE ONE PREDICTION HAS TO COVER THE BUTTON
+   * AND EVERY ROW. It was a `<form action={markAllRead}>` in the page — a server
    * component, a sibling of this table, with no state either could share. An
    * optimistic hide there would have taken the button away while forty rows
    * stayed bold, which is the half-update that reads worse than none.
    *
-   * Absent while a search is active: marking all read would silently clear rows
-   * the person cannot see, so the page passes nothing and no control renders.
+   * ⚠️ A BOOLEAN NOW, NOT THE ACTION ITSELF. The page used to pass the action
+   * down (or `undefined` to withhold it) because it was declared inline in an
+   * RSC; the action is an ordinary import here, so the only thing the view has
+   * to say is whether the conditions hold. Those are unchanged: there must be
+   * something unread, and no search may be active — marking all read would
+   * silently clear rows the person cannot see, and searching is a reading task,
+   * not a triage one. `inbox-view.tsx` adds a third: not while the unread count
+   * failed to load.
    */
-  markAllAction?: () => Promise<void>;
+  canMarkAll: boolean;
   empty: React.ReactNode;
   /** Search and filters, for the table's own header strip. */
   toolbar?: React.ReactNode;
   count?: React.ReactNode;
 }) {
-  /*
-   * ⚠️ BOTH OPTIMISTIC VALUES LIVE HERE, and the second one had to move up.
-   *
-   * The unread DOT, the bold title, the `sr-only` "(unread)" and the actions
-   * cell are rendered by this component, while the clickable title is a child
-   * (`MarkReadTitle`). That child used to hold its own `useOptimistic`, so
-   * clicking a title turned it into plain text while the dot beside it stayed
-   * blue — one field, two components, two pieces of state.
-   *
-   * Which rows have been read lives on the parent now and is passed down. Every
-   * reader goes through `isRead`.
-   */
-  const router = useRouter();
-  const [allRead, markAllRead] = useOptimistic(false);
-  const [readIds, markRead] = useOptimistic<string[], string>([], (state, id) => [...state, id]);
+  const queryClient = useQueryClient();
 
-  const isRead = (item: Notification) =>
-    allRead || readIds.includes(item.id) || Boolean(item.read_at);
+  /*
+   * ⚠️ ONE READ RECEIPT, AND THE ROW CHANGES ON THE CLICK.
+   *
+   * `useOptimistic` used to do this and had to be held open across an awaited
+   * action plus `router.refresh()`; the cached row carries the value now, so it
+   * survives on its own. See the file header for the full account.
+   *
+   * ⚠️ NOT AWAITED BY THE LINK THAT FIRES IT. App Router navigation is
+   * client-side, so this request survives the page change — awaiting it would
+   * put a server round trip in front of every click on this screen, for a write
+   * nobody is waiting on. `mutate` (not `mutateAsync`) is what makes that
+   * true here.
+   */
+  const markOne = useMutation({
+    mutationFn: (id: string) => readOne(id),
+
+    onMutate: (id) => {
+      const snapshot = beginWrite(queryClient, INBOX_ROOTS);
+      patchRead(queryClient, (row) => row.id === id);
+      // Fired, not awaited, and AFTER the patch — see `cancelRefetches`.
+      cancelRefetches(queryClient, INBOX_ROOTS);
+      return snapshot;
+    },
+
+    onError: (error, _id, snapshot) => {
+      if (snapshot) rollbackWrite(queryClient, snapshot);
+      /* ⚠️ SAID OUT LOUD, WHERE IT USED TO BE SILENT. The action returned `void`
+         and never looked at `error`, so a refused update left the row looking
+         read forever. The rollback puts the dot back; the toast is what explains
+         a row that just went bold again under somebody's cursor. */
+      toast.error(error.message || "That notification could not be marked read.");
+    },
+
+    /*
+     * ⚠️ NO SUCCESS TOAST, DELIBERATELY. Marking read is the most-pressed thing
+     * on this page and it usually happens on the way to somewhere else — a toast
+     * per click would be a toast on every navigation out of the inbox. The row
+     * changing IS the feedback.
+     */
+
+    /*
+     * ⚠️ FIRED, NEVER AWAITED. `["inbox"]` is every cached page of the list,
+     * `qk.unread()` is the count beside the filters, and `qk.snapshot()` is the
+     * rail's badge — which is a field INSIDE the sidebar snapshot since P12-01,
+     * so leaving it out would let the number in the sidebar sit one higher than
+     * the page it links to. `realtime.ts` names the same three for a
+     * `vizserve_pms_notifications` event; keeping the two lists in step is the
+     * point of naming them from one place.
+     */
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+      void queryClient.invalidateQueries({ queryKey: qk.unread() });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+    },
+  });
+
+  /** The same write, over every unread row rather than one. */
+  const markAll = useMutation({
+    mutationFn: () => readAll(),
+
+    onMutate: () => {
+      const snapshot = beginWrite(queryClient, INBOX_ROOTS);
+      patchRead(queryClient, () => true);
+      cancelRefetches(queryClient, INBOX_ROOTS);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackWrite(queryClient, snapshot);
+      toast.error(error.message || "Those notifications could not be marked read.");
+    },
+
+    /* This one DOES toast: it is a deliberate bulk action somebody pressed a
+       button for, and forty rows going plain at once is worth confirming. */
+    onSuccess: () => toast.success("All read"),
+
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+      void queryClient.invalidateQueries({ queryKey: qk.unread() });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+    },
+  });
+
+  /*
+   * ⚠️ ONE READER FOR THE UNREAD FLAG, AND IT IS THE ROW ITSELF NOW. This used
+   * to fold two `useOptimistic` values in — `allRead || readIds.includes(id) ||
+   * Boolean(read_at)` — precisely because the prediction lived somewhere other
+   * than the data. It does not any more.
+   */
+  const isRead = (item: Notification) => Boolean(item.read_at);
 
   const columns: Column<Notification>[] = [
     {
@@ -127,7 +286,7 @@ export function InboxTable({
                  * action would ignore it anyway (`.is("read_at", null)`).
                  */
                 onClick={() => {
-                  if (!isRead(item)) void markNotificationRead(item.id);
+                  if (!isRead(item)) markOne.mutate(item.id);
                 }}
               >
                 {item.title}
@@ -147,7 +306,11 @@ export function InboxTable({
                * being a control at all — there is nothing left for it to do,
                * and an inert button is worse than plain text.
                */
-              <MarkReadTitle item={item} read={isRead(item)} onRead={markRead} />
+              <MarkReadTitle
+                item={item}
+                read={isRead(item)}
+                onRead={() => markOne.mutate(item.id)}
+              />
             )}
             {/*
               ⚠️ FLATTENED, BECAUSE THE BODY IS MARKUP NOW.
@@ -245,33 +408,36 @@ export function InboxTable({
       toolbar={
         <>
           {toolbar}
-          {markAllAction && !allRead ? (
-            <form
+          {/*
+            ⚠️ THE BUTTON HIDES ITSELF, AND IT DOES SO OFF THE COUNT RATHER THAN
+            OFF A FLAG IT SET. `canMarkAll` is false the moment `qk.unread()`
+            reaches zero, and `onMutate` has already written that zero — so the
+            control disappears on the click, exactly as the `allRead` optimistic
+            flag used to make it, with nothing left to revert when the transition
+            ends. The `<form>` wrapper went with it: there is no form action to
+            own a transition any more, and a lone submit button in a hidden form
+            is markup pretending to be one.
+          */}
+          {canMarkAll ? (
+            <Button
               className="ml-auto"
-              action={() =>
-                startTransition(async () => {
-                  markAllRead(true);
-                  await markAllAction();
-                  /* Holds the transition until the fresh rows land; without it
-                     the optimistic flag reverts and every row goes bold again
-                     for a beat. */
-                  router.refresh();
-                })
-              }
+              size="sm"
+              loading={markAll.isPending}
+              onClick={() => markAll.mutate()}
             >
-              <Button type="submit" size="sm">
-                <CheckCheck />
-                Mark all read
-              </Button>
-            </form>
+              <CheckCheck />
+              Mark all read
+            </Button>
           ) : null}
         </>
       }
       count={count}
       urlSort
-      /* What the server orders by when the URL says nothing. Display only — it
+      /* What the query orders by when the URL says nothing. Display only — it
          puts the arrow on the right column instead of leaving every header
-         neutral, and it is the same pair `page.tsx` builds its query from. */
+         neutral, and it is the same pair `DEFAULT_INBOX_SORT` in
+         `lib/query/fetchers/inbox.ts` builds the `.order()` from. Change one and
+         change the other or it goes back to lying about it. */
       defaultSort={{ key: "when", dir: "desc" }}
       empty={empty}
     />
@@ -293,46 +459,41 @@ function MarkReadTitle({
   item: Notification;
   /** Decided by the table, so the dot and the title cannot disagree. */
   read: boolean;
-  onRead: (id: string) => void;
+  /** Fires the table's own mutation. See the note below on why it takes none. */
+  onRead: () => void;
 }) {
   /*
    * P11-05 — the row stops being unread on the click.
    *
    * Marking read is the most-pressed thing on this page and the only feedback
    * was a spinner on the title, which is the text you are trying to read. The
-   * optimistic value flips the control out of existence: once read, the title is
+   * predicted value flips the control out of existence: once read, the title is
    * a plain span, so the button that was just pressed becomes the thing it
    * pressed toward.
+   *
+   * ⚠️ THE MUTATION IS THE TABLE'S, NOT THIS COMPONENT'S, and that is the same
+   * rule the `read` prop already followed: the dot, the weight and the title are
+   * one field rendered by two components, and a second `useMutation` down here
+   * would be a second thing to patch the cache from. This used to hold its own
+   * `useOptimistic` for exactly that reason and it had already been hoisted once.
+   *
+   * ⚠️ AND THE `<form action>` IS GONE. It existed to own a `startTransition`
+   * that had to outlive an awaited action and a `router.refresh()`, because
+   * `useOptimistic` drops its value when its transition ends. There is no
+   * transition to hold now — a plain `onClick` is the whole control.
    */
-  const router = useRouter();
-
   if (read) {
     return <span className="text-sm">{item.title}</span>;
   }
 
   return (
-    /* ⚠️ ASYNC AND AWAITED. `void`-ing the call left a SYNCHRONOUS transition
-       that ended immediately, so the optimistic "read" was dropped a frame
-       later and the row only changed when the server payload arrived. See
-       `app/(app)/tasks/transition.tsx` for the full account — the symptom is a
-       toast landing before the screen moves. */
-    <form
-      action={() =>
-        startTransition(async () => {
-          onRead(item.id);
-          await markNotificationRead(item.id);
-          router.refresh();
-        })
-      }
+    <Button
+      variant="link"
+      className="h-auto justify-start p-0 text-left text-sm font-medium whitespace-normal"
+      onClick={onRead}
     >
-      <Button
-        type="submit"
-        variant="link"
-        className="h-auto justify-start p-0 text-left text-sm font-medium whitespace-normal"
-      >
-        {item.title}
-        <span className="sr-only"> (unread — press to mark read)</span>
-      </Button>
-    </form>
+      {item.title}
+      <span className="sr-only"> (unread — press to mark read)</span>
+    </Button>
   );
 }
