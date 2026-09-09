@@ -213,6 +213,30 @@ export function ClientFormSettings({
    * surprising: routing to an ordinary project list, which leaves this form's
    * own list permanently empty.
    */
+  /*
+   * ⚠️ WHAT "NO LIST" ACTUALLY MEANS DEPENDS ON WHETHER THE FORM EXISTS YET,
+   * and calling it the same thing in both places was a trap. Ace, 10 Sep:
+   * "when im creating a client form it shows me the list not under client
+   * request".
+   *
+   * ON CREATION there is no form, so `vizserve_pms_ensure_form_list` has not
+   * run and this form has no list of its own to offer. Null is therefore not
+   * "nowhere" — it is the INSTRUCTION to let the trigger create one in the
+   * department's Client Requests folder and point the form at it. Labelling
+   * that "No list" reads as "requests go nowhere" and pushes a lead towards
+   * picking an ordinary project list instead.
+   *
+   * ⚠️ AND THAT CHOICE IS STICKY IN A WAY NOTHING ON SCREEN SAID.
+   * `ensure_form_list` sets `default_list_id` ONLY WHEN IT IS NULL (P7-24,
+   * deliberately, so a lead's explicit choice survives). So picking a list here
+   * still creates the form's own list — and leaves it EMPTY FOREVER while every
+   * approved request files somewhere else. That is the exact bug P7-24 was
+   * written about, and it "took an afternoon to work out from the outside".
+   * The edit screen warns about it; this screen was causing it silently.
+   *
+   * `creating` is already declared above — the same `!formId` this file uses to
+   * decide slug editability. One flag, not two.
+   */
   const ownList = departmentLists.find((list) => list.form_id === formId) ?? null;
   const chosenListId = watch("default_list_id") ?? null;
   const routedElsewhere = Boolean(ownList && chosenListId && chosenListId !== ownList.id);
@@ -222,7 +246,7 @@ export function ClientFormSettings({
   // worst case of that: a bare UUID and the literal string "__none__".
   const departmentItems = Object.fromEntries(departments.map((d) => [d.id, d.name]));
   const listItems = {
-    [NO_LIST]: "No list",
+    [NO_LIST]: creating ? "Its own list in Client Requests" : "No list",
     ...Object.fromEntries(departmentLists.map((list) => [list.id, ownListLabel(list)])),
   };
 
@@ -370,7 +394,9 @@ export function ClientFormSettings({
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={NO_LIST}>No list</SelectItem>
+              <SelectItem value={NO_LIST}>
+                {creating ? "Its own list in Client Requests" : "No list"}
+              </SelectItem>
               {/* The label goes in BOTH the items map and the children — Base UI
                   reads the map for the trigger and the children for the popup,
                   and labelling only one is how they drift. */}
@@ -384,9 +410,11 @@ export function ClientFormSettings({
           {/* P2-06. Pre-fills the review screen; the TL can still override it
               per request. */}
           <p className="text-xs text-muted-foreground">
-            {departmentLists.length === 0
-              ? "This department has no lists yet."
-              : "Where approved requests land. This form has a list of its own in Client Requests; pick another only if you want them filed elsewhere. The reviewer can still change it per request."}
+            {creating
+              ? "Where approved requests land. Leave this as it is and the form gets its own list inside the department's Client Requests folder, named after the form. Pick an existing list only if you want them filed elsewhere — that list will then stay empty."
+              : departmentLists.length === 0
+                ? "This department has no lists yet."
+                : "Where approved requests land. This form has a list of its own in Client Requests; pick another only if you want them filed elsewhere. The reviewer can still change it per request."}
           </p>
 
           {/* Stated out loud, with the way back. A form routed away from its own
