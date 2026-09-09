@@ -95,7 +95,7 @@ export function Monogram({
  * list, because a name missing from a picker reads as "not allowed" when the
  * answer is "already there".
  *
- * ⚠️ P11-11 — THE LIST DOES NOT MOVE AND NOTHING IS DISABLED WHILE IT SAVES.
+ * ⚠️ P11-12 — THE LIST DOES NOT MOVE AND NOTHING IS DISABLED WHILE IT SAVES.
  *
  * Two halves of one bug. Every row and the trigger itself carried
  * `disabled={pending}`, so one click froze the whole picker for a round trip —

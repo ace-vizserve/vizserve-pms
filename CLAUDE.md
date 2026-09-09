@@ -121,3 +121,13 @@ Two parallel tracks with a hard seam at the API contract: **Ace owns contract-an
 Phases are strictly ordered 0→6, no dates, binary exit criteria. If a phase runs long, cut scope *inside* it — never start the next in parallel (`R7`). Tests are written inside the phase alongside migrations.
 
 Use backlog IDs (`P2-04`) in commit messages.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+# This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->

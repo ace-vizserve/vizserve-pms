@@ -548,3 +548,28 @@ export function describeLeaveSpan(
 
   return `${from} – ${to}`;
 }
+
+/**
+ * P11-13 — the optional note on a withdrawal.
+ *
+ * ⚠️ NO FLOOR, AND THAT IS THE FEATURE. Every other free-text field in this file
+ * has a five-character minimum because somebody is being asked to justify
+ * something; this one is offered, never demanded. P9-03's rule — that
+ * withdrawing owes nobody an explanation, precisely because only the author can
+ * do it — is unchanged by giving them somewhere to put one.
+ *
+ * The cap is the same 2000 as everything else here, measured on the flattened
+ * text rather than the markup (see `richTextSchema`).
+ *
+ * `.default("")` rather than `.optional()`: the dialog always renders the editor
+ * and always sends its value, so "" is the shape that actually arrives when
+ * somebody leaves it alone. The action turns that into a null.
+ */
+export const withdrawNoteSchema = z.object({
+  note: richTextSchema({
+    max: INTERNAL_REASON_MAX,
+    tooLongMessage: "Keep it under 2000 characters.",
+  }).default(""),
+});
+
+export type WithdrawNoteInput = z.infer<typeof withdrawNoteSchema>;
