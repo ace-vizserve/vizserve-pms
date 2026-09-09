@@ -6,14 +6,16 @@ import type {
   FeedbackReport,
   Negotiation,
   Turnaround,
-} from "@/lib/reports-server";
+} from "@/lib/query/fetchers/reports";
 import { cn } from "@/lib/utils";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 /**
  * P6-04 / P6-06 / P6-07 — the four metric cards.
  *
- * Presentational only: every figure arrives computed from `lib/reports-server`.
+ * Presentational only: every figure arrives computed from
+ * `lib/query/fetchers/reports.ts` (it was `lib/reports-server.ts` until P12-21,
+ * when the reads moved to the browser and the module lost its `server-only`).
  * They are separate from `page.tsx` because that file is already 400 lines of
  * P6-05 and these are four independent questions rather than a continuation of
  * one.
