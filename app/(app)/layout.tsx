@@ -13,11 +13,14 @@ import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
+import { QueryProvider } from "@/lib/query/provider";
+
 import { SidebarPanel } from "./sidebar-panel";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContext();
   return (
+    <QueryProvider>
     <TooltipProvider>
       <BreadcrumbLabelProvider>
         {/*
@@ -67,6 +70,15 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             had come back — on first load AND after every mutation, since
             `router.refresh()` re-renders layouts too.
 
+            ⚠️ P12-01 LEFT THE BOUNDARY IN PLACE AND EMPTIED IT OF ALMOST
+            EVERYTHING. `SidebarPanel` is still a server component and still
+            awaits — one query now, the managed-department names for the user
+            menu, which is keyed on authorization output the browser does not
+            hold. Everything else moved into `vizserve_pms_sidebar_snapshot()`
+            and is fetched from the query cache in `sidebar-snapshot.tsx`, which
+            renders THE SAME `AppSidebarSkeleton` while it waits. One skeleton
+            hands over to the other and the reader sees one wait.
+
             The skeleton draws the rail's FRAME at its real width, so nothing in
             the content area moves when the real one arrives.
           */}
@@ -113,5 +125,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         </SidebarProvider>
       </BreadcrumbLabelProvider>
     </TooltipProvider>
+    </QueryProvider>
   );
 }
