@@ -10,7 +10,9 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { QueryError } from "@/components/query-error";
 import { RequestStatusBadge } from "@/components/status-badge";
+import { TableSkeleton } from "@/components/skeletons";
 import { formatDate, formatDuration, isOverdue } from "@/lib/dates";
+import type { RequestListRow } from "@/lib/schemas/requests";
 
 /**
  * P7-64 — the columns, in a client component, because the table is one now.
@@ -24,26 +26,17 @@ import { formatDate, formatDuration, isOverdue } from "@/lib/dates";
  * a Map is not serialisable across the boundary either.
  */
 
-export type RequestRow = {
-  id: string;
-  reference_no: string;
-  title: string;
-  requester_name: string;
-  requester_org: string;
-  target_date: string | null;
-  approved_target_date: string | null;
-  sla_started_at: string | null;
-  reviewed_by: string | null;
-  status:
-    | "DRAFT"
-    | "SUBMITTED"
-    | "PENDING_REVIEW"
-    | "APPROVED"
-    | "RETURNED"
-    | "REJECTED";
-  submitted_at: string;
-  form_id: string;
-};
+/**
+ * ⚠️ THE ROW TYPE IS THE CONTRACT'S NOW, NOT A LOCAL DECLARATION. It was written
+ * out by hand here — the six status literals included — and had to match, field
+ * for field, a `.select()` string in a different file that nothing checked it
+ * against. `requestListRowSchema` in `lib/schemas/requests.ts` is parsed on
+ * arrival, so a dropped column is a sentence rather than an `undefined` that
+ * renders as an em dash and reads as "the client gave no date".
+ *
+ * The name is kept because this file and its callers say it.
+ */
+export type RequestRow = RequestListRow;
 
 export function RequestsTable({
   rows,
@@ -51,6 +44,7 @@ export function RequestsTable({
   formSlaMinutes,
   reviewerNames,
   isFiltered,
+  isPending,
   errorMessage,
   toolbar,
   count,
@@ -62,6 +56,8 @@ export function RequestsTable({
   /** Reviewer id → name. A Map cannot cross the RSC boundary. */
   reviewerNames: Record<string, string>;
   isFiltered: boolean;
+  /** No rows have arrived yet — draw a skeleton, never an empty state. */
+  isPending: boolean;
   errorMessage?: string;
   /** Search and filters, for the table's own header strip. */
   toolbar?: React.ReactNode;
@@ -247,13 +243,26 @@ export function RequestsTable({
         /* Paged on the server, so the browser holds one page and must not
            pretend to sort the whole queue. */
         urlSort
-        /* What the server orders by when the URL says nothing. Display only —
+        /* What the query orders by when the URL says nothing. Display only —
            it puts the arrow on the right column instead of leaving every header
-           neutral, and it is the same pair `page.tsx` builds its query from. */
+           neutral, and it is the same pair `DEFAULT_REQUEST_SORT` in
+           `lib/query/fetchers/requests.ts` builds the `.order()` from. Change
+           one and change the other or it goes back to lying about it. */
         defaultSort={{ key: "submitted", dir: "desc" }}
         empty={
+          /*
+           * ⚠️ THREE BRANCHES IN ORDER, AND THE MIDDLE ONE IS NEW IN P12-18:
+           * could not load, has not loaded yet, genuinely nothing. The RSC only
+           * ever had the first and the last, because a server render has no
+           * "not yet" — it either had the rows or it did not. A client query
+           * does, and without this branch the reassuring "Nothing here yet.
+           * Requests appear when a client submits one of your published forms"
+           * would flash over every navigation into the queue.
+           */
           errorMessage ? (
             <QueryError what="requests" message={errorMessage} />
+          ) : isPending ? (
+            <TableSkeleton columns={5} rows={8} />
           ) : isFiltered ? (
             <EmptyState
               icon={<Inbox />}

@@ -5,6 +5,7 @@ import { Download, Loader2, Paperclip } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 import { formatBytes } from "@/lib/attachments";
+import type { RequestAttachment } from "@/lib/schemas/requests";
 
 import { getAttachmentDownloadUrl } from "../actions";
 
@@ -17,13 +18,13 @@ import { getAttachmentDownloadUrl } from "../actions";
  * attachments on most requests are never opened.
  */
 
-export type Attachment = {
-  id: string;
-  filename: string;
-  mime_type: string;
-  size_bytes: number;
-  field_key: string | null;
-};
+/**
+ * ⚠️ THE CONTRACT'S SHAPE, NOT A LOCAL DECLARATION (P12-18). It was written out
+ * by hand here and had to match a `.select()` string in a page that nothing
+ * checked it against; `requestAttachmentSchema` is parsed on arrival. The name
+ * is kept because this file and its caller say it.
+ */
+export type Attachment = RequestAttachment;
 
 export function AttachmentList({ attachments }: { attachments: Attachment[] }) {
   const [opening, setOpening] = useState<string | null>(null);

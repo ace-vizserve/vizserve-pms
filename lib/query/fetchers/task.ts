@@ -10,7 +10,6 @@ import {
   taskCommentRowSchema,
   taskCoverageSchema,
   taskHistoryEntrySchema,
-  taskRequestRowSchema,
   taskRowSchema,
   taskTimeTrackedSchema,
   type ClientDecision,
@@ -19,7 +18,6 @@ import {
   type TaskCommentRow,
   type TaskCoverage,
   type TaskHistoryEntry,
-  type TaskRequestRow,
   type TaskRow,
 } from "@/lib/schemas/task-detail";
 import {
@@ -442,36 +440,29 @@ export async function fetchDirectory(client: TaskReadClient): Promise<DirectoryP
 /**
  * `qk.request(requestId)` — P7-59, THE LEAD'S VIEW AND ONLY THE LEAD'S.
  *
- * ⚠️ A NULL ROW IS THE ORDINARY CASE, NOT A FAILURE. `requests readable in
- * department scope` returns NO ROW to a member PIC, deliberately: the client is
- * never told who at VizServe holds their task, and the anonymity runs both
- * ways. Everything the person doing the work needs comes from the brief on
- * `qk.task(id)` — this is the IDENTITY plus Gate 1, and nothing else.
- *
- * ⚠️ FILED UNDER THE REQUEST'S OWN ID RATHER THAN FOLDED INTO `qk.task(id)`,
- * and the reason is the policy. Folding a LEAD-ONLY read into the task key would
- * make the task query's success depend on a read most of the team is refused —
- * and a refusal that arrives as an error, rather than as a null row, would take
- * the whole page down for the very people the split exists to serve.
- *
- * ⚠️ SAME SUPERSET WARNING AS `fetchDepartmentLists`. Phase 4 moves
+ * ⚠️ THE FETCHER MOVED IN P12-18 AND THIS RE-EXPORTS IT. It lived here with
+ * eleven columns and its own comment warned what was coming: "Phase 4 moves
  * `/requests/[id]` onto this key with a far wider column set; whichever writes
- * last wins the entry. Widen this one then.
+ * last wins the entry. Widen this one then." That is exactly what happened —
+ * `fetchRequestDetail` in `lib/query/fetchers/requests.ts` is the widened
+ * version, `/requests/[id]` and `/tasks/[id]` share the one entry, and the task
+ * page takes the fields it needs out of it.
+ *
+ * ⚠️ THE RE-EXPORT IS NOT A SHIM. `task-detail.tsx` reads five fetchers out of
+ * this file for one page, and splitting one of them across two imports because
+ * of where its widest consumer lives would be a worse arrangement than the
+ * alias. `TaskRequestRow` follows it for the same reason.
+ *
+ * ⚠️ AND THE POLICY NOTE STILL APPLIES ON THIS SURFACE. A null row is the
+ * ORDINARY case here: `requests readable in department scope` returns NO ROW to
+ * a member PIC, deliberately — the client is never told who at VizServe holds
+ * their task, and the anonymity runs both ways. Everything the person doing the
+ * work needs comes from the brief on `qk.task(id)`. Which is also why this is
+ * filed under the request's own id rather than folded into `qk.task(id)`:
+ * folding a LEAD-ONLY read into the task key would make the task query's success
+ * depend on a read most of the team is refused, and a refusal arriving as an
+ * error rather than as a null row would take the whole page down for the very
+ * people the split exists to serve.
  */
-export async function fetchTaskRequest(
-  client: TaskReadClient,
-  requestId: string,
-): Promise<TaskRequestRow | null> {
-  const row = await read<unknown>(
-    client
-      .from("vizserve_pms_requests")
-      .select(
-        "id, reference_no, requester_name, requester_email, requester_org, description, target_date, submitted_at, reviewed_by, reviewed_at, form_id",
-      )
-      .eq("id", requestId)
-      .maybeSingle(),
-  );
-
-  if (row === null) return null;
-  return parse(taskRequestRowSchema, row, "the request");
-}
+export { fetchRequestDetail as fetchTaskRequest } from "./requests";
+export type { RequestDetail as TaskRequestRow } from "@/lib/schemas/requests";

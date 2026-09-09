@@ -1,10 +1,9 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useOptimistic, useState, useTransition } from "react";
+import { useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ChevronRight, Plus } from "lucide-react";
 import { toast } from "@/components/ui/toast";
-
 
 import {
   Collapsible,
@@ -16,6 +15,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { QueryError } from "@/components/query-error";
+import { CardSkeleton } from "@/components/skeletons";
 import {
   Select,
   SelectContent,
@@ -27,15 +28,20 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { formatDate, isOverdue } from "@/lib/dates";
 import { richTextLength } from "@/lib/rich-text";
 import { CharacterCount } from "@/components/ui/character-count";
+import { browserClient } from "@/lib/query/browser-client";
+import { fetchReviewContext } from "@/lib/query/fetchers/requests";
+import { qk } from "@/lib/query/keys";
+import { fromAction } from "@/lib/query/mutate";
 import { DECISION_REASON_MAX, DECISION_REASON_MIN } from "@/lib/schemas/approvals";
 import type { CapacityRow } from "@/lib/schemas/approvals";
+import type { ReviewCandidate, ReviewList } from "@/lib/schemas/requests";
 
 import { saveList } from "../../tasks/actions";
 import { decideOnRequest } from "./actions";
 import { focusWithoutScroll } from "@/lib/focus";
 
 /**
- * P2-01 / P2-02 / P2-04 / P2-05 — the Team Leader review screen.
+ * P2-01 / P2-02 / P2-04 / P2-05 / P12-18 — the Team Leader review screen.
  *
  * Two design consequences follow from Amier at 37:00–38:40, and both are easy to
  * lose to a tidier layout:
@@ -47,14 +53,123 @@ import { focusWithoutScroll } from "@/lib/focus";
  *   2. NEGOTIATION IS THE PRIMARY PATH, rejection the exception —
  *      *"Dapat di tayo nagre-reject, eh, di ba?"* So "approve with an adjusted
  *      date" is the prominent action and Reject is a quiet, deliberate one.
+ *
+ * ------------------------------------------------------------------------
+ * ⚠️ P12-18 — THIS IS THE GATE 1 DECISION SURFACE AND IT IS CLIENT-VISIBLE.
+ *
+ * What changed is where four props came from, and nothing else about the
+ * decision. The candidates, the capacity scan, the department's lists and the
+ * reserved folder used to be fetched in the page's third wave and handed down;
+ * they are `qk.requestPart(id, "review")` now, and this component reads them.
+ * Every rule the panel enforces is unchanged and every one of them is re-checked
+ * by `vizserve_pms_approve_request` — the list is mandatory, a deactivated
+ * colleague cannot be PIC, the reason has a floor. Nothing here is authority.
+ *
+ * ⚠️ THE FOUR READS ARE STILL GATED. `vizserve_pms_department_capacity` is a
+ * scan over the department's open tasks and the RSC deliberately refused to pay
+ * for it on a request decided last week; `request-detail.tsx` renders this
+ * component only while `status = PENDING_REVIEW`, so the query mounts only then.
+ *
+ * ⚠️ AND A FAILED READ MUST NOT DRAW AN EMPTY PANEL. An empty PIC picker beside
+ * an empty capacity list reads as "nobody is in this department" on the screen
+ * where that decides who gets the work — a lead would then approve to whoever
+ * they could type, or not approve at all. `QueryError` in place of the whole
+ * panel is the only honest answer, which is why `fetchReviewContext` throws
+ * rather than returning empties.
+ * ------------------------------------------------------------------------
  */
-
-type Person = { id: string; full_name: string; role: string };
-type List = { id: string; name: string };
 
 const NO_QA = "__none__";
 
+/** The Server Actions, as promises TanStack can drive `onError` off. */
+const decide = fromAction(decideOnRequest);
+const createList = fromAction(saveList);
+
+/**
+ * ⚠️ THE OUTER COMPONENT IS THE QUERY AND NOTHING ELSE, and the split is not
+ * cosmetic. Every field in the form below is seeded from something this query
+ * returns — the PIC, the list, the folder — and `useState` initialisers run
+ * once. A single component would seed them all from `undefined` on the first
+ * render and never re-seed, so the form's default list would silently be "none"
+ * on every visit. Keying the inner component on the department makes the seeding
+ * a MOUNT, which is the same trick `list-manager.tsx` uses for its dialogs and
+ * the reason they are unmounted while closed.
+ */
 export function ReviewPanel({
+  requestId,
+  requestTitle,
+  requestDescription,
+  targetDate,
+  currentUserId,
+  currentUserName,
+  defaultListId,
+  departmentId,
+}: {
+  requestId: string;
+  requestTitle: string;
+  requestDescription: string;
+  targetDate: string | null;
+  /*
+   * P8-10 — the requester's details are NOT PASSED DOWN.
+   *
+   * They existed only to build a client email in the browser. That send now
+   * happens on the server, through `sendEmail()` and whichever transport is
+   * selected, so the approval contract goes back to being about the approval.
+   */
+  currentUserId: string;
+  currentUserName: string;
+  defaultListId: string | null;
+  /** P7-23. The FORM's department — which a list created from here belongs to. */
+  departmentId: string;
+}) {
+  /*
+   * The candidates, the capacity scan, the department's lists and the reserved
+   * folder. One key, one wave — see `fetchReviewContext`.
+   *
+   * ⚠️ `targetDate` IS PART OF THE CAPACITY QUERY BUT NOT OF THE KEY, and that
+   * is deliberate. `vizserve_pms_department_capacity` takes it to compute
+   * `due_before`, and it is a property of THIS REQUEST — which the key already
+   * carries as `requestId`. Adding it would be adding a value that cannot vary
+   * within the key.
+   */
+  const contextQuery = useQuery({
+    queryKey: qk.requestPart(requestId, "review"),
+    queryFn: () => fetchReviewContext(browserClient(), departmentId, targetDate),
+  });
+
+  /*
+   * ⚠️ A FAILED READ REPLACES THE WHOLE PANEL. An empty PIC picker beside an
+   * empty capacity list reads as "nobody is in this department" on the screen
+   * where that decides who gets the work. See the file header.
+   */
+  if (contextQuery.isError) {
+    return <QueryError what="who has room" message={contextQuery.error.message} />;
+  }
+
+  if (contextQuery.isPending) return <CardSkeleton lines={6} />;
+
+  return (
+    <ReviewForm
+      /* Remounted if the department ever changes, so every seeded field below
+         is seeded again rather than kept from another team's data. */
+      key={departmentId}
+      requestId={requestId}
+      requestTitle={requestTitle}
+      requestDescription={requestDescription}
+      targetDate={targetDate}
+      currentUserId={currentUserId}
+      currentUserName={currentUserName}
+      defaultListId={defaultListId}
+      departmentId={departmentId}
+      candidates={contextQuery.data.candidates}
+      capacity={contextQuery.data.capacity}
+      lists={contextQuery.data.lists}
+      clientFolderId={contextQuery.data.clientFolderId}
+    />
+  );
+}
+
+function ReviewForm({
   requestId,
   requestTitle,
   requestDescription,
@@ -72,20 +187,13 @@ export function ReviewPanel({
   requestTitle: string;
   requestDescription: string;
   targetDate: string | null;
-  /*
-   * P8-10 — the requester's details are NO LONGER PASSED DOWN.
-   *
-   * They existed only to build a client email in the browser. That send now
-   * happens on the server, through `sendEmail()` and whichever transport is
-   * selected, so the approval contract goes back to being about the approval.
-   */
   /** Department members who can be PIC. */
-  candidates: Person[];
+  candidates: ReviewCandidate[];
   capacity: CapacityRow[];
   currentUserId: string;
   currentUserName: string;
   /** P2-06. Empty when the department has not organised itself into lists. */
-  lists: List[];
+  lists: ReviewList[];
   defaultListId: string | null;
   /** P7-23. Which department a list created from here belongs to. */
   departmentId: string;
@@ -101,8 +209,8 @@ export function ReviewPanel({
    */
   clientFolderId: string | null;
 }) {
-  const router = useRouter();
-  const [pending, startTransition] = useTransition();
+  const queryClient = useQueryClient();
+
 
   const [assigneeId, setAssigneeId] = useState<string>("");
   // P2-05 — defaults to the approving TL, overridable to any member of the
@@ -121,7 +229,7 @@ export function ReviewPanel({
   const [listId, setListId] = useState<string>(defaultListId ?? "");
   // Lists created from here are added locally rather than waiting on a refresh,
   // so the one somebody just made is selected and selectable immediately.
-  const [extraLists, setExtraLists] = useState<List[]>([]);
+  const [extraLists, setExtraLists] = useState<ReviewList[]>([]);
   const [creatingList, setCreatingList] = useState(false);
   const [newListName, setNewListName] = useState("");
 
@@ -148,8 +256,18 @@ export function ReviewPanel({
         .map((person) => [person.id, person.full_name]),
     ),
   };
-  // The department's lists plus anything created here this session.
-  const options = [...lists, ...extraLists];
+  /*
+   * The department's lists plus anything created here this session.
+   *
+   * ⚠️ DEDUPED BY ID, AND THAT IS NEW IN P12-18. `lists` was a prop that never
+   * changed, so a list created here could only ever be in `extraLists`. It is a
+   * QUERY now, and `addListMutation.onSettled` invalidates it — so the moment
+   * that refetch lands the new list is in BOTH arrays, and a plain concat would
+   * render two `<SelectItem>`s with the same React key and the same value.
+   */
+  const options = [...lists, ...extraLists].filter(
+    (list, index, all) => all.findIndex((other) => other.id === list.id) === index,
+  );
   const listItems = Object.fromEntries(options.map((list) => [list.id, list.name]));
   const [title, setTitle] = useState(requestTitle);
   const [description, setDescription] = useState(requestDescription);
@@ -175,36 +293,94 @@ export function ReviewPanel({
    * The whole review form is replaced by it, because the alternative is a live
    * Approve button sitting under a request that has already been approved.
    */
-  const [taken, setTaken] = useOptimistic<"approved" | "returned" | "rejected" | null>(null);
+  /*
+   * ------------------------------------------------------------------------
+   * P11-05 / P12-18 — THE PANEL SAYS WHICH WAY IT WENT, ON THE CLICK.
+   *
+   * ⚠️ IT NAMES THE DECISION, NOT THE OUTCOME. Approving here does not simply
+   * flip a status: `vizserve_pms_approve_request` creates a task, mails the PIC
+   * and mails the client, and the sentence in the toast reports all three.
+   * Predicting any of that would be inventing facts about work that has not
+   * happened. What is certain is which button was pressed.
+   *
+   * ⚠️ SO THIS IS THE ONE WRITE IN PHASE 4 THAT PATCHES NO CACHE ENTRY, and the
+   * absence is the design rather than an omission. There is nothing honest to
+   * write into `qk.request(id)`: the new status depends on which branch of the
+   * function ran, the agreed date may have been renegotiated inside it, and the
+   * task id does not exist until it returns. `useMutation`'s own `isPending`
+   * carries the whole prediction — the form is replaced by a sentence naming the
+   * button — and `onSettled` brings back what actually happened.
+   *
+   * ⚠️ WHICH ALSO MEANS `onError` HAS NOTHING TO ROLL BACK, and that is why
+   * there is no `beginWrite` here. A refused decision puts the FORM back
+   * (`isPending` goes false) carrying the reason, which is exactly the old
+   * behaviour — React used to do it by ending the transition. Nothing on screen
+   * was ever moved to a value the database refused, so nothing has to be undone.
+   *
+   * ⚠️ THE FORM IS REPLACED WHOLE, not just the buttons. The alternative is a
+   * live Approve sitting under a request that has already been approved, which
+   * is an invitation to press it twice.
+   * ------------------------------------------------------------------------
+   */
+  const submit = useMutation({
+    mutationFn: (payload: Record<string, unknown>) => decide(requestId, payload),
 
-  function run(payload: Record<string, unknown>) {
-    setFormError(null);
+    onError: (error) => {
+      // The form comes back carrying the reason. `fieldErrors` are not read
+      // here: every field on this panel is a picker or a date, and the one free
+      // -text field has its own floor enforced by `richTextLength` before submit.
+      setFormError(error.message);
+    },
 
-    startTransition(async () => {
-      setTaken(payload.decision as "approved" | "returned" | "rejected");
-
-      const result = await decideOnRequest(requestId, payload);
-
-      if (!result.ok) {
-        // React puts the form back, carrying the reason.
-        setFormError(result.error);
-        return;
-      }
-
-
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
+    onSuccess: (data) => {
       toast.success(
-        result.data.status === "APPROVED"
+        data.status === "APPROVED"
           ? "Approved — the task is created, and the PIC and the client have been told."
-          : result.data.status === "RETURNED"
+          : data.status === "RETURNED"
             ? "Returned. The requester has been emailed the reason."
             : "Rejected. The requester has been emailed the reason.",
       );
-    });
-  }
+    },
+
+    /*
+     * ⚠️ FIRED, NEVER AWAITED, AND THE PREFIX IS THE POINT. `["requests"]`
+     * covers this request's own row and every part under it, the `/requests`
+     * queue, AND `qk.pendingRequests(...)` — the Gate 1 queue the TASK views
+     * draw above their stages, which is a different row set under the same
+     * prefix precisely so a decision here moves it.
+     *
+     * `qk.tasks()` and `qk.snapshot()` because APPROVING CREATES A TASK:
+     * `vizserve_pms_approve_request` inserts into `vizserve_pms_tasks` in the
+     * request's department, which is a new row in a list and a new number in the
+     * rail. `["lists"]` is NOT swept — a list created here is created by the
+     * OTHER mutation below, which sweeps it itself.
+     */
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["requests"] });
+      void queryClient.invalidateQueries({ queryKey: ["request"] });
+      void queryClient.invalidateQueries({ queryKey: qk.tasks() });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+    },
+  });
+
+  /**
+   * What was pressed — while it is in flight AND after it lands.
+   *
+   * ⚠️ `isSuccess` IS NOT OPTIONAL HERE, and leaving it off puts a live Approve
+   * button back under a request that has just been approved. `isPending` goes
+   * false the instant the write returns, but this panel is unmounted by its
+   * PARENT, which stops rendering it when `qk.request(id)` comes back no longer
+   * `PENDING_REVIEW` — a refetch that `onSettled` has only just fired. The gap
+   * between those two moments is precisely what the old `useOptimistic` was held
+   * open across `router.refresh()` to cover.
+   *
+   * `submit.variables` survives a success, which is what makes this readable at
+   * all — TanStack keeps the last arguments until the mutation is reset.
+   */
+  const taken =
+    submit.isPending || submit.isSuccess
+      ? (submit.variables?.decision as "approved" | "returned" | "rejected" | undefined)
+      : undefined;
 
   /**
    * P7-23 — create a list without leaving the review.
@@ -214,7 +390,55 @@ export function ReviewPanel({
    * second set of rules to keep in step with the first, and this one already
    * checks the department is in scope and maps the unique-name collision to a
    * sentence.
+   *
+   * ⚠️ THE NEW LIST IS HELD IN LOCAL STATE, NOT PATCHED INTO THE CACHE, and the
+   * distinction matters. `extraLists` is about THIS FORM — it exists so the list
+   * somebody just made is selected and selectable immediately, and creating a
+   * list and then having to find it in the dropdown is the step that makes
+   * people not bother. `onSettled` sweeps `["lists"]` so `/tasks/lists`, the
+   * `/tasks` filter dropdown and the rail all learn about it; this component
+   * does not wait for that, because it already knows the id.
    */
+  const addListMutation = useMutation({
+    mutationFn: (name: string) =>
+      createList(null, {
+        department_id: departmentId,
+        name,
+        description: "",
+        is_active: true,
+        sort_order: 0,
+        // P7-25. Client Requests, so the list appears with the client work in
+        // the sidebar rather than hanging loose under the department.
+        group_id: clientFolderId,
+      }),
+
+    onError: (error) => toast.error(error.message),
+
+    onSuccess: (data, name) => {
+      // Selected straight away.
+      setExtraLists((current) => [...current, { id: data.id, name }]);
+      setListId(data.id);
+      setNewListName("");
+      setCreatingList(false);
+      toast.success(`"${name}" created.`);
+    },
+
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["lists"] });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+      /* The panel's own list picker, so a reopened page sees it without this
+         component's local `extraLists`. */
+      void queryClient.invalidateQueries({ queryKey: qk.requestPart(requestId, "review") });
+    },
+  });
+
+  const pending = submit.isPending || addListMutation.isPending;
+
+  function run(payload: Record<string, unknown>) {
+    setFormError(null);
+    submit.mutate(payload);
+  }
+
   function addList() {
     const name = newListName.trim();
 
@@ -224,31 +448,7 @@ export function ReviewPanel({
     }
 
     setFormError(null);
-    startTransition(async () => {
-      const result = await saveList(null, {
-        department_id: departmentId,
-        name,
-        description: "",
-        is_active: true,
-        sort_order: 0,
-        // P7-25. Client Requests, so the list appears with the client work in
-        // the sidebar rather than hanging loose under the department.
-        group_id: clientFolderId,
-      });
-
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      // Selected straight away. Creating a list and then having to find it in
-      // the dropdown is the step that makes people not bother.
-      setExtraLists((current) => [...current, { id: result.data.id, name }]);
-      setListId(result.data.id);
-      setNewListName("");
-      setCreatingList(false);
-      toast.success(`"${name}" created.`);
-    });
+    addListMutation.mutate(name);
   }
 
   function approve() {

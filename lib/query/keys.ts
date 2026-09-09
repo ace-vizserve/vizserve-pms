@@ -35,6 +35,12 @@ export type TaskFilters = {
   dir?: string;
 };
 
+/**
+ * The panels of a request detail page. See `qk.requestPart` for what each holds
+ * and why it is not folded into the row.
+ */
+export type RequestPart = "context" | "outcome" | "review";
+
 /** The panels of a task detail page, each invalidated on its own. */
 export type TaskPart =
   | "comments"
@@ -63,7 +69,25 @@ export type RefTable =
   | "holidays"
   | "leave-types"
   | "events"
-  | "task-groups";
+  | "task-groups"
+  /**
+   * P12-18 — the CLIENT_REQUEST forms, for the `/requests` filter dropdown and
+   * its SLA lookup.
+   *
+   * Reference data by the same test as the rest: admin-managed, read by a picker
+   * on every visit to a queue that re-reads its rows on every filter change, and
+   * changed about as often as a department is. It is NOT under `["forms"]` —
+   * that prefix is Phase 6's builder, which owns the whole form INCLUDING its
+   * fields and its draft state, and sweeping the builder from a request filter
+   * would be the wrong direction entirely.
+   *
+   * ⚠️ SO A PUBLISHED-OR-RENAMED FORM TAKES UP TO `REF_STALE_TIME` TO APPEAR
+   * HERE. That is the trade every `qk.ref` entry makes; the difference is that
+   * `realtime.ts` has no `vizserve_pms_forms` row to close the gap, because that
+   * table is not published to Realtime. Phase 6 owns forms and is where an
+   * invalidation from the builder belongs.
+   */
+  | "client-forms";
 
 /**
  * Drops keys whose value is `undefined` or `""`.
@@ -189,6 +213,28 @@ export const qk = {
   requests: (filters: Record<string, string | undefined>) =>
     ["requests", normalize(filters)] as const,
   request: (id: string) => ["request", id] as const,
+  /**
+   * P12-18 — the parts of ONE request that change on different schedules.
+   *
+   * ⚠️ THE THIRD SEGMENT IS WHAT MAKES A GATE 1 DECISION CHEAP. `["request", id]`
+   * prefix-matches all of these, so a decision can sweep the lot — and the parts
+   * that a decision cannot possibly have changed do not have to be swept
+   * individually:
+   *
+   *   * `"context"` — the form's name, its field labels and the uploaded files.
+   *     Fixed the moment the client pressed Submit. Nothing on this page can
+   *     move it.
+   *   * `"outcome"` — the decision log and the task the request became. Empty
+   *     until there IS a decision, which is why the caller gates it with
+   *     `enabled` rather than fetching an empty list on every pending request.
+   *   * `"review"` — the candidates, the capacity scan, the lists and the
+   *     reserved folder. Read only while the panel renders; `department_capacity`
+   *     is a scan over the department's open tasks and there is no reason to pay
+   *     for it on a request decided last week.
+   *
+   * Same shape and same argument as `qk.taskPart(id, part)`.
+   */
+  requestPart: (id: string, part: RequestPart) => ["request", id, part] as const,
   /**
    * P7-26 — the Gate 1 queue as the TASK VIEWS show it, above the stages and as
    * the board's first column.

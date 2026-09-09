@@ -190,33 +190,20 @@ export const taskTimeTrackedSchema = z.object({
  */
 
 /**
- * P7-59 — the request row, WHICH IS THE LEAD'S VIEW AND ONLY THE LEAD'S.
+ * P7-59 — the request row.
  *
- * ⚠️ `requests readable in department scope` RETURNS NO ROW TO A MEMBER PIC,
- * deliberately: the client is never told who at VizServe holds their task, and
- * the anonymity runs both ways. So `null` here means "you may not see who
- * asked", never "nobody asked" — everything the person doing the work actually
- * needs comes from `vizserve_pms_task_request_brief`, which carries the brief
- * WITHOUT the identity.
+ * ⚠️ IT MOVED TO `lib/schemas/requests.ts` IN P12-18, AND THE WHOLE OF WHY IS
+ * THE PARAGRAPH ABOVE APPLIED ONE SHAPE FURTHER ON. This contract held eleven
+ * columns because `/tasks/[id]` was the only browser reader of `qk.request(id)`;
+ * `/requests/[id]` is now the other one and it needs seventeen. A shape two
+ * surfaces read out of ONE cache entry cannot be declared in the contract of one
+ * of them, and the wider consumer is the one that owns it — otherwise whichever
+ * fetcher wrote the entry last would win it, silently.
  *
- * `reviewed_by` / `reviewed_at` cost no extra query and are the half of an
- * approval that matters when somebody asks later.
+ * `requestDetailSchema` there is the superset. The policy note that lived here
+ * travels with the fetcher: `requests readable in department scope` returns NO
+ * ROW to a member PIC, deliberately, so `null` means "you may not see who
+ * asked", never "nobody asked" — everything the person doing the work needs
+ * comes from `vizserve_pms_task_request_brief`, which carries the brief WITHOUT
+ * the identity.
  */
-export const taskRequestRowSchema = z.object({
-  id: z.uuid(),
-  reference_no: z.string(),
-  /* NOT NULL in the schema, all four of these — the public form requires them.
-     Stated strictly rather than defensively: a null arriving here is a shape
-     fault worth hearing about, not a value to paper over. */
-  requester_name: z.string(),
-  requester_email: z.string(),
-  requester_org: z.string(),
-  description: z.string(),
-  target_date: z.string().nullable(),
-  submitted_at: z.string(),
-  reviewed_by: z.uuid().nullable(),
-  reviewed_at: z.string().nullable(),
-  form_id: z.uuid(),
-});
-
-export type TaskRequestRow = z.infer<typeof taskRequestRowSchema>;
