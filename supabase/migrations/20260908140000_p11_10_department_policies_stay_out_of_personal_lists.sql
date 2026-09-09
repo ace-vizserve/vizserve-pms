@@ -1,4 +1,4 @@
--- P11-09 — the department's list policies stop at a personal list.
+-- P11-10 — the department's list policies stop at a personal list.
 --
 -- P11-07 opened creating and deleting a department's lists to any active member
 -- of it. It was written the same afternoon `owner_id` arrived on this table, and
@@ -29,7 +29,7 @@ drop policy if exists "lists creatable by the department" on vizserve_pms_lists;
 create policy "lists creatable by the department"
   on vizserve_pms_lists for insert to authenticated
   with check (
-    -- P11-09. A personal list is created through "personal lists belong to
+    -- P11-10. A personal list is created through "personal lists belong to
     -- their owner", which is the only policy that may set `owner_id` — and it
     -- can only set it to the caller.
     owner_id is null
