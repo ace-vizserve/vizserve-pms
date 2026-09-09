@@ -32,6 +32,7 @@ import type { CapacityRow } from "@/lib/schemas/approvals";
 
 import { saveList } from "../../tasks/actions";
 import { decideOnRequest } from "./actions";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * P2-01 / P2-02 / P2-04 / P2-05 — the Team Leader review screen.
@@ -426,7 +427,7 @@ export function ReviewPanel({
               {creatingList ? (
                 <div className="flex items-center gap-1.5">
                   <Input
-                    autoFocus
+                    ref={focusWithoutScroll}
                     value={newListName}
                     disabled={pending}
                     placeholder="New list name"

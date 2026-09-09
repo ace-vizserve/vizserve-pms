@@ -4,7 +4,9 @@ import { toast } from "@/components/ui/toast";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, type ReactNode } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
+import { focusWithoutScroll } from "@/lib/focus";
 import { useOptimisticMove } from "./optimistic-move";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -25,6 +27,8 @@ import {
 import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 import { DeleteTaskDialog } from "./delete-task-dialog";
+
+import { invalidateTaskWrite } from "@/lib/query/invalidate";
 
 import { updateTaskField } from "./actions";
 import { ComposerCard, type Assignable } from "./task-composer";
@@ -62,6 +66,19 @@ import { ComposerCard, type Assignable } from "./task-composer";
  */
 function usePatch(taskId: string) {
   const router = useRouter();
+
+  /*
+   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   *
+   * This control is shared: the detail header renders it, every list row renders
+   * it and every board card renders it. `/tasks/[id]` reads `qk.task(id)` from
+   * the cache now, so a write has to invalidate; `/tasks` and `/tasks/board`
+   * still read their rows in an RSC, so the `router.refresh()` below stays until
+   * Phase 3c. The precedent is `hooks/use-realtime-refresh.ts` (P12-02), which
+   * invalidates AND refreshes for exactly this reason. Full account, including
+   * what `ded2244` cost, in `lib/query/invalidate.ts`.
+   */
+  const queryClient = useQueryClient();
 
   /*
    * ⚠️ THE ROW IS PATCHED, NOT JUST THIS CONTROL'S OWN STATE.
@@ -133,6 +150,15 @@ function usePatch(taskId: string) {
      * and these lines go with `optimistic-move.tsx`.
      */
     router.refresh();
+
+    /*
+     * ⚠️ AWAITED, AND STILL INSIDE THE CALLER'S FORM ACTION — which is a
+     * transition, per this hook's own header ("it opens no transition, and that
+     * is the point"). An un-awaited invalidate would let that transition end
+     * before the refetch lands and the field would snap back to its old value,
+     * which is the whole of `ded2244` in one line.
+     */
+    await invalidateTaskWrite(queryClient, taskId);
 
     if (success) toast.success(success);
   }
@@ -239,7 +265,7 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
       <PopoverContent align="start" className="w-72 p-2">
         <div className="flex items-center gap-1.5">
           <Input
-            autoFocus
+            ref={focusWithoutScroll}
             value={draft}
             aria-label="Title"
             onChange={(event) => setDraft(event.target.value)}
@@ -513,7 +539,7 @@ export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: n
       <PopoverContent align="start" className="w-56 p-2">
         <div className="space-y-1.5">
           <Input
-            autoFocus
+            ref={focusWithoutScroll}
             value={raw}
             placeholder="2h 30m"
             aria-label="Estimate"

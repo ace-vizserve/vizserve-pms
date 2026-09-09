@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { createForm } from "../actions";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * P7-66 — NAME IT AND START WRITING QUESTIONS.
@@ -92,7 +93,7 @@ export function InternalCreate({ departmentId }: { departmentId: string | null }
         <Label htmlFor="name">What is this form called?</Label>
         <Input
           id="name"
-          autoFocus
+          ref={focusWithoutScroll}
           value={name}
           onChange={(event) => setName(event.target.value)}
           placeholder="e.g. Q3 Pulse Survey"

@@ -27,6 +27,7 @@ import {
 import { RICH_TEXT_CLASS } from "@/components/ui/rich-text";
 import { EDITOR_SHELL, RichTextEditorShell } from "@/components/ui/rich-text-editor-shell";
 import { cn } from "@/lib/utils";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * P7-56 — the editor behind the six long-prose columns.
@@ -379,7 +380,7 @@ function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean })
         <div className="flex flex-col gap-2">
           <Input
             value={href}
-            autoFocus
+            ref={focusWithoutScroll}
             placeholder="example.com"
             aria-label="Link address"
             onChange={(event) => setHref(event.target.value)}

@@ -5,6 +5,7 @@ import { useState, useTransition } from "react";
 import { toast } from "@/components/ui/toast";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { useOptimisticMove } from "./optimistic-move";
 
 import { TaskPriorityBadge } from "@/components/status-badge";
@@ -27,7 +28,10 @@ import {
 import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
+import { invalidateTaskWrite, invalidateTaskPart } from "@/lib/query/invalidate";
+
 import { quickAddTask } from "./actions";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * K3 — INLINE CREATION, as a whole row rather than a title box.
@@ -99,6 +103,17 @@ function useComposer({
   const listId = searchParams.get("list");
   const [draft, setDraft] = useState<Draft>(EMPTY);
   const router = useRouter();
+  /*
+   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   *
+   * This composer is shared: it is the foot of a list group, the foot of a board
+   * column, and "Add a subtask" on `/tasks/[id]`. That last surface reads
+   * `qk.taskPart(parentId, "subtasks")` from the cache now; the other two still
+   * read their rows in an RSC, so the `router.refresh()` below stays until Phase
+   * 3c. See `lib/query/invalidate.ts`, and `ded2244` for what removing the
+   * refresh early costs.
+   */
+  const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -152,6 +167,24 @@ function useComposer({
          re-checked it against Next 16's action queue and kept it. See
          `tasks/inline.tsx` for the full account. */
       router.refresh();
+      /*
+       * ⚠️ AWAITED, INSIDE THE TRANSITION, or the placeholder row vanishes
+       * before the real one lands — see the note above and `ded2244`.
+       *
+       * ⚠️ AND THE PARENT'S SUBTASK PANEL IS A SEPARATE KEY. A new task moves
+       * `qk.tasks()` and the rail; a new SUBTASK also moves
+       * `["task", parentId, "subtasks"]`, which is a different ROOT that
+       * `["tasks"]` cannot prefix-match however long you stare at the pair.
+       * `INVALIDATES` in `lib/query/realtime.ts` records the same trap for the
+       * same reason. Forgetting this is a subtask that does not appear on the
+       * page it was added from.
+       */
+      await Promise.all([
+        invalidateTaskWrite(queryClient),
+        parentId
+          ? invalidateTaskPart(queryClient, parentId, "subtasks")
+          : Promise.resolve(),
+      ]);
       setDraft(EMPTY);
       onDone?.();
     });
@@ -225,7 +258,7 @@ export function ComposerRow({
 
       <TableCell className="max-w-sm whitespace-normal">
         <Input
-          autoFocus
+          ref={focusWithoutScroll}
           value={draft.title}
           disabled={pending}
           placeholder={parentId ? "Subtask name" : "Task name"}
@@ -343,7 +376,7 @@ export function ComposerCard({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-primary/40 bg-card grade-surface p-2.5 shadow-raised-lg">
       <Input
-        autoFocus
+        ref={focusWithoutScroll}
         value={draft.title}
         disabled={pending}
         placeholder={parentId ? "Subtask name" : "Task name"}
@@ -710,7 +743,7 @@ function EstimateInlineField({
           </Label>
           <Input
             id="composer-estimate"
-            autoFocus
+            ref={focusWithoutScroll}
             value={raw}
             placeholder="2h 30m"
             aria-invalid={error ? true : undefined}

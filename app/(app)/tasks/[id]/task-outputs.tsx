@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useOptimistic, useRef, useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Download, Link2, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -30,7 +31,9 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatBytes } from "@/lib/attachments";
+import { focusWithoutScroll } from "@/lib/focus";
 
+import { invalidateTaskPart, invalidateTaskWrite } from "@/lib/query/invalidate";
 import { outputLinkSchema } from "@/lib/schemas/tasks";
 
 import {
@@ -110,6 +113,15 @@ export function TaskOutputs({
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
+  /*
+   * P12-06 — `/tasks/[id]` reads its attachments from `qk.taskPart(id,
+   * "attachments")` now, and its `output_link` off the task row. The
+   * `router.refresh()` calls below stay until Phase 3c: this file is
+   * detail-page-only, so they are redundant for the DATA — and they are still
+   * what holds the two `useOptimistic` values open until the fresh rows land.
+   * Removing them while the optimism is hand-rolled is `ded2244`.
+   */
+  const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
   const [opening, setOpening] = useState<string | null>(null);
 
@@ -174,6 +186,9 @@ export function TaskOutputs({
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
       router.refresh();
+      // The LINK is a column on the task row, not an attachment — so this
+      // sweeps the task rather than the attachments panel.
+      await invalidateTaskWrite(queryClient, taskId);
       toast.success(parsed.data ? "Link saved" : "Link removed");
     });
   }
@@ -199,6 +214,14 @@ export function TaskOutputs({
           break;
         }
       }
+
+      /* ⚠️ AFTER THE LOOP, AND IT RUNS EVEN ON A PARTIAL FAILURE. Uploads are
+         sequential and the loop `break`s on the first refusal, so three of five
+         files may well be on the server — invalidating only on a clean run
+         would leave those three invisible until a navigation. There is no
+         optimistic value on this path, which is why there is no
+         `router.refresh()` beside it and never was. */
+      await invalidateTaskPart(queryClient, taskId, "attachments");
 
       if (inputRef.current) inputRef.current.value = "";
     });
@@ -232,6 +255,8 @@ export function TaskOutputs({
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
       router.refresh();
+      // One panel, not the task: removing a file changes nothing about the row.
+      await invalidateTaskPart(queryClient, taskId, "attachments");
       toast.success("Removed");
     });
   }
@@ -431,7 +456,7 @@ export function TaskOutputs({
                 <Input
                   id="output_link"
                   type="url"
-                  autoFocus
+                  ref={focusWithoutScroll}
                   placeholder="https://drive.google.com/…"
                   value={linkDraft}
                   disabled={pending}

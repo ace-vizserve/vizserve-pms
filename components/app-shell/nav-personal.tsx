@@ -39,6 +39,7 @@ import {
 
 import { savePersonalList } from "@/app/(app)/tasks/actions";
 import { LinkPending } from "./link-pending";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * P11-06 — the reader's own lists, and nobody else's.
@@ -574,7 +575,7 @@ function PersonalListDialog({
             <Input
               id="personal_list_name"
               value={name}
-              autoFocus
+              ref={focusWithoutScroll}
               maxLength={80}
               placeholder="Errands"
               onChange={(event) => setName(event.target.value)}
