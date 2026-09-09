@@ -1,12 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
 import { invalidateTaskWrite, markTaskStale } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { beginTaskWrite, cancelTaskRefetches, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { updateTaskField } from "../actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const writeField = fromAction(updateTaskField);
 
 /**
  * P7-55 — per-field autosave for `/tasks/[id]`.
@@ -78,6 +83,14 @@ type CommitOptions = {
   refresh?: boolean;
 };
 
+/** One field, its new value, and how the caller wants the write reported. */
+type WriteVars = {
+  /** The column, as it is named in the database. */
+  key: string;
+  value: unknown;
+  options: CommitOptions;
+};
+
 export type TaskAutosave = {
   /** Write now. For controls that emit one event per decision. */
   commit: (key: string, value: unknown, options?: CommitOptions) => void;
@@ -119,49 +132,101 @@ export function useTaskAutosave(taskId: string): TaskAutosave {
    * A transition would tie every field to one shared `pending`, which is the
    * exact behaviour this page is losing: disabling a focused textarea mid-save
    * blurs it and drops the caret to position 0.
+   *
+   * ------------------------------------------------------------------------
+   * P12-10 — ONE `useMutation`, DRIVEN PER FIELD.
+   *
+   * ⚠️ ITS `isPending` IS DELIBERATELY UNREAD. TanStack tracks the LATEST call,
+   * and six fields save independently here — `states` is the per-key record and
+   * it stays the only one. What the mutation buys is the same `onMutate` /
+   * `onError` / `onSettled` shape every other task control now has, so a refused
+   * autosave rolls the CACHE back exactly like a refused inline edit.
+   *
+   * ⚠️ THE CACHE ROLLBACK IS NOT THE `onRefused` ROLLBACK, AND THE HEADER'S RULE
+   * IS UNCHANGED. `rollbackTaskWrite` puts the stored row back to what the
+   * database actually holds — it does not touch the textarea, which is local
+   * state in `task-surface.tsx`. Free-text callers still pass no `onRefused`, so
+   * a refusal still leaves what somebody is typing exactly where it is.
+   * ------------------------------------------------------------------------
+   */
+  const save = useMutation({
+    mutationFn: (vars: WriteVars) => writeField(taskId, { [vars.key]: vars.value }),
+
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      /*
+       * ⚠️ THE ROW, so the field reaches every surface that renders it. The
+       * resolution is read by nothing else, but `due_date`, `priority` and the
+       * list are the same columns the list row and the board card draw.
+       */
+      patchTaskRow(queryClient, taskId, { [vars.key]: vars.value });
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      // A policy-refused UPDATE is success with zero rows (trap 9), and
+      // `updateTaskField` is what turns that into this sentence. Loud, always —
+      // a silent failed autosave is worse than no autosave.
+      vars.options.onRefused?.();
+      toast.error(error.message);
+      setState(vars.key, "idle");
+    },
+
+    onSuccess: (_data, vars) => {
+      setState(vars.key, "saved");
+    },
+
+    /*
+     * ⚠️ FIRED, NOT AWAITED — AND THE `refresh: false` BRANCH IS NOT A SHORTCUT
+     * FOR IT. They mean different things and both are still needed.
+     *
+     * `true` invalidates and refetches. It used to be AWAITED so that `flush()`
+     * — which the P3-07 gate calls before every status move — did not resolve
+     * until the fresh row was in the cache. That reason is gone: the gate reads
+     * `TaskGateProvider`'s own state, which `setSavedResolution` pushes on every
+     * accepted write, and `flush()` still awaits the WRITE itself through
+     * `mutateAsync`. The precondition the gate needs is that the column is
+     * SAVED before the move leaves, not that it has been read back.
+     *
+     * `false` marks the entry STALE WITHOUT FETCHING. It could never simply mean
+     * "tell nobody": the cached row holds `resolution`, so leaving the entry
+     * FRESH after a save would let a back-button restore or a second tab paint
+     * text the person has already replaced. Stale-without-fetch is the version
+     * of `refresh: false` that is still true, and it is what keeps a round trip
+     * off every keystroke pause on a textarea somebody is still typing into.
+     *
+     * ⚠️ P12-09 took a `router.refresh()` off the branch above. `updateTaskField`
+     * still revalidates its four routes on the server, so a later navigation to
+     * a page that is still server-rendered is fresh.
+     */
+    onSettled: (_data, _error, vars) => {
+      if (vars.options.refresh !== false) void invalidateTaskWrite(queryClient, taskId);
+      else markTaskStale(queryClient, taskId);
+    },
+  });
+
+  const { mutateAsync } = save;
+
+  /**
+   * ⚠️ THE REJECTION IS SWALLOWED HERE, ON PURPOSE. `mutateAsync` rejects on a
+   * refusal, `onError` above has already reported it, and `flush()` below is
+   * `Promise.all`-ed and awaited by the status gate — one refused field must not
+   * reject the flush and abort a move the server would have accepted. That is
+   * the behaviour the `ActionResult` check it replaces already had.
    */
   const write = useCallback(
-    async (key: string, value: unknown, options: CommitOptions) => {
+    (key: string, value: unknown, options: CommitOptions): Promise<void> => {
       setState(key, "saving");
-
-      const result = await updateTaskField(taskId, { [key]: value });
-
-      if (!result.ok) {
-        // A policy-refused UPDATE is success with zero rows (trap 9), and
-        // `updateTaskField` is what turns that into this sentence. Loud, always
-        // — a silent failed autosave is worse than no autosave.
-        options.onRefused?.();
-        toast.error(result.error);
-        setState(key, "idle");
-        return;
-      }
-
-      setState(key, "saved");
-
-      if (options.refresh !== false) {
-        /*
-         * ⚠️ AWAITED. This function is not inside a `useTransition` — the header
-         * explains at length why it must not be — so there is no optimistic
-         * value to hold and no `ded2244` risk here. It is awaited anyway so that
-         * `flush()` (which the P3-07 gate calls before every status move) does
-         * not resolve until the fresh row is in the cache: the move is decided
-         * on the SAVED resolution, and a gate that reads a stale one is the
-         * exact failure `task-gate.tsx` was built to prevent.
-         *
-         * ⚠️ P12-09 took a `router.refresh()` off the line above this. It was
-         * a second round trip for the same purpose, and the one it left behind
-         * is the one the gate actually reads. `updateTaskField` still
-         * revalidates its four routes on the server, so a later navigation to a
-         * page that is still server-rendered is fresh.
-         */
-        await invalidateTaskWrite(queryClient, taskId);
-      } else {
-        // Stale, not refetched — the resolution textarea is still being typed
-        // into. See `CommitOptions.refresh` above.
-        markTaskStale(queryClient, taskId);
-      }
+      return mutateAsync({ key, value, options }).then(
+        () => undefined,
+        () => undefined,
+      );
     },
-    [queryClient, setState, taskId],
+    [mutateAsync, setState],
   );
 
   const clearTimer = useCallback((key: string) => {

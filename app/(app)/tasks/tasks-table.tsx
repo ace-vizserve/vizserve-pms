@@ -45,7 +45,7 @@ import { LatestCommentCell } from "./latest-comment-cell";
 import { TaskSelectAll, TaskSelectCheckbox } from "./task-selection";
 import { TaskStatusSelect } from "./status-select";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
-import { isPlaceholder } from "./optimistic-move";
+import { isPlaceholder } from "@/lib/query/task-cache";
 
 /**
  * P7-64 - the task list's columns, in a client component.

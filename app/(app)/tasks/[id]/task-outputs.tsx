@@ -1,7 +1,7 @@
 "use client";
 
-import { useOptimistic, useRef, useState, useTransition } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Download, Link2, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -33,6 +33,14 @@ import { formatBytes } from "@/lib/attachments";
 import { focusWithoutScroll } from "@/lib/focus";
 
 import { invalidateTaskPart, invalidateTaskWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import {
+  beginTaskWrite,
+  cancelTaskRefetches,
+  dropTaskPartRow,
+  patchTaskRow,
+  rollbackTaskWrite,
+} from "@/lib/query/task-cache";
 import { outputLinkSchema } from "@/lib/schemas/tasks";
 
 import {
@@ -41,6 +49,11 @@ import {
   updateTaskField,
   uploadTaskOutput,
 } from "../actions";
+
+/** The three Server Actions, as promises TanStack can drive `onError` off. */
+const writeField = fromAction(updateTaskField);
+const uploadOutput = fromAction(uploadTaskOutput);
+const removeAttachment = fromAction(removeTaskAttachment);
 
 /**
  * P3-13 — the PIC's output files.
@@ -113,30 +126,13 @@ export function TaskOutputs({
   const inputRef = useRef<HTMLInputElement>(null);
   /*
    * P12-06 — `/tasks/[id]` reads its attachments from `qk.taskPart(id,
-   * "attachments")` now, and its `output_link` off the task row. The
-   * `router.refresh()` calls below came out in P12-09: this file is
-   * detail-page-only, so they are redundant for the DATA — and they are still
-   * what holds the two `useOptimistic` values open until the fresh rows land.
-   * Removing them while the optimism is hand-rolled is `ded2244`.
+   * "attachments")`, and its `output_link` off the task row. The
+   * `router.refresh()` calls came out in P12-09; P12-10 took the AWAITS off what
+   * was left, because the prediction lives in the cache now rather than in a
+   * `useOptimistic` that had to be held open — see `saveOutputLink` below.
    */
   const queryClient = useQueryClient();
-  const [pending, startTransition] = useTransition();
   const [opening, setOpening] = useState<string | null>(null);
-
-  /*
-   * P11-05 — TWO OPTIMISTIC VALUES, BECAUSE THIS PANEL HOLDS TWO THINGS.
-   *
-   * The link is one field and predicting it is a string swap. The attachments
-   * are a LIST, and the only prediction worth making there is a removal — the
-   * row vanishes the moment you press it.
-   *
-   * ⚠️ AN UPLOAD IS DELIBERATELY NOT PREDICTED. Its id, size and signed URL
-   * all come from the server, and a placeholder row that cannot be downloaded is
-   * worse than a moment's wait: somebody would click it. Uploads keep their
-   * spinner, which is honest about the bytes still being in flight.
-   */
-  const [shownLink, setShownLink] = useOptimistic(outputLink);
-  const [removed, markRemoved] = useOptimistic<string[], string>([], (state, id) => [...state, id]);
   const [error, setError] = useState<string | null>(null);
 
   /*
@@ -158,6 +154,60 @@ export function TaskOutputs({
     setLinkOpen(true);
   }
 
+  /*
+   * ------------------------------------------------------------------------
+   * P11-05 / P12-10 — THE LINK, AND WHAT IT USED TO COST TO PAINT IT.
+   *
+   * ⚠️ THIS WAS `useOptimistic(outputLink)`, WHICH DROPS ITS VALUE WHEN ITS
+   * TRANSITION ENDS — so `invalidateTaskWrite` had to be AWAITED inside that
+   * transition, and it awaits `qk.tasks()`, the prefix over the list AND the
+   * board, for a field only this panel renders. `onMutate` writes `output_link`
+   * into the CACHED ROW, which is where the `outputLink` prop comes from, so the
+   * panel repaints on the click and stays repainted with nothing holding it.
+   *
+   * ⚠️ IT ALSO FIXES A SPLIT THIS FILE HAD: `showLink` tested `shownLink` while
+   * the row below rendered `outputLink`, so a saved link could be shown as a row
+   * containing the OLD url for a round trip. One value now, because there is
+   * only one.
+   *
+   * ⚠️ AND A REFUSED SAVE NEEDS REAL ROLLBACK CODE NOW. React used to put the old
+   * link back for free; `onError` restores the snapshot and reopens the dialog
+   * carrying the reason.
+   * ------------------------------------------------------------------------
+   */
+  const saveOutputLink = useMutation({
+    mutationFn: (vars: { link: string }) => writeField(taskId, { output_link: vars.link }),
+
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      patchTaskRow(queryClient, taskId, { output_link: vars.link });
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      // The old link comes back; reopening shows why.
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      setLinkError(error.message || "That did not go through.");
+      setLinkOpen(true);
+    },
+
+    onSuccess: (_data, vars) => {
+      /* ⚠️ P12-08 — THE TOAST REPORTS THE WRITE, which has already happened.
+         Scheduled after the invalidation it reported the refetch instead. See
+         `lib/query/invalidate.ts`. */
+      toast.success(vars.link ? "Link saved" : "Link removed");
+    },
+
+    // Fired, never awaited. The LINK is a column on the task row, not an
+    // attachment — so this sweeps the task rather than the attachments panel.
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
+
   function saveLink(next: string) {
     const parsed = outputLinkSchema.safeParse(next);
     if (!parsed.success) {
@@ -170,62 +220,57 @@ export function TaskOutputs({
     // Closed first: the panel carries the new link from here on.
     setLinkOpen(false);
 
-    startTransition(async () => {
-      setShownLink(parsed.data);
-
-      const result = await updateTaskField(taskId, { output_link: parsed.data });
-      if (!result.ok) {
-        // React puts the old link back; reopening shows why.
-        setLinkError(result.error ?? "That did not go through.");
-        setLinkOpen(true);
-        return;
-      }
-      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-         the WRITE, which has already happened; scheduled after the invalidation
-         it reported the refetch instead. See `lib/query/invalidate.ts`. */
-      toast.success(parsed.data ? "Link saved" : "Link removed");
-
-      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO:
-         hold the transition open until the fresh data lands, or `useOptimistic`
-         reverts the moment the action resolves. See `tasks/inline.tsx`. */
-      // The LINK is a column on the task row, not an attachment — so this
-      // sweeps the task rather than the attachments panel.
-      await invalidateTaskWrite(queryClient, taskId);
-    });
+    saveOutputLink.mutate({ link: parsed.data });
   }
+
+  /*
+   * ⚠️ AN UPLOAD IS DELIBERATELY NOT PREDICTED, so there is no `onMutate` here
+   * and no snapshot to roll back. The id, the size and the signed URL all come
+   * from the server, and a placeholder row that cannot be downloaded is worse
+   * than a moment's wait: somebody would click it. Uploads keep their spinner,
+   * which is honest about the bytes still being in flight.
+   */
+  const uploadFiles = useMutation({
+    mutationFn: async (vars: { files: File[] }) => {
+      // Sequential. Several large files in parallel from an office connection is
+      // how you get several timeouts instead of several files.
+      for (const file of vars.files) {
+        const formData = new FormData();
+        formData.set("task_id", taskId);
+        formData.set("file", file);
+
+        try {
+          await uploadOutput(formData);
+        } catch (cause) {
+          // Name the file — "that file is too large" is useless when four were
+          // selected. The loop stops here; `onSettled` still re-reads, because
+          // the files before this one are already on the server.
+          throw new Error(`${file.name}: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+      }
+    },
+
+    onError: (error) => {
+      setError(error.message);
+    },
+
+    /* ⚠️ IT RUNS EVEN ON A PARTIAL FAILURE, which is why it is in `onSettled`
+       rather than `onSuccess`. Uploads are sequential and the loop stops on the
+       first refusal, so three of five files may well be on the server —
+       re-reading only on a clean run would leave those three invisible until a
+       navigation. */
+    onSettled: () => {
+      void invalidateTaskPart(queryClient, taskId, "attachments");
+
+      if (inputRef.current) inputRef.current.value = "";
+    },
+  });
 
   function handleFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError(null);
 
-    startTransition(async () => {
-      // Sequential. Several large files in parallel from an office connection is
-      // how you get several timeouts instead of several files.
-      for (const file of Array.from(files)) {
-        const formData = new FormData();
-        formData.set("task_id", taskId);
-        formData.set("file", file);
-
-        const result = await uploadTaskOutput(formData);
-
-        if (!result.ok) {
-          // Name the file — "that file is too large" is useless when four were
-          // selected.
-          setError(`${file.name}: ${result.error}`);
-          break;
-        }
-      }
-
-      /* ⚠️ AFTER THE LOOP, AND IT RUNS EVEN ON A PARTIAL FAILURE. Uploads are
-         sequential and the loop `break`s on the first refusal, so three of five
-         files may well be on the server — invalidating only on a clean run
-         would leave those three invisible until a navigation. There is no
-         optimistic value on this path, which is why there is no
-         `router.refresh()` beside it and never was. */
-      await invalidateTaskPart(queryClient, taskId, "attachments");
-
-      if (inputRef.current) inputRef.current.value = "";
-    });
+    uploadFiles.mutate({ files: Array.from(files) });
   }
 
   async function open(attachment: TaskAttachment) {
@@ -242,28 +287,61 @@ export function TaskOutputs({
     }
   }
 
-  function remove(attachment: TaskAttachment) {
-    startTransition(async () => {
-      // The row goes now. React brings it back if the server refuses.
-      markRemoved(attachment.id);
+  /*
+   * ⚠️ THE ROW GOES NOW, AND IT GOES INTO THE CACHE RATHER THAN INTO A LOCAL
+   * `removed` LIST. That list was a `useOptimistic` reducer, which is why the
+   * invalidate below used to be awaited — it was the only thing holding the row
+   * off the screen. `dropTaskPartRow` takes it out of
+   * `qk.taskPart(id, "attachments")`, which is the array this panel renders, and
+   * the cache keeps it out until the refetch agrees.
+   *
+   * ⚠️ AND `onError` PUTS IT BACK. React used to. `beginTaskWrite` snapshots the
+   * `["task"]` root, which this panel's key sits under, so the restore is exact.
+   */
+  const deleteAttachment = useMutation({
+    mutationFn: (vars: { attachment: TaskAttachment }) =>
+      removeAttachment(vars.attachment.id, taskId),
 
-      const result = await removeTaskAttachment(attachment.id, taskId);
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-         the WRITE, which has already happened; scheduled after the invalidation
-         it reported the refetch instead. See `lib/query/invalidate.ts`. */
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      dropTaskPartRow(queryClient, taskId, "attachments", vars.attachment.id);
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      toast.error(error.message);
+    },
+
+    onSuccess: () => {
+      /* ⚠️ P12-08 — THE TOAST REPORTS THE WRITE, which has already happened.
+         Scheduled after the invalidation it reported the refetch instead. See
+         `lib/query/invalidate.ts`. */
       toast.success("Removed");
+    },
 
-      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO:
-         hold the transition open until the fresh data lands, or `useOptimistic`
-         reverts the moment the action resolves. See `tasks/inline.tsx`. */
-      // One panel, not the task: removing a file changes nothing about the row.
-      await invalidateTaskPart(queryClient, taskId, "attachments");
-    });
+    // Fired, never awaited. One panel, not the task: removing a file changes
+    // nothing about the row.
+    onSettled: () => {
+      void invalidateTaskPart(queryClient, taskId, "attachments");
+    },
+  });
+
+  function remove(attachment: TaskAttachment) {
+    deleteAttachment.mutate({ attachment });
   }
+
+  /*
+   * ⚠️ ONE FLAG FOR THE WHOLE PANEL, exactly as the `useTransition` it replaces
+   * was. The "Add output" trigger says "Uploading…" while ANY of the three is in
+   * flight, which is what it did before — the three controls sit inside one
+   * disclosure and disabling them separately would let a link save race a
+   * removal of the row it is about to replace.
+   */
+  const pending = uploadFiles.isPending || saveOutputLink.isPending || deleteAttachment.isPending;
 
   /*
    * The upload control, built once for both shapes.
@@ -310,7 +388,7 @@ export function TaskOutputs({
         </DropdownMenuItem>
         <DropdownMenuItem onClick={openLink}>
           <Link2 />
-          {shownLink ? "Replace the link" : "Paste a link"}
+          {outputLink ? "Replace the link" : "Paste a link"}
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -330,11 +408,12 @@ export function TaskOutputs({
     </>
   ) : null;
 
-  const showLink = variant === "field" && shownLink.length > 0;
-
-  /* ⚠️ BOTH THE EMPTY CHECK AND THE LIST READ THIS. Filtering in one place and
-     not the other is how a panel ends up saying "no files" above a file. */
-  const shownAttachments = attachments.filter((row) => !removed.includes(row.id));
+  /* The PROPS, and both are optimistic because the cache is — see the notes on
+     `saveOutputLink` and `deleteAttachment`. `shownLink` and `removed` were
+     `useOptimistic` values over these same two; keeping either would be a second
+     source to disagree with the row the panel renders from. */
+  const showLink = variant === "field" && outputLink.length > 0;
+  const shownAttachments = attachments;
 
   const body = (
     <>

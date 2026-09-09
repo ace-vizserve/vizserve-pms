@@ -1,15 +1,20 @@
 "use client";
 
-import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 import { cn } from "@/lib/utils";
 
 import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { beginTaskWrite, cancelTaskRefetches, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { updateTaskField } from "../actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const writeField = fromAction(updateTaskField);
 
 /**
  * The task's name, on the one screen that could not change it.
@@ -40,17 +45,7 @@ export function EditableTitle({
   /** The same test as the rest of the card: on the task, or leading it. */
   canEdit: boolean;
 }) {
-  /*
-   * P11-05 — the heading changes on save, not a round trip later.
-   *
-   * ⚠️ THE OLD ROLLBACK WAS WRITING BACK SOMETHING THAT HAD NEVER CHANGED. Its
-   * comment claimed "the heading on screen already shows the new value", but the
-   * heading rendered `title` — the prop — so nothing on screen had moved and
-   * `setDraft(title)` restored an input nobody could see. Now the heading really
-   * does show it, and React puts it back by itself if the server refuses.
-   */
   const queryClient = useQueryClient();
-  const [shownTitle, setShownTitle] = useOptimistic(title);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
   const inputRef = useRef<HTMLInputElement>(null);
@@ -65,6 +60,61 @@ export function EditableTitle({
     inputRef.current?.focus();
     inputRef.current?.select();
   }, [editing]);
+
+  /*
+   * ------------------------------------------------------------------------
+   * P11-05 / P12-10 — THE HEADING CHANGES ON SAVE, AND THE FIELD IS FREE AGAIN
+   * WHEN THE WRITE RETURNS.
+   *
+   * ⚠️ THE PREDICTION MOVED OUT OF `useOptimistic` AND INTO THE CACHE. This was
+   * `useOptimistic(title)`, which drops its value the instant the transition that
+   * set it ends — so `invalidateTaskWrite` had to be AWAITED inside that
+   * transition, and it awaits `qk.tasks()`: the whole list and the whole board
+   * behind a one-word rename. `onMutate` writes the new title into the CACHED
+   * ROW instead, which is where this component's `title` prop comes from, so the
+   * heading moves on the keystroke and stays moved with nothing holding it.
+   *
+   * ⚠️ AND IT REACHES EVERY OTHER READER OF THAT ROW BY CONSTRUCTION — the list
+   * row, the board card, the subtask line on a parent's page. The old
+   * `useOptimistic` repainted this heading and nothing else.
+   *
+   * ⚠️ A REFUSED RENAME NEEDS REAL ROLLBACK CODE NOW. React used to put the old
+   * heading back for free; `onError` restores the snapshot, and the draft goes
+   * back with it so reopening the editor does not offer a name the server
+   * refused.
+   * ------------------------------------------------------------------------
+   */
+  const rename = useMutation({
+    mutationFn: (vars: { title: string }) => writeField(taskId, { title: vars.title }),
+
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      patchTaskRow(queryClient, taskId, { title: vars.title });
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      setDraft(title);
+      toast.error(error.message);
+    },
+
+    onSuccess: () => {
+      /* ⚠️ P12-08 — THE TOAST REPORTS THE WRITE, which has already happened.
+         Scheduled after the invalidation it reported the refetch instead. See
+         `lib/query/invalidate.ts`. */
+      toast.success("Renamed");
+    },
+
+    // Fired, never awaited. The heading already shows the new name and keeps
+    // showing it until this refetch replaces it with the server's own.
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
 
   function commit() {
     const next = draft.trim();
@@ -81,39 +131,16 @@ export function EditableTitle({
     // the input open would show the same words twice.
     setEditing(false);
 
-    startTransition(async () => {
-      setShownTitle(next);
-
-      const result = await updateTaskField(taskId, { title: next });
-
-      if (!result.ok) {
-        // React drops the optimistic heading on its own. The draft goes back so
-        // reopening the editor does not offer a name the server refused.
-        setDraft(title);
-        toast.error(result.error);
-        return;
-      }
-
-      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-         the WRITE, which has already happened; scheduled after the invalidation
-         it reported the refetch instead. See `lib/query/invalidate.ts`. */
-      toast.success("Renamed");
-
-      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO.
-         The refresh held the transition open until fresh data landed; without
-         something doing that, `useOptimistic` drops the heading the instant the
-         action resolves and it snaps back to the old title with the toast
-         firing in the gap. That is `ded2244`. This page has read `qk.task(id)`
-         from the cache since P12-06, so the invalidate below IS the fresh data
-         and the route render beside it was redundant work on every rename. */
-      await invalidateTaskWrite(queryClient, taskId);
-    });
+    rename.mutate({ title: next });
   }
 
   if (!editing) {
     return (
       <h1 className="group/title flex min-w-0 items-center gap-1.5 text-xl font-semibold tracking-tight">
-        <span className="min-w-0 wrap-break-word">{shownTitle}</span>
+        {/* The PROP, and it is optimistic because the cached row is — see
+            the note on `rename`. `shownTitle` was a `useOptimistic` over this
+            same value; two of them would be two things to disagree. */}
+        <span className="min-w-0 wrap-break-word">{title}</span>
 
         {canEdit ? (
           <button
@@ -122,7 +149,7 @@ export function EditableTitle({
               setDraft(title);
               setEditing(true);
             }}
-            aria-label={`Rename ${shownTitle}`}
+            aria-label={`Rename ${title}`}
             title="Rename"
             className={cn(
               "inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground",

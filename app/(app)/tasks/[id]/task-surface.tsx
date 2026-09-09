@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useOptimistic, useState, useTransition } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -39,6 +39,8 @@ import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
 import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { beginTaskWrite, cancelTaskRefetches, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { overrideTaskStatus, reassignTask } from "../actions";
 import { InlineDate, InlineEstimate, InlineList, InlinePriority } from "../inline";
@@ -89,6 +91,10 @@ import { useTaskAutosave } from "./use-task-autosave";
  */
 
 const NONE = "__none__";
+
+/** The two Server Actions, as promises TanStack can drive `onError` off. */
+const forceStatus = fromAction(overrideTaskStatus);
+const reassign = fromAction(reassignTask);
 
 type Person = { id: string; full_name: string };
 
@@ -277,24 +283,14 @@ export function TaskSurface({
   subtasks?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
-  /**
-   * P7-55. `moving`, not `pending`, and it covers ONLY the status moves and the
-   * override — transitions that must disable each other, because two in flight
-   * at once is a race the state machine should never see.
-   *
-   * ⚠️ IT MUST NOT DISABLE A FIELD. The old shared `pending` did, and under
-   * autosave that is the one change that makes this page feel broken: disabling
-   * a focused textarea mid-save blurs it and drops the caret to position 0.
-   */
   /*
-   * P12-06 — the page this control sits on reads `qk.task(id)` from the cache
-   * now, so a write has to say so. `router.refresh()` stood beside it because
-   * the ACTION revalidates four routes and because removing it breaks the
-   * optimistic hold below — see `lib/query/invalidate.ts` for the full account
-   * of why both, and `ded2244` for what happened the day one of them went.
+   * P12-06 — the page this control sits on reads `qk.task(id)` from the cache,
+   * so a write has to say so. `router.refresh()` stood beside it until P12-09,
+   * and the AWAIT that replaced it went in P12-10: the prediction lives in the
+   * cache now, so there is no transition left to hold open. See
+   * `lib/query/invalidate.ts`.
    */
   const queryClient = useQueryClient();
-  const [moving, startTransition] = useTransition();
   const autosave = useTaskAutosave(taskId);
   const gate = useTaskGate();
 
@@ -319,22 +315,7 @@ export function TaskSurface({
   const [overrideReason, setOverrideReason] = useState("");
   const [error, setError] = useState<string | null>(null);
 
-  /*
-   * P11-05 — the PIC and QA names change when you press Save.
-   *
-   * ⚠️ THE OPTIMISTIC VALUE IS THE NAME, NOT THE ID. `picName` and `qaName` are
-   * what the panel renders; the ids are what the form holds. Predicting the id
-   * would repaint nothing, which is the shape of optimism that looks broken —
-   * the control updates and the thing beside it does not.
-   *
-   * The names are resolved from `people`, the same list the Select offers, so a
-   * chosen person always has one.
-   */
-  const [shownPic, setShownPic] = useOptimistic(picName);
-  const [shownQa, setShownQa] = useOptimistic(qaName);
-
   const [reassignOpen, setReassignOpen] = useState(false);
-  const [reassigning, startReassign] = useTransition();
   const [pic, setPic] = useState(assigneeId ?? NONE);
   const [qa, setQa] = useState(qaAssigneeId ?? NONE);
   const [reassignError, setReassignError] = useState<string | null>(null);
@@ -370,30 +351,64 @@ export function TaskSurface({
     estimateMinutes !== null && trackedMinutes !== null && trackedMinutes > estimateMinutes;
   const reassignUnchanged = pic === (assigneeId ?? NONE) && qa === (qaAssigneeId ?? NONE);
 
-  function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
-    setError(null);
-    startTransition(async () => {
-      const result = await action();
-      if (!result.ok) {
-        setError(result.error ?? "That did not go through.");
-        return;
-      }
-      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-         the WRITE, which has already happened; scheduled after the invalidation
-         it reported the refetch instead. See `lib/query/invalidate.ts`. */
-      toast.success(success);
+  /*
+   * ------------------------------------------------------------------------
+   * P7-55 / P12-10 — Q5's OVERRIDE.
+   *
+   * `moving` was a `useTransition`, and it covers ONLY the forced move: two
+   * status writes in flight at once is a race the state machine should never
+   * see.
+   *
+   * ⚠️ IT MUST NOT DISABLE A FIELD. The old shared `pending` did, and under
+   * autosave that is the one change that makes this page feel broken: disabling
+   * a focused textarea mid-save blurs it and drops the caret to position 0. The
+   * mutation's `isPending` is read by the two buttons in the disclosure and by
+   * nothing else.
+   *
+   * ⚠️ THE CHIP MOVES ON THE CLICK, AND IT MOVES EVERYWHERE. `onMutate` writes
+   * the forced status into the CACHED ROW, so the header's chip, the row on
+   * `/tasks` and the card on the board all follow — the awaited invalidate that
+   * used to stand here repainted them a round trip later, and it awaited
+   * `qk.tasks()` to do it. `onError` restores the snapshot, because a refused
+   * force must not leave the task sitting in a status the database would not
+   * give it.
+   * ------------------------------------------------------------------------
+   */
+  const override = useMutation({
+    mutationFn: (vars: { status: TaskStatus; reason: string }) =>
+      forceStatus(taskId, { to_status: vars.status, reason: vars.reason }),
 
-      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO.
-         An un-awaited invalidate lets the transition end before the fresh rows
-         arrive and the value snaps back, which is `ded2244`; the refresh was a
-         second way of holding the same transition open, and this page has read
-         from the cache since P12-06. A forced status also writes a history row,
-         which is why this sweeps the whole task rather than one part. */
-      await invalidateTaskWrite(queryClient, taskId);
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      patchTaskRow(queryClient, taskId, { status: vars.status });
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      setError(error.message || "That did not go through.");
+    },
+
+    onSuccess: () => {
+      /* ⚠️ P12-08 — THE TOAST REPORTS THE WRITE, which has already happened.
+         Scheduled after the invalidation it reported the refetch instead. See
+         `lib/query/invalidate.ts`. */
+      toast.success("Status forced");
       setOverrideOpen(false);
       setOverrideReason("");
-    });
-  }
+    },
+
+    // Fired, never awaited. A forced status also writes a history row, which is
+    // why this sweeps the whole task rather than one part.
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
+
+  const moving = override.isPending;
 
   function openReassign() {
     // Seeded on open, so a change made in another tab is not overwritten by a
@@ -404,42 +419,74 @@ export function TaskSurface({
     setReassignOpen(true);
   }
 
+  /*
+   * ------------------------------------------------------------------------
+   * P11-05 / P12-10 — THE PIC AND QA NAMES CHANGE WHEN YOU PRESS SAVE.
+   *
+   * ⚠️ THE PREDICTION IS THE ID NOW, NOT THE NAME, AND THAT IS THE OPPOSITE OF
+   * WHAT THIS FILE USED TO SAY. Two `useOptimistic` values held `picName` and
+   * `qaName` — the rendered strings — precisely because predicting the id
+   * "would repaint nothing". That was true of local state and is not true of the
+   * cache: `picName` is `nameOf.get(task.assignee_id)`, resolved in
+   * `task-detail.tsx` from the cached row, so patching `assignee_id` repaints
+   * the name by construction — and repaints the LIST and the BOARD with it,
+   * which two component-local strings never could.
+   *
+   * ⚠️ AND A REFUSED REASSIGNMENT NEEDS REAL ROLLBACK CODE NOW. React used to
+   * put both names back for free; `onError` restores the snapshot and reopens
+   * the dialog with the reason.
+   * ------------------------------------------------------------------------
+   */
+  const reassignment = useMutation({
+    mutationFn: (vars: { pic: string; qa: string }) =>
+      reassign(taskId, {
+        assignee_id: vars.pic === NONE ? null : vars.pic,
+        qa_assignee_id: vars.qa === NONE ? null : vars.qa,
+      }),
+
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      patchTaskRow(queryClient, taskId, {
+        assignee_id: vars.pic === NONE ? null : vars.pic,
+        qa_assignee_id: vars.qa === NONE ? null : vars.qa,
+      });
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      // Both names come back; reopening shows the error.
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      setReassignError(error.message || "That did not go through.");
+      setReassignOpen(true);
+    },
+
+    onSuccess: () => {
+      /* ⚠️ P12-08 — THE TOAST REPORTS THE WRITE, which has already happened.
+         Scheduled after the invalidation it reported the refetch instead. See
+         `lib/query/invalidate.ts`. */
+      toast.success("Reassigned");
+    },
+
+    /* Fired, never awaited. A reassignment changes `assignee_id` /
+       `qa_assignee_id`, which is what `viewer.isAssignee` and `viewer.isQa` are
+       derived from on this page — so without this the controls would keep
+       offering the old seat's moves until a navigation. */
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
+
+  const reassigning = reassignment.isPending;
+
   function saveReassign() {
     setReassignError(null);
     // Closed first: the panel below carries the new names from here on.
     setReassignOpen(false);
 
-    startReassign(async () => {
-      const nameOf = (id: string) =>
-        id === NONE ? null : (candidates.find((row) => row.id === id)?.full_name ?? null);
-      setShownPic(nameOf(pic));
-      setShownQa(nameOf(qa));
-
-      const result = await reassignTask(taskId, {
-        assignee_id: pic === NONE ? null : pic,
-        qa_assignee_id: qa === NONE ? null : qa,
-      });
-      if (!result.ok) {
-        // React puts both names back; reopening shows the error.
-        setReassignError(result.error ?? "That did not go through.");
-        setReassignOpen(true);
-        return;
-      }
-      /* ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-         the WRITE, which has already happened; scheduled after the invalidation
-         it reported the refetch instead. See `lib/query/invalidate.ts`. */
-      toast.success("Reassigned");
-
-      /* ⚠️ P12-09 — AWAITED, AND IT IS WHAT `router.refresh()` USED TO DO:
-         hold the transition open until the fresh data lands, or `useOptimistic`
-         reverts the moment the action resolves (`ded2244`).
-
-         A reassignment changes
-         `assignee_id` / `qa_assignee_id`, which is what `viewer.isAssignee` and
-         `viewer.isQa` are derived from on this page — so without this the
-         controls would keep offering the old seat's moves until a navigation. */
-      await invalidateTaskWrite(queryClient, taskId);
-    });
+    reassignment.mutate({ pic, qa });
   }
 
   /* ------------------------------------------------------------------ */
@@ -644,12 +691,14 @@ export function TaskSurface({
               </>
             ) : null}
 
-            <Prop label="PIC">{person(shownPic, "Unassigned")}</Prop>
+            {/* The PROPS, and they are optimistic because the cached row is —
+                see the note on `reassignment`. */}
+            <Prop label="PIC">{person(picName, "Unassigned")}</Prop>
 
             {/* NO QA ROW ON PERSONAL WORK. It is closed by the person who made
                 it (P7-01) — naming a reviewer with no part in it is worse than
                 saying nothing. */}
-            {category === "personal" ? null : <Prop label="QA">{person(shownQa, "Not set")}</Prop>}
+            {category === "personal" ? null : <Prop label="QA">{person(qaName, "Not set")}</Prop>}
 
             <Prop label="Dates">{dates}</Prop>
 
@@ -874,16 +923,10 @@ export function TaskSurface({
               <div className="flex gap-2">
                 <Button
                   size="sm"
-                  onClick={() =>
-                    run(
-                      () =>
-                        overrideTaskStatus(taskId, {
-                          to_status: overrideStatus,
-                          reason: overrideReason,
-                        }),
-                      "Status forced",
-                    )
-                  }
+                  onClick={() => {
+                    setError(null);
+                    override.mutate({ status: overrideStatus, reason: overrideReason });
+                  }}
                   loading={moving}
                   disabled={overrideReason.trim().length < 10}
                   title={

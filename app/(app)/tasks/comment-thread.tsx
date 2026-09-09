@@ -1,24 +1,37 @@
 "use client";
 
-import { startTransition, useOptimistic, useState, useTransition } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
-
-import { isPlaceholder, placeholderId } from "./optimistic-move";
 
 import { Button } from "@/components/ui/button";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { RICH_TEXT_CLASS } from "@/components/ui/rich-text";
 import { isRichTextEmpty } from "@/lib/rich-text";
+import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
 import { formatDateTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
 import { invalidateTaskPart } from "@/lib/query/invalidate";
 import { qk } from "@/lib/query/keys";
+import { fromAction } from "@/lib/query/mutate";
+import {
+  addPlaceholderComment,
+  beginTaskWrite,
+  cancelTaskRefetches,
+  isPlaceholder,
+  placeholderId,
+  rollbackTaskWrite,
+} from "@/lib/query/task-cache";
 
 import { addTaskComment, deleteTaskComment, editTaskComment } from "./actions";
 import { Monogram, initials } from "./assignees";
+
+/** The three Server Actions, as promises TanStack can drive `onError` off. */
+const postComment = fromAction(addTaskComment);
+const saveComment = fromAction(editTaskComment);
+const dropComment = fromAction(deleteTaskComment);
 
 export type TaskComment = {
   id: string;
@@ -153,7 +166,7 @@ export function CommentThread({
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   /*
-   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   * P12-06 — THE CACHE, AND SINCE P12-09 THE ONLY MECHANISM.
    *
    * This thread is shared: the detail page's Activity card renders it, and so
    * does the popover behind `latest-comment-cell.tsx` on the task LIST, which is
@@ -168,41 +181,126 @@ export function CommentThread({
    * stare at the pair — `INVALIDATES` records the same trap for the same table.
    */
   const queryClient = useQueryClient();
-  const [pending, startPending] = useTransition();
 
   /*
-   * P11-05 — THE COMMENT APPEARS WHEN YOU POST IT.
+   * ------------------------------------------------------------------------
+   * P11-05 / P12-10 — THE COMMENT APPEARS WHEN YOU POST IT.
    *
    * Posting used to sit for a round trip with nothing on screen but a disabled
    * button, and a comment is the one thing on a task where people expect the
    * feedback loop of a chat box.
    *
-   * ⚠️ THE OPTIMISTIC ROW IS MARKED `pending` AND SAYS SO. Predicting that a
-   * comment WILL be accepted is fine; pretending it already has been is not —
-   * the row is dimmed and captioned "Sending…" until the server confirms it,
-   * so nobody quotes a comment in a meeting that never landed.
+   * ⚠️ THE OPTIMISTIC ROW MOVED OUT OF `useOptimistic` AND INTO THE CACHE. It
+   * used to be a reducer over the `comments` PROP, which meant the row lived
+   * only while the transition that added it was pending — which is why
+   * `invalidateTaskPart` was `await`ed inside that transition and BEFORE the
+   * ok-check. `addPlaceholderComment` writes it into
+   * `qk.taskPart(id, "comments")` and into the list's latest-comment column
+   * instead, so the thread this component renders IS the thread with the row in
+   * it, and nothing has to be held open.
    *
-   * React drops it when the transition ends, and the real one arrives with the
-   * action's revalidation. A refusal needs no rollback: the row simply
-   * disappears and the text is still in the box.
+   * ⚠️ THE ROW IS STILL MARKED AND STILL SAYS SO. Predicting that a comment WILL
+   * be accepted is fine; pretending it already has been is not — the row is
+   * dimmed and captioned "Sending…" until the server confirms it, so nobody
+   * quotes a comment in a meeting that never landed.
+   *
+   * ⚠️ AND THE BODY IS SANITISED BEFORE IT GOES INTO THE CACHE. It is painted
+   * with `dangerouslySetInnerHTML` below, and the read sites
+   * (`task-detail.tsx`, `tasks-view.tsx`) run every server row through
+   * `sanitizeRichTextInBrowser` on the way in — a placeholder that skipped that
+   * would be the one body on the page that reached the sink untouched. What goes
+   * to the SERVER is the raw editor string, which the action sanitises itself.
+   * ------------------------------------------------------------------------
    */
-  const [shownComments, addOptimisticComment] = useOptimistic(
-    comments,
-    (state: TaskComment[], text: string): TaskComment[] => [
-      ...state,
-      {
-        // A key React can tell apart from every real id. It exists for one
-        // render and is replaced by the server's row.
-        id: placeholderId(state.length),
-        body: text,
-        authorId: viewerId,
-        authorName:
-          comments.find((row) => row.authorId === viewerId)?.authorName ?? "You",
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      },
-    ],
-  );
+  const sendComment = useMutation({
+    mutationFn: (vars: { text: string }) => postComment(taskId, { body: vars.text }),
+
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      addPlaceholderComment(queryClient, taskId, {
+        // A key React can tell apart from every real id. `isPlaceholder` is how
+        // the rows below know not to offer Edit or Delete on it.
+        id: placeholderId(),
+        body: sanitizeRichTextInBrowser(vars.text),
+        author_id: viewerId,
+        created_at: new Date().toISOString(),
+      });
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      // Put it back: a comment the server refused must not be lost to a toast
+      // nobody can copy out of.
+      setBody(vars.text);
+      toast.error(error.message);
+    },
+
+    /* ⚠️ FIRED, NOT AWAITED, AND ON BOTH PATHS. A REFUSED comment still needs the
+       thread re-read — the placeholder has to be replaced by whatever the server
+       actually holds either way, and `onError` above has already put the cache
+       back to what it was.
+
+       ⚠️ P12-09 took a `router.refresh()` off this line. It was doing the same
+       job through the router, back when `/tasks` read its latest-comment column
+       in an RSC; `qk.tasks()` in the `extra` list is that surface now. See
+       `lib/query/invalidate.ts`. */
+    onSettled: () => {
+      void invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
+    },
+  });
+
+  const editComment = useMutation({
+    mutationFn: (vars: { commentId: string; text: string }) =>
+      saveComment(vars.commentId, { body: vars.text }),
+
+    /* No `onMutate`, and that is not an omission. There is no optimistic value
+       on this path and never was — an edited body is replaced in place by the
+       refetch, so a patch here would buy one frame and a rollback to maintain. */
+    onError: (error) => {
+      toast.error(error.message);
+    },
+
+    onSuccess: () => {
+      setEditing(null);
+      setDraft("");
+    },
+
+    // No refresh here and there never was one — this path has no optimistic
+    // value to hold, so the action's own `revalidatePath` was enough. The cache
+    // has no such fallback: without this the edited body would sit at its old
+    // text until something else invalidated the thread.
+    onSettled: () => {
+      void invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
+    },
+  });
+
+  const deleteComment = useMutation({
+    mutationFn: (vars: { commentId: string }) => dropComment(vars.commentId),
+
+    onError: (error) => {
+      toast.error(error.message);
+    },
+
+    // Same as `editComment`: no optimistic value, so no refresh was ever
+    // needed — but a deleted comment left fresh in the cache stays on screen.
+    onSettled: () => {
+      void invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
+    },
+  });
+
+  /*
+   * ⚠️ THE SAME COMBINED FLAG THIS FILE ALREADY HAD, and it deliberately does
+   * NOT include `sendComment`. The composer's button read the edit/delete
+   * transition
+   * before this change too — posting ran on React's global `startTransition`,
+   * which nothing observed — so widening it here would be a behaviour change
+   * riding along with a refactor.
+   */
+  const pending = editComment.isPending || deleteComment.isPending;
 
   function post() {
     const text = body.trim();
@@ -212,68 +310,18 @@ export function CommentThread({
     // it in the box as well would put the same comment on screen twice.
     setBody("");
 
-    startTransition(async () => {
-      addOptimisticComment(text);
-
-      const result = await addTaskComment(taskId, { body: text });
-
-      /* ⚠️ AWAITED, INSIDE THE TRANSITION, AND BEFORE THE OK-CHECK. Both halves
-         are deliberate. `useOptimistic` drops the "Sending…" row the instant this
-         transition ends, so the real one has to be there first; and a REFUSED
-         comment still needs the thread re-read, because the optimistic row has
-         to be replaced by whatever the server actually holds either way.
-
-         ⚠️ P12-09 took a `router.refresh()` off the line above this. It was
-         doing the same job through the router, back when `/tasks` read its
-         latest-comment column in an RSC; `qk.tasks()` in the `extra` list is
-         that surface now. See `lib/query/invalidate.ts`. */
-      await invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
-
-      if (!result.ok) {
-        // Put it back: a comment the server refused must not be lost to a toast
-        // nobody can copy out of.
-        setBody(text);
-        toast.error(result.error);
-      }
-    });
+    sendComment.mutate({ text });
   }
 
   function saveEdit(commentId: string) {
     const text = draft.trim();
     if (isRichTextEmpty(text)) return;
 
-    startPending(async () => {
-      const result = await editTaskComment(commentId, { body: text });
-
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      // No refresh here and there never was one — this path has no optimistic
-      // value to hold, so the action's own `revalidatePath` was enough. The
-      // cache has no such fallback: without this the edited body would sit at
-      // its old text until something else invalidated the thread.
-      await invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
-
-      setEditing(null);
-      setDraft("");
-    });
+    editComment.mutate({ commentId, text });
   }
 
   function remove(commentId: string) {
-    startPending(async () => {
-      const result = await deleteTaskComment(commentId);
-
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-
-      // Same as `saveEdit`: no optimistic value, so no refresh was ever needed
-      // — but a deleted comment left fresh in the cache stays on screen.
-      await invalidateTaskPart(queryClient, taskId, "comments", [qk.tasks()]);
-    });
+    deleteComment.mutate({ commentId });
   }
 
   /*
@@ -283,9 +331,11 @@ export function CommentThread({
    * component could render two things it already knows how to render.
    */
   const feed = [
-    // ⚠️ `shownComments`, NOT `comments` — the optimistic row lives here, and
-    // reading the prop straight would render the thread without it.
-    ...shownComments.map((comment) => ({
+    /* ⚠️ THE PROP, AND IT ALREADY CARRIES THE OPTIMISTIC ROW. This read
+       `shownComments` — a `useOptimistic` over the same array — until `onMutate`
+       moved the placeholder into the cache the prop is derived from. Two sources
+       would now be two things to disagree. */
+    ...comments.map((comment) => ({
       at: comment.createdAt,
       comment,
       event: null,

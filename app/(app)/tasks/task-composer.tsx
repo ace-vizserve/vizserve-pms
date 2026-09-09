@@ -1,12 +1,11 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
 import { useSearchParams } from "next/navigation";
-import { useQueryClient } from "@tanstack/react-query";
-import { useOptimisticMove } from "./optimistic-move";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { TaskPriorityBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -29,9 +28,20 @@ import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
 import { invalidateTaskWrite, invalidateTaskPart } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import {
+  addPlaceholderRow,
+  beginTaskWrite,
+  cancelTaskRefetches,
+  placeholderId,
+  rollbackTaskWrite,
+} from "@/lib/query/task-cache";
 
 import { quickAddTask } from "./actions";
 import { focusWithoutScroll } from "@/lib/focus";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const createTask = fromAction(quickAddTask);
 
 /**
  * K3 — INLINE CREATION, as a whole row rather than a title box.
@@ -103,43 +113,52 @@ function useComposer({
   const listId = searchParams.get("list");
   const [draft, setDraft] = useState<Draft>(EMPTY);
   /*
-   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   * P12-06 — THE CACHE, AND SINCE P12-09 THE ONLY MECHANISM.
    *
    * This composer is shared: it is the foot of a list group, the foot of a board
    * column, and "Add a subtask" on `/tasks/[id]`. That last surface reads
-   * `qk.taskPart(parentId, "subtasks")` from the cache now; the other two still
-   * read their rows from the cache too since P12-07, so P12-09 took the
-   * `router.refresh()` out: one mechanism, not two. The AWAITED invalidate is
-   * what holds the placeholder row across the settle — see
-   * `lib/query/invalidate.ts`, and `ded2244` for what removing the hold with
-   * nothing in its place cost.
+   * `qk.taskPart(parentId, "subtasks")` from the cache, and the other two have
+   * read their rows from it since P12-07, so P12-09 took the `router.refresh()`
+   * out: one mechanism, not two.
    */
   const queryClient = useQueryClient();
-  const [pending, startTransition] = useTransition();
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
   }
 
   /*
-   * P11-05 — the row appears under the heading you typed it into.
+   * ------------------------------------------------------------------------
+   * P12-10 — THE ROW APPEARS UNDER THE HEADING YOU TYPED IT INTO, AND THE BOX
+   * IS READY AGAIN WHEN THE WRITE RETURNS.
    *
-   * Null on `/tasks/[id]`, where a subtask is added with no status groups
-   * around the composer.
+   * ⚠️ THE PLACEHOLDER MOVED OUT OF `OptimisticMoveContext` AND INTO THE CACHE.
+   * It used to be `addRow?.({ kind: "add", title, status })` published through a
+   * context the status groups owned — so it existed on `/tasks` and nowhere else
+   * — and it lived inside a `useOptimistic` reducer, which drops its value the
+   * instant the transition that set it ends. That is why the invalidate below
+   * had to be AWAITED: the await WAS the hold, and it covered `qk.tasks()`, the
+   * prefix over the list AND the board. `a64b06c` removed the equivalent hold
+   * with nothing in its place and `ded2244` reverted it the same day.
+   *
+   * `addPlaceholderRow` writes the row into the cached list and board entries
+   * instead, and the cache keeps it there until the refetch replaces it with the
+   * server's own — so nothing has to be held open, and `onSettled` fires.
+   *
+   * ⚠️ THE PLACEHOLDER IS INERT AND ITS ID SAYS SO. `placeholderId()` is not a
+   * uuid; `isPlaceholder` is how `tasks-table.tsx` knows not to link it or hang
+   * a control off it. It is a counter now rather than the array length, because
+   * the cache keeps the row long enough for two quick adds to collide.
+   *
+   * ⚠️ AND A REFUSED CREATE NEEDS REAL ROLLBACK CODE NOW. React used to drop the
+   * placeholder for free; `onError` restores the snapshot, which is what takes
+   * a row for a task the database refused back off the screen.
+   * ------------------------------------------------------------------------
    */
-  const addRow = useOptimisticMove();
-
-  function submit() {
-    const title = draft.title.trim();
-    if (!title) return;
-
-    startTransition(async () => {
-      // Before the await: the placeholder carries the title and nothing else,
-      // because everything else on a task row is resolved server-side.
-      addRow?.({ kind: "add", title, status });
-
-      const result = await quickAddTask({
-        title,
+  const create = useMutation({
+    mutationFn: (vars: { title: string }) =>
+      createTask({
+        title: vars.title,
         status,
         assignee_id: draft.assigneeId,
         priority: draft.priority,
@@ -150,60 +169,58 @@ function useComposer({
         // The list this was typed into. Both RPCs validate it against the
         // task's department and refuse a foreign one, so this is a proposal.
         list_id: listId,
-      });
+      }),
 
-      if (!result.ok) {
-        // The draft is KEPT on failure. Everything typed into six fields is
-        // worth more than a clean slate, and the toast explains what to change.
-        toast.error(result.error);
-        return;
-      }
+    onMutate: (vars) => {
+      const snapshot = beginTaskWrite(queryClient);
+      // The placeholder carries the title and nothing else, because everything
+      // else on a task row is resolved server-side.
+      addPlaceholderRow(queryClient, { id: placeholderId(), title: vars.title, status });
 
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      // The draft is KEPT on failure. Everything typed into six fields is worth
+      // more than a clean slate, and the toast explains what to change.
+      toast.error(error.message);
+    },
+
+    onSuccess: () => {
       // Cleared only on success, and the composer stays open: adding tasks is
       // something people do in runs of five.
-      /*
-       * ⚠️ P12-09 — `router.refresh()` WAS HERE, AND THE AWAITED INVALIDATE
-       * BELOW IS WHAT REPLACED IT. Read this before putting it back.
-       *
-       * The refresh existed to HOLD THE TRANSITION OPEN. `useOptimistic` drops
-       * its value the instant the transition that set it ends, and Next resolves
-       * an action's promise BEFORE the router commits the revalidated tree — so
-       * without something pending, the value snapped back to the old one with
-       * the success toast firing in the gap. That is `ded2244`, which reverted
-       * this same removal across eighteen files in a day. The full account is
-       * the long note in `app/(app)/tasks/inline.tsx`.
-       *
-       * What changed is not the argument, it is the data path. `/tasks`,
-       * `/tasks/board` and `/tasks/[id]` all read from the cache now, so
-       * `invalidateTaskWrite` refetches the very rows this control is rendered
-       * over — and it is AWAITED, inside the same transition, which is exactly
-       * the hold the refresh was providing. One mechanism instead of two, and
-       * the route render that ran beside every click is gone.
-       *
-       * ⚠️ SO THE AWAIT IS NOT OPTIONAL AND MUST NOT BECOME A FIRE-AND-FORGET.
-       * Removing it is `ded2244` again, through a different door.
-       */
-      /*
-       * ⚠️ AWAITED, INSIDE THE TRANSITION, or the placeholder row vanishes
-       * before the real one lands — see the note above and `ded2244`.
-       *
-       * ⚠️ AND THE PARENT'S SUBTASK PANEL IS A SEPARATE KEY. A new task moves
-       * `qk.tasks()` and the rail; a new SUBTASK also moves
-       * `["task", parentId, "subtasks"]`, which is a different ROOT that
-       * `["tasks"]` cannot prefix-match however long you stare at the pair.
-       * `INVALIDATES` in `lib/query/realtime.ts` records the same trap for the
-       * same reason. Forgetting this is a subtask that does not appear on the
-       * page it was added from.
-       */
-      await Promise.all([
-        invalidateTaskWrite(queryClient),
-        parentId
-          ? invalidateTaskPart(queryClient, parentId, "subtasks")
-          : Promise.resolve(),
-      ]);
       setDraft(EMPTY);
       onDone?.();
-    });
+    },
+
+    /*
+     * ⚠️ FIRED, NOT AWAITED. Nothing on screen is waiting on it: the placeholder
+     * is in the cache and stays there until the real row replaces it.
+     *
+     * ⚠️ AND THE PARENT'S SUBTASK PANEL IS A SEPARATE KEY. A new task moves
+     * `qk.tasks()` and the rail; a new SUBTASK also moves
+     * `["task", parentId, "subtasks"]`, which is a different ROOT that
+     * `["tasks"]` cannot prefix-match however long you stare at the pair.
+     * `INVALIDATES` in `lib/query/realtime.ts` records the same trap for the
+     * same reason. Forgetting this is a subtask that does not appear on the page
+     * it was added from.
+     */
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient);
+      if (parentId) void invalidateTaskPart(queryClient, parentId, "subtasks");
+    },
+  });
+
+  const pending = create.isPending;
+
+  function submit() {
+    const title = draft.title.trim();
+    if (!title) return;
+
+    create.mutate({ title });
   }
 
   return { draft, set, submit, pending };

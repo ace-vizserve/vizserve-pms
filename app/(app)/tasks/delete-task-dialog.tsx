@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
-import { useOptimisticMove } from "./optimistic-move";
 import { Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -19,8 +18,13 @@ import {
 import { formatDuration } from "@/lib/dates";
 
 import { invalidateTaskWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { beginTaskWrite, cancelTaskRefetches, dropTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
 import { deleteTask, taskDeleteImpact, type TaskDeleteImpact } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const removeTask = fromAction(deleteTask);
 
 /**
  * P7-19 — deleting an internal task, with the damage named first.
@@ -57,19 +61,15 @@ export function DeleteTaskDialog({
   const [impact, setImpact] = useState<TaskDeleteImpact | null>(null);
   const [error, setError] = useState<string | null>(null);
   /*
-   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   * P12-06 — THE CACHE, AND SINCE P12-09 THE ONLY MECHANISM.
    *
    * This dialog is shared: the detail header, every list row and every board
-   * card can open it. `/tasks/[id]` reads `qk.task(id)` from the cache now, so a
-   * delete has to invalidate; `/tasks` and `/tasks/board` still read their rows
-   * from the cache too since P12-07, so P12-09 took the `router.refresh()` out:
-   * one mechanism, not two. The AWAITED invalidate is what holds the optimistic
-   * removal across the settle — see the note at the call site, and
-   * `lib/query/invalidate.ts` for what `ded2244` cost.
+   * card can open it. `/tasks/[id]` reads `qk.task(id)` from the cache, and
+   * `/tasks` and `/tasks/board` have read their rows from it since P12-07, so
+   * P12-09 took the `router.refresh()` out: one mechanism, not two.
    */
   const queryClient = useQueryClient();
   const [loadingImpact, startImpact] = useTransition();
-  const [pending, startDelete] = useTransition();
 
   function show() {
     setImpact(null);
@@ -84,12 +84,75 @@ export function DeleteTaskDialog({
   }
 
   /*
-   * P11-05 — the row goes on confirm.
+   * ------------------------------------------------------------------------
+   * P12-10 — THE ROW GOES ON CONFIRM, AND THE DIALOG IS DONE WHEN THE WRITE IS.
    *
-   * Null on the task DETAIL page, where deleting navigates away and there is no
-   * list to remove anything from. Optional by construction rather than by check.
+   * ⚠️ THE REMOVAL MOVED OUT OF `OptimisticMoveContext` AND INTO THE CACHE. It
+   * used to be `removeRow?.({ kind: "remove", id })` published through a context
+   * the status groups owned, so it only existed on `/tasks` — the board and a
+   * subtask row got nothing — and it lived inside a `useOptimistic` reducer, so
+   * it survived only as long as the transition that set it. That is why
+   * `invalidateTaskWrite` had to be AWAITED here: the await WAS the hold.
+   * `a64b06c` removed the equivalent hold with nothing in its place and
+   * `ded2244` reverted it the same day across eighteen files; this is not that.
+   *
+   * `dropTaskRow` takes the row out of every cached list, board and subtask
+   * panel at once, and the cache keeps it out until the refetch confirms it — so
+   * there is nothing left to hold open and `onSettled` fires rather than awaits.
+   *
+   * ⚠️ AND A REFUSED DELETE NEEDS REAL ROLLBACK CODE NOW. React used to put the
+   * row back for free. `onError` restores the snapshot; without it the row would
+   * stay gone from a list the database still holds it in.
+   * ------------------------------------------------------------------------
    */
-  const removeRow = useOptimisticMove();
+  const remove = useMutation({
+    mutationFn: () => removeTask(taskId),
+
+    onMutate: () => {
+      const snapshot = beginTaskWrite(queryClient);
+      /*
+       * ⚠️ ARRAYS ONLY — the deleted task's OWN detail entry is left alone on
+       * purpose, because this dialog is reachable from a subtask row while the
+       * parent's page stays mounted. `onSettled` is what retires that entry. See
+       * `dropTaskRow`.
+       */
+      dropTaskRow(queryClient, taskId);
+
+      // Fired, not awaited, and AFTER the patch -- see `cancelTaskRefetches`.
+      cancelTaskRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      // The row comes back, and the dialog reopens carrying the reason.
+      if (snapshot) rollbackTaskWrite(queryClient, snapshot);
+      setError(error.message);
+      setOpen(true);
+    },
+
+    onSuccess: () => {
+      /*
+       * ⚠️ P12-08 — THE TOAST REPORTS THE WRITE, which has already happened.
+       * Scheduled after the invalidation it reported the refetch instead, and
+       * arrived up to a second late on a screen that had already moved. See
+       * `lib/query/invalidate.ts`.
+       */
+      toast.success("Task deleted");
+      onDeleted?.();
+    },
+
+    /*
+     * ⚠️ FIRED, NOT AWAITED. `qk.task(id)` is swept as well as the list views: a
+     * deleted task's own detail page may still be mounted — this dialog is
+     * reachable FROM a subtask row — and leaving a fresh copy of a deleted row
+     * in the cache is how the back button resurrects it.
+     */
+    onSettled: () => {
+      void invalidateTaskWrite(queryClient, taskId);
+    },
+  });
+
+  const pending = remove.isPending;
 
   function confirm() {
     setError(null);
@@ -98,56 +161,7 @@ export function DeleteTaskDialog({
     // already gone reads as the delete not having worked.
     setOpen(false);
 
-    startDelete(async () => {
-      removeRow?.({ kind: "remove", id: taskId });
-
-      const result = await deleteTask(taskId);
-      if (!result.ok) {
-        // React brings the row back; the dialog reopens carrying the reason.
-        setError(result.error);
-        setOpen(true);
-        return;
-      }
-
-      /*
-       * ⚠️ P12-08 — THE TOAST GOES FIRST, BEFORE ANYTHING IS AWAITED. It reports
-       * the WRITE, which has already happened; scheduled after the invalidation
-       * it reported the refetch instead, and arrived up to a second late on a
-       * screen that had already moved. See `lib/query/invalidate.ts`.
-       */
-      toast.success("Task deleted");
-
-      /*
-       * ⚠️ P12-09 — `router.refresh()` WAS HERE, AND THE AWAITED INVALIDATE
-       * BELOW IS WHAT REPLACED IT. Read this before putting it back.
-       *
-       * The refresh existed to HOLD THE TRANSITION OPEN. `useOptimistic` drops
-       * its value the instant the transition that set it ends, and Next resolves
-       * an action's promise BEFORE the router commits the revalidated tree — so
-       * without something pending, the value snapped back to the old one with
-       * the success toast firing in the gap. That is `ded2244`, which reverted
-       * this same removal across eighteen files in a day. The full account is
-       * the long note in `app/(app)/tasks/inline.tsx`.
-       *
-       * What changed is not the argument, it is the data path. `/tasks`,
-       * `/tasks/board` and `/tasks/[id]` all read from the cache now, so
-       * `invalidateTaskWrite` refetches the very rows this control is rendered
-       * over — and it is AWAITED, inside the same transition, which is exactly
-       * the hold the refresh was providing. One mechanism instead of two, and
-       * the route render that ran beside every click is gone.
-       *
-       * ⚠️ SO THE AWAIT IS NOT OPTIONAL AND MUST NOT BECOME A FIRE-AND-FORGET.
-       * Removing it is `ded2244` again, through a different door.
-       */
-      /*
-       * `qk.task(id)` is invalidated as well as the list views: a deleted task's
-       * own detail page may still be mounted — this dialog is reachable FROM a
-       * subtask row — and leaving a fresh copy of a deleted row in the cache is
-       * how the back button resurrects it.
-       */
-      await invalidateTaskWrite(queryClient, taskId);
-      onDeleted?.();
-    });
+    remove.mutate();
   }
 
   const blocked = impact?.ok === false;
