@@ -82,7 +82,10 @@ type Recorded = {
   limit?: number;
 };
 
-type Response = { data?: unknown; error?: { message: string } | null; count?: number };
+// ⚠️ `count: number | null` — P12-01. A `head: true` read that FAILED comes back
+// with a null count, and a fake that could only express a number could not stage
+// the exact case `count ?? 0` used to swallow.
+type Response = { data?: unknown; error?: { message: string } | null; count?: number | null };
 
 function fakeSupabase(responses: Record<string, Response>) {
   const calls: Recorded[] = [];
@@ -328,7 +331,7 @@ describe("listWaitingOnYou — the rows behind the count", () => {
       [RELIEVERS]: { data: [] },
     });
 
-    const rows = await listWaitingOnYou(supabase, leadCtx, true);
+    const { rows, error } = await listWaitingOnYou(supabase, leadCtx, true);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       id: "wk-week-1",
@@ -338,6 +341,75 @@ describe("listWaitingOnYou — the rows behind the count", () => {
       since: "2026-08-24",
       href: timesheetWeekHref("2026-08-17"),
     });
+    // Nothing failed, so the caller has no reason to hedge.
+    expect(error).toBeNull();
+  });
+
+  /**
+   * ⚠️ P12-01 — THE WRONG ZERO IN ITS LAST HIDING PLACE.
+   *
+   * `listWaitingOnYou` used to return a bare array built out of three reads
+   * whose `error` nobody destructured. `/` renders it under "Nothing awaiting
+   * your decision" and `/dashboard` under a green tick, so a broken queue read
+   * as the most reassuring sentence in the product. Two things are pinned here:
+   * the error comes back, and the rows that DID arrive still do.
+   */
+  it("RETURNS THE ERROR, and keeps the rows that survived it", async () => {
+    const { supabase } = fakeSupabase({
+      // The client queue failed; the weeks queue did not.
+      vizserve_pms_requests: { data: null, error: { message: "permission denied for table" } },
+      vizserve_pms_internal_requests: { data: [] },
+      [WEEKS]: { data: [weekRow] },
+      vizserve_pms_users: { data: [] },
+      [RELIEVERS]: { data: [] },
+    });
+
+    const { rows, error } = await listWaitingOnYou(supabase, leadCtx, true);
+
+    expect(error?.message).toBe("permission denied for table");
+    // Not emptied. A partial queue plus an admission beats either half.
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.kind).toBe("Timesheet");
+  });
+});
+
+/**
+ * P12-01 — the count's own half of the same fact.
+ *
+ * A `head: true` read that fails arrives as `{ count: null, error }`, which is
+ * exactly what `count ?? 0` turns into a quiet Tuesday. The tile on /dashboard
+ * reads `unavailable` and draws a dash instead of a zero.
+ */
+describe("countWaitingOnYou — a failed queue is not an empty one", () => {
+  it("says so when a queue could not be counted", async () => {
+    const { supabase } = fakeSupabase({
+      vizserve_pms_requests: { count: null, error: { message: "permission denied for table" } },
+      vizserve_pms_internal_requests: { data: [pending(0, "a")] },
+      [WEEKS]: { count: 2 },
+      [RELIEVERS]: { data: [] },
+    });
+
+    const waiting = await countWaitingOnYou(supabase, leadCtx, true);
+
+    expect(waiting.unavailable).toBe(true);
+    // The queues that DID come back are still counted — the total is a floor,
+    // and the flag is what stops it being read as a fact.
+    expect(waiting.total).toBe(3);
+  });
+
+  it("is not flagged when every queue came back", async () => {
+    const { supabase } = fakeSupabase({
+      vizserve_pms_requests: { count: 0 },
+      vizserve_pms_internal_requests: { data: [] },
+      [WEEKS]: { count: 0 },
+      [RELIEVERS]: { data: [] },
+    });
+
+    const waiting = await countWaitingOnYou(supabase, leadCtx, true);
+
+    // A genuine zero. Distinguishable from the one above, which is the point.
+    expect(waiting.unavailable).toBe(false);
+    expect(waiting.total).toBe(0);
   });
 });
 

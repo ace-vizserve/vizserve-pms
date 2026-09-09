@@ -37,11 +37,11 @@ export default async function UsersPage() {
   const balanceYear = currentBalanceYear(today);
 
   const [
-    { data: users, error: usersError },
-    { data: departments },
-    { data: managed },
-    { data: leaveTypes },
-    { data: allocations },
+    { data: users, error: usersReadError },
+    { data: departments, error: departmentsError },
+    { data: managed, error: managedError },
+    { data: leaveTypes, error: leaveTypesError },
+    { data: allocations, error: allocationsError },
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_users")
@@ -82,6 +82,27 @@ export default async function UsersPage() {
       .select("user_id, leave_type_id, days_allocated")
       .eq("balance_year", balanceYear),
   ]);
+
+  /*
+   * ⚠️ P12-01 — ALL FIVE READS GATE THE TABLE, NOT JUST THE STAFF LIST, AND THE
+   * REASON IS THAT THIS SCREEN SAVES WHAT IT SHOWS.
+   *
+   * The `usersError` check below was already here and already argued (see its
+   * own note). What it did not cover is the four reads that SEED THE EDITOR.
+   * `managed ?? []` and `allocations ?? []` are the current state of somebody's
+   * managed departments and this year's leave allocations; the dialog opens
+   * with them, and `saveUser`/`writeAllocations` replace the stored set with
+   * whatever the dialog holds. So a failed read did not merely display a blank
+   * — it armed a save that would have DELETED a team leader's departments or
+   * zeroed a year of entitlement, with the owner believing they had changed one
+   * checkbox. `departments` and `leaveTypes` are the pickers those same fields
+   * choose from.
+   *
+   * This is the sharp end of the whole `?? []` class: everywhere else a failed
+   * read shows too little, and here it writes too little.
+   */
+  const usersError =
+    usersReadError ?? managedError ?? allocationsError ?? departmentsError ?? leaveTypesError;
 
   // Grouped in one pass rather than a query per user — this table is the whole
   // staff list and N+1 here is a visible page load.

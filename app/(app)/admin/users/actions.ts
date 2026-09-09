@@ -62,10 +62,31 @@ async function readProfileForAudit(
 
   if (!profile) return null;
 
-  const { data: managed } = await admin
+  const { data: managed, error: managedError } = await admin
     .from("vizserve_pms_user_managed_departments")
     .select("department_id")
     .eq("user_id", userId);
+
+  /*
+   * ⚠️ P12-01 — THIS IS THE `before` SIDE OF AN AUDIT ROW, so a swallowed
+   * failure does not show somebody too little, it WRITES something untrue.
+   *
+   * `managed ?? []` on a failed read records "they managed nothing" as the
+   * prior state, and the diff then reads as though this save granted every
+   * department the form happens to hold. The audit trail is the condition
+   * P11-03 was granted on (CLAUDE.md); a row in it that misstates what changed
+   * is worse than no row.
+   *
+   * Logged rather than aborted: refusing the whole save because a side read
+   * failed is a bigger behaviour change than this sweep should make, and the
+   * write itself is unaffected. Flagged in the phase report.
+   */
+  if (managedError) {
+    console.error(
+      `[admin:users] the prior managed set for ${userId} could not be read; the audit "before" ` +
+        `may understate it — ${managedError.message}`,
+    );
+  }
 
   return {
     ...profile,

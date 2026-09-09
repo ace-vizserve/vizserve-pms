@@ -194,6 +194,27 @@ async function loadHomeSpans({
       .eq("status", "PENDING_REVIEW"),
   ]);
 
+  /*
+   * ⚠️ P12-01 — LOGGED, AND THE `?? []` BELOW SURVIVES ON PURPOSE.
+   *
+   * Both reads feed ONE array that two surfaces paint: the "Out today" widget
+   * and the three-month calendar. A failure in either currently renders as
+   * "Nobody is out today" over an empty grid — a claim about the company, not
+   * an absence of data — and until this log there was no trace of it anywhere.
+   *
+   * It is a log rather than an `unavailable` state because saying so properly
+   * means giving `loadHomeSpans` a return shape and teaching both
+   * `leave-calendar.tsx` and the widget to render it, which is a larger change
+   * than this sweep should make on its own. It is written up as a
+   * recommendation instead. What is NOT acceptable is the third option, which
+   * was silence.
+   */
+  const leaveFailure = approvedLeave.error ?? myPendingLeave.error ?? null;
+
+  if (leaveFailure) {
+    console.error(`[home] the leave calendar could not be read — ${leaveFailure.message}`);
+  }
+
   // ----------------------------------------------------------------- leave
   //
   // P7-42. `type_label` arrives null for two reasons this page cannot tell apart
@@ -286,12 +307,22 @@ async function WaitingCell({
    * policy through `vizserve_pms_manages_department`, and restating it would
    * imply the policy is optional.
    */
-  const waiting = await listWaitingOnYou(supabase, context, isApprover, 5);
+  const { rows: waiting, error: waitingError } = await listWaitingOnYou(
+    supabase,
+    context,
+    isApprover,
+    5,
+  );
 
   // ---------------------------------------------------------------- waiting
   // Built by `listWaitingOnYou`. Nothing left to do here but count it — the
   // shaping that used to live in this block is shared with /dashboard.
-  const waitingTotal = waiting.length;
+  //
+  // ⚠️ P12-01 — `null` WHEN A QUEUE COULD NOT BE READ, and `waiting.length` is
+  // then a floor rather than a total. `CellHead` draws a dash for null; a badge
+  // reading "0" over a queue nobody could read is the wrong zero this whole
+  // module exists to prevent.
+  const waitingTotal = waitingError ? null : waiting.length;
 
   return (
     <Cell span="sm:col-span-3" label="Waiting on you">
@@ -310,7 +341,31 @@ async function WaitingCell({
         }
       />
       <CellBody>
-        {waiting.length === 0 ? (
+        {/*
+          ⚠️ P12-01 — THE FAILED READ GETS ITS OWN SENTENCE, and it goes FIRST.
+
+          "Nothing awaiting your decision" is written to reassure, and that is
+          exactly what makes it dangerous over a queue that failed to load: a
+          lead holding four leave requests and three handed-in weeks reads it,
+          believes it and closes the tab. The rows that DID arrive are still
+          listed underneath — a partial queue plus an admission is more than
+          either half — so this is a line above them rather than a takeover.
+
+          `role="status"`, not `alert`: this is a cell on a landing page, and
+          the whole surface is furniture people scan. Same call as the rail.
+        */}
+        {waitingError ? (
+          <p
+            role="status"
+            className="border-b px-4 py-2 text-2xs text-balance text-muted-foreground"
+          >
+            Some of your queue couldn&rsquo;t be loaded, so this may be short.
+            Open <span className="font-medium text-foreground">Approvals</span> for the
+            full list.
+          </p>
+        ) : null}
+
+        {waiting.length === 0 && !waitingError ? (
           <p className="m-auto px-4 py-3 text-center text-xs text-balance text-muted-foreground">
             Nothing awaiting your decision. Requests appear here the moment somebody files
             one.
@@ -350,7 +405,7 @@ async function YoursToMoveCell({
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   context: Awaited<ReturnType<typeof requireAuthContext>>;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<{ count: number | null; error: { message: string } | null }>;
 }) {
   const [myTasks, myOpenTasks] = await Promise.all([
     myTasksPromise,
@@ -367,11 +422,25 @@ async function YoursToMoveCell({
       .limit(5),
   ]);
 
+  /*
+   * ⚠️ P12-01 — NULL, NOT `?? 0`, AND A DIFFERENT SENTENCE UNDER IT.
+   *
+   * A failed head count arrives as `{ count: null, error }` and a failed row
+   * read as `{ data: null, error }`. Both used to end in a fallback, so the
+   * cell drew a `0` badge over "Nothing is assigned to you right now. Work
+   * lands here when a Team Leader approves a request…" — a complete, plausible,
+   * reassuring account of a broken query, told to somebody holding twenty-two
+   * open tasks. That is the exact pair of bugs `lib/query/read.ts` was written
+   * for, in the place a person looks first every morning.
+   */
+  const myTasksCount = myTasks.error ? null : (myTasks.count ?? 0);
+  const openRows = myOpenTasks.data ?? [];
+
   return (
     <Cell span="sm:col-span-3" label="Your work">
       <CellHead
         title="Yours to move"
-        count={myTasks.count ?? 0}
+        count={myTasksCount}
         tone="brand"
         action={
           <Link
@@ -384,13 +453,25 @@ async function YoursToMoveCell({
         }
       />
       <CellBody>
-        {(myOpenTasks.data ?? []).length === 0 ? (
+        {myOpenTasks.error ? (
+          // The honest short sentence, not the PostgREST code — this is a cell
+          // on a landing page and the message belongs in the dev log, which now
+          // has it. Same posture the rail takes in `nav-projects.tsx`.
+          <p
+            role="status"
+            className="m-auto px-4 py-3 text-center text-xs text-balance text-muted-foreground"
+          >
+            Your work couldn&rsquo;t be loaded. This is a fault, not an empty
+            plate — open <span className="font-medium text-foreground">My tasks</span> to
+            try again.
+          </p>
+        ) : openRows.length === 0 ? (
           <p className="m-auto px-4 py-3 text-center text-xs text-balance text-muted-foreground">
             Nothing is assigned to you right now. Work lands here when a Team Leader
             approves a request or hands you something directly.
           </p>
         ) : (
-          (myOpenTasks.data ?? []).map((task) => {
+          openRows.map((task) => {
             // Overdue matters on live work only, and every one of these
             // is live by construction — the query excludes both
             // terminal statuses.
@@ -433,7 +514,7 @@ async function StatStripSection({
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   context: Awaited<ReturnType<typeof requireAuthContext>>;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<{ count: number | null; error: { message: string } | null }>;
 }) {
   const [unread, myTasks, myQa] = await Promise.all([
     supabase
@@ -450,13 +531,29 @@ async function StatStripSection({
       .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
   ]);
 
+  /*
+   * ⚠️ P12-01 — THREE COUNTS, THREE INDEPENDENT ANSWERS, AND `?? 0` GAVE THE
+   * SAME ONE TO A FAILURE AND TO A QUIET WEEK.
+   *
+   * `head: true` ships no rows, so a successful count arrives as
+   * `{ count: n, data: null }` and a failed one as `{ count: null, error }` —
+   * the fallback could not tell them apart, and three zeroes side by side is
+   * the most confident thing this page says. Each is folded separately rather
+   * than as a group: two counts that came back are still worth reading, and
+   * blanking all three because one failed would hide facts we have.
+   *
+   * `StatStrip` draws a dash with `count unavailable` for null.
+   */
+  const countOf = (result: { count: number | null; error: unknown }) =>
+    result.error ? null : (result.count ?? 0);
+
   return (
     <StatStrip
       span="sm:col-span-2"
       stats={[
-        { label: "My tasks", value: myTasks.count ?? 0, href: "/tasks?view=mine" },
-        { label: "On my QA", value: myQa.count ?? 0, href: "/tasks?view=qa" },
-        { label: "Unread", value: unread.count ?? 0, href: "/inbox" },
+        { label: "My tasks", value: countOf(myTasks), href: "/tasks?view=mine" },
+        { label: "On my QA", value: countOf(myQa), href: "/tasks?view=qa" },
+        { label: "Unread", value: countOf(unread), href: "/inbox" },
       ]}
     />
   );
@@ -577,6 +674,24 @@ async function LeaveCalendarSection({
       .gte("end_date", gridFrom)
       .order("start_date"),
   ]);
+
+  /*
+   * ⚠️ P12-01 — LOGGED, for the same reason and with the same limits as the
+   * leave reads in `loadHomeSpans`.
+   *
+   * A failed holiday read paints a public holiday as an ordinary working day on
+   * the shared calendar; a failed event read hides the offsite. Neither can be
+   * told from "there is nothing on in September" by looking, and neither left a
+   * trace. The grid keeps rendering — a calendar missing its decorations is
+   * still a calendar — but the fact now reaches the dev log.
+   */
+  const calendarFailure = holidayRows.error ?? eventRows.error ?? null;
+
+  if (calendarFailure) {
+    console.error(
+      `[home] the calendar's holidays or events could not be read — ${calendarFailure.message}`,
+    );
+  }
 
   const holidays: Holiday[] = (holidayRows.data ?? []).map((row) => ({
     date: row.holiday_date,

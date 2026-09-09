@@ -21,6 +21,15 @@ import { cn } from "@/lib/utils";
  * `value` is `number | null`. Null renders an em dash rather than a zero,
  * because "not built yet" and "genuinely zero" are different facts and a
  * placeholder zero is a lie people act on.
+ *
+ * ⚠️ P12-01 GAVE NULL ITS SECOND MEANING: THE NUMBER COULD NOT BE READ. Same
+ * dash, same reason — a count query that failed comes back `null`, and folding
+ * it into a zero tells an approver with seven things waiting that they are
+ * clear. The dash now carries `count unavailable` for a screen reader, because
+ * a dash on its own is state conveyed by a glyph, which this app does not do.
+ * The three-state rule is the one `FolderCounts` in
+ * `components/app-shell/nav-projects.tsx` follows: null is UNKNOWN, 0 is
+ * nothing, n is the number.
  */
 export function StatTile({
   label,
@@ -80,7 +89,14 @@ export function StatTile({
           value === null && "text-foreground-faint",
         )}
       >
-        {value === null ? "—" : value}
+        {value === null ? (
+          <>
+            <span aria-hidden>—</span>
+            <span className="sr-only">count unavailable</span>
+          </>
+        ) : (
+          value
+        )}
       </p>
 
       {hint ? <p className="truncate text-xs text-muted-foreground">{hint}</p> : null}

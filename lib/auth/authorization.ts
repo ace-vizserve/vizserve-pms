@@ -239,7 +239,7 @@ export const resolveAuth = cache(
      * failures as `error` on the result rather than rejecting, so `Promise.all`
      * has nothing to reject on and the error posture is exactly as it was.
      */
-    const [attempt, { data: managed }] = await Promise.all([
+    const [attempt, { data: managed, error: managedError }] = await Promise.all([
       supabase
         .from("vizserve_pms_users")
         .select(`${PROFILE_COLUMNS}, is_dept_admin`)
@@ -310,6 +310,34 @@ export const resolveAuth = cache(
     // there. It used to be awaited here, serially, for no reason: it depends
     // only on `userId`, and nothing between there and here can change what it
     // holds.
+    /*
+     * ⚠️ P12-01 — A FAILED MANAGED-DEPARTMENTS READ IS AN INVISIBLE DEMOTION,
+     * and until this log there was nothing anywhere saying it had happened.
+     *
+     * `managed ?? []` is the fallback this whole sweep is about, in the one
+     * place with the widest blast radius in the app: `managedDepartmentIds` is
+     * what `canAccessDepartment` reads, so an empty one turns a team leader
+     * into somebody who leads nothing — an empty approvals queue, an empty
+     * department tree, buttons that vanish — for one request, with every
+     * screen rendering its own reassuring empty state over the top.
+     *
+     * The empty array STAYS. Denying on a transient failure would lock the
+     * company out of a live app, which is the failure mode `deptAdminColumnMissing`
+     * above exists to avoid, and it cannot GRANT anything: an empty set is
+     * strictly the narrowest scope there is. What it must not be is silent.
+     *
+     * A stronger answer — carrying an `unavailable` flag on `AuthContext` so a
+     * screen can say "we could not work out what you lead" — is a change to the
+     * shape every authenticated page reads, and is deliberately left as a
+     * recommendation rather than smuggled into a sweep.
+     */
+    if (managedError) {
+      console.error(
+        `[auth] managed departments for ${userId} could not be read; scoping to none for this ` +
+          `request — ${managedError.message}`,
+      );
+    }
+
     return {
       context: {
         userId: profile.id,

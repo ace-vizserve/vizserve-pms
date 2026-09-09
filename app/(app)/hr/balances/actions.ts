@@ -150,11 +150,30 @@ async function writeAllocations(
   // rather than by row id: the ids are meaningless to anyone reading the log,
   // and an upsert can mint new ones, which would make a before/after diff look
   // like a wholesale replacement of untouched rows.
-  const { data: existing } = await admin
+  const { data: existing, error: existingError } = await admin
     .from("vizserve_pms_leave_balances")
     .select("leave_type_id, days_allocated")
     .eq("user_id", userId)
     .eq("balance_year", year);
+
+  /*
+   * ⚠️ P12-01 — SAME CLASS AS `loadUserBefore` IN admin/users/actions.ts: this
+   * `?? []` feeds an audit row's `before`, not a screen.
+   *
+   * A failed read records "they had no allocations", so a correction of one
+   * number is written up as an entitlement appearing from nothing — and the
+   * no-op guard below then fires on a comparison against the wrong baseline, so
+   * a save that changed nothing is logged as a change. Both make the trail say
+   * something that did not happen.
+   *
+   * Logged, not aborted: the upsert itself is correct either way.
+   */
+  if (existingError) {
+    console.error(
+      `[hr:balances] the prior allocations for ${userId} (${year}) could not be read; the audit ` +
+        `"before" may understate them — ${existingError.message}`,
+    );
+  }
 
   const before = Object.fromEntries(
     (existing ?? []).map((row) => [row.leave_type_id, row.days_allocated]),

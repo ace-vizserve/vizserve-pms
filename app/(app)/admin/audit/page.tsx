@@ -162,7 +162,12 @@ export default async function AuditPage({
     }
   }
 
-  const [{ data: entries, count, error }, { data: people }, { data: leaveTypes }, { data: departments }] =
+  const [
+    { data: entries, count, error: entriesError },
+    { data: people, error: peopleError },
+    { data: leaveTypes },
+    { data: departments },
+  ] =
     await Promise.all([
       query,
       // Every user, active or not. A deactivated account's past actions are
@@ -175,6 +180,29 @@ export default async function AuditPage({
       supabase.from("vizserve_pms_leave_types").select("id, label"),
       supabase.from("vizserve_pms_departments").select("id, name"),
     ]);
+
+  /*
+   * ⚠️ P12-01 — A FAILED NAME LOOKUP USED TO ATTRIBUTE EVERY HUMAN ACTION TO
+   * "SYSTEM", ON THE ONE SCREEN IN THIS APP READ FOR ACCOUNTABILITY.
+   *
+   * The chain: `people ?? []` builds an empty `lookup`, so
+   * `lookup[entry.actor_id]` is undefined, so `actor_name` is null — and the
+   * "Who" column renders null as an italic "System", deliberately, because an
+   * entry with no actor genuinely IS the cron or a client acting through a
+   * token. The comment on that cell says the two "must not look the same on a
+   * page people read for accountability". A broken names query made them
+   * identical for every row at once.
+   *
+   * So `peopleError` joins the gate rather than being logged past. A trail
+   * whose actors are all wrong is not a degraded trail, it is a misleading one,
+   * and `QueryError` says which — "This is a fault, not an empty list".
+   *
+   * The other two lookups are NOT in the gate on purpose: they only translate
+   * ids appearing INSIDE payloads, so losing them shows a raw uuid in a detail
+   * dialog. That is visibly unfinished rather than quietly wrong, and it does
+   * not deserve to take the page down.
+   */
+  const error = entriesError ?? peopleError;
 
   const actors = people ?? [];
 

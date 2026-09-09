@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ArrowRight, CircleCheck } from "lucide-react";
+import { ArrowRight, CircleCheck, TriangleAlert } from "lucide-react";
 
 import { Chip, type ChipTone } from "@/components/status-badge";
 import { cn } from "@/lib/utils";
@@ -37,11 +37,28 @@ export function NeedsYou({
   overflow,
   overflowHref,
   empty,
+  unavailable = false,
 }: {
   rows: NeedsYouRow[];
   /** How many did not fit. Zero draws nothing. */
   overflow: number;
   overflowHref: string;
+  /**
+   * P12-01 — ⚠️ ONE OF THE THREE READS BEHIND THIS SECTION FAILED, so `rows` is
+   * a floor rather than the queue.
+   *
+   * It exists because of what this section draws when `rows` is empty: a green
+   * tick and a specific, reassuring sentence. Over a failed read that is not a
+   * missing feature, it is an active lie — the tick says "you are clear" to
+   * somebody who may be holding an overdue task, a QA review and three
+   * approvals. `empty` cannot carry the fact on its own, because the tick beside
+   * it would still be green.
+   *
+   * Optional and defaulting to false, so nothing that already renders this
+   * changes. Mirrors `NavProjects`'s prop of the same name — same phase, same
+   * argument, same word.
+   */
+  unavailable?: boolean;
   /**
    * The true sentence for an empty queue, from `emptyNeedsYouMessage`.
    *
@@ -62,12 +79,36 @@ export function NeedsYou({
         ) : null}
       </div>
 
-      {rows.length === 0 ? (
+      {/*
+        ⚠️ P12-01 — THE FAILURE LINE COMES FIRST AND KEEPS ITS ROWS.
+
+        Whatever did arrive is still listed below it. A partial queue plus "some
+        of this could not be read" is strictly more use than either the rows
+        alone (which understate) or a takeover error panel (which throws away
+        work somebody can act on right now).
+
+        `role="status"` rather than `alert`: this is one section of a summary
+        page, and the app's rule is that furniture does not interrupt. No retry
+        control — a server render is what refreshes this, and a button that only
+        does sooner what a reload does is a control that teaches people to press
+        it.
+      */}
+      {unavailable ? (
+        <p
+          role="status"
+          className="flex items-center gap-2 border-b bg-warning-subtle/40 px-3.5 py-2 text-2xs text-muted-foreground"
+        >
+          <TriangleAlert className="size-3.5 shrink-0 text-warning" aria-hidden />
+          Part of this queue couldn&rsquo;t be read, so it may be short.
+        </p>
+      ) : null}
+
+      {rows.length === 0 && !unavailable ? (
         <p className="flex items-center gap-2 px-3.5 py-6 text-xs text-muted-foreground">
           <CircleCheck className="size-4 shrink-0 text-success" aria-hidden />
           {empty}
         </p>
-      ) : (
+      ) : rows.length === 0 ? null : (
         <ul className="divide-y">
           {rows.map((row) => (
             <li key={row.key}>

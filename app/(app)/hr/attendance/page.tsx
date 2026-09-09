@@ -76,9 +76,9 @@ export default async function AttendancePage({
   const [
     { data: people, error: peopleError },
     { data: entries, error: entriesError },
-    { data: leave },
-    { data: holidays },
-    { data: overtime },
+    { data: leave, error: leaveError },
+    { data: holidays, error: holidaysError },
+    { data: overtime, error: overtimeError },
     { data: departments },
     settings,
   ] = await Promise.all([
@@ -123,7 +123,31 @@ export default async function AttendancePage({
     loadAppSettings(),
   ]);
 
-  const error = peopleError ?? entriesError;
+  /*
+   * ⚠️ P12-01 — ALL FIVE READS, BECAUSE FOUR OF THEM ARE PART OF THE DEFINITION
+   * OF "ABSENT" AND ONLY TWO WERE CHECKED.
+   *
+   * The paragraph this page prints says it out loud: "Absent means a working
+   * day with no time-in AND NO APPROVED LEAVE", and a day counts "only if it is
+   * a weekday AND NOT A HOLIDAY". Both of those clauses were being evaluated
+   * against `?? []`.
+   *
+   *   * a failed LEAVE read marks everybody who was legitimately away as absent
+   *   * a failed HOLIDAY read counts Rizal Day as a working day, so the whole
+   *     company is absent on it
+   *   * a failed OVERTIME read removes the allowance that stops a long day
+   *     reading as undertime
+   *
+   * None of those produce an empty screen. They produce a FULL one, with
+   * numbers, that HR reads as evidence about individual people — which is worse
+   * than an empty list, because there is nothing about it to disbelieve. It is
+   * the same failure the header warns about from the other end: the definition
+   * of "absent" is a decision, so every input to it has to be known.
+   *
+   * `departments` stays out: it fills a name column, and a missing department
+   * label changes no figure.
+   */
+  const error = peopleError ?? entriesError ?? leaveError ?? holidaysError ?? overtimeError;
   const dates = datesIn(month);
   const holidayDates = new Set((holidays ?? []).map((row) => row.holiday_date));
   const departmentName = new Map((departments ?? []).map((row) => [row.id, row.name]));

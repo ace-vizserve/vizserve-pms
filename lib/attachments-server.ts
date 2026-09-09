@@ -118,11 +118,34 @@ export async function uploadPendingAttachment(input: {
   const ip = clientIp(headerList);
 
   if (ip) {
-    const { count } = await admin
+    const { count, error: countError } = await admin
       .from("vizserve_pms_pending_attachments")
       .select("id", { count: "exact", head: true })
       .eq("ip", ip)
       .gte("created_at", new Date(Date.now() - 3_600_000).toISOString());
+
+    /*
+     * ⚠️ P12-01 — THIS LIMITER FAILS OPEN, DELIBERATELY, AND SAYS SO.
+     *
+     * A failed head count arrives as `{ count: null }`, so `count ?? 0` reads
+     * as "this address has uploaded nothing in the last hour" and every request
+     * is waved through while the read is broken. That is the same conflation of
+     * failure and legal-zero the rest of this sweep is about, in a place where
+     * nobody is looking at a screen to notice it.
+     *
+     * Failing OPEN is still the right call and is not an accident of the `??`:
+     * this is the public form, a limiter that refuses on a transient database
+     * fault turns a hiccup into "VizServe will not accept my files", and the
+     * real defences below — the MIME allowlist, the size cap, the magic-byte
+     * sniff and the form's own open/active check — do not depend on this count.
+     * What was missing is that the window was invisible.
+     */
+    if (countError) {
+      console.error(
+        `[attachments] the per-IP upload count failed; the hourly limit is not being enforced ` +
+          `for this request — ${countError.message}`,
+      );
+    }
 
     if ((count ?? 0) >= UPLOADS_PER_IP_PER_HOUR) {
       return { ok: false, error: "Too many uploads from here in the last hour." };

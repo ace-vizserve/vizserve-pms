@@ -36,7 +36,8 @@ export async function HomeNewTaskAction() {
 
   const myDepartment = me?.primary_department_id ?? null;
 
-  const [{ data: lists }, { data: colleagues }] = await Promise.all([
+  const [{ data: lists, error: listsError }, { data: colleagues, error: colleaguesError }] =
+    await Promise.all([
     // RLS scopes this to the reader's own department — no filter needed here,
     // and adding one would imply the policy were optional.
     supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
@@ -51,8 +52,27 @@ export async function HomeNewTaskAction() {
           .eq("is_active", true)
           .neq("id", context.userId)
           .order("full_name")
-      : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
-  ]);
+      : Promise.resolve({
+          data: [] as { id: string; full_name: string }[],
+          // ⚠️ Present so the branch STATES that nothing failed, rather than
+          // leaving `error` undefined and relying on it being falsy by luck.
+          error: null,
+        }),
+    ]);
+
+  /*
+   * ⚠️ P12-01 — LOGGED. The pickers degrade to empty, which in this dialog
+   * reads as "your department has no lists" and "you have no colleagues" —
+   * plausible sentences, and both wrong. The dialog stays open and usable (a
+   * personal task needs neither), so this is a log rather than a state: giving
+   * `NewPersonalTaskDialog` an unavailable mode is Phase 3's work, and it is
+   * one of the components that phase replaces.
+   */
+  const pickerFailure = listsError ?? colleaguesError ?? null;
+
+  if (pickerFailure) {
+    console.error(`[home] the quick-task pickers could not be read — ${pickerFailure.message}`);
+  }
 
   return (
     <NewPersonalTaskDialog

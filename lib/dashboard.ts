@@ -110,8 +110,16 @@ export const NEEDS_YOU_LIMIT = 8;
  * different claims and only one of them is safe to make. Saying how much open
  * work exists alongside it is what stops an empty queue reading as an empty
  * system.
+ *
+ * ⚠️ `null` MEANS THE COUNT COULD NOT BE READ — P12-01, and it is the state
+ * this function did not have. The caller passed `count ?? 0`, so a failed head
+ * count produced "and you have no open tasks": the strongest claim in the
+ * sentence, made out of nothing, on the page people open to find out what they
+ * owe. The clause is simply dropped instead — "nothing is due" is still true of
+ * the queue that WAS read, and nothing is asserted about the rest.
  */
-export function emptyNeedsYouMessage(openTasks: number): string {
+export function emptyNeedsYouMessage(openTasks: number | null): string {
+  if (openTasks === null) return "Nothing is due.";
   if (openTasks === 0) return "Nothing is due, and you have no open tasks.";
   return openTasks === 1
     ? "Nothing is due. One task is open."

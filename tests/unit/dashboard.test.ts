@@ -122,4 +122,16 @@ describe("emptyNeedsYouMessage", () => {
   it("distinguishes an empty queue from an empty system", () => {
     expect(emptyNeedsYouMessage(0)).toBe("Nothing is due, and you have no open tasks.");
   });
+
+  /**
+   * ⚠️ P12-01 — the count is `number | null`, and null is UNKNOWN.
+   *
+   * The caller used to pass `count ?? 0`, so a failed head count produced the
+   * zero sentence: "and you have no open tasks", the strongest claim in the
+   * line, asserted out of a broken query. The clause is dropped instead.
+   */
+  it("claims nothing about open work when the count could not be read", () => {
+    expect(emptyNeedsYouMessage(null)).toBe("Nothing is due.");
+    expect(emptyNeedsYouMessage(null)).not.toContain("no open tasks");
+  });
 });

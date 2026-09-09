@@ -50,7 +50,20 @@ export function CellHead({
   children,
 }: {
   title: string;
-  count?: number;
+  /**
+   * ⚠️ THREE STATES, NOT TWO — P12-01.
+   *
+   *   undefined  this cell has no count. Nothing is drawn, as before.
+   *   null       the count COULD NOT BE READ. A dimmed dash, with
+   *              `count unavailable` for a screen reader.
+   *   number     the figure, including a real 0.
+   *
+   * `null` exists because the reads behind these cells used to end in `?? 0`,
+   * so a failed query wore the same badge a quiet morning does. That is the
+   * bug the whole phase is named for — see `FolderCounts` in
+   * `components/app-shell/nav-projects.tsx`, which is the pattern this follows.
+   */
+  count?: number | null;
   tone?: "neutral" | "warning" | "info" | "brand";
   action?: React.ReactNode;
   children?: React.ReactNode;
@@ -68,7 +81,15 @@ export function CellHead({
     // row — and at 14px the heading still outweighs the 12px content under it.
     <div className="flex shrink-0 items-center gap-2 border-b px-3.5 py-1.5">
       <h2 className="text-sm font-semibold tracking-[-0.012em]">{title}</h2>
-      {typeof count === "number" ? (
+      {count === null ? (
+        <span className="inline-flex h-5.5 shrink-0 items-center rounded-sm border border-border px-1.5 text-2xs font-semibold text-muted-foreground/60">
+          {/* The dash is decoration and the words are the fact — the standing
+              rule in this app. A screen reader announcing "em dash" would be
+              worse than silence. */}
+          <span aria-hidden>—</span>
+          <span className="sr-only">count unavailable</span>
+        </span>
+      ) : typeof count === "number" ? (
         <span
           className={cn(
             "inline-flex h-5.5 shrink-0 items-center rounded-sm border px-1.5 text-2xs font-semibold tabular-nums",
@@ -109,7 +130,15 @@ export function StatStrip({
   stats,
   span = "",
 }: {
-  stats: { label: string; value: number; href?: string }[];
+  /**
+   * ⚠️ `value: number | null` — P12-01. Null is UNKNOWN, not zero.
+   *
+   * All three of these are `head: true` counts, and a failed one comes back
+   * `{ count: null, error }`. `?? 0` rendered that as three confident zeroes:
+   * "My tasks 0 · On my QA 0 · Unread 0", which is the single most believable
+   * wrong thing this page could say. Same rule as `CellHead` above.
+   */
+  stats: { label: string; value: number | null; href?: string }[];
   span?: string;
 }) {
   return (
@@ -122,8 +151,20 @@ export function StatStrip({
               {/* text-xl, not 2xl. These are three small counts, and at 30px
                   they were the loudest thing on a page whose actual subject is
                   the work underneath them. */}
-              <span className="text-xl font-semibold tracking-[-0.02em] tabular-nums">
-                {stat.value}
+              <span
+                className={cn(
+                  "text-xl font-semibold tracking-[-0.02em] tabular-nums",
+                  stat.value === null && "text-foreground-faint",
+                )}
+              >
+                {stat.value === null ? (
+                  <>
+                    <span aria-hidden>—</span>
+                    <span className="sr-only">count unavailable</span>
+                  </>
+                ) : (
+                  stat.value
+                )}
               </span>
             </>
           );

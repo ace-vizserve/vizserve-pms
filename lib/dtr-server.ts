@@ -66,6 +66,33 @@ export const loadPunchState = cache(async (userId: string): Promise<PunchState> 
     loadAppSettings(),
   ]);
 
+  /*
+   * ⚠️ P12-01 — THE TWO READS THAT DECIDE WHAT THE PANEL SAYS, LOGGED.
+   *
+   * `entries.data ?? []` is the punch state: a failed read produces no row for
+   * today, which renders as "Not timed in" to somebody who timed in at 08:52.
+   * `overtime.data ?? []` is the day's approved extension, so a failure asks
+   * them to file a correction for overtime they already filed a request for.
+   *
+   * The fallbacks SURVIVE rather than throwing, and that is a considered
+   * position: this component renders on `/`, `/dashboard` and `/dtr`, there is
+   * no `error.tsx` anywhere in this app (checked), so a throw here is a blank
+   * page on three screens for one card. The panel also fails safe on its own —
+   * `vizserve_pms_punch` refuses a second time-in, so the worst case is a
+   * button that produces a readable error rather than a duplicate row.
+   *
+   * What was missing was any trace at all. This is the one class the SPA
+   * migration's Phase 1 exists to remove: a failed read that is
+   * indistinguishable from a legal empty one, everywhere, silently.
+   */
+  const punchFailure = entries.error ?? overtime.error ?? null;
+
+  if (punchFailure) {
+    console.error(
+      `[dtr] the punch state for ${userId} could not be read — ${punchFailure.message}`,
+    );
+  }
+
   const rows = entries.data ?? [];
   const todayRow = rows.find((row) => row.work_date === today) ?? null;
   const yesterdayRow = rows.find((row) => row.work_date === yesterday) ?? null;
@@ -156,5 +183,22 @@ export const loadWorkingDay = cache(async (userId: string): Promise<boolean> => 
 
   // `data === true` rather than a truthiness test: the RPC returns `null` on
   // error, and `null` is not "yes".
-  return workingDay.data === true && (leaveToday.count ?? 0) === 0;
+  //
+  /*
+   * ⚠️ P12-01 — `leaveToday.count === 0`, NOT `(leaveToday.count ?? 0) === 0`,
+   * AND THAT WAS A REAL BUG rather than a tidy-up.
+   *
+   * The header two paragraphs up says FALSE ON ANY DOUBT, and the first half
+   * honoured it — a failed RPC returns `null`, and `null` is not `true`. The
+   * second half did the exact opposite. A failed count also arrives as `null`,
+   * and `?? 0` turned "we could not find out whether you are on leave" into
+   * "you have no leave today" — the one answer that lets the reminder fire. So
+   * the sentence the whole function is built around was inverted by a fallback
+   * sitting four characters away from it.
+   *
+   * A successful read with no rows is a genuine `0` and still passes. A failure
+   * is `null` and now fails, which is silence on a day somebody is away —
+   * exactly what the comment promised.
+   */
+  return workingDay.data === true && leaveToday.count === 0;
 });

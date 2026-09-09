@@ -193,8 +193,37 @@ async function loadWeek({
   const weekStatus = (thisWeekRow.data?.status ?? null) as TimesheetWeekStatus | null;
 
   const [lastWeekEntries, lastWeekRow] = lastWeek;
+
+  /*
+   * ⚠️ P12-01 — THE NAG NEEDS BOTH READS TO HAVE SUCCEEDED, AND ONE OF THEM WAS
+   * PREVIOUSLY ALLOWED TO FAIL INTO AN ACCUSATION.
+   *
+   * `!lastWeekRow.data` is "there is no submitted week", and a failed read is
+   * also `data: null` — so a broken query told somebody who handed last week in
+   * on Friday that they never had. The comment on the query above names this
+   * exact failure mode as "the same libel the team grid was fixed for"; it was
+   * guarding against leave, and the fallback let it in through the other door.
+   *
+   * The entries half already failed quiet (`count ?? 0` is `0`, and `> 0` is
+   * false), which is the right direction for a nag and is now stated rather
+   * than accidental.
+   */
+  const lastWeekReadable = !lastWeekEntries.error && !lastWeekRow.error;
+
   const lastWeekUnsubmitted =
-    (lastWeekEntries.count ?? 0) > 0 && !lastWeekRow.data ? lastMonday : null;
+    lastWeekReadable && (lastWeekEntries.count ?? 0) > 0 && !lastWeekRow.data
+      ? lastMonday
+      : null;
+
+  // The logged total is a FLOOR when its read failed — the strip renders it as
+  // "3h 20m logged", which reads as a fact about the week rather than about the
+  // query. Not silenced here (the strip has no unknown state and giving it one
+  // is a larger change than this sweep), but no longer invisible.
+  if (thisWeekEntries.error) {
+    console.error(
+      `[dashboard] this week's logged minutes could not be read — ${thisWeekEntries.error.message}`,
+    );
+  }
 
   return { weekMinutes, weekStatus, thisWeekRow, lastWeekUnsubmitted, schedule };
 }
@@ -218,7 +247,7 @@ async function loadNeedsYou({
   monday: string;
   week: ReturnType<typeof loadWeek>;
 }) {
-  const [myWork, qaQueue, waitingRows, { weekStatus }] = await Promise.all([
+  const [myWork, qaQueue, waitingQueue, { weekStatus }] = await Promise.all([
     /*
      * I2 — the member's own work as ROWS, with both dates.
      *
@@ -256,6 +285,31 @@ async function loadNeedsYou({
   ]);
 
   // ------------------------------------------------------------------ I2
+  /*
+   * ⚠️ P12-01 — THE THREE READS THAT FILL THIS QUEUE, CHECKED.
+   *
+   * All three used to end in a fallback, and the section they feed draws a
+   * GREEN TICK over `emptyNeedsYouMessage` when it is empty. That is the worst
+   * possible rendering of a failure in this app: a positive, specific,
+   * reassuring "Nothing is due, and you have no open tasks" — assembled out of
+   * two broken queries and a third that also failed — on the one screen people
+   * open to find out what they owe.
+   *
+   * Reported rather than thrown: there is no `error.tsx` anywhere in this app,
+   * so a throw inside this boundary is a blank dashboard rather than a section
+   * that admits it. The rows that DID arrive are still shown.
+   */
+  const unavailable = Boolean(myWork.error ?? qaQueue.error ?? waitingQueue.error);
+
+  if (unavailable) {
+    console.error(
+      `[dashboard] the "needs you" queue is incomplete — ` +
+        (myWork.error ?? qaQueue.error ?? waitingQueue.error)?.message,
+    );
+  }
+
+  const waitingRows = waitingQueue.rows;
+
   const rows: (NeedsYouRow & { kindKey: NeedsYouKind })[] = [];
 
   /*
@@ -338,7 +392,7 @@ async function loadNeedsYou({
   const shown = rows.slice(0, NEEDS_YOU_LIMIT);
   const overflow = Math.max(0, rows.length - NEEDS_YOU_LIMIT);
 
-  return { shown, overflow };
+  return { shown, overflow, unavailable };
 }
 
 /**
@@ -413,7 +467,7 @@ async function StatTiles({
   supabase: Awaited<ReturnType<typeof createClient>>;
   context: Awaited<ReturnType<typeof requireAuthContext>>;
   isApprover: boolean;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<{ count: number | null; error: { message: string } | null }>;
 }) {
   const [waiting, unread, myQa, myTasks] = await Promise.all([
     // Three queues, not one — see `countWaitingOnYou`. This tile counted client
@@ -435,7 +489,30 @@ async function StatTiles({
     myTasksPromise,
   ]);
 
-  const showQa = (myQa.count ?? 0) > 0;
+  /*
+   * ⚠️ P12-01 — A FAILED HEAD COUNT IS NOT A ZERO, and on this row of tiles the
+   * difference is the whole point of the row.
+   *
+   * `head: true` ships no rows, so success is `{ count: n, data: null }` and
+   * failure is `{ count: null, error }`. `?? 0` collapsed them, and every tile
+   * here is written on the assumption that its number is a fact: "Waiting on
+   * you" is what an approver checks before closing the tab, and the QA tile is
+   * HIDDEN at zero — so a broken read did not merely understate it, it removed
+   * the tile entirely and left no evidence there had ever been one.
+   *
+   * `StatTile` already renders `value={null}` as a dash; P12-01 gave that dash
+   * `count unavailable` for a screen reader. `waiting.unavailable` comes off
+   * `countWaitingOnYou`, which reads its three queues' errors now.
+   */
+  const countOf = (result: { count: number | null; error: unknown }) =>
+    result.error ? null : (result.count ?? 0);
+
+  const myQaCount = countOf(myQa);
+
+  // ⚠️ SHOWN WHEN THE COUNT IS UNKNOWN. `myQaCount > 0` would hide the tile on a
+  // failed read, which is the zero-shaped lie one step worse: not a wrong
+  // number but no number at all, on a queue somebody may well be holding.
+  const showQa = myQaCount === null || myQaCount > 0;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -448,8 +525,12 @@ async function StatTiles({
       {isApprover ? (
         <StatTile
           label="Waiting on you"
-          value={waiting.total}
-          hint={waiting.breakdown || "Nothing awaiting your decision"}
+          value={waiting.unavailable ? null : waiting.total}
+          hint={
+            waiting.unavailable
+              ? "Your queue couldn't be read"
+              : waiting.breakdown || "Nothing awaiting your decision"
+          }
           icon={<ClipboardCheck />}
           tone="warning"
           href="#needs-you"
@@ -459,7 +540,7 @@ async function StatTiles({
 
       <StatTile
         label="My tasks"
-        value={myTasks.count ?? 0}
+        value={countOf(myTasks)}
         hint="Assigned to you, still open"
         icon={<ListChecks />}
         tone="info"
@@ -472,7 +553,7 @@ async function StatTiles({
       {showQa ? (
         <StatTile
           label="Waiting on my QA"
-          value={myQa.count ?? 0}
+          value={myQaCount}
           hint="Work that needs your review"
           icon={<ShieldCheck />}
           tone="info"
@@ -483,7 +564,7 @@ async function StatTiles({
 
       <StatTile
         label="Inbox"
-        value={unread.count ?? 0}
+        value={countOf(unread)}
         hint="Unread notifications about your work"
         icon={<Bell />}
         href="/inbox"
@@ -499,16 +580,23 @@ async function NeedsYouSection({
   myTasks: myTasksPromise,
 }: {
   needsYou: ReturnType<typeof loadNeedsYou>;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<{ count: number | null; error: { message: string } | null }>;
 }) {
-  const [{ shown, overflow }, myTasks] = await Promise.all([needsYou, myTasksPromise]);
+  const [{ shown, overflow, unavailable }, myTasks] = await Promise.all([
+    needsYou,
+    myTasksPromise,
+  ]);
 
   return (
     <NeedsYou
       rows={shown}
       overflow={overflow}
       overflowHref="/tasks?view=mine"
-      empty={emptyNeedsYouMessage(myTasks.count ?? 0)}
+      // ⚠️ P12-01 — `null` when the count itself failed. `emptyNeedsYouMessage`
+      // says "and you have no open tasks" at zero, which is the sentence that
+      // turns an unread count into a claim about somebody's workload.
+      empty={emptyNeedsYouMessage(myTasks.error ? null : (myTasks.count ?? 0))}
+      unavailable={unavailable}
     />
   );
 }
@@ -529,10 +617,21 @@ async function TeamSubmitted({
         .from("vizserve_pms_timesheet_weeks")
         .select("user_id, status")
         .eq("week_start", monday)
-    : Promise.resolve({ data: null })
+    : Promise.resolve({ data: null, error: null })
   );
 
   // ------------------------------------------------------------------ I4
+  /*
+   * ⚠️ P12-01 — "0 weeks handed in" IS A CLAIM ABOUT THE TEAM, and a failed
+   * read used to make it. The sentence sits in a band a lead skims on a Monday
+   * to decide whether to chase anybody; told a wrong zero, they chase everybody.
+   */
+  if (teamWeeks.error) {
+    console.error(`[dashboard] the team's week statuses could not be read — ${teamWeeks.error.message}`);
+
+    return <>Handed-in weeks couldn&rsquo;t be counted.</>;
+  }
+
   const teamRows = teamWeeks.data ?? [];
   const teamSubmitted = teamRows.filter(
     (row) => row.status === "SUBMITTED" || row.status === "APPROVED",

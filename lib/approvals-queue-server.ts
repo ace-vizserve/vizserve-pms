@@ -47,6 +47,27 @@ export type WaitingOnYou = {
   total: number;
   /** `"2 client · 4 internal · 3 weeks"`, omitting the empty ones. */
   breakdown: string;
+  /**
+   * P12-01 — ⚠️ AT LEAST ONE OF THE QUEUES COULD NOT BE READ, so `total` is a
+   * FLOOR rather than a fact and must not be rendered as a plain number.
+   *
+   * The header above already argues that a zero here is not a soft failure: it
+   * does not say "nothing has loaded", it says THERE IS NOTHING TO DO, and
+   * people act on it by closing the tab. Until this flag existed that argument
+   * had no way of reaching the screen — `client.count ?? 0` folded a failed
+   * head count into the same zero a quiet Tuesday produces.
+   *
+   * The caller decides what to draw. `StatTile` takes `value={null}` and shows
+   * a dash with `count unavailable` beside it, which is the same three-state
+   * rule `FolderCounts` in `components/app-shell/nav-projects.tsx` follows —
+   * null is UNKNOWN, 0 is nothing to do, n is the number.
+   *
+   * ⚠️ IT COVERS THE THREE APPROVER QUEUES ONLY. The reliever read
+   * (`listOwedAsReliever`) still degrades to an empty set by design — see the
+   * note there — and logs. Widening this to cover it means giving that function
+   * an error channel, and its other caller is `/approvals`.
+   */
+  unavailable: boolean;
 };
 
 const EMPTY: WaitingOnYou = {
@@ -55,6 +76,7 @@ const EMPTY: WaitingOnYou = {
   weeks: 0,
   total: 0,
   breakdown: "",
+  unavailable: false,
 };
 
 /**
@@ -124,16 +146,31 @@ export function waitingOnMe(
  * A failure comes back as an empty set, which understates the queue rather than
  * inventing one. Swallowed here because the caller renders somebody else's
  * approvals list around it and a thrown read would take the whole page.
+ *
+ * ⚠️ P12-01 — SWALLOWED, BUT NO LONGER SILENT. The empty set stays (there is no
+ * error boundary above `/` or `/dashboard`, so a throw here is a blank page for
+ * a decoration on somebody else's queue), and that is the whole reason it has to
+ * be logged: an understated queue is a member being told they owe nobody cover,
+ * which is the wrong zero this module's header is about. Without the log there
+ * was nothing anywhere — not on screen, not in the dev log — saying it had
+ * happened, and working out whether one empty queue was real took a service-role
+ * query against the database.
  */
 export async function listOwedAsReliever(
   supabase: SupabaseClient<Database>,
   userId: string,
 ): Promise<Set<string>> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from("vizserve_pms_internal_request_relievers")
     .select("request_id")
     .eq("reliever_id", userId)
     .is("decision", null);
+
+  if (error) {
+    console.error(
+      `[approvals-queue] the cover queue for ${userId} could not be read — ${error.message}`,
+    );
+  }
 
   return new Set((data ?? []).map((row) => row.request_id));
 }
@@ -408,6 +445,26 @@ export async function countWaitingOnYou(
       .neq("user_id", userId),
   ]);
 
+  /*
+   * ⚠️ P12-01 — THE ERRORS ARE READ NOW, and the `?? 0` below survives only
+   * because this flag rides beside it.
+   *
+   * The old code destructured nothing but `count` and `data`. A failed head
+   * count arrives as `{ count: null, error }`, so `client.count ?? 0` produced
+   * exactly the figure a quiet day produces and the tile said "Waiting on you:
+   * 0" — the sentence this whole module's header is about, restored by the
+   * fallback that was supposed to be a convenience.
+   *
+   * The counts are still summed rather than abandoned: two queues that DID come
+   * back are a real floor, and the caller says the total is not vouched for
+   * rather than pretending it has nothing to show.
+   */
+  const failure = client.error ?? internal.error ?? weeks.error ?? null;
+
+  if (failure) {
+    console.error(`[approvals-queue] a queue count failed — ${failure.message}`);
+  }
+
   const counts = {
     client: client.count ?? 0,
     // P9-04. Counted in TypeScript because the rule is a four-way switch on the
@@ -418,6 +475,7 @@ export async function countWaitingOnYou(
 
   return {
     ...counts,
+    unavailable: failure !== null,
     total: counts.client + counts.internal + counts.weeks,
     // Only the live ones. "2 client · 0 internal · 0 weeks" spends three
     // quarters of the line saying nothing.
@@ -467,13 +525,28 @@ export type WaitingRow = {
   href: string;
 };
 
+/**
+ * ⚠️ P12-01 — RETURNS ITS ERROR, exactly as `listPendingTimesheetWeeks` above
+ * does and for the same reason spelled out there.
+ *
+ * This used to return a bare `WaitingRow[]`, built out of three reads whose
+ * `error` nobody destructured. `/` renders it under "Nothing awaiting your
+ * decision. Requests appear here the moment somebody files one." and
+ * `/dashboard` renders it under a green tick — two of the most reassuring
+ * sentences in the product, drawn over a queue nobody could read. A person
+ * holding four leave requests and three handed-in weeks was told they were
+ * clear, and there was nothing on screen or in the log to say otherwise.
+ *
+ * The rows that DID arrive are still returned beside the error. A partial queue
+ * plus "some of this could not be loaded" is strictly more than either half.
+ */
 export async function listWaitingOnYou(
   supabase: SupabaseClient<Database>,
   context: Pick<AuthContext, "userId" | "role" | "managedDepartmentIds">,
   isApprover: boolean,
   /** Per queue, not in total. Five each is enough to fill any list that shows them. */
   perQueue = 5,
-): Promise<WaitingRow[]> {
+): Promise<{ rows: WaitingRow[]; error: { message: string } | null }> {
   const userId = context.userId;
 
   // P9-01. Read for everybody, before the approver gate — a reliever named on
@@ -484,7 +557,7 @@ export async function listWaitingOnYou(
 
   // Short-circuited on purpose: only a non-approver can trip this guard, so an
   // approver never waits on the reliever read before the batch starts.
-  if (!isApprover && (await owedPromise).size === 0) return [];
+  if (!isApprover && (await owedPromise).size === 0) return { rows: [], error: null };
 
   // ⚠️ IN THE BATCH, as in `countWaitingOnYou`. Nothing in the four queries
   // below filters on `owed`; it is spent on the guard above and on `waitingOnMe`
@@ -501,7 +574,13 @@ export async function listWaitingOnYou(
           // bottom nobody reaches, and the bottom is the part that has been waiting.
           .order("submitted_at", { ascending: true })
           .limit(perQueue)
-      : { data: null },
+      : // ⚠️ `error: null` RIDES ALONG, and it is not decoration. A
+        // non-approver has no client queue to fail at reading, so the branch
+        // that skips the query must report "nothing went wrong" rather than
+        // leaving the property off — `client.error` is read below, and an
+        // absent one would type as `undefined` and read as falsy by luck
+        // rather than by statement.
+        { data: null, error: null },
 
     /*
      * ⚠️ P9-04 — `approval_stage` and `department_id` are here for
@@ -536,6 +615,22 @@ export async function listWaitingOnYou(
     supabase.from("vizserve_pms_users").select("id, full_name"),
   ]);
 
+  /*
+   * ⚠️ P12-01 — THE FOUR READS THAT DECIDE WHETHER A ROW EXISTS, and the one
+   * that only decides what it is called.
+   *
+   * `client`, `internal` and `weeks` ARE the queue: a failure in any of them
+   * removes rows, so it is reported. `people` is a name lookup — a failure
+   * there costs "A colleague" instead of a name on a row that is still there,
+   * still linked and still workable, so it is deliberately not part of the
+   * error and does not turn a readable queue into "couldn't load".
+   */
+  const error = client.error ?? internal.error ?? weeks.error ?? null;
+
+  if (error) {
+    console.error(`[approvals-queue] a queue could not be listed — ${error.message}`);
+  }
+
   const nameOf = new Map((people.data ?? []).map((row) => [row.id, row.full_name]));
 
   /**
@@ -566,7 +661,7 @@ export async function listWaitingOnYou(
     return formatDate(row.work_date);
   };
 
-  return [
+  const rows: WaitingRow[] = [
     ...(client.data ?? []).map((request) => ({
       id: `req-${request.id}`,
       kind: "Client",
@@ -614,4 +709,6 @@ export async function listWaitingOnYou(
       href: week.href,
     })),
   ];
+
+  return { rows, error };
 }
