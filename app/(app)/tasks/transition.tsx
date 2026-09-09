@@ -19,7 +19,7 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { isRichTextEmpty } from "@/lib/rich-text";
 import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/tasks";
 
-import { invalidateDerived } from "@/lib/query/invalidate";
+import { invalidateTaskWrite } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
 import { beginTaskWrite, cancelTaskRefetches, patchTaskRow, rollbackTaskWrite } from "@/lib/query/task-cache";
 
@@ -181,14 +181,21 @@ export function useTaskTransition({
      * waiting for.
      */
     /*
-     * ⚠️ DERIVED DATA ONLY. The row is already patched and confirmed; what a
-     * move changes that the patch cannot know is the history row it writes and
-     * the rail's counts. Invalidating the row instead refetched the list — and
-     * re-rendered every row on the page over a patch that was already right.
+     * ⚠️ TANSTACK'S DOCUMENTED SHAPE: invalidate what the write affected, on
+     * BOTH paths, so the optimistic guess is always reconciled against the
+     * server. Fired, never awaited -- awaiting is what used to hold the
+     * interaction open, and with `onMutate` there is no transition whose end
+     * could drop a value.
+     *
+     * It was briefly narrowed to derived data only, on the theory that
+     * refetching a row we had just patched was what felt slow. It was not: a
+     * production build is fast, and the lag was `npm run dev`. Narrow
+     * invalidation trades a real guarantee -- the screen reconciles with the
+     * database after every write -- for a saving that did not exist.
      */
     onSettled: () => {
       setActive(null);
-      invalidateDerived(queryClient, taskId);
+      void invalidateTaskWrite(queryClient, taskId);
     },
   });
 
