@@ -384,10 +384,19 @@ export async function fetchFilingOptions(
      * ⚠️ THE ONE READ HERE THAT IS ALLOWED TO FAIL QUIETLY, AND IT KEEPS THAT.
      * The balance is a HINT beside a field; the page it decorates is somebody's
      * approval queue, and that must render whether or not the entitlement
-     * figures came back. `null` rather than `[]` is what makes the dialog able
-     * to say "we could not load these" instead of "you have no days left" —
-     * which is the wrong zero this whole phase is about, in the one place it
-     * would stop somebody filing legitimate leave.
+     * figures came back.
+     *
+     * ⚠️ AND IT IS NOT A SILENT-EMPTY IN DISGUISE, WHICH IS WORTH SAYING ON A
+     * PHASE THAT REMOVED A DOZEN OF THEM. `new-request-dialog.tsx` renders the
+     * line as `{balance ? … : null}` and its own prop doc states the rule:
+     * "Empty when the summary could not be read, which renders as nothing rather
+     * than as zero — a hint that is missing is better than one that is wrong."
+     * There is no number on screen to be wrong about, and nothing here refuses a
+     * request that would overdraw anyway — entitlement is HR's call.
+     *
+     * `null` rather than `[]` so the SHAPE still records which happened. A caller
+     * that ever wants to say "we could not load these" has the fact to hand;
+     * today none does, deliberately.
      */
     client.rpc("vizserve_pms_leave_balance_summary", {}),
 

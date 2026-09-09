@@ -11,12 +11,14 @@ import { richTextToPlainText } from "@/lib/rich-text";
 import { requestDetail } from "./request-summary";
 
 /**
- * P7-64 — the columns and the section wrapper, in a client component.
+ * P7-64 — the columns and the section wrapper.
  *
- * `cell` is a function and a function cannot cross the RSC boundary, so this
- * moved out of `page.tsx` when `DataTable` went onto `@tanstack/react-table`.
- * `empty` stays a prop: a rendered element crosses the wire fine, only the
- * closures could not.
+ * `cell` is a function and a function cannot cross the RSC boundary, which is
+ * why this moved out of `page.tsx` when `DataTable` went onto
+ * `@tanstack/react-table`. Since P12-19 the whole page is a client tree and that
+ * constraint no longer binds — the file stays split because two sections
+ * rendering one set of columns is a good reason on its own, and `empty` stays a
+ * prop for the same reason it always was.
  *
  * ⚠️ `urlSort` IS SET. The query takes `APPROVALS_PAGE_SIZE + 1` rows, so the
  * page does not hold the whole queue and the browser must not pretend to sort
@@ -152,10 +154,12 @@ export function Section({
         rows={rows}
         getRowKey={(request) => request.id}
         urlSort
-        /* What the server orders BOTH sections by when the URL says nothing.
+        /* What the query orders BOTH sections by when the URL says nothing.
            Display only — it puts the arrow on the right column instead of
-           leaving every header neutral, and it is the same pair `page.tsx`
-           builds its queries from. */
+           leaving every header neutral, and it is the same pair
+           `DEFAULT_APPROVAL_SORT` in `lib/query/fetchers/approvals.ts` builds
+           the two `.order()`s from. Change one and change the other or it goes
+           back to lying about it. */
         defaultSort={{ key: "submitted", dir: "desc" }}
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}

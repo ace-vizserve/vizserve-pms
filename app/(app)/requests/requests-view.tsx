@@ -148,6 +148,14 @@ export function RequestsView({
     queryFn: () => fetchClientForms(browserClient()),
   });
 
+  /*
+   * ⚠️ A FAILED FORM READ IS NOT AN EMPTY FORM LIST, AND IT SHOWS IN TWO
+   * PLACES. The filter dropdown would offer nothing — which reads as "your
+   * department publishes no forms" — and every row's Reference cell would draw
+   * an em dash where the form's name belongs, on the column somebody scans to
+   * tell one request from another. The rows themselves are a different key and
+   * are unaffected, so this degrades rather than replacing the page.
+   */
   const forms = formsQuery.data ?? [];
   const formNames = Object.fromEntries(forms.map((form) => [form.id, form.name]));
   const formSlaMinutes = Object.fromEntries(forms.map((form) => [form.id, form.sla_minutes]));
@@ -229,6 +237,12 @@ export function RequestsView({
             />
 
             <RequestFilters forms={forms} />
+
+            {formsQuery.isError ? (
+              <p role="alert" className="text-xs text-warning">
+                Form names and the form filter are unavailable: {formsQuery.error.message}
+              </p>
+            ) : null}
           </>
         }
         /* The readout describes the RESULTS, beside the filters that produced

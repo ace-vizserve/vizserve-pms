@@ -129,8 +129,24 @@ export function ApprovalDetailView({
     queryFn: () => fetchApprovalChain(browserClient(), requestId),
   });
 
+  /*
+   * ⚠️ AN EMPTY CHAIN AND A BROKEN ONE ARE NOT THE SAME THING, AND ON THIS PAGE
+   * THE DIFFERENCE IS WHO A REQUEST IS WAITING FOR.
+   *
+   * `relievers` drives stage 1 of the rail ("0 of 3 answered"), `decisions`
+   * drives stages 2 and 3, and `waitingOnMe` reads the reliever rows to decide
+   * whether to draw the decision panel at all. A failed read would render as
+   * "nobody has been asked and nobody has signed" — on a request three people
+   * are actually holding — and would withhold the Approve button from a reliever
+   * the request is waiting on.
+   *
+   * So the failure is carried and said out loud beside the rail rather than
+   * folded into an empty array. The rest of the page still renders: the request
+   * row is a different key and is correct whether or not this one landed.
+   */
   const relievers = chainQuery.data?.relievers ?? [];
   const decisions = chainQuery.data?.decisions ?? [];
+  const chainError = chainQuery.isError ? chainQuery.error : null;
 
   /*
    * P8-05 — WHICH TIMESHEET WEEKS THIS LEAVE TOUCHES.
@@ -602,6 +618,18 @@ export function ApprovalDetailView({
                 marker states with distinct shapes, and an `sr-only` word for
                 each, so none of this is carried by colour. */}
             <StageTrack steps={chainSteps} className="p-0" />
+
+            {/* ⚠️ SAID BESIDE THE RAIL, NOT INSTEAD OF THE PAGE. The stops above
+                are derived from `approval_stage` on the request row, which came
+                back fine — what is missing is WHO, WHEN and WHAT THEY WROTE.
+                Replacing the whole card would hide a stage number that is
+                correct; saying nothing would present "0 of 0 answered" as a
+                fact. */}
+            {chainError ? (
+              <p role="alert" className="text-xs text-warning">
+                Could not load who has signed or who is covering: {chainError.message}
+              </p>
+            ) : null}
 
             {/*
               WHAT EACH SIGNATORY WROTE.
