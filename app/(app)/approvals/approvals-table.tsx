@@ -5,7 +5,7 @@ import Link from "next/link";
 import { DataTable, type Column } from "@/components/data-table";
 import { useColumnVisibility } from "@/components/data-table-columns";
 import { InternalStatusBadge, InternalTypeBadge } from "@/components/status-badge";
-import type { InternalRequestRow } from "@/lib/database.types";
+import type { InternalRequestListRow } from "@/lib/schemas/internal-approvals";
 import { formatDate } from "@/lib/dates";
 import { richTextToPlainText } from "@/lib/rich-text";
 import { requestDetail } from "./request-summary";
@@ -23,7 +23,17 @@ import { requestDetail } from "./request-summary";
  * it. The server reads `?sort=` and orders in Postgres.
  */
 
-export type Row = InternalRequestRow & { vizserve_pms_users: { full_name: string } | null };
+/**
+ * ⚠️ THE CONTRACT'S SHAPE, NOT A GENERATED-TYPE INTERSECTION (P12-19). It was
+ * `InternalRequestRow & { vizserve_pms_users: … }` — the DB row type crossed
+ * with a hand-written embed — which described a shape nothing checked the actual
+ * rows against. `internalRequestListRowSchema` is parsed on arrival, so a
+ * renamed column is a sentence rather than an `undefined` that renders as
+ * "Invalid Date – Invalid Date" where somebody's leave span belongs.
+ *
+ * The name is kept because this file and its callers say it.
+ */
+export type Row = InternalRequestListRow;
 
 function columnsFor(
   showWho: boolean,

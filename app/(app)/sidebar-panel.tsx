@@ -111,21 +111,27 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
        * Phase 2 was meant to retire this once `use-realtime-refresh.ts` stopped
        * calling `router.refresh()`; P12-09 was meant to retire it once the task
        * controls stopped too. Both have happened and this stays, for a reason
-       * that is now about the OTHER domains rather than about tasks: lists,
-       * requests, approvals, the inbox, the timesheet and DTR all write through
-       * Server Actions that touch the query cache nowhere, and the rail carries
-       * a count for every one of them. The full argument is above
+       * that is about the domains still unconverted rather than about tasks.
+       *
+       * ⚠️ THAT LIST SHRANK IN PHASE 4 AND IS NOW TWO MODULES. It read "lists,
+       * requests, approvals, the inbox, the timesheet and DTR"; P12-16 through
+       * P12-19 converted the first four, and each of their writes invalidates
+       * `qk.snapshot()` from `onSettled` directly. What is left is the TIMESHEET
+       * and DTR (Phase 5) and forms and reports (Phase 6) — those still write
+       * through Server Actions that touch the query cache nowhere, and the rail
+       * carries a count for the first pair. The full argument is above
        * `useRefetchOnServerRender` in `sidebar-snapshot.tsx`; it goes when the
-       * last of those is converted (Phases 4–6).
+       * last of them is converted.
        *
        * Those mutations end in `revalidatePath`, which re-runs this server
        * component. That is how the rail's counts move for them. A re-render does
        * NOT remount a client component, so the query inside one would never be
-       * asked to refetch and approving a request would leave the count where it
+       * asked to refetch and submitting a week would leave the count where it
        * was. A fresh number on every server render is the signal;
        * `useRefetchOnServerRender` turns it into one invalidation. No timer, no
-       * poll — and after P12-09 a task click does not produce one at all,
-       * because nothing re-renders this component any more.
+       * poll — and after Phase 4 a task click, a list rename, a Gate 1 decision
+       * and a read receipt produce none at all, because nothing re-renders this
+       * component for any of them any more.
        *
        * ⚠️ `react-hooks/purity` IS SUPPRESSED HERE, DELIBERATELY AND EXACTLY
        * ONCE. The rule is right about client components: an impure call during

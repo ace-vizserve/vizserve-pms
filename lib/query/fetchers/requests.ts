@@ -12,6 +12,7 @@ import {
   requestFormSchema,
   requestLinkedTaskSchema,
   requestListRowSchema,
+  personNameSchema,
   reviewCandidateSchema,
   reviewListSchema,
   type RequestAttachment,
@@ -222,7 +223,7 @@ export async function fetchRequestsPage(
     rows,
     total: count ?? 0,
     reviewerNames: Object.fromEntries(
-      parseAll(reviewCandidateSchema.omit({ role: true }), reviewers, "reviewers").map((person) => [
+      parseAll(personNameSchema, reviewers, "reviewers").map((person) => [
         person.id,
         person.full_name,
       ]),
@@ -446,7 +447,7 @@ export async function fetchRequestOutcome(
     decisions,
     task,
     names: Object.fromEntries(
-      parseAll(reviewCandidateSchema.omit({ role: true }), people, "people").map((person) => [
+      parseAll(personNameSchema, people, "people").map((person) => [
         person.id,
         person.full_name,
       ]),

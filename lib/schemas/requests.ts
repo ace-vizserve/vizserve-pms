@@ -227,6 +227,22 @@ export const requestLinkedTaskSchema = z.object({
 
 export type RequestLinkedTask = z.infer<typeof requestLinkedTaskSchema>;
 
+/**
+ * An id and a name — the reviewer column, and the three people the decision card
+ * can mention.
+ *
+ * ⚠️ ITS OWN SCHEMA RATHER THAN A `.omit()` OFF `reviewCandidateSchema`. It was
+ * that briefly and it is the wrong coupling: these are two reads with two column
+ * lists, and the day the PIC picker needs a fourth column the two-column read
+ * would start failing to parse and take the queue down with it.
+ */
+export const personNameSchema = z.object({
+  id: z.uuid(),
+  full_name: z.string(),
+});
+
+export type PersonName = z.infer<typeof personNameSchema>;
+
 /** A department member who could be PIC, with the role the picker shows. */
 export const reviewCandidateSchema = z.object({
   id: z.uuid(),

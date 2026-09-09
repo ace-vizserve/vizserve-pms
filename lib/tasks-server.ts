@@ -75,88 +75,18 @@ export const fetchJoinedTaskIdSet = cache(async (userId: string): Promise<Set<st
  */
 export { MINE_COLUMN } from "@/lib/schemas/tasks";
 
-/**
- * P9-01 — the tasks somebody could hand over to a reliever.
+/*
+ * ⚠️ `fetchHandoverTasks` MOVED TO `lib/query/fetchers/approvals.ts` IN P12-19,
+ * WITH THE CLIENT AS A PARAMETER AND NOTHING ELSE CHANGED.
  *
- * "Could hand over" is `vizserve_pms_is_on_task` — PIC, QA, or a row in
- * `vizserve_pms_task_assignees` — minus anything already finished.
+ * It had exactly one caller — `/approvals` — and that page is a client tree now.
+ * This module opens with `import "server-only"`, so the import would have been a
+ * build error by design; the same reason `MINE_COLUMN` moved out above.
  *
- * ⚠️ TWO QUERIES, AND THE REASON IS THE BUG THIS REPLACES.
- *
- * The first version built one `or(...)` fragment containing every joined task
- * id. A PostgREST filter travels in the URL, and one real user has 444 rows in
- * `vizserve_pms_task_assignees` — a 16,542-character query string. The request
- * did not return a PostgREST error, it did not return 414; `fetch` itself
- * failed. The page did `data ?? []` and rendered "You have no open tasks to
- * hand over" to somebody with 22 of them.
- *
- * So NOTHING VARIABLE-LENGTH GOES IN A FILTER. Both queries below carry one
- * uuid each, whatever the person's history looks like, and the join table is
- * reached through an `!inner` embed rather than by listing its ids.
- *
- * ⚠️ RETURNS ITS ERROR. Every other read in this file degrades to an empty
- * array on failure, deliberately — they WIDEN a set the caller already has. This
- * one IS the set, and an empty one is a sentence telling somebody they have no
- * work to hand over. That is the wrong zero `lib/approvals-queue-server.ts`
- * exists to prevent, in a new place, and it is exactly how this shipped broken.
+ * Everything that made it worth reading travelled with it: the two fixed-length
+ * queries (a filter carrying 444 joined task ids was a 16,542-character URL that
+ * `fetch` refused outright, and `?? []` rendered it as "you have no open tasks
+ * to hand over" to somebody with 22), the `!inner` embed, the merge, and the
+ * newest-first sort with its argument. It is NOT re-exported from here, because
+ * unlike `MINE_COLUMN` it had no other importer to keep working.
  */
-export async function fetchHandoverTasks(
-  userId: string,
-): Promise<{ tasks: { id: string; title: string }[]; error: { message: string } | null }> {
-  const supabase = await createClient();
-
-  // Named once: the four statuses split two ways everywhere in this app, and a
-  // second spelling here would drift from the submit function's own test.
-  const FINISHED = "(COMPLETED,COMPLETED_NO_RESPONSE)";
-
-  const [own, joined] = await Promise.all([
-    // The two COLUMNS. Fixed-length filter, always.
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id, title, created_at")
-      .or(`assignee_id.eq.${userId},qa_assignee_id.eq.${userId}`)
-      .not("status", "in", FINISHED),
-
-    /*
-     * The JOIN TABLE, walked from its own side.
-     *
-     * `!inner` makes the embed a real inner join, so filtering the embedded
-     * status drops the parent row too — which is what keeps finished tasks out
-     * without a second pass. Reading it this way is what removes the id list
-     * from the URL entirely.
-     */
-    supabase
-      .from("vizserve_pms_task_assignees")
-      .select("vizserve_pms_tasks!inner(id, title, created_at, status)")
-      .eq("user_id", userId)
-      .not("vizserve_pms_tasks.status", "in", FINISHED),
-  ]);
-
-  const error = own.error ?? joined.error ?? null;
-
-  // A task reached both ways is one task. Somebody is routinely the PIC AND
-  // carries a `task_assignees` row for the same work.
-  const merged = new Map<string, { id: string; title: string; created_at: string }>();
-  for (const task of own.data ?? []) merged.set(task.id, task);
-  for (const row of (joined.data ?? []) as unknown as Array<{
-    vizserve_pms_tasks: { id: string; title: string; created_at: string } | null;
-  }>) {
-    if (row.vizserve_pms_tasks) merged.set(row.vizserve_pms_tasks.id, row.vizserve_pms_tasks);
-  }
-
-  /*
-   * NEWEST FIRST, and it cannot be an `.order()` now that the rows arrive from
-   * two places.
-   *
-   * Newest rather than soonest-due, because the picker shows five and lets you
-   * search for the rest: the five you most recently picked up are the five you
-   * can recognise from a title, whereas the five due soonest are as likely to
-   * be a stale deadline on something finished in all but status. Due date is
-   * the right default for a BOARD, which is a different question.
-   */
-  const tasks = [...merged.values()]
-    .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.title.localeCompare(b.title))
-    .map(({ id, title }) => ({ id, title }));
-
-  return { tasks, error: error ? { message: error.message } : null };
-}

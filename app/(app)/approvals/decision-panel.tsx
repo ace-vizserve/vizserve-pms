@@ -1,7 +1,7 @@
 "use client";
 
-import { useRouter } from "next/navigation";
-import { useOptimistic, useState, useTransition } from "react";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -10,7 +10,12 @@ import { Label } from "@/components/ui/label";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { CharacterCount } from "@/components/ui/character-count";
 import { INTERNAL_REASON_MAX } from "@/lib/schemas/internal-requests";
+import { fieldErrorsOf, fromAction } from "@/lib/query/mutate";
+import { qk } from "@/lib/query/keys";
 import { decideInternalRequest } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const sendDecision = fromAction(decideInternalRequest);
 
 /**
  * P5-08 — approve or reject.
@@ -24,13 +29,13 @@ import { decideInternalRequest } from "./actions";
  * to get a box.
  */
 export function DecisionPanel({ requestId }: { requestId: string }) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [reason, setReason] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [pending, startTransition] = useTransition();
 
   /*
-   * P11-05 — the panel answers on the click.
+   * ------------------------------------------------------------------------
+   * P11-05 / P12-19 — THE PANEL ANSWERS ON THE CLICK.
    *
    * ⚠️ IT DOES NOT PREDICT THE REQUEST'S NEW STATUS, and that distinction is
    * the point. A leave request at stage 2 that a lead approves does NOT become
@@ -39,47 +44,74 @@ export function DecisionPanel({ requestId }: { requestId: string }) {
    *
    * What is certain is that THIS person has now decided, so that is what shows:
    * the two buttons are replaced by what they chose, and the real status arrives
-   * with the action's revalidation.
+   * with the invalidation.
+   *
+   * ⚠️ SO THIS WRITE PATCHES NO CACHE ENTRY, and the absence is the design.
+   * There is nothing honest to put in `qk.approval(id)`: which branch of
+   * `vizserve_pms_decide_internal_request` ran decides the new status, and a
+   * correction rewrites a DTR row this panel cannot see. `useMutation`'s own
+   * state carries the whole prediction — which also means `onError` has nothing
+   * to roll back, and the form simply comes back carrying the reason, exactly as
+   * ending the old transition did.
+   *
+   * ⚠️ `isSuccess` IS IN `decided` AND IS NOT OPTIONAL. `isPending` goes false
+   * the instant the write returns, but this panel is unmounted by its PARENT,
+   * which stops rendering it when `qk.approval(id)` comes back no longer
+   * `PENDING_REVIEW` — a refetch `onSettled` has only just fired. The gap
+   * between those two moments is what the old `useOptimistic` was held open
+   * across `router.refresh()` to cover.
+   * ------------------------------------------------------------------------
    */
-  const [decided, setDecided] = useOptimistic<"approved" | "rejected" | null>(null);
+  const submit = useMutation({
+    mutationFn: (decision: "approved" | "rejected") =>
+      sendDecision(requestId, { decision, reason: reason.trim() || undefined }),
 
-  /*
-   * ⚠️ ASYNC, AND THE ACTION IS AWAITED INSIDE THE TRANSITION. A synchronous
-   * callback ends the transition the moment it returns, which drops the
-   * optimistic value a frame after it is set — and the visible symptom is the
-   * TOAST ARRIVING BEFORE ANYTHING ON SCREEN CHANGES, because by then the toast
-   * and the server payload are the same event. See the longer note in
-   * `app/(app)/tasks/transition.tsx`.
-   */
-  function decide(decision: "approved" | "rejected") {
-    setError(null);
+    onError: (mutationError) => {
+      /* The field message where there is one — the reason has a server-side
+         floor and this is the box it belongs beside. `fieldErrorsOf` is what
+         `ActionResult.fieldErrors` exists for. */
+      setError(fieldErrorsOf(mutationError)?.reason?.[0] ?? mutationError.message);
+      toast.error(mutationError.message);
+    },
 
-    startTransition(async () => {
-      setDecided(decision);
-
-      const result = await decideInternalRequest(requestId, {
-        decision,
-        reason: reason.trim() || undefined,
-      });
-
-      if (!result.ok) {
-        setError(result.fieldErrors?.reason?.[0] ?? result.error);
-        toast.error(result.error);
-        return;
-      }
-
+    onSuccess: (data) => {
       // Said explicitly, because the whole value of a No Time-In request is
       // that approving it CHANGED something — and the DTR is a different screen.
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
       toast.success(
-        result.data.dtrEntryId
+        data.dtrEntryId
           ? "Approved. The DTR record has been corrected."
-          : `Request ${result.data.status.toLowerCase()}.`,
+          : `Request ${data.status.toLowerCase()}.`,
       );
-    });
+    },
+
+    /*
+     * ⚠️ FIRED, NEVER AWAITED, AND FIVE ROOTS BECAUSE A DECISION REACHES FIVE
+     * PLACES. `["approval"]` is this request and every part of it — the chain
+     * gains a signature row, which is a different key from the request itself.
+     * `["approvals"]` is the queue that sent somebody here. `qk.snapshot()` is
+     * the rail's awaiting count. `qk.unread()` and `["inbox"]` because
+     * `vizserve_pms_decide_internal_request` notifies the requester, and the
+     * badge is on every page.
+     *
+     * These mirror the `revalidatePath` list the action still carries, which is
+     * how the two are kept honest against each other.
+     */
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["approval"] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+      void queryClient.invalidateQueries({ queryKey: qk.unread() });
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+    },
+  });
+
+  const pending = submit.isPending;
+  const decided =
+    submit.isPending || submit.isSuccess ? (submit.variables ?? null) : null;
+
+  function decide(decision: "approved" | "rejected") {
+    setError(null);
+    submit.mutate(decision);
   }
 
   return (

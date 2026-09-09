@@ -12,7 +12,12 @@ import { formatCellDuration } from "@/lib/schemas/timesheet";
    is erased, so this borrows the shape without pulling the module into the
    browser bundle. Borrowing it rather than restating it is the point: the row
    this table draws is the row that function defines. */
-import type { PendingWeek } from "@/lib/approvals-queue-server";
+/* ⚠️ `lib/approvals-queue`, NOT ITS `-server` TWIN. This is a `"use client"`
+   file and the twin imports `lib/auth/authorization.ts`, which is `server-only`.
+   A TYPE import is erased and would have built either way — which is exactly why
+   it is worth naming: the next person to reach for a VALUE from that module here
+   would get a build failure `tsc`, eslint and vitest are all blind to. */
+import type { PendingWeek } from "@/lib/approvals-queue";
 
 /**
  * P8 — the third approval queue, on the page that only ever showed two.

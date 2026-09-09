@@ -1,8 +1,8 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { Undo2 } from "lucide-react";
-import { useOptimistic, useState, useTransition } from "react";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { CharacterCount } from "@/components/ui/character-count";
@@ -20,7 +20,12 @@ import { toast } from "@/components/ui/toast";
 import { richTextLength } from "@/lib/rich-text";
 import { INTERNAL_REASON_MAX } from "@/lib/schemas/internal-requests";
 
+import { qk } from "@/lib/query/keys";
+import { fromAction } from "@/lib/query/mutate";
 import { withdrawInternalRequest } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const sendWithdrawal = fromAction(withdrawInternalRequest);
 
 /**
  * P9-03 — the author takes their own request back.
@@ -59,40 +64,74 @@ export function WithdrawButton({
   /** True once anybody has signed — see `canWithdraw` on the request page. */
   needsNote?: boolean;
 }) {
-  const router = useRouter();
+  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState("");
   const [error, setError] = useState<string | null>(null);
+
   /*
-   * P11-05 — the button answers on the click.
+   * ------------------------------------------------------------------------
+   * P11-05 / P12-19 — THE BUTTON ANSWERS ON THE CLICK.
    *
-   * ⚠️ IT REPLACES ITSELF RATHER THAN PREDICTING THE PAGE. The status pill,
-   * the stage rail and the whole "waiting on" paragraph are rendered by the
-   * server component around this one, and there is no honest way to reach up
-   * and repaint them from here. What is certain is that the request is being
-   * withdrawn and this control is finished — so it says so, and the page catches
-   * up with the action's revalidation.
+   * ⚠️ IT REPLACES ITSELF RATHER THAN PREDICTING THE PAGE. The status pill, the
+   * stage rail and the whole "waiting on" paragraph are rendered by the tree
+   * around this one, and there is no honest way to reach up and repaint them
+   * from here — withdrawing an APPROVED leave request undoes consequences
+   * scattered across the timesheet and the leave calendar, none of which this
+   * control can see. What is certain is that the request is being withdrawn and
+   * this control is finished, so it says so, and the page catches up with the
+   * invalidation.
    *
    * The dialog closes with it. Leaving a modal up over a decision already taken
    * reads as the button not having worked.
+   *
+   * ⚠️ `isSuccess` IS IN `withdrawing` FOR THE REASON THE DECISION PANEL GIVES:
+   * `isPending` goes false the instant the write returns, and the parent only
+   * stops rendering this once `qk.approval(id)` comes back WITHDRAWN — a refetch
+   * `onSettled` has only just fired. Without it the Withdraw button flashes back
+   * into existence under the cursor.
+   * ------------------------------------------------------------------------
    */
-  const [withdrawing, setWithdrawing] = useOptimistic(false);
+  const submit = useMutation({
+    mutationFn: () => sendWithdrawal(requestId, { note }),
 
-  const [pending, startTransition] = useTransition();
+    onMutate: () => {
+      setOpen(false);
+    },
 
-  /*
-   * ⚠️ ASYNC, AND AWAITED INSIDE THE TRANSITION. A synchronous callback ends
-   * the transition as soon as it returns, dropping the optimistic value a frame
-   * after it is set — the symptom is the toast landing before the screen
-   * changes. See `app/(app)/tasks/transition.tsx`.
-   */
+    onError: (mutationError) => {
+      /* The button comes back. The dialog is NOT reopened: the commonest
+         failure is somebody having answered seconds ago, and the toast says so
+         — reopening a confirm for an action that is no longer legal would be
+         offering it again. */
+      toast.error(mutationError.message);
+    },
+
+    onSuccess: () => toast.success("Request withdrawn."),
+
+    /* The same five roots the decision panel sweeps, and for the same reasons —
+       a withdrawal notifies whoever it was waiting on, so the inbox and the
+       badge move too. `vizserve_pms_withdraw_internal_request` sends those
+       inside the function. */
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["approval"] });
+      void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+      void queryClient.invalidateQueries({ queryKey: qk.unread() });
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+    },
+  });
+
+  const pending = submit.isPending;
+  const withdrawing = submit.isPending || submit.isSuccess;
+
   function withdraw() {
     /*
-     * The one check made before the transition, and it is a COURTESY rather
-     * than the rule. `vizserve_pms_withdraw_internal_request` refuses an empty
-     * note on this route anyway; catching it here keeps the dialog open with
-     * the cursor in the box instead of closing it, failing, and leaving a toast
-     * to explain what went wrong to somebody who can no longer see the field.
+     * The one check made before the write, and it is a COURTESY rather than the
+     * rule. `vizserve_pms_withdraw_internal_request` refuses an empty note on
+     * this route anyway; catching it here keeps the dialog open with the cursor
+     * in the box instead of closing it, failing, and leaving a toast to explain
+     * what went wrong to somebody who can no longer see the field.
      *
      * `richTextLength`, not `.trim()`: an empty editor is `<p></p>`, which is
      * seven characters of nothing.
@@ -102,27 +141,8 @@ export function WithdrawButton({
       return;
     }
 
-    startTransition(async () => {
-      setWithdrawing(true);
-      setOpen(false);
-
-      const result = await withdrawInternalRequest(requestId, { note });
-
-      if (!result.ok) {
-        // React puts the button back. The dialog is NOT reopened: the commonest
-        // failure is somebody having answered seconds ago, and the toast says
-        // so — reopening a confirm for an action that is no longer legal would
-        // be offering it again.
-        toast.error(result.error);
-        return;
-      }
-
-      /* ⚠️ Holds the transition open until the fresh data lands — without it
-         `useOptimistic` reverts the moment the action resolves. See
-         `tasks/inline.tsx` for the full account. */
-      router.refresh();
-      toast.success("Request withdrawn.");
-    });
+    setError(null);
+    submit.mutate();
   }
 
   return (

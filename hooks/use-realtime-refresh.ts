@@ -38,10 +38,15 @@ import { createClient } from "@/utils/supabase/client";
  * landed that was `/tasks`, `/tasks/board`, `/tasks/[id]` and `/requests`, and a
  * `router.refresh()` was kept here to cover them. P12-07 moved the three task
  * surfaces onto `qk.taskList` / `qk.taskBoard` / `qk.task`, so P12-09 took the
- * refresh out: they are live again, wider than before. What is left waiting for
- * a navigation is `/requests` and the inbox list, until Phase 4 puts them on
- * `qk.requests(f)` and `qk.inbox(f)` — no change here when it does. Do NOT
- * restore `router.refresh()` to close that gap; convert the page instead.
+ * refresh out: they are live again, wider than before.
+ *
+ * ⚠️ AND PHASE 4 CLOSED THE REST OF IT WITH NO CHANGE TO THIS FILE, WHICH WAS
+ * THE PREDICTION. `/requests` and the inbox list were the two surfaces still
+ * waiting for a navigation; P12-17 and P12-18 put them on `qk.inbox(f)` and
+ * `qk.requests(f)`, and the `vizserve_pms_notifications` and
+ * `vizserve_pms_requests` rows of `INVALIDATES` already named those prefixes.
+ * Both are live now. Do NOT restore `router.refresh()` for anything;
+ * convert the page instead.
  *
  * ⚠️ THE FILTER IS EVALUATED SERVER-SIDE AND RLS RUNS ON TOP OF IT. A
  * filtered-out event never leaves the database, and an event that survives the
@@ -292,17 +297,27 @@ export function useRealtimeRefresh({
      * which is the whole of P8-03. All three read from the cache now, and the
      * `vizserve_pms_tasks` row of `INVALIDATES` reaches every one of them.
      *
-     * ⚠️ TWO SURFACES STILL READ IN RSC AND KNOWINGLY LOSE THE PUSH:
-     * `/requests` (its table waits for a navigation — that page already carries
-     * this note, and Phase 4 puts it on `qk.requests(f)`, at which point the same
-     * event moves the rows with no change here) and the inbox list (same, on
-     * `qk.inbox(f)`). Their COUNTS stay live either way, because the rail
-     * observes `qk.snapshot()` and both rows carry it.
+     * ⚠️ THE TWO SURFACES THAT KNOWINGLY LOST THE PUSH HAVE IT BACK, AND THIS
+     * FILE DID NOT CHANGE TO GIVE IT TO THEM. `/requests` and the inbox list
+     * read their rows in an RSC until Phase 4; P12-17 and P12-18 moved them onto
+     * `qk.inbox(f)` and `qk.requests(f)`, which the `vizserve_pms_notifications`
+     * and `vizserve_pms_requests` rows of `INVALIDATES` already swept. A key
+     * gaining an observer is the whole of what turns an invalidation into a
+     * repaint — which is the property that made "convert the page" the right
+     * answer rather than "restore the refresh".
+     *
+     * ⚠️ ONE GAP SURVIVES AND IT IS THE DATABASE'S, NOT THIS FILE'S. A second
+     * Team Leader RETURNING or REJECTING a client request writes no task, and
+     * `vizserve_pms_requests` is deliberately not published to Realtime (a
+     * request has no `department_id`, only a `form_id`, and a Postgres Changes
+     * filter cannot join) — so nothing is published and `/requests` will not push
+     * for it. It corrects on the next navigation. Closing it means adding a
+     * NOTIFICATION on those two transitions, never widening that stream.
      *
      * The alternative was keeping a whole-route render on every event anybody
-     * receives so that two unconverted pages stay live — which is the storm
-     * P12-02 exists to stop, paid by every screen in the product. Do not restore
-     * it; convert the page instead.
+     * receives so that a couple of unconverted pages stay live — which is the
+     * storm P12-02 exists to stop, paid by every screen in the product. Do not
+     * restore it; convert the page instead.
      */
   }, [queryClient, table]);
 

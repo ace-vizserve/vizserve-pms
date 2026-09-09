@@ -3,7 +3,8 @@
 import { toast } from "@/components/ui/toast";
 import { ChevronsUpDown, Plus, X } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
 import { CharacterCount } from "@/components/ui/character-count";
@@ -45,7 +46,16 @@ import {
 import { formatDays } from "@/lib/schemas/leave-balances";
 import { toMinutes } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
+import type {
+  HandoverTask,
+  RelieverCandidate,
+} from "@/lib/schemas/internal-approvals";
+import { qk } from "@/lib/query/keys";
+import { fieldErrorsOf, fromAction } from "@/lib/query/mutate";
 import { submitInternalRequest } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const sendRequest = fromAction(submitInternalRequest);
 
 /**
  * Only what the picker needs. The server page selects the active ones, in order.
@@ -88,15 +98,18 @@ function groupByDepartment(people: RelieverCandidate[]) {
 
   return groups;
 }
-export type RelieverCandidate = {
-  id: string;
-  full_name: string;
-  department_id: string;
-  department_name: string;
-};
-
-/** One of the requester's own open tasks. */
-export type HandoverTask = { id: string; title: string };
+/*
+ * ⚠️ BOTH SHAPES ARE THE CONTRACT'S NOW, NOT LOCAL DECLARATIONS (P12-19). They
+ * were written out here and had to match, field for field, an RPC signature and
+ * a `.select()` string in a page that nothing checked them against.
+ * `lib/schemas/internal-approvals.ts` parses them on arrival — so a
+ * `department_name` the RPC stopped returning is a sentence rather than a
+ * reliever picker whose group headings are all `undefined`.
+ *
+ * The names are kept and re-exported because this file declares them and other
+ * modules import them from here.
+ */
+export type { HandoverTask, RelieverCandidate };
 
 /**
  * P9-01 — one row of the hand-over block: a person and the tasks they take.
@@ -566,7 +579,7 @@ export function NewRequestDialog({
   const needsReliever =
     type === "LEAVE" && Boolean(leaveTypes.find((option) => option.id === leaveTypeId)?.requires_reliever);
   const halfItems = Object.fromEntries(DAY_HALVES.map((half) => [half, DAY_HALF_LABELS[half]]));
-  const [pending, startTransition] = useTransition();
+  const queryClient = useQueryClient();
 
   const today = todayInAppZone();
 
@@ -672,23 +685,43 @@ export function NewRequestDialog({
      * form than on most: a leave request with three relievers and a task
      * assigned to each is a minute of work to re-enter.
      *
-     * The request itself is NOT predicted. It lands in a queue rendered by a
-     * server component elsewhere on the page, and the stage it opens at depends
-     * on the leave type (P9-03) — a placeholder row would have to guess that and
-     * would guess wrong for vacation.
+     * The request itself is NOT predicted. It lands in a queue this page renders
+     * from `qk.approvals(...)`, and the stage it opens at depends on the leave
+     * type (P9-03) — a placeholder row would have to guess that and would guess
+     * wrong for vacation. `onSettled` brings back the real one, with the right
+     * stage on it.
      */
     setOpen(false);
+    send.mutate(payload);
+  }
 
-    startTransition(async () => {
-      const result = await submitInternalRequest(payload);
+  /*
+   * ------------------------------------------------------------------------
+   * P12-19 — THE SUBMIT, AS A MUTATION.
+   *
+   * ⚠️ `onError` REOPENS THE DIALOG RATHER THAN ROLLING ANYTHING BACK, and that
+   * is the whole of its job here: nothing was written to the cache, so there is
+   * nothing to restore. `useOptimistic` had no part in this control either —
+   * what closed the dialog was a plain `setOpen(false)` and what reopened it was
+   * the error branch. Both survive unchanged.
+   *
+   * ⚠️ `fieldErrors` ARE READ, AND THEY ARE THE REASON THIS FORM NEEDS THEM.
+   * Fourteen fields across five request types, all validated by one
+   * discriminated union — "Check the form" with no field messages would leave
+   * somebody hunting. `fieldErrorsOf` is what `ActionResult.fieldErrors` exists
+   * for, and it survives the `ActionError` wrapper.
+   * ------------------------------------------------------------------------
+   */
+  const send = useMutation({
+    mutationFn: (payload: unknown) => sendRequest(payload),
 
-      if (!result.ok) {
-        setErrors(result.fieldErrors ?? {});
-        setOpen(true);
-        toast.error(result.error);
-        return;
-      }
+    onError: (error) => {
+      setErrors(fieldErrorsOf(error) ?? {});
+      setOpen(true);
+      toast.error(error.message);
+    },
 
+    onSuccess: () => {
       // P9-01. Who was actually told depends on where the request opens, and
       // saying "your department lead has been notified" about a request sitting
       // with three relievers is simply untrue.
@@ -700,8 +733,25 @@ export function NewRequestDialog({
       setErrors({});
       setRelievers([EMPTY_RELIEVER]);
       setTurnoverConfirmed(false);
-    });
-  }
+    },
+
+    /*
+     * ⚠️ FIRED, NEVER AWAITED. `["approvals"]` is the queue this dialog sits on
+     * — including the filing-options entry, whose leave BALANCES have just
+     * changed if this was leave. `qk.snapshot()` is the rail's awaiting count,
+     * and `qk.unread()` / `["inbox"]` because
+     * `vizserve_pms_submit_internal_request` notifies the approvers inside the
+     * function. The same list the action's `revalidatePath` names.
+     */
+    onSettled: () => {
+      void queryClient.invalidateQueries({ queryKey: ["approvals"] });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+      void queryClient.invalidateQueries({ queryKey: qk.unread() });
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+    },
+  });
+
+  const pending = send.isPending;
 
   return (
     <Dialog

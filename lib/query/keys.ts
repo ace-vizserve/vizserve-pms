@@ -41,6 +41,9 @@ export type TaskFilters = {
  */
 export type RequestPart = "context" | "outcome" | "review";
 
+/** The panels of an internal request page. See `qk.approvalPart`. */
+export type ApprovalPart = "chain" | "weeks";
+
 /** The panels of a task detail page, each invalidated on its own. */
 export type TaskPart =
   | "comments"
@@ -251,6 +254,22 @@ export const qk = {
   approvals: (filters: Record<string, string | undefined>) =>
     ["approvals", normalize(filters)] as const,
   approval: (id: string) => ["approval", id] as const,
+  /**
+   * P12-19 — the parts of ONE internal request that change on different
+   * schedules. Same shape and same argument as `qk.taskPart` and
+   * `qk.requestPart`; `["approval", id]` prefix-matches all of them, so a
+   * decision sweeps the lot.
+   *
+   *   * `"chain"` — the relievers and the signatures. A decision writes a row
+   *     into `vizserve_pms_approvals`, so this DOES move on every decision, and
+   *     it is split from the row because a reliever answering moves it while the
+   *     request's own columns do not change at all.
+   *   * `"weeks"` — P8-05, the timesheet weeks an approved leave touches.
+   *     Derived from dates that cannot change after submission, and read only on
+   *     a LEAVE request with both of them. Folding it into the row would refetch
+   *     it on every decision to re-learn something arithmetic.
+   */
+  approvalPart: (id: string, part: ApprovalPart) => ["approval", id, part] as const,
 
   // ── inbox ───────────────────────────────────────────────────────────────────
   /** The rail badge. Split from the list so a read receipt does not refetch it. */

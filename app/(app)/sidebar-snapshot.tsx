@@ -121,21 +121,27 @@ function withUnknownCounts(space: ProjectSpace): ProjectSpace {
  *      still true, and both now covered for tasks by (1) — your own write no
  *      longer depends on a round trip through Postgres and back over a socket.
  *
- * ⚠️ WHAT KEEPS IT ALIVE IS THE SIX DOMAINS THAT HAVE NOT BEEN CONVERTED.
- * Lists, requests, approvals, the inbox, the timesheet and DTR all still write
- * through Server Actions that end in `revalidatePath` and touch the query cache
- * NOWHERE. Creating a personal list, approving a request, reading a
- * notification, submitting a week — not one of them invalidates `qk.snapshot()`,
- * and the rail carries a count for every one of them. `revalidatePath` re-runs
- * `sidebar-panel.tsx`, which is what changes `serverRenderedAt`, which is what
- * this turns into the one invalidation that keeps those numbers honest. Delete
- * it today and the rail silently stops counting for two thirds of the product.
+ * ⚠️ WHAT KEEPS IT ALIVE IS THE DOMAINS THAT HAVE NOT BEEN CONVERTED, AND THE
+ * LIST IS SHORTER THAN IT WAS. It read "lists, requests, approvals, the inbox,
+ * the timesheet and DTR". Phase 4 (P12-16 through P12-19) converted the first
+ * four: creating a list, approving a request, deciding an internal request and
+ * reading a notification all invalidate `qk.snapshot()` directly now, from
+ * `onSettled`, so the rail's counts move without a server render.
  *
- * ⚠️ SO THE CONDITION IS NOW EXPLICIT: it goes when the LAST domain that
- * writes without invalidating is converted (Phases 4–6), not when the plan
+ * ⚠️ WHAT IS LEFT IS PHASES 5 AND 6 — the TIMESHEET, DTR, forms and reports.
+ * Those still write through Server Actions that end in `revalidatePath` and
+ * touch the query cache NOWHERE. Submitting a week and punching in do not
+ * invalidate anything, and the rail carries counts that move when they happen.
+ * `revalidatePath` re-runs `sidebar-panel.tsx`, which is what changes
+ * `serverRenderedAt`, which is what this turns into the one invalidation that
+ * keeps those numbers honest. Delete it today and the rail silently stops
+ * counting for the two modules that still write that way.
+ *
+ * ⚠️ SO THE CONDITION REMAINS EXPLICIT: it goes when the LAST domain that
+ * writes without invalidating is converted — after Phase 6, not when the plan
  * document says a phase number. The cost of keeping it is one extra invalidation
- * on renders that came from the server anyway — and after P12-09 those are
- * navigations and other domains' writes, not task clicks.
+ * on renders that came from the server anyway, and after Phase 4 those are
+ * navigations and the timesheet/DTR writes, not clicks anywhere else.
  */
 function useRefetchOnServerRender(serverRenderedAt: number) {
   const client = useQueryClient();

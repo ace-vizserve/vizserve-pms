@@ -1,7 +1,7 @@
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { describeLeaveSpan } from "@/lib/schemas/internal-requests";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
-import type { InternalRequestRow } from "@/lib/database.types";
+import type { InternalRequest } from "@/lib/schemas/internal-approvals";
 
 /**
  * The one-line "what is being asked for", shared by the list and the detail
@@ -11,7 +11,7 @@ import type { InternalRequestRow } from "@/lib/database.types";
  * `components/status-badge.tsx`. They were a second badge system for the same
  * idea, already drifted a font weight away from the first.
  */
-export function requestDetail(request: InternalRequestRow): string {
+export function requestDetail(request: InternalRequest): string {
   switch (request.request_type) {
     case "LEAVE":
       // P7-16. One shared description, because the dialog, the queue and the
