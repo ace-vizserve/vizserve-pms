@@ -1,9 +1,9 @@
 import {
-  canAdminDepartment,
-  canShapeDepartment,
+  canAdminDepartmentScope,
+  canShapeDepartmentScope,
   roleAtLeast,
-  type AuthContext,
-} from "@/lib/auth/authorization";
+  type ShapeScope,
+} from "@/lib/auth/roles";
 
 /**
  * P7-66 Phase 4b — ⚠️ "MAY I ADMINISTER THIS FORM?", asked in the query layer
@@ -48,6 +48,28 @@ import {
  * The two clauses mirror `assertCanEditForm` exactly, deliberately: a form the
  * builder lists must be a form the builder can save.
  */
+/**
+ * ⚠️ P12-22 — THE SEAT, STRUCTURALLY, RATHER THAN `AuthContext`.
+ *
+ * This file was `server-only` by inheritance: it imported `canAdminDepartment`
+ * and `canShapeDepartment` from `lib/auth/authorization.ts`, which is
+ * `server-only` by design. Phase 6 moved `/forms` onto the query cache, and the
+ * rows arrive in a CLIENT component — so this filter had to run there, beside
+ * them. Importing it as it stood would have pulled `server-only` into the
+ * browser bundle: a build failure `tsc`, eslint and vitest are all blind to.
+ *
+ * The two predicates now live in `lib/auth/roles.ts`, which has no server
+ * import and holds the role ordering for the same reason. `AuthContext`
+ * SATISFIES this type structurally, so every existing server call site —
+ * `/forms/page.tsx`, `/forms/[id]/page.tsx` — passes its context exactly as
+ * before and nothing about the rule changed.
+ *
+ * ⚠️ ONLY THE FIELDS THE RULE READS. Narrower than `AuthContext` on purpose: a
+ * client component is handed precisely these five values and no session, no
+ * email, no HR flag. What it cannot see it cannot leak into a bundle.
+ */
+export type FormAdminScope = ShapeScope & { userId: string };
+
 export type AdministrableForm = {
   department_id: string | null;
   created_by: string | null;
@@ -58,7 +80,7 @@ export type AdministrableForm = {
   purpose: string;
 };
 
-export function administersForm(context: AuthContext, form: AdministrableForm): boolean {
+export function administersForm(context: FormAdminScope, form: AdministrableForm): boolean {
   /*
    * ⚠️ P7-66 Phase 5 — AN INTERNAL FORM IS AN ADMIN INSTRUMENT, AND THIS IS THE
    * SCREEN'S HALF OF THAT.
@@ -99,7 +121,10 @@ export function administersForm(context: AuthContext, form: AdministrableForm): 
    * author carve-out below would otherwise answer `true` for a plain member who
    * happens to have created a draft.
    */
-  if (!roleAtLeast(context.role, "team_leader") && !canAdminDepartment(context, context.primaryDepartmentId)) {
+  if (
+    !roleAtLeast(context.role, "team_leader") &&
+    !canAdminDepartmentScope(context, context.primaryDepartmentId)
+  ) {
     return false;
   }
 
@@ -118,10 +143,11 @@ export function administersForm(context: AuthContext, form: AdministrableForm): 
    * P8-01c: `canShapeDepartment` — "leads it OR holds the Admin tick on it" —
    * where this read `canAccessDepartment`.
    *
-   * ⚠️ AND `canAccessDepartment` MUST NOT ITSELF BE WIDENED to make this work.
+   * ⚠️ AND `canAccessDepartmentScope` MUST NOT ITSELF BE WIDENED to make this
+   * work.
    * It mirrors `vizserve_pms_manages_department`, which is what decides who may
    * APPROVE; the tick confers no approval rights at all. Two predicates, so the
    * two questions can never be answered by one edit.
    */
-  return canShapeDepartment(context, form.department_id);
+  return canShapeDepartmentScope(context, form.department_id);
 }

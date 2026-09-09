@@ -8,6 +8,8 @@ import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import {
   ROLE_ORDER,
   canAccessDepartmentScope,
+  canAdminDepartmentScope,
+  canShapeDepartmentScope,
   roleAtLeast,
   type Role,
 } from "@/lib/auth/roles";
@@ -518,11 +520,16 @@ export async function requireHr(): Promise<AuthContext> {
  * been assigned one — is false for everyone but an owner, which is the correct
  * reading of "administers no department". It matches the SQL, where the `=`
  * against null is null and therefore not true.
+ *
+ * ⚠️ P12-22 — THE BODY MOVED TO `lib/auth/roles.ts` AND THIS DELEGATES, exactly
+ * as `canAccessDepartment` below already does and for the same reason:
+ * `administersForm` needed this predicate in a CLIENT component once `/forms`
+ * started reading from the query cache, and this module is `server-only` by
+ * design. The decision still belongs here — every server caller keeps this name
+ * and this signature, and nothing about the rule was changed on the way.
  */
 export function canAdminDepartment(context: AuthContext, departmentId: string | null): boolean {
-  if (roleAtLeast(context.role, "owner")) return true;
-  if (!departmentId) return false;
-  return context.isDeptAdmin && context.primaryDepartmentId === departmentId;
+  return canAdminDepartmentScope(context, departmentId);
 }
 
 /**
@@ -676,9 +683,14 @@ export function departmentPickerScope(context: AuthContext): DepartmentPickerSco
  * them (they are OR-ed, so nobody's access narrows and no policy is ever
  * briefly absent). This function is the single TypeScript reading of the union
  * those two policies produce.
+ *
+ * ⚠️ P12-22 — THE BODY MOVED TO `lib/auth/roles.ts` AND THIS DELEGATES, on the
+ * same terms as its two halves. Not a second implementation: `administersForm`
+ * asks this question about every row on `/forms`, and that filter now runs in
+ * the browser beside the rows.
  */
 export function canShapeDepartment(context: AuthContext, departmentId: string | null): boolean {
-  return canAccessDepartment(context, departmentId) || canAdminDepartment(context, departmentId);
+  return canShapeDepartmentScope(context, departmentId);
 }
 
 /**

@@ -927,3 +927,52 @@ export const fieldGradingSchema = z.object({
 });
 
 export type FieldGradingInput = z.infer<typeof fieldGradingSchema>;
+
+/**
+ * P12-22 — ONE FORM AS `/forms` LISTS IT. `qk.forms()`.
+ *
+ * ⚠️ `created_by` IS DRAWN NOWHERE AND IS NOT PADDING. `administersForm` needs
+ * it to recognise an UNROUTED DRAFT as its author's — the one carve-out that
+ * lets a team leader see the form they just created before it has a department.
+ * `AdministrableForm` requires it, so this projection cannot quietly lose it.
+ *
+ * ⚠️ `purpose` AND `is_public` CANNOT DISAGREE (the CHECK sees to that) AND ARE
+ * BOTH READ ANYWAY, because they answer different questions: one is what the
+ * form IS, the other is whether the `/request/` route will serve it. Drawing the
+ * public URL cell off `purpose` would be inferring a route from a category.
+ */
+export const formListRowSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  slug: z.string(),
+  purpose: formPurposeSchema,
+  is_public: z.boolean(),
+  is_active: z.boolean(),
+  reference_prefix: z.string(),
+  department_id: z.uuid().nullable(),
+  created_by: z.uuid().nullable(),
+  created_at: z.string(),
+  sla_minutes: z.number().nullable(),
+  requires_attachment: z.boolean(),
+});
+
+export type FormListRow = z.infer<typeof formListRowSchema>;
+
+/**
+ * P7-66 — ONE SUBMISSION, FOR THE TALLY BESIDE EACH FORM.
+ *
+ * ⚠️ TWO COLUMNS PER ROW RATHER THAN A COUNT PER FORM. PostgREST has no
+ * GROUP BY, so the alternative is one `count` query per form — an N+1 over a
+ * list that grows with every request type. At this row count pulling the ids and
+ * tallying them in the browser is one round trip instead of N.
+ *
+ * ⚠️ AND ZERO ROWS HERE IS NOT THE SAME FACT AS "THIS FORM IS UNUSED". The
+ * policy on `vizserve_pms_requests` is `manages_department`, which the P8-01c
+ * department-admin tick deliberately does not grant — so a department admin
+ * reads no rows at all for a form with real traffic. `submissionsReadable` in
+ * `forms-view.tsx` is what keeps the two apart on screen.
+ */
+export const formSubmissionTallySchema = z.object({
+  form_id: z.uuid(),
+  submitted_at: z.string(),
+});

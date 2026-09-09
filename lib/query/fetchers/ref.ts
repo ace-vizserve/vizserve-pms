@@ -27,9 +27,13 @@ import type { TaskReadClient } from "./task";
  * was being fetched as though it were both.
  *
  * ⚠️ `REF_STALE_TIME` IS TEN MINUTES AND IT IS WHY THIS PREFIX EXISTS.
- * `lib/query/client.ts` declares it; every consumer below passes it. So a tab
- * reads the departments ONCE and the next five screens that want them pay
- * nothing at all.
+ * `lib/query/client.ts` declares it AND APPLIES IT, as a prefix default on
+ * `["ref"]` — no consumer passes a `staleTime` and none should, because the one
+ * that forgets is indistinguishable on screen from the ones that do. (It was
+ * declared in Phase 0 and applied by nobody until P12-20; four files' comments
+ * asserted it in capitals while every ref entry ran on the 30-second default.)
+ * So a tab reads the departments ONCE and the next five screens that want them
+ * pay nothing at all.
  *
  * ⚠️ AND A LONG STALE TIME MAKES THE INVALIDATION ROW MANDATORY RATHER THAN A
  * NICETY. `lib/query/realtime.ts` maps `vizserve_pms_task_groups` to
@@ -37,9 +41,21 @@ import type { TaskReadClient } from "./task";
  * would keep its old name in the filter dropdown for the rest of the session.
  * Anything added to this file that a person can EDIT from inside the app needs
  * either a row in that map or an explicit invalidation from the screen that
- * edits it. `vizserve_pms_forms` is the case that has neither: it is not
- * published to Realtime, so `/forms` invalidates `qk.ref("client-forms")` from
- * its own mutations (see `app/(app)/forms/forms-view.tsx`).
+ * edits it.
+ *
+ * ⚠️ `vizserve_pms_forms` HAS NEITHER, AND THE REASON IT DOES NOT MATTER TODAY
+ * IS ITSELF A BUG WORTH KNOWING ABOUT. It is not published to Realtime, so a
+ * form renamed or published in the builder cannot invalidate
+ * `qk.ref("client-forms")` or `qk.forms()` — and it does not have to, because
+ * `/forms/[id]` lives in the `(builder)` ROUTE GROUP while `<QueryProvider>` is
+ * mounted in `app/(app)/layout.tsx`. Navigating into the builder unmounts that
+ * provider and DISCARDS THE ENTIRE CACHE; coming back rebuilds it from nothing.
+ * So the stale entry cannot survive the trip. That is a very expensive way to
+ * stay correct — every reference entry, the rail snapshot and every task view
+ * are refetched on the way back from editing one form — and the fix is to hoist
+ * the provider above both route groups. Reported at the end of P12-22 rather
+ * than done there: it changes what every phase of this migration caches, and
+ * the public form at `/request/[slug]` sits under the root layout too.
  *
  * ⚠️ THE HOUSE RULE FOR EVERY FETCHER HERE: READ THE WHOLE TABLE, LET THE
  * CONSUMER FILTER. `lib/schemas/reference.ts` argues it at length and
