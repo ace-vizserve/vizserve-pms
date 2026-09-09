@@ -235,27 +235,28 @@ export default async function ApprovalsPage({
     listPendingTimesheetWeeks(supabase, context.userId, isApprover, APPROVALS_PAGE_SIZE + 1),
 
     /*
-     * P9-01 — who this person may name as a reliever.
+     * P11-11 — who this person may name as a reliever: ANY ACTIVE COLLEAGUE.
      *
-     * ACTIVE MEMBERS OF THEIR OWN DEPARTMENT, minus themselves, which is the
-     * rule `vizserve_pms_submit_internal_request` enforces. Scoped here as well
-     * so the picker offers only what the function will accept — an option that
-     * is refused after the form is filled in is worse than one that was never
-     * offered.
+     * Was a query on `vizserve_pms_users` filtered to the caller's own
+     * department, mirroring what `vizserve_pms_submit_internal_request`
+     * enforced. Both halves widened together, and the picker still offers
+     * exactly what the function will accept — an option refused after the form
+     * is filled in is worse than one that was never offered.
      *
-     * ⚠️ `.eq("primary_department_id", ...)` IS NEEDED, unlike almost every
-     * other query on this page. The users policy is not department-scoped for a
-     * lead of several teams, and this list is about the requester's OWN team.
+     * ⚠️ AN RPC, AND THE `.eq()` DID NOT MERELY MOVE. Deleting the filter would
+     * have changed nothing: `vizserve_pms_users` is readable to your own
+     * department, your managed departments and HR, so for a plain member RLS
+     * WAS the filter and the list would have come back the same length.
+     * `vizserve_pms_reliever_candidates` is `security definer` and returns two
+     * columns — id and name. Widening the table's policy instead would have put
+     * email, role, `is_hr` and `app_access` in front of everybody to populate a
+     * dropdown.
+     *
+     * No `primaryDepartmentId` branch any more. The function answers for
+     * somebody with no department too, which is the account that used to get
+     * `{ data: null }` and an empty picker.
      */
-    context.primaryDepartmentId
-      ? supabase
-          .from("vizserve_pms_users")
-          .select("id, full_name")
-          .eq("is_active", true)
-          .eq("primary_department_id", context.primaryDepartmentId)
-          .neq("id", context.userId)
-          .order("full_name")
-      : { data: null },
+    supabase.rpc("vizserve_pms_reliever_candidates"),
 
     /*
      * P9-01 — the tasks this person could hand over.

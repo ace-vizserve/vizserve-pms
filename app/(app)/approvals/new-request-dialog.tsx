@@ -6,8 +6,9 @@ import Link from "next/link";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
+import { CharacterCount } from "@/components/ui/character-count";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
 import { DatePicker } from "@/components/ui/date-picker";
 import {
   Dialog,
@@ -17,6 +18,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { FieldError } from "@/components/ui/field-error";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -29,6 +31,8 @@ import {
   DAY_HALF_LABELS,
   DAY_HALVES,
   type DayHalf,
+  INTERNAL_REASON_MAX,
+  INTERNAL_REASON_MIN,
   INTERNAL_REQUEST_BLURBS,
   INTERNAL_REQUEST_LABELS,
   INTERNAL_REQUEST_TYPES,
@@ -42,9 +46,6 @@ import { formatDays } from "@/lib/schemas/leave-balances";
 import { toMinutes } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 import { submitInternalRequest } from "./actions";
-import { CharacterCount } from "@/components/ui/character-count";
-import { INTERNAL_REASON_MAX, INTERNAL_REASON_MIN } from "@/lib/schemas/internal-requests";
-import { FieldError } from "@/components/ui/field-error";
 
 /**
  * Only what the picker needs. The server page selects the active ones, in order.
@@ -56,7 +57,43 @@ import { FieldError } from "@/components/ui/field-error";
 export type PickableLeaveType = { id: string; label: string; requires_reliever: boolean };
 
 /** A colleague who could take the work. The server page scopes these to the department. */
-export type RelieverCandidate = { id: string; full_name: string };
+/**
+ * P11-11 — a colleague who can be named as a reliever.
+ *
+ * The department travels with the name because the picker GROUPS by it. Once
+ * the list stopped being your own team it became a company directory, and a
+ * flat alphabetical run of forty names gives no way to tell the two Marias
+ * apart or to find the person you actually work with.
+ *
+ * Never null: `vizserve_pms_reliever_candidates` joins departments inner, so
+ * somebody with no team is not offered at all.
+ */
+/**
+ * P11-11 — the candidate list, split into one entry per department.
+ *
+ * A WALK, NOT A MAP. `vizserve_pms_reliever_candidates` orders by department
+ * name then person, so consecutive rows sharing a department already ARE the
+ * group — this only draws the boundaries. Keying an object by department id
+ * instead would hand the order of the headings over to key iteration, which is
+ * not the sort the server chose.
+ */
+function groupByDepartment(people: RelieverCandidate[]) {
+  const groups: { id: string; name: string; people: RelieverCandidate[] }[] = [];
+
+  for (const person of people) {
+    const last = groups.at(-1);
+    if (last && last.id === person.department_id) last.people.push(person);
+    else groups.push({ id: person.department_id, name: person.department_name, people: [person] });
+  }
+
+  return groups;
+}
+export type RelieverCandidate = {
+  id: string;
+  full_name: string;
+  department_id: string;
+  department_name: string;
+};
 
 /** One of the requester's own open tasks. */
 export type HandoverTask = { id: string; title: string };
@@ -96,6 +133,140 @@ const MATCHES_SHOWN = 8;
  * ITS OWN COMPONENT because the query and the open state are per-row and the
  * rows are drawn in a `.map()`, where a hook cannot go.
  */
+/**
+ * P11-11 — choosing a reliever, with a search box.
+ *
+ * ⚠️ A COMBOBOX, NOT A SELECT, AND THE REASON IS WHAT P11-11 CHANGED. While the
+ * candidates were your own department this was a dropdown of four or five names
+ * and scrolling was the whole interaction. It is now every active account in the
+ * company, so the control has to answer "where is Maria" rather than "show me
+ * everyone" — and a native-shaped Select answers only the second.
+ *
+ * Same shape as `RelieverTaskPicker` directly below: a Popover holding a
+ * `Command`, with `shouldFilter={false}` and a plain substring test. cmdk's
+ * fuzzy matcher ranks by edit distance, which on a list of names surfaces
+ * "Marian Cruz" above "Maria" for the query "maria".
+ *
+ * THE DEPARTMENT STAYS VISIBLE, in a `CommandGroup` heading while browsing and
+ * beside the name once a search has flattened the list. Two people called Maria
+ * in different teams are otherwise the same row twice.
+ */
+function RelieverPicker({
+  index,
+  people,
+  value,
+  onChange,
+}: {
+  /** Which of the three rows this is. Only used to keep the labels apart. */
+  index: number;
+  /** Already filtered by the caller to exclude whoever the other rows took. */
+  people: RelieverCandidate[];
+  value: string;
+  onChange: (relieverId: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+
+  const term = query.trim().toLowerCase();
+  const chosen = people.find((person) => person.id === value) ?? null;
+
+  /* Name AND department, so "design" finds the whole team — which is how
+     somebody looks when they know the department but not who is free. */
+  const matches = term
+    ? people.filter(
+        (person) =>
+          person.full_name.toLowerCase().includes(term) || person.department_name.toLowerCase().includes(term),
+      )
+    : people;
+
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next);
+        // Cleared on close, so reopening starts from the full list rather than
+        // from whatever was typed a minute ago and then abandoned.
+        if (!next) setQuery("");
+      }}>
+      <PopoverTrigger
+        render={
+          <Button
+            type="button"
+            variant="outline"
+            id={`reliever_${index}`}
+            /* Three of these can be on screen at once and all three would
+               otherwise read "Choose a colleague…". */
+            aria-label={`Choose reliever ${index + 1}`}
+            className="w-full justify-between font-normal">
+            {chosen ? (
+              <span className="flex min-w-0 items-baseline gap-1.5">
+                <span className="truncate">{chosen.full_name}</span>
+                <span className="shrink-0 text-2xs text-muted-foreground">{chosen.department_name}</span>
+              </span>
+            ) : (
+              <span className="text-muted-foreground">Choose a colleague…</span>
+            )}
+            <ChevronsUpDown className="size-3.5 shrink-0 opacity-50" aria-hidden />
+          </Button>
+        }
+      />
+      <PopoverContent className="w-[min(32rem,100vw)] p-0 h-56" align="center">
+        <Command shouldFilter={false}>
+          <CommandInput placeholder="Search by name or team" value={query} onValueChange={setQuery} />
+          {/* `max-h-36`, matching the height Amier set on the Select this
+              replaced. Roughly six rows: enough to show a team without the
+              popover covering the tasks underneath it. */}
+          <CommandList className="max-h-full">
+            {matches.length === 0 ? (
+              <CommandEmpty>Nobody matches “{query.trim()}”.</CommandEmpty>
+            ) : term ? (
+              /* SEARCHING — one flat list, department beside each name.
+                 Headings while filtering would leave single-row groups scattered
+                 down the list, and the ranking people expect from a search is
+                 "best match first", not "grouped by team". */
+              matches.map((person) => (
+                <CommandItem
+                  key={person.id}
+                  value={person.id}
+                  onSelect={() => {
+                    onChange(person.id);
+                    setOpen(false);
+                  }}>
+                  <span aria-hidden className="w-3 shrink-0 text-center">
+                    {person.id === value ? "✓" : ""}
+                  </span>
+                  <span className="truncate">{person.full_name}</span>
+                  <span className="ml-auto shrink-0 text-2xs text-muted-foreground">{person.department_name}</span>
+                </CommandItem>
+              ))
+            ) : (
+              /* BROWSING — grouped, which is the P11-11 heading. */
+              groupByDepartment(matches).map((group) => (
+                <CommandGroup key={group.id} heading={group.name}>
+                  {group.people.map((person) => (
+                    <CommandItem
+                      key={person.id}
+                      value={person.id}
+                      onSelect={() => {
+                        onChange(person.id);
+                        setOpen(false);
+                      }}>
+                      <span aria-hidden className="w-3 shrink-0 text-center">
+                        {person.id === value ? "✓" : ""}
+                      </span>
+                      <span className="truncate">{person.full_name}</span>
+                    </CommandItem>
+                  ))}
+                </CommandGroup>
+              ))
+            )}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 function RelieverTaskPicker({
   tasks,
   selected,
@@ -803,17 +974,21 @@ export function NewRequestDialog({
                   <div>
                     <h3 className="text-sm font-medium">Hand-over</h3>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Name up to {MAX_RELIEVERS} colleagues from your team and give each of them the tasks they will
+                      Name up to {MAX_RELIEVERS} colleagues — from any team — and give each of them the tasks they will
                       hold while you are away. They confirm before your team leader sees this.
                     </p>
                   </div>
 
                   {relieverCandidates.length === 0 ? (
-                    /* Not an error state — it is a fact about the department and
+                    /* Not an error state — it is a fact about the company and
                        the person filing has no way to fix it. Saying so beats an
-                       empty dropdown they will click three times. */
+                       empty dropdown they will click three times.
+
+                       Reworded with P11-11: the list is no longer your own
+                       team, so "nobody in your department" would be a wrong
+                       explanation for an empty picker. */
                     <p className="text-xs text-muted-foreground">
-                      There is nobody else active in your department to hand work to. Ask an admin before filing this.
+                      There is nobody else to hand work to yet. Ask an admin before filing this.
                     </p>
                   ) : null}
 
@@ -847,21 +1022,12 @@ export function NewRequestDialog({
                         <div className="flex items-end gap-2">
                           <div className="flex-1 space-y-1.5">
                             <Label htmlFor={`reliever_${index}`}>Reliever {index + 1}</Label>
-                            <Select
-                              items={Object.fromEntries(people.map((person) => [person.id, person.full_name]))}
-                              value={row.relieverId || null}
-                              onValueChange={(value) => value !== null && update({ relieverId: value })}>
-                              <SelectTrigger id={`reliever_${index}`} className="w-full">
-                                <SelectValue placeholder="Choose a colleague…" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {people.map((person) => (
-                                  <SelectItem key={person.id} value={person.id}>
-                                    {person.full_name}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
+                            <RelieverPicker
+                              index={index}
+                              people={people}
+                              value={row.relieverId}
+                              onChange={(relieverId) => update({ relieverId })}
+                            />
                           </div>
                           {relievers.length > 1 ? (
                             <Button
@@ -1066,12 +1232,7 @@ export function NewRequestDialog({
                     : "What happened, briefly."
               }
             />
-            <CharacterCount
-              value={reason}
-              min={INTERNAL_REASON_MIN}
-              max={INTERNAL_REASON_MAX}
-              rich
-            />
+            <CharacterCount value={reason} min={INTERNAL_REASON_MIN} max={INTERNAL_REASON_MAX} rich />
             <FieldError messages={errors.reason} />
           </div>
 

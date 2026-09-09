@@ -2145,6 +2145,31 @@ export type Database = {
         Returns: boolean;
       };
       /**
+       * P11-11. Every active account except the caller, id and name only.
+       * Feeds the reliever picker, which is no longer department-scoped.
+       * SECURITY DEFINER: the caller is usually a member whose reach stops at
+       * their own department, which is the whole reason it exists.
+       */
+      vizserve_pms_reliever_candidates: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          id: string;
+          full_name: string;
+          department_id: string;
+          department_name: string;
+        }[];
+      };
+      /**
+       * P11-11. True when the caller and this person are on opposite sides of
+       * a hand-over, in either direction, or are both relievers on the same
+       * request. Backs the `vizserve_pms_users` SELECT policy that lets each
+       * of them render the other's name.
+       */
+      vizserve_pms_shares_a_handover_with: {
+        Args: { p_user_id: string };
+        Returns: boolean;
+      };
+      /**
        * P11-01. True when this person has decided on an internal request the
        * caller may read. Backs the `vizserve_pms_users` SELECT policy that lets
        * an approval timeline print a name instead of a role.
