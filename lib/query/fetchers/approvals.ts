@@ -490,7 +490,7 @@ export async function fetchHandoverTasks(
     // The two COLUMNS. Fixed-length filter, always.
     client
       .from("vizserve_pms_tasks")
-      .select("id, title, created_at")
+      .select("id, title, created_at, list_id, vizserve_pms_lists(name)")
       .or(`assignee_id.eq.${userId},qa_assignee_id.eq.${userId}`)
       .not("status", "in", FINISHED),
 
@@ -504,7 +504,7 @@ export async function fetchHandoverTasks(
      */
     client
       .from("vizserve_pms_task_assignees")
-      .select("vizserve_pms_tasks!inner(id, title, created_at, status)")
+      .select("vizserve_pms_tasks!inner(id, title, created_at, status, list_id, vizserve_pms_lists(name))")
       .eq("user_id", userId)
       .not("vizserve_pms_tasks.status", "in", FINISHED),
   ]);
@@ -513,10 +513,23 @@ export async function fetchHandoverTasks(
 
   // A task reached both ways is one task. Somebody is routinely the PIC AND
   // carries a `task_assignees` row for the same work.
-  const merged = new Map<string, { id: string; title: string; created_at: string }>();
-  for (const task of own.data ?? []) merged.set(task.id, task);
+  /*
+   * ⚠️ THE EMBED COMES BACK AS AN OBJECT OR NULL, NOT AN ARRAY, because
+   * `list_id` is a to-one foreign key. A task in no list embeds `null`, which is
+   * the ordinary case rather than a fault — `list_id` is nullable on the table.
+   */
+  type Row = {
+    id: string;
+    title: string;
+    created_at: string;
+    list_id: string | null;
+    vizserve_pms_lists: { name: string } | null;
+  };
+
+  const merged = new Map<string, Row>();
+  for (const task of (own.data ?? []) as unknown as Row[]) merged.set(task.id, task);
   for (const row of (joined.data ?? []) as unknown as Array<{
-    vizserve_pms_tasks: { id: string; title: string; created_at: string } | null;
+    vizserve_pms_tasks: Row | null;
   }>) {
     if (row.vizserve_pms_tasks) merged.set(row.vizserve_pms_tasks.id, row.vizserve_pms_tasks);
   }
@@ -533,7 +546,12 @@ export async function fetchHandoverTasks(
    */
   const tasks = [...merged.values()]
     .sort((a, b) => b.created_at.localeCompare(a.created_at) || a.title.localeCompare(b.title))
-    .map(({ id, title }) => ({ id, title }));
+    .map(({ id, title, list_id, vizserve_pms_lists }) => ({
+      id,
+      title,
+      list_id,
+      list_name: vizserve_pms_lists?.name ?? null,
+    }));
 
   return {
     tasks: parseAll(handoverTaskSchema, tasks, "your open tasks"),

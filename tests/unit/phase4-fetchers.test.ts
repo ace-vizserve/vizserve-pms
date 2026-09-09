@@ -630,7 +630,16 @@ describe("fetchHandoverTasks", () => {
     const { client, calls } = stubClient({
       tables: {
         vizserve_pms_tasks: {
-          data: [{ id: TASK, title: "Poster", created_at: "2026-09-01T02:00:00Z" }],
+          data: [
+            {
+              id: TASK,
+              title: "Poster",
+              created_at: "2026-09-01T02:00:00Z",
+              // A to-one embed, so an object or null — never an array.
+              list_id: LIST_A,
+              vizserve_pms_lists: { name: "Design" },
+            },
+          ],
           error: null,
         },
         vizserve_pms_task_assignees: {
@@ -641,6 +650,11 @@ describe("fetchHandoverTasks", () => {
                 title: "Banner",
                 created_at: "2026-09-02T02:00:00Z",
                 status: "ONGOING",
+                // In no list, which is the ordinary case rather than a fault —
+                // `list_id` is nullable and the picker's "No list" chip is what
+                // this row feeds.
+                list_id: null,
+                vizserve_pms_lists: null,
               },
             },
             // The SAME task reached both ways. Somebody is routinely the PIC and
@@ -651,6 +665,8 @@ describe("fetchHandoverTasks", () => {
                 title: "Poster",
                 created_at: "2026-09-01T02:00:00Z",
                 status: "ONGOING",
+                list_id: LIST_A,
+                vizserve_pms_lists: { name: "Design" },
               },
             },
           ],
@@ -664,6 +680,16 @@ describe("fetchHandoverTasks", () => {
     expect(error).toBeNull();
     // Merged, and newest first.
     expect(tasks.map((task) => task.id)).toEqual([OTHER, TASK]);
+
+    /*
+     * The list travels with the task so the picker's filter needs no second
+     * lookup — and a task in no list carries nulls rather than being dropped,
+     * which is what feeds the "No list" chip.
+     */
+    expect(tasks.map((task) => [task.list_id, task.list_name])).toEqual([
+      [null, null],
+      [LIST_A, "Design"],
+    ]);
 
     /*
      * ⚠️ THE WHOLE OF P9-01's BUG, IN ONE ASSERTION. The first version built an

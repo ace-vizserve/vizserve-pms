@@ -313,6 +313,19 @@ export type RelieverCandidate = z.infer<typeof relieverCandidateSchema>;
 export const handoverTaskSchema = z.object({
   id: z.uuid(),
   title: z.string(),
+  /**
+   * ⚠️ THE LIST IS FOR FILTERING AND FOR READING, NOT FOR SCOPE. Ace, 9 Sep:
+   * the picker should let somebody narrow by list. It is nullable because a
+   * task legitimately has no list — `list_id` is nullable on the table and the
+   * home quick action was the only entry point that made that a trap.
+   *
+   * The NAME travels with the id so the picker never has to hold a second
+   * lookup: this is a fixed-length embed off the task row, not a join the
+   * filter builds — see the note in `fetchHandoverTasks` about what a
+   * variable-length filter cost this app.
+   */
+  list_id: z.uuid().nullable(),
+  list_name: z.string().nullable(),
 });
 
 export type HandoverTask = z.infer<typeof handoverTaskSchema>;

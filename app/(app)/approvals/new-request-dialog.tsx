@@ -3,7 +3,7 @@
 import { toast } from "@/components/ui/toast";
 import { ChevronsUpDown, Plus, X } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Button } from "@/components/ui/button";
@@ -126,6 +126,15 @@ const EMPTY_RELIEVER: RelieverRow = { relieverId: "", taskIds: [] };
 
 /** Matches listed at once. Enough to choose from, few enough to read. */
 const MATCHES_SHOWN = 8;
+
+/**
+ * The sentinel for "tasks in no list".
+ *
+ * A real list id can never collide with it, and it is not a uuid, so it cannot
+ * be mistaken for one if it ever escaped this component — the rule
+ * `lib/query/task-cache.ts` records for placeholder ids, applied to a filter.
+ */
+const NO_LIST_FILTER = "__no_list__";
 
 /**
  * P9-01 — choosing the tasks one reliever takes on.
@@ -280,6 +289,38 @@ function RelieverPicker({
   );
 }
 
+/**
+ * One filter chip. A button, not a `CommandItem` — it must not be reachable by
+ * the list's own arrow-key navigation, which belongs to the tasks.
+ */
+function FilterChip({
+  active,
+  onClick,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      className={cn(
+        "rounded-full border px-2 py-0.5 text-2xs transition-colors",
+        // The state is carried by the word `aria-pressed` for a screen reader
+        // and by border AND fill for everybody else — never by tint alone.
+        active
+          ? "border-primary bg-primary/10 font-medium text-primary"
+          : "border-border text-muted-foreground hover:bg-muted",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
 function RelieverTaskPicker({
   tasks,
   selected,
@@ -298,11 +339,57 @@ function RelieverTaskPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
+  /** `null` is "every list", which is where it starts. */
+  const [listFilter, setListFilter] = useState<string | null>(null);
 
   const titleOf = new Map(tasks.map((task) => [task.id, task.title]));
   const term = query.trim().toLowerCase();
 
-  const matches = term ? tasks.filter((task) => task.title.toLowerCase().includes(term)) : [];
+  /*
+   * ⚠️ THE LISTS THE READER ACTUALLY HAS WORK IN, not every list in the
+   * department. A filter offering twelve lists when your open tasks sit in two
+   * is a filter that mostly produces empty results, and the tasks are already
+   * in hand — so the options are derived from them rather than fetched.
+   *
+   * Ordered by name, with "No list" last if anything is unfiled: it is the
+   * residual bucket, not a peer of the named ones.
+   */
+  const listOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    let hasUnfiled = false;
+    for (const task of tasks) {
+      if (task.list_id && task.list_name) byId.set(task.list_id, task.list_name);
+      else hasUnfiled = true;
+    }
+    const named = [...byId.entries()]
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    return hasUnfiled ? [...named, { id: NO_LIST_FILTER, name: "No list" }] : named;
+  }, [tasks]);
+
+  /*
+   * ⚠️ THE FILTER APPLIES TO BOTH THE BROWSE AND THE SEARCH. Narrowing to a
+   * list and then typing has to search WITHIN that list — a filter that the
+   * search silently escapes is a filter nobody trusts twice.
+   */
+  const inList = useCallback(
+    (task: HandoverTask) =>
+      listFilter === null ||
+      (listFilter === NO_LIST_FILTER ? task.list_id === null : task.list_id === listFilter),
+    [listFilter],
+  );
+
+  const visible = useMemo(() => tasks.filter(inList), [tasks, inList]);
+
+  /*
+   * ⚠️ BROWSING SHOWS THE NEWEST, IT NO LONGER SAYS "TYPE TO FIND A TASK".
+   * Ace, 9 Sep. `fetchHandoverTasks` already returns newest-created first and
+   * explains why — the work you picked up most recently is the work you can
+   * recognise from a title, whereas the soonest-due is as likely to be a stale
+   * deadline on something finished in all but status. An empty popover asked
+   * somebody to remember a title before it would show them anything.
+   */
+  const matches = term ? visible.filter((task) => task.title.toLowerCase().includes(term)) : visible;
 
   const toggle = (id: string) =>
     onChange(selected.includes(id) ? selected.filter((it) => it !== id) : [...selected, id]);
@@ -376,15 +463,42 @@ function RelieverTaskPicker({
           */}
           <Command shouldFilter={false}>
             <CommandInput
-              placeholder={`Search your ${tasks.length} open tasks`}
+              placeholder={`Search your ${visible.length} open tasks`}
               value={query}
               onValueChange={setQuery}
             />
+            {/*
+              ⚠️ THE LIST FILTER, ABOVE THE RESULTS AND NOT INSIDE THEM. A row
+              in the same scrolling list as the tasks reads as a task; a filter
+              has to stay put while what it filters moves under it.
+
+              Rendered only when there is a choice to make: one list, or none,
+              means every option produces the same result set.
+            */}
+            {listOptions.length > 1 ? (
+              <div className="flex flex-wrap gap-1 border-b p-2">
+                <FilterChip active={listFilter === null} onClick={() => setListFilter(null)}>
+                  All lists
+                </FilterChip>
+                {listOptions.map((option) => (
+                  <FilterChip
+                    key={option.id}
+                    active={listFilter === option.id}
+                    onClick={() => setListFilter(listFilter === option.id ? null : option.id)}
+                  >
+                    {option.name}
+                  </FilterChip>
+                ))}
+              </div>
+            ) : null}
+
             <CommandList>
-              {term === "" ? (
-                <CommandEmpty>Type to find a task.</CommandEmpty>
-              ) : matches.length === 0 ? (
-                <CommandEmpty>Nothing matches “{query.trim()}”.</CommandEmpty>
+              {matches.length === 0 ? (
+                <CommandEmpty>
+                  {term
+                    ? `Nothing matches “${query.trim()}”.`
+                    : "No open tasks in this list."}
+                </CommandEmpty>
               ) : (
                 matches.slice(0, MATCHES_SHOWN).map((task) => {
                   const isClaimed = claimed.has(task.id);
@@ -412,9 +526,13 @@ function RelieverTaskPicker({
           </Command>
 
           {/* Said out loud, or eight rows reads as "eight is all there is". */}
-          {term && matches.length > MATCHES_SHOWN ? (
+          {/* It now has something to say while BROWSING too: the popover opens on
+              the newest eight, so the count is how much is not shown yet. */}
+          {matches.length > MATCHES_SHOWN ? (
             <p className="border-t px-3 py-2 text-2xs text-muted-foreground">
-              {matches.length - MATCHES_SHOWN} more match — keep typing to narrow it.
+              {term
+                ? `${matches.length - MATCHES_SHOWN} more match — keep typing to narrow it.`
+                : `Showing the ${MATCHES_SHOWN} most recent of ${matches.length}. Search or filter to find the rest.`}
             </p>
           ) : null}
         </PopoverContent>
