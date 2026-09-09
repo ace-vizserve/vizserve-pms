@@ -2,10 +2,13 @@
 
 import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 import { cn } from "@/lib/utils";
+
+import { invalidateTaskWrite } from "@/lib/query/invalidate";
 
 import { updateTaskField } from "../actions";
 
@@ -48,6 +51,7 @@ export function EditableTitle({
    * does show it, and React puts it back by itself if the server refuses.
    */
   const router = useRouter();
+  const queryClient = useQueryClient();
   const [shownTitle, setShownTitle] = useOptimistic(title);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -94,6 +98,13 @@ export function EditableTitle({
 
       /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
       router.refresh();
+      /* ⚠️ P12-06 — AND THE CACHE, AWAITED, FOR THE SAME REASON. This control is
+         `/tasks/[id]`-only, so the refresh above is now redundant for THIS page
+         — and it stays anyway, because it is what holds the optimistic heading
+         until fresh data lands and the whole of `ded2244` is what happens when
+         that hold is removed while `useOptimistic` is still doing the work.
+         Phase 3c retires both together, with the `useMutation` conversion. */
+      await invalidateTaskWrite(queryClient, taskId);
       toast.success("Renamed");
     });
   }

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { useOptimisticMove } from "./optimistic-move";
 import { Trash2 } from "lucide-react";
@@ -17,6 +18,8 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { formatDuration } from "@/lib/dates";
+
+import { invalidateTaskWrite } from "@/lib/query/invalidate";
 
 import { deleteTask, taskDeleteImpact, type TaskDeleteImpact } from "./actions";
 
@@ -55,6 +58,18 @@ export function DeleteTaskDialog({
   const [impact, setImpact] = useState<TaskDeleteImpact | null>(null);
   const [error, setError] = useState<string | null>(null);
   const router = useRouter();
+  /*
+   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   *
+   * This dialog is shared: the detail header, every list row and every board
+   * card can open it. `/tasks/[id]` reads `qk.task(id)` from the cache now, so a
+   * delete has to invalidate; `/tasks` and `/tasks/board` still read their rows
+   * in an RSC, so the `router.refresh()` below stays until Phase 3c. The
+   * precedent is `hooks/use-realtime-refresh.ts` (P12-02), which invalidates AND
+   * refreshes for exactly this reason. Full account, including what `ded2244`
+   * cost, in `lib/query/invalidate.ts`.
+   */
+  const queryClient = useQueryClient();
   const [loadingImpact, startImpact] = useTransition();
   const [pending, startDelete] = useTransition();
 
@@ -104,6 +119,13 @@ export function DeleteTaskDialog({
        * Next 16's action queue and kept it. Full account in `tasks/inline.tsx`.
        */
       router.refresh();
+      /*
+       * ⚠️ AWAITED, INSIDE THE TRANSITION. `qk.task(id)` is invalidated as well
+       * as the list views: a deleted task's own detail page may still be
+       * mounted — this dialog is reachable FROM it — and leaving a fresh copy
+       * of a deleted row in the cache is how the back button resurrects it.
+       */
+      await invalidateTaskWrite(queryClient, taskId);
       toast.success("Task deleted");
       onDeleted?.();
     });

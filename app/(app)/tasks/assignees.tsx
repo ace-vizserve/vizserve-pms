@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useCallback, useMemo, useOptimistic, useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Check, Search, UserPlus, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -9,6 +10,8 @@ import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+
+import { invalidateTaskWrite } from "@/lib/query/invalidate";
 
 import { addTaskAssignee, removeTaskAssignee } from "./actions";
 
@@ -147,6 +150,18 @@ export function AssigneePicker({
   align?: "start" | "center" | "end";
 }) {
   const router = useRouter();
+  /*
+   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   *
+   * This control is shared: the detail header renders it, every list row renders
+   * it and every board card renders it. `/tasks/[id]` reads `qk.task(id)` from
+   * the cache now, so a write has to invalidate; `/tasks` and `/tasks/board`
+   * still read their rows in an RSC, so the `router.refresh()` below stays until
+   * Phase 3c. The precedent is `hooks/use-realtime-refresh.ts` (P12-02), which
+   * invalidates AND refreshes for exactly this reason. Full account, including
+   * what `ded2244` cost, in `lib/query/invalidate.ts`.
+   */
+  const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -285,6 +300,17 @@ export function AssigneePicker({
        * Next 16's action queue and kept it. Full account in `tasks/inline.tsx`.
        */
       router.refresh();
+      /*
+       * ⚠️ AWAITED, INSIDE THE TRANSITION. `qk.task(id)` prefix-matches
+       * `["task", id, "assignees"]`, so one call covers the seat and the row —
+       * and the row matters, because `vizserve_pms_remove_task_assignee`
+       * promotes the next assignee into `assignee_id` on the way out.
+       *
+       * ⚠️ AND THIS FUNCTION IS MEANT TO BE CALLED AGAIN BEFORE IT RETURNS. See
+       * the note above: three clicks start three transitions, and each awaits
+       * its own invalidation rather than queueing behind the last.
+       */
+      await invalidateTaskWrite(queryClient, taskId);
       toast.success(success);
     });
   }

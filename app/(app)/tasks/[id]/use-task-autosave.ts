@@ -2,7 +2,10 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
+
+import { invalidateTaskWrite, markTaskStale } from "@/lib/query/invalidate";
 
 import { updateTaskField } from "../actions";
 
@@ -64,6 +67,14 @@ type CommitOptions = {
    * nothing else on the page renders; `updateTaskField` already revalidates
    * four paths on the server, so an extra client refresh per keystroke pause is
    * the difference between this feeling instant and feeling like a page load.
+   *
+   * ⚠️ P12-06 — IT NOW ALSO DECIDES HOW THE CACHE IS TOLD. `true` invalidates
+   * `qk.task(id)` and refetches; `false` marks the same entry STALE WITHOUT
+   * FETCHING (`markTaskStale`). The flag could not simply mean "tell nobody":
+   * the row in the cache holds `resolution`, so leaving the entry FRESH after a
+   * save would let a back-button restore or a second tab paint text the person
+   * has already replaced. Stale-without-fetch is the version of `refresh: false`
+   * that is still true. See `lib/query/invalidate.ts`.
    */
   refresh?: boolean;
 };
@@ -86,6 +97,7 @@ export type TaskAutosave = {
 
 export function useTaskAutosave(taskId: string): TaskAutosave {
   const router = useRouter();
+  const queryClient = useQueryClient();
 
   const [states, setStates] = useState<Record<string, FieldState>>({});
 
@@ -127,9 +139,26 @@ export function useTaskAutosave(taskId: string): TaskAutosave {
       }
 
       setState(key, "saved");
-      if (options.refresh !== false) router.refresh();
+
+      if (options.refresh !== false) {
+        router.refresh();
+        /*
+         * ⚠️ AWAITED. This function is not inside a `useTransition` — the header
+         * explains at length why it must not be — so there is no optimistic
+         * value to hold and no `ded2244` risk here. It is awaited anyway so that
+         * `flush()` (which the P3-07 gate calls before every status move) does
+         * not resolve until the fresh row is in the cache: the move is decided
+         * on the SAVED resolution, and a gate that reads a stale one is the
+         * exact failure `task-gate.tsx` was built to prevent.
+         */
+        await invalidateTaskWrite(queryClient, taskId);
+      } else {
+        // Stale, not refetched — the resolution textarea is still being typed
+        // into. See `CommitOptions.refresh` above.
+        markTaskStale(queryClient, taskId);
+      }
     },
-    [router, setState, taskId],
+    [queryClient, router, setState, taskId],
   );
 
   const clearTimer = useCallback((key: string) => {
@@ -213,6 +242,13 @@ export function useTaskAutosave(taskId: string): TaskAutosave {
     const pending = drafts.current;
     const running = timers.current;
 
+    /*
+     * ⚠️ NOTHING IS INVALIDATED HERE, ON PURPOSE. This runs during the effect
+     * cleanup — a navigation, an unmount, or a tab going hidden — where there is
+     * nothing left to render into, which is why it reads only refs and calls the
+     * action directly. Writing into a query cache from a torn-down tree is the
+     * same class of mistake, and the next mount refetches anyway.
+     */
     function flushNow() {
       for (const [key, draft] of pending.entries()) {
         const timer = running.get(key);

@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useOptimistic, useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -37,6 +38,8 @@ import {
 } from "@/lib/schemas/tasks";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
+
+import { invalidateTaskWrite } from "@/lib/query/invalidate";
 
 import { overrideTaskStatus, reassignTask } from "../actions";
 import { InlineDate, InlineEstimate, InlineList, InlinePriority } from "../inline";
@@ -135,6 +138,7 @@ export function TaskSurface({
   priority,
   listId,
   lists,
+  listsUnavailable = false,
   assigneeId,
   qaAssigneeId,
   picName,
@@ -179,11 +183,28 @@ export function TaskSurface({
    * P7-15. Minutes logged by EVERYONE, from `vizserve_pms_task_time_tracked` —
    * never a sum of `timesheet_entries`, whose policy is owner-or-their-lead and
    * would show each viewer a different total for the same task.
+   *
+   * ⚠️ P12-06 — NULL MEANS THE ROLLUP DID NOT COME BACK, AND IT IS NOT ZERO.
+   * The read is its own query key now (`qk.taskPart(id, "time")`), so it can
+   * fail on its own. A failure rendered as `0` says nobody has logged time
+   * against this task — on a task somebody has spent two days on that is a lie
+   * nobody would think to report, and it is the same wrong zero P12-01 removed
+   * from the rail's counts. A task genuinely absent from the rollup is a real
+   * `0`; the fetcher settles that before this prop is built.
    */
-  trackedMinutes: number;
+  trackedMinutes: number | null;
   priority: TaskPriority | null;
   listId: string | null;
   lists: { id: string; name: string }[];
+  /**
+   * P12-06 — the lists read FAILED, as distinct from the department having none.
+   *
+   * ⚠️ THE ROW BELOW IS DRAWN ON `lists.length > 0`, so without this flag a
+   * failed read renders as a task that belongs to no list and offers no picker —
+   * silently, on a screen where the list is how people find the work again. The
+   * two states have to look different (P12-01).
+   */
+  listsUnavailable?: boolean;
   assigneeId: string | null;
   qaAssigneeId: string | null;
   picName: string | null;
@@ -267,6 +288,14 @@ export function TaskSurface({
    * a focused textarea mid-save blurs it and drops the caret to position 0.
    */
   const router = useRouter();
+  /*
+   * P12-06 — the page this control sits on reads `qk.task(id)` from the cache
+   * now, so a write has to say so. `router.refresh()` stays beside it because
+   * the ACTION revalidates four routes and because removing it breaks the
+   * optimistic hold below — see `lib/query/invalidate.ts` for the full account
+   * of why both, and `ded2244` for what happened the day one of them went.
+   */
+  const queryClient = useQueryClient();
   const [moving, startTransition] = useTransition();
   const autosave = useTaskAutosave(taskId);
   const gate = useTaskGate();
@@ -339,7 +368,8 @@ export function TaskSurface({
    */
   const canForce = viewer.leadsDepartment || viewer.administersDepartment;
   const savingResolution = autosave.stateOf("resolution") === "saving";
-  const overEstimate = estimateMinutes !== null && trackedMinutes > estimateMinutes;
+  const overEstimate =
+    estimateMinutes !== null && trackedMinutes !== null && trackedMinutes > estimateMinutes;
   const reassignUnchanged = pic === (assigneeId ?? NONE) && qa === (qaAssigneeId ?? NONE);
 
   function run(action: () => Promise<{ ok: boolean; error?: string }>, success: string) {
@@ -354,6 +384,12 @@ export function TaskSurface({
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
       router.refresh();
+      /* ⚠️ AWAITED, AND INSIDE THE TRANSITION, for exactly the same reason the
+         line above it is here: an un-awaited invalidate lets the transition end
+         before the fresh rows arrive and the value snaps back. A forced status
+         also writes a history row, which is why this sweeps the whole task
+         rather than one part. */
+      await invalidateTaskWrite(queryClient, taskId);
       toast.success(success);
       setOverrideOpen(false);
       setOverrideReason("");
@@ -394,6 +430,11 @@ export function TaskSurface({
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
       router.refresh();
+      /* ⚠️ AND THE CACHE, AWAITED INSIDE THE TRANSITION. A reassignment changes
+         `assignee_id` / `qa_assignee_id`, which is what `viewer.isAssignee` and
+         `viewer.isQa` are derived from on this page — so without this the
+         controls would keep offering the old seat's moves until a navigation. */
+      await invalidateTaskWrite(queryClient, taskId);
       toast.success("Reassigned");
     });
   }
@@ -472,9 +513,19 @@ export function TaskSurface({
           {estimateMinutes === null ? "—" : formatCellDuration(estimateMinutes)}
         </span>
       )}
+      {/* ⚠️ THE FAILED READ SAYS SO. It cannot fall in with the branch below,
+          which hides itself at zero — "nothing logged" and "we could not find
+          out" would then be the same blank space. */}
+      {trackedMinutes === null ? (
+        <span className="text-2xs text-muted-foreground">
+          <span aria-hidden>time logged unavailable</span>
+          <span className="sr-only">the time logged against this task could not be loaded</span>
+        </span>
+      ) : null}
+
       {/* HIDDEN WHEN NOTHING IS LOGGED, never a permanent "0h of 6h" — a figure
           that reads zero on most tasks is one people stop reading. */}
-      {trackedMinutes > 0 ? (
+      {trackedMinutes !== null && trackedMinutes > 0 ? (
         <span
           className={cn(
             "text-2xs tabular-nums",
@@ -633,7 +684,20 @@ export function TaskSurface({
 
             <Prop label="Estimate">{estimate}</Prop>
 
-            {lists.length > 0 ? (
+            {/* ⚠️ THREE STATES, NOT TWO. The department has lists · the read
+                failed · the department genuinely has none. The last one draws
+                nothing, as it always has; the middle one used to draw nothing
+                too, which made a broken query look like a task in no list. */}
+            {listsUnavailable ? (
+              <Prop label="List">
+                <span className="text-muted-foreground">
+                  <span aria-hidden>could not be loaded</span>
+                  <span className="sr-only">
+                    the lists in this department could not be loaded; this task may well be in one
+                  </span>
+                </span>
+              </Prop>
+            ) : lists.length > 0 ? (
               <Prop label="List">
                 {canEdit ? (
                   <InlineList taskId={taskId} value={listId} lists={lists} />

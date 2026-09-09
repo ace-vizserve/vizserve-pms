@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useOptimistic, useState, useTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
 import { toneButtonVariant } from "@/components/status-badge";
@@ -19,6 +20,8 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor";
 import { isRichTextEmpty } from "@/lib/rich-text";
 import { useOptimisticMove } from "./optimistic-move";
 import { transitionTone, type TaskStatus, type Transition } from "@/lib/schemas/tasks";
+
+import { invalidateTaskWrite } from "@/lib/query/invalidate";
 
 import { transitionTask } from "./actions";
 
@@ -86,6 +89,18 @@ export function useTaskTransition({
    * machine and reported as an error the person did not cause.
    */
   const router = useRouter();
+  /*
+   * P12-06 — THE CACHE, AS WELL AS THE REFRESH. NOT INSTEAD OF IT.
+   *
+   * This control is shared: the detail header renders it, every list row renders
+   * it and every board card renders it. `/tasks/[id]` reads `qk.task(id)` from
+   * the cache now, so a write has to invalidate; `/tasks` and `/tasks/board`
+   * still read their rows in an RSC, so the `router.refresh()` below stays until
+   * Phase 3c. The precedent is `hooks/use-realtime-refresh.ts` (P12-02), which
+   * invalidates AND refreshes for exactly this reason. Full account, including
+   * what `ded2244` cost, in `lib/query/invalidate.ts`.
+   */
+  const queryClient = useQueryClient();
   const [pending, startTransition] = useTransition();
 
   /*
@@ -192,6 +207,16 @@ export function useTaskTransition({
        * Next 16's action queue and kept it. Full account in `tasks/inline.tsx`.
        */
       router.refresh();
+      /*
+       * ⚠️ AWAITED, AND INSIDE THE TRANSITION, for the same reason as the line
+       * above. An un-awaited invalidate lets the transition end before the
+       * fresh rows arrive, which is `ded2244` through a different door.
+       *
+       * The whole task, not one part: a move writes a `task_status_history`
+       * row, may write a `client_decisions` row, and changes the counts in the
+       * rail. `qk.task(id)` prefix-matches every panel of this task.
+       */
+      await invalidateTaskWrite(queryClient, taskId);
       toast.success(transition.label);
       setPrompt(null);
       setError(null);
