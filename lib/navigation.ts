@@ -150,6 +150,28 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "form",
   },
   {
+    /*
+     * ⚠️ THE PAGE SHIPPED WITHOUT A WAY IN. Ace, 10 Sep: `/reports` existed,
+     * was gated, was in the breadcrumb map — and NOTHING IN THE APP LINKED TO
+     * IT. The only inbound reference was `range-picker.tsx` resetting the range
+     * from inside the page, so the sole way to reach it was typing the URL.
+     *
+     * `team_leader`, matching `requireRole("team_leader")` on the page itself,
+     * and no `alsoDeptAdmin`: unlike `/forms`, this is not one of the structure
+     * screens the department-admin tick reaches. The row and the gate agree,
+     * which is the rule the Admin group's comment states — a row that leads to
+     * a refusal is a door that does not open.
+     *
+     * It lands in "Manage" beside Forms because `NAV_GROUPS` already listed
+     * `/reports` there; the group knew about the page before the rail did.
+     */
+    label: "Reports",
+    href: "/reports",
+    minRole: "team_leader",
+    enabled: true,
+    icon: "reports",
+  },
+  {
     label: "Requests",
     href: "/requests",
     minRole: "team_leader",
