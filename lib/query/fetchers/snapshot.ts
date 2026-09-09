@@ -42,7 +42,31 @@ export async function fetchSidebarSnapshot(client: SnapshotClient): Promise<Side
   // `read`, not `?? {}`. A failed RPC throws with PostgREST's code intact, which
   // is what lets `makeQueryClient`'s retry policy tell a socket hiccup from a
   // missing GRANT — and what stops the rail rendering an empty tree in silence.
-  const payload = await read<unknown>(client.rpc("vizserve_pms_sidebar_snapshot"));
+  let payload: unknown;
+
+  try {
+    payload = await read<unknown>(client.rpc("vizserve_pms_sidebar_snapshot"));
+  } catch (error) {
+    /*
+     * ⚠️ THE RAIL SAYS "COULDN'T LOAD" AND, WITHOUT THIS, SAYS IT NOWHERE ELSE.
+     *
+     * `read()` throws with the PostgREST code intact and `useQuery` puts it in
+     * `query.error`, which nothing renders and nothing logs — so the one screen
+     * that reports its failure honestly still gave a person debugging it
+     * nothing to go on. Reported once here, at the boundary, rather than in
+     * `read()`: this is the app's most-rendered query and a generic log there
+     * would be noise on every screen.
+     *
+     * `error` and not `warn`: unlike the realtime degrade, there is no version
+     * of this that is working as intended.
+     */
+    const detail =
+      error instanceof ReadError
+        ? `${error.message} (code ${error.code ?? "none"})`
+        : String(error);
+    console.error(`[sidebar] snapshot read failed — ${detail}`);
+    throw error;
+  }
 
   const parsed = sidebarSnapshotSchema.safeParse(payload);
 
