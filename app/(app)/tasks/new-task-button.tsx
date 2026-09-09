@@ -4,8 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { roleAtLeast } from "@/lib/auth/roles";
 import { browserClient } from "@/lib/query/browser-client";
+import { fetchDepartments } from "@/lib/query/fetchers/ref";
 import { fetchDirectory, fetchVisibleLists } from "@/lib/query/fetchers/task";
-import { fetchDepartments } from "@/lib/query/fetchers/task-list";
 import { qk } from "@/lib/query/keys";
 
 import { NewPersonalTaskDialog } from "./new-personal-task-dialog";
@@ -227,13 +227,24 @@ export function NewTaskButton({
      they are there — same argument as the two above it. */
   if (departmentsQuery.isPending || !departmentsQuery.data) return null;
 
-  // An admin sees every department; a TL should only be offered the ones they
-  // actually lead, or the create call fails after they have filled in the form.
+  /*
+   * ⚠️ `is_active` IS TESTED HERE AND NOT IN THE QUERY (P12-20).
+   * `qk.ref("departments")` holds EVERY department the reader may see, retired
+   * ones included, because four other surfaces need to NAME a department rather
+   * than offer a seat in one — a report cannot label a two-year-old task's
+   * department if the entry dropped it. The same split `qk.ref("users")` makes,
+   * and the same obligation on this side of it: a caller offering a SEAT
+   * filters for itself. `vizserve_pms_create_task` refuses a retired
+   * department, so offering one is offering a door the server does not open.
+   *
+   * An owner sees every department; a TL should only be offered the ones they
+   * actually lead, or the create call fails after they have filled in the form.
+   */
+  const live = departmentsQuery.data.filter((department) => department.is_active);
+
   const allowed = roleAtLeast(viewer.role, "owner")
-    ? departmentsQuery.data
-    : departmentsQuery.data.filter((department) =>
-        viewer.managedDepartmentIds.includes(department.id),
-      );
+    ? live
+    : live.filter((department) => viewer.managedDepartmentIds.includes(department.id));
 
   if (allowed.length === 0) return null;
 

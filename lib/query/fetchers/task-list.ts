@@ -632,35 +632,23 @@ export async function fetchTaskFolders(client: TaskReadClient): Promise<TaskFold
 }
 
 /**
- * `qk.ref("departments")` — the departments a Team Leader may create work in.
+ * ⚠️ `fetchDepartments` MOVED TO `lib/query/fetchers/ref.ts` IN P12-20, AND IT
+ * WAS WIDENED ON THE WAY.
  *
- * ⚠️ REFERENCE DATA, AND FILED AS SUCH RATHER THAN UNDER THE PAGE THAT ASKS FOR
- * IT. One reader today (`new-task-button.tsx`, on the lead branch only), and
- * every picker in Phase 6 wants the same rows — so it goes where
- * `client.ts`'s `REF_STALE_TIME` already points and that phase inherits a
- * populated key rather than a duplicate to reconcile.
+ * It lived here with a comment that said what was coming — "every picker in
+ * Phase 6 wants the same rows" — and that is what happened, except that the
+ * five new consumers want a WIDER row set than this one did. It read
+ * `.eq("is_active", true)`, which is right for the create picker that was its
+ * only caller and wrong for `/reports`, `/forms` and `/hr/reports`, all of
+ * which need to NAME a department rather than offer a seat in it. The filter is
+ * now the caller's, exactly as `fetchDirectory` made `is_active` the caller's
+ * on the staff directory in P12-07.
  *
- * ⚠️ NO ROLE FILTER, ON PURPOSE. RLS returns what the reader may see, and the
- * caller narrows to `managedDepartmentIds` for the OFFER — an owner is offered
- * every department, a lead only the ones they lead, because
- * `vizserve_pms_create_task` refuses anything else after the form has been
- * filled in. Restating the scope in SQL would imply the policy were optional.
+ * The whole argument is at the function's new home. It is not re-exported from
+ * here: `new-task-button.tsx` is the only file that imported it and the picker
+ * it feeds now filters that column itself, so a line that hid where the rows
+ * come from would hide the one thing that call site has to remember.
  */
-export async function fetchDepartments(
-  client: TaskReadClient,
-): Promise<{ id: string; name: string }[]> {
-  const rows = await read<unknown[]>(
-    client
-      .from("vizserve_pms_departments")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name"),
-  );
-
-  /* The same two columns a folder has, and the same reasons for each — reused
-     rather than declared twice for one shape. */
-  return parseAll(taskFolderSchema, rows, "departments");
-}
 
 /**
  * `qk.pendingRequests(...)` — P7-26, the requests that have not been decided.

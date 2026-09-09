@@ -14,7 +14,7 @@ import { isPermanent } from "./read";
 export const REF_STALE_TIME = 10 * 60_000;
 
 export function makeQueryClient() {
-  return new QueryClient({
+  const client = new QueryClient({
     defaultOptions: {
       queries: {
         /*
@@ -55,4 +55,38 @@ export function makeQueryClient() {
       },
     },
   });
+
+  /*
+   * ⚠️ P12-20 — `REF_STALE_TIME` IS APPLIED HERE, ONCE, AND IT WAS APPLIED
+   * NOWHERE AT ALL BEFORE THIS LINE.
+   *
+   * The constant has existed since Phase 0 and four files' comments say that
+   * reference data "carries `REF_STALE_TIME`" — `fetchers/task.ts`,
+   * `fetchers/requests.ts`, `keys.ts` and `realtime.ts` all assert it in
+   * capitals, and `realtime.ts` maps a folder rename to `qk.ref("task-groups")`
+   * specifically because a ten-minute stale time would otherwise hold a stale
+   * name. NOT ONE `useQuery` PASSED IT. Every `qk.ref(...)` entry in Phases 3
+   * and 4 was running on the 30-second default, so the staff directory was
+   * being refetched on every window focus and on every navigation that landed
+   * more than half a minute after the last one — which is precisely the cost
+   * the plan calls "the cheapest win", sitting unclaimed behind a constant
+   * everybody had already written the comments for.
+   *
+   * ⚠️ A KEY DEFAULT RATHER THAN AN OPTION AT EACH CALL SITE, deliberately, and
+   * the reason is the same one `keys.ts` gives for the key hierarchy being the
+   * invalidation API: `setQueryDefaults` matches BY PREFIX, so every present and
+   * future `["ref", …]` entry inherits this whether or not the person adding it
+   * remembers. Passing it per query would be nine call sites today and a tenth
+   * that silently does not, indistinguishable on screen from one that does.
+   *
+   * ⚠️ IT CHANGES NOTHING ABOUT FRESHNESS GUARANTEES, ONLY ABOUT COST. A long
+   * stale time is not a cache that ignores the truth — `invalidateQueries` cuts
+   * straight through it, which is what `realtime.ts` does on a folder rename and
+   * what `/forms` does on a publish. Staleness only decides whether a MOUNT
+   * refetches; a table nobody has edited does not need re-reading because
+   * somebody opened a second tab.
+   */
+  client.setQueryDefaults(["ref"], { staleTime: REF_STALE_TIME });
+
+  return client;
 }
