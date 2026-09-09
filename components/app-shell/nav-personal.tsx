@@ -94,7 +94,23 @@ export type PersonalList = {
   isActive: boolean;
 };
 
-export function NavPersonal({ lists }: { lists: PersonalList[] }) {
+export function NavPersonal({
+  lists,
+  unavailable = false,
+}: {
+  lists: PersonalList[];
+  /**
+   * P12-01 — the snapshot could not be read, so `lists` is empty because we do
+   * not KNOW, not because there are none.
+   *
+   * ⚠️ WITHOUT THIS THE GROUP STATES A FALSEHOOD. An empty `lists` renders "No
+   * lists yet", which to somebody holding four personal lists is the app
+   * telling them their work is gone — and it is the exact silent-empty this
+   * phase exists to kill, six pixels under the Projects group that reports the
+   * failure honestly.
+   */
+  unavailable?: boolean;
+}) {
   const pathname = usePathname();
   const params = useSearchParams();
 
@@ -161,6 +177,7 @@ export function NavPersonal({ lists }: { lists: PersonalList[] }) {
             <PersonalSpace
               lists={active}
               archived={archived}
+              unavailable={unavailable}
               activeList={activeList}
               base={base}
               onEdit={edit}
@@ -215,9 +232,11 @@ function PersonalSpace({
   onCreate,
   showArchived,
   onToggleArchived,
+  unavailable,
 }: {
   lists: PersonalList[];
   archived: PersonalList[];
+  unavailable: boolean;
   activeList: string | null;
   base: string;
   onEdit: (list: PersonalList) => void;
@@ -261,9 +280,17 @@ function PersonalSpace({
             />
           ))}
 
+          {/* ⚠️ "NO LISTS YET" IS A CLAIM ABOUT DATA, so it may only be made when
+              the data actually arrived. On a failed snapshot the honest row is
+              that we could not read it — see `unavailable` above. */}
           {lists.length === 0 ? (
             <SidebarMenuSubItem>
-              <span className="block px-2 py-1 text-2xs text-muted-foreground">No lists yet</span>
+              <span
+                role={unavailable ? "status" : undefined}
+                className="block px-2 py-1 text-2xs text-muted-foreground"
+              >
+                {unavailable ? "Couldn’t load your lists. Trying again." : "No lists yet"}
+              </span>
             </SidebarMenuSubItem>
           ) : null}
 
@@ -281,6 +308,10 @@ function PersonalSpace({
             beside this. Two ways to open one dialog is one more than the dialog
             deserves — the note on the folder `…` in nav-projects.tsx.
           */}
+          {/* Hidden while the set is unknown: "New list" beside a failed read
+              invites somebody to add a second list called the same thing as one
+              they already have and cannot currently see. */}
+          {unavailable ? null : (
           <SidebarMenuSubItem>
             {/*
               ⚠️ `render={<button type="button" />}` IS LOAD-BEARING.
@@ -300,6 +331,7 @@ function PersonalSpace({
               <span>New list</span>
             </SidebarMenuSubButton>
           </SidebarMenuSubItem>
+          )}
 
           {/*
             THE WAY BACK from the Active switch, and the reason archived lists

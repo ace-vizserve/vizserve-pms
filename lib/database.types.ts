@@ -2384,6 +2384,30 @@ export type Database = {
           days: number;
         }[];
       };
+      /**
+       * P12-01. The whole sidebar in one jsonb: both nav badges, the department
+       * tree and the caller's own personal lists.
+       *
+       * ⚠️ `SECURITY INVOKER`, unlike almost every other function in this list.
+       * Every existing policy still decides what comes back, exactly as it did
+       * for the nine queries it replaces — a DEFINER version would hand every
+       * department's tree to every member.
+       *
+       * `Returns: Json` is what the generator emits for a `returns jsonb`
+       * function and is deliberately not narrowed here. The shape lives in
+       * `lib/schemas/sidebar.ts` and is PARSED at the boundary; a hand-written
+       * type here would be a cast dressed up as a generated one, and the whole
+       * point of P12-01 is that a wrong-shaped payload must fail loudly rather
+       * than render as an empty project tree.
+       *
+       * ⚠️ HAND-ADDED, like every entry near it: regenerating this file needs
+       * `db:start` and Docker. If it and the migration disagree, the migration
+       * wins.
+       */
+      vizserve_pms_sidebar_snapshot: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
       vizserve_pms_submit_request: {
         Args: {
           p_slug: string;

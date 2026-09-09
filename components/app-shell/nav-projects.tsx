@@ -55,12 +55,27 @@ import { cn } from "@/lib/utils";
  * everything — from the same queries, with no role check in this component.
  */
 
+/**
+ * ⚠️ THE COUNTS ARE `number | null`, AND `null` IS NOT `0`.
+ *
+ * P12-01. Until this change a count was a plain number, so a read that failed
+ * and a list that is genuinely empty produced the same pixels — nothing at all,
+ * because `FolderCounts` hides a zero. That is the bug the whole phase is named
+ * for: `sidebar-panel.tsx` ended every read in `?? []` / `?? 0`, and a burst of
+ * concurrent PostgREST failures rendered as "you have no open tasks" to somebody
+ * holding twenty-two.
+ *
+ * `null` means UNKNOWN and renders as a dimmed dash with `count unavailable`
+ * beside it for a screen reader. `0` still renders as nothing, exactly as
+ * before. See `FolderCounts` at the foot of this file.
+ */
 export type ProjectList = {
   id: string;
   name: string;
-  openTasks: number;
+  /** Open tasks in this list, or `null` when the count could not be read. */
+  openTasks: number | null;
   /** P7-26. Client requests waiting on Gate 1 that will land in this list. */
-  pendingRequests: number;
+  pendingRequests: number | null;
 };
 
 export type ProjectFolder = {
@@ -75,10 +90,13 @@ export type ProjectFolder = {
    */
   isSystem: boolean;
   lists: ProjectList[];
-  /** Rolled up from `lists`, so a collapsed folder still says how much is in it. */
-  openTasks: number;
+  /**
+   * Rolled up from `lists`, so a collapsed folder still says how much is in it.
+   * `null` when the count could not be read — see `ProjectList` above.
+   */
+  openTasks: number | null;
   /** Rolled up the same way. Client Requests is where this is usually non-zero. */
-  pendingRequests: number;
+  pendingRequests: number | null;
 };
 
 /**
@@ -101,8 +119,24 @@ export type ProjectSpace = {
 export function NavProjects({
   spaces,
   canManageLists,
+  unavailable = false,
 }: {
   spaces: ProjectSpace[];
+  /**
+   * P12-01 — THE TREE COULD NOT BE READ AT ALL, which is not the same fact as
+   * "this department has no lists" and must not render as it.
+   *
+   * `FolderCounts` gained a dash for the same reason one level down: an empty
+   * array here draws the "Create a list" row over nothing, and a person holding
+   * twenty-two lists reads that as having none. Optional and defaulting to
+   * false, so nothing that already renders this component changes.
+   *
+   * Deliberately NOT an error message with a cause in it. The rail is furniture
+   * on every page in the product; the honest short sentence belongs here and the
+   * PostgREST code belongs in `ReadError`, where the console and the devtools
+   * already have it.
+   */
+  unavailable?: boolean;
   /**
    * `/tasks/lists` calls `requireDepartmentShape()` and renders the forbidden
    * page for anybody else.
@@ -208,6 +242,31 @@ export function NavProjects({
             point is gone: `app/(app)/tasks/page.tsx` now sends it to the list
             tree instead of rendering everything.
           */}
+          {/*
+            ⚠️ THE FAILED READ, SAID OUT LOUD — P12-01.
+
+            `role="status"` rather than `role="alert"`: the rail is furniture,
+            and interrupting whatever a person is reading on the page because a
+            nav tree could not load is louder than the fact deserves. It is
+            polite, so it is announced when they get there.
+
+            No retry button. The query retries itself (twice, unless the code is
+            a `42xxx` — a missing GRANT never becomes present on a retry), and
+            `refetchOnWindowFocus` picks it up the moment they come back to the
+            tab. A button whose only effect is to do sooner what is already
+            happening is a control that teaches people to press it.
+          */}
+          {unavailable ? (
+            <SidebarMenuItem>
+              <span
+                role="status"
+                className="block px-2 py-1.5 text-2xs text-muted-foreground"
+              >
+                Couldn&rsquo;t load your lists. Trying again.
+              </span>
+            </SidebarMenuItem>
+          ) : null}
+
           {spaces.map((space) => (
             <SpaceNode
               key={space.departmentId}
@@ -225,15 +284,28 @@ export function NavProjects({
               `/tasks/lists` is where folders and lists are created and archived;
               it already exists and enforces its own department scope, so this is
               a link to a screen rather than a second way to make one. */}
+          {/* ⚠️ `&& !unavailable` — P12-01. The empty wording is "Create a list",
+              i.e. "you have none yet", and that is a CLAIM ABOUT THE DATA. When
+              the tree could not be read there is no basis for it, so the row
+              keeps its ordinary label and the message above carries the fact.
+              The link itself is still offered: `/tasks/lists` re-reads on its
+              own and enforces its own scope, so it is a working door even while
+              the rail is blind. */}
           {canManageLists ? (
             <SidebarMenuItem>
               <SidebarMenuButton
-                tooltip={spaces.length === 0 ? "Create your first list" : "Manage folders and lists"}
+                tooltip={
+                  spaces.length === 0 && !unavailable
+                    ? "Create your first list"
+                    : "Manage folders and lists"
+                }
                 className="text-muted-foreground"
                 render={<Link href="/tasks/lists" />}
               >
                 <Plus />
-                <span>{spaces.length === 0 ? "Create a list" : "Manage lists"}</span>
+                <span>
+                  {spaces.length === 0 && !unavailable ? "Create a list" : "Manage lists"}
+                </span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           ) : null}
@@ -503,14 +575,29 @@ function ListRow({ list, activeList }: { list: ProjectList; activeList: string |
  * Inline in the flex row removes the whole class of bug: the counts take part in
  * the layout, `ml-auto` puts them at the end, and the trigger's own `pr-9`
  * keeps them clear of the `+`. Nothing has to hide to make room for anything.
+ *
+ * ⚠️ THREE STATES, NOT TWO — P12-01. `null` is UNKNOWN and is the state this
+ * component did not have. Without it a failed read and a genuinely empty list
+ * rendered identically (as nothing), which is the exact bug the SPA migration's
+ * Phase 1 is named after: a burst of `TypeError: fetch failed` in
+ * `sidebar-panel.tsx` degraded to `?? 0` and told somebody holding twenty-two
+ * open tasks that they had none, silently, with no error on screen.
+ *
+ *   null   the count could not be read — a dimmed dash, and `count unavailable`
+ *          for a screen reader. Deliberately NOT a zero and deliberately not
+ *          nothing: the row has to look different from a quiet one.
+ *   0      nothing to say. Hidden, exactly as before. A permanent `0` beside
+ *          every list teaches people to stop reading the column — the same rule
+ *          the QA tile on the dashboard follows.
+ *   n > 0  the number.
  */
 function FolderCounts({
   pending,
   open,
   hideOpenWhenExpanded = false,
 }: {
-  pending: number;
-  open: number;
+  pending: number | null;
+  open: number | null;
   /**
    * On a FOLDER, the open-task total is the sum of the rows revealed directly
    * beneath it, so it is worth saying only while shut. The pending count is not
@@ -519,6 +606,28 @@ function FolderCounts({
    */
   hideOpenWhenExpanded?: boolean;
 }) {
+  /*
+   * ⚠️ ONE DASH FOR THE PAIR, NOT ONE PER COUNT. Both counts come off the same
+   * read (`vizserve_pms_sidebar_snapshot`), so they are unknown together or not
+   * at all — and two dashes side by side on every row of a broken tree reads as
+   * a rendering fault rather than as a message. If a later phase ever splits the
+   * two reads apart, split this too rather than leaving it ambiguous.
+   */
+  if (pending === null || open === null) {
+    return (
+      <span className="ml-auto flex shrink-0 items-center gap-1 font-mono text-2xs tabular-nums">
+        {/* The dash is `aria-hidden` and the words carry the meaning, which is
+            the standing rule in this app: state is never conveyed by a visual
+            alone. A screen reader announcing "em dash" would be worse than
+            silence; "count unavailable" is the fact. */}
+        <span className="font-semibold text-muted-foreground/50" aria-hidden>
+          —
+        </span>
+        <span className="sr-only">count unavailable</span>
+      </span>
+    );
+  }
+
   if (pending === 0 && open === 0) return null;
 
   return (

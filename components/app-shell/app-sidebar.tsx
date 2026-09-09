@@ -54,6 +54,7 @@ export function AppSidebar({
   user,
   badges,
   spaces = [],
+  unavailable = false,
   canManageLists = false,
   personalLists = [],
 }: {
@@ -84,6 +85,18 @@ export function AppSidebar({
    * and an admin gets everything from the same query.
    */
   spaces?: ProjectSpace[];
+  /**
+   * P12-01 — `spaces` is empty because the READ FAILED, not because there is
+   * nothing there.
+   *
+   * The two are indistinguishable in an array, and rendering them the same way
+   * is the bug the SPA migration's Phase 1 exists to remove: an empty tree with
+   * "Create a list" under it, shown to somebody holding twenty-two, with no
+   * error anywhere on screen. `NavProjects` says so instead.
+   *
+   * Optional and defaulting to false, so every existing caller is unchanged.
+   */
+  unavailable?: boolean;
   /** Whether `/tasks/lists` is reachable for this person — it is team_leader+. */
   canManageLists?: boolean;
   /**
@@ -165,12 +178,16 @@ export function AppSidebar({
         {/* Between the flow and the pinned sections: the modules are what you
             DO, the projects are where the work lives, and Admin stays at the
             foot. */}
-        <NavProjects spaces={spaces} canManageLists={canManageLists} />
+        <NavProjects
+          spaces={spaces}
+          unavailable={unavailable}
+          canManageLists={canManageLists}
+        />
 
         {/* P11-06 — after Projects, before the pinned sections. The order is the
             claim: what the team is doing first, what only you are doing after
             it, and Admin still at the foot. */}
-        <NavPersonal lists={personalLists} />
+        <NavPersonal lists={personalLists} unavailable={unavailable} />
 
         {pinned.map((section) => (
           <NavSection
