@@ -3,7 +3,7 @@
 import { toast } from "@/components/ui/toast";
 import { ChevronsUpDown, Plus, X } from "lucide-react";
 import Link from "next/link";
-import { useState, useTransition } from "react";
+import { Fragment, useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -21,7 +21,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { TimePicker } from "@/components/ui/time-picker";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { todayInAppZone } from "@/lib/dates";
@@ -56,7 +63,23 @@ import { FieldError } from "@/components/ui/field-error";
 export type PickableLeaveType = { id: string; label: string; requires_reliever: boolean };
 
 /** A colleague who could take the work. The server page scopes these to the department. */
-export type RelieverCandidate = { id: string; full_name: string };
+/**
+ * P11-11 — a colleague who can be named as a reliever.
+ *
+ * The department travels with the name because the picker GROUPS by it. Once
+ * the list stopped being your own team it became a company directory, and a
+ * flat alphabetical run of forty names gives no way to tell the two Marias
+ * apart or to find the person you actually work with.
+ *
+ * Never null: `vizserve_pms_reliever_candidates` joins departments inner, so
+ * somebody with no team is not offered at all.
+ */
+export type RelieverCandidate = {
+  id: string;
+  full_name: string;
+  department_id: string;
+  department_name: string;
+};
 
 /** One of the requester's own open tasks. */
 export type HandoverTask = { id: string; title: string };
@@ -803,17 +826,21 @@ export function NewRequestDialog({
                   <div>
                     <h3 className="text-sm font-medium">Hand-over</h3>
                     <p className="mt-0.5 text-xs text-muted-foreground">
-                      Name up to {MAX_RELIEVERS} colleagues from your team and give each of them the tasks they will
-                      hold while you are away. They confirm before your team leader sees this.
+                      Name up to {MAX_RELIEVERS} colleagues — from any team — and give each of them the tasks
+                      they will hold while you are away. They confirm before your team leader sees this.
                     </p>
                   </div>
 
                   {relieverCandidates.length === 0 ? (
-                    /* Not an error state — it is a fact about the department and
+                    /* Not an error state — it is a fact about the company and
                        the person filing has no way to fix it. Saying so beats an
-                       empty dropdown they will click three times. */
+                       empty dropdown they will click three times.
+
+                       Reworded with P11-11: the list is no longer your own
+                       team, so "nobody in your department" would be a wrong
+                       explanation for an empty picker. */
                     <p className="text-xs text-muted-foreground">
-                      There is nobody else active in your department to hand work to. Ask an admin before filing this.
+                      There is nobody else to hand work to yet. Ask an admin before filing this.
                     </p>
                   ) : null}
 
@@ -855,11 +882,37 @@ export function NewRequestDialog({
                                 <SelectValue placeholder="Choose a colleague…" />
                               </SelectTrigger>
                               <SelectContent>
-                                {people.map((person) => (
-                                  <SelectItem key={person.id} value={person.id}>
-                                    {person.full_name}
-                                  </SelectItem>
-                                ))}
+                                {/*
+                                  P11-11 — GROUPED BY DEPARTMENT.
+
+                                  The list stopped being your own team, so a flat
+                                  alphabetical run of every name in the company is
+                                  no way to find the person you actually work with
+                                  — or to tell two people with the same first name
+                                  apart. The heading is the only thing on screen
+                                  that distinguishes them.
+
+                                  Built by WALKING the list, not by grouping into a
+                                  map: the function orders by department then name,
+                                  so consecutive rows sharing a department are the
+                                  group. An object keyed by department id would
+                                  hand the order over to whatever key iteration
+                                  gives, which is not the sort the server chose.
+                                */}
+                                {people.map((person, at) => {
+                                  const first =
+                                    at === 0 ||
+                                    people[at - 1]!.department_id !== person.department_id;
+
+                                  return (
+                                    <Fragment key={person.id}>
+                                      {first ? (
+                                        <SelectLabel>{person.department_name}</SelectLabel>
+                                      ) : null}
+                                      <SelectItem value={person.id}>{person.full_name}</SelectItem>
+                                    </Fragment>
+                                  );
+                                })}
                               </SelectContent>
                             </Select>
                           </div>
