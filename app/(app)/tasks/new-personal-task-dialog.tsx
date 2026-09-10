@@ -50,6 +50,28 @@ import { FieldError } from "@/components/ui/field-error";
  *   assigned to me        → `createPersonalTask` → is_personal = true  → I close it
  *   assigned to somebody  → `createTask`         → is_personal = false → QA closes it
  *
+ * ⚠️ THE PICKER TAKES SEVERAL PEOPLE (P7-13), AND THAT DOES NOT BLUR THE LINE
+ * ABOVE — it decides it the same way, on ONE question: is anybody else on this.
+ *
+ *   just me                → personal, and it stays PRIVATE (P7-17)
+ *   me and a colleague     → department work, me accountable, them beside me
+ *   colleagues, not me     → department work, the first of them accountable
+ *
+ * Ticking yourself ALONGSIDE somebody else is therefore not a personal task
+ * with a guest on it. `is_personal` is what keeps work out of the department's
+ * sight, and work two people share is not work one of them can hide — so the
+ * moment a second name appears, the task belongs to the department.
+ *
+ * `assignee_id` stays exactly one person either way, because the column is the
+ * ACCOUNTABLE name and not a list. The rest become rows in
+ * `vizserve_pms_task_assignees`, where every one of them is a full participant:
+ * they can open it, edit it, log time against it and move it (P7-13a, P11-05).
+ *
+ * ⚠️ THE ADDS HAPPEN AFTER THE ROW EXISTS and are judged one at a time by
+ * `vizserve_pms_add_task_assignee`, which P11-06 widened to any active member
+ * of the task's own department — which is what makes "for Ace and Raiza, not
+ * me" work at all from a member who is not on the task they just filed.
+ *
  * That is not a derivation of `created_by = assignee_id` — which correction 1
  * ruled out, because a later reassignment would silently flip a task's category
  * and with it which moves are legal. It is a choice recorded in a column that
@@ -65,6 +87,7 @@ export function NewPersonalTaskDialog({
   defaultListId = null,
   colleagues,
   departmentId,
+  selfId,
   trigger = "toolbar",
 }: {
   /** The member's own department's lists. Optional — a task needs no list. */
@@ -84,6 +107,16 @@ export function NewPersonalTaskDialog({
   /** The member's own department, read on the server. Never chosen here. */
   departmentId: string | null;
   /**
+   * The reader's OWN user id, read on the server beside the department.
+   *
+   * Needed only since the picker took several people: "me and Ace" is a
+   * department task with `assignee_id` set to me, and `createTask` wants a real
+   * uuid there — the `MINE` sentinel below is a UI value and never leaves this
+   * file. It is not a permission of any kind; `vizserve_pms_create_task` still
+   * refuses an assignee outside the caller's own department, whoever is named.
+   */
+  selfId: string;
+  /**
    * The SHAPE, never the permission — the same rule `new-task-button.tsx`
    * states. `quick` is the home page's action grid, where this sits beside five
    * outline links and has to look like the sixth rather than the only primary
@@ -94,7 +127,14 @@ export function NewPersonalTaskDialog({
   const [open, setOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
   const [estimate, setEstimate] = useState<number | null>(null);
-  const [assignee, setAssignee] = useState<string>(MINE);
+  /*
+   * ⚠️ NEVER EMPTY. `[MINE]` is the default and `onValueChange` puts it back
+   * the moment the last tick comes off — a task with nobody on it is not a
+   * state either create function will accept, so it is not a state the form is
+   * allowed to reach. Unticking your way to nothing means "mine again", which
+   * is the only reading that leaves the dialog submittable.
+   */
+  const [assignees, setAssignees] = useState<string[]>([MINE]);
   const [errors, setErrors] = useState<Record<string, string[]>>({});
 
   /*
@@ -124,10 +164,28 @@ export function NewPersonalTaskDialog({
   const [startDate, setStartDate] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<string | null>(null);
 
-  const assigneeItems = {
+  // Annotated, not inferred: a computed key narrows the literal to `__mine__`
+  // alone, so looking a colleague's id up in it is an error rather than a miss.
+  const assigneeItems: Record<string, string> = {
     [MINE]: "Myself",
     ...Object.fromEntries(colleagues.map((person) => [person.id, person.full_name])),
   };
+
+  /**
+   * "Ace Guevarra", "Ace Guevarra and Raiza Mondina", "you and 3 others".
+   *
+   * Spelled out rather than counted while it fits, because "3 people" in a
+   * confirmation is not something anybody can check. Past two names it is the
+   * count, since a toast that wraps to three lines is read by nobody.
+   */
+  function nameList(ids: string[], withMe: boolean) {
+    const names = ids.map((id) => assigneeItems[id] ?? "somebody");
+    const all = withMe ? ["you", ...names] : names;
+
+    if (all.length === 1) return all[0]!;
+    if (all.length === 2) return `${all[0]} and ${all[1]}`;
+    return `${all[0]} and ${all.length - 1} others`;
+  }
   const listItems = {
     [NO_LIST]: "No list",
     ...Object.fromEntries(lists.map((list) => [list.id, list.name])),
@@ -136,12 +194,21 @@ export function NewPersonalTaskDialog({
 
   /** Offering the picker at all needs both a department and somebody in it. */
   const canAssign = colleagues.length > 0 && departmentId !== null;
-  const forSomebodyElse = canAssign && assignee !== MINE;
+  /** Everybody ticked who is not the reader, in the order the list offers them. */
+  const chosenColleagues = canAssign ? assignees.filter((id) => id !== MINE) : [];
+  const includesMe = !canAssign || assignees.includes(MINE);
+  /*
+   * The whole branch, in one line: is there a second name on this.
+   *
+   * NOT `assignees.length > 1` — a task ticked "me and nobody" is still mine,
+   * and a task ticked "Ace" alone is still the department's.
+   */
+  const forSomebodyElse = chosenColleagues.length > 0;
 
   function reset() {
     setPriority(null);
     setEstimate(null);
-    setAssignee(MINE);
+    setAssignees([MINE]);
     setErrors({});
     /* ⚠️ Closing this dialog does NOT unmount the form — unlike
        `new-task-dialog`, which renders `{open ? <TaskForm/> : null}`. An
@@ -170,6 +237,22 @@ export function NewPersonalTaskDialog({
     // optimistic list here to add it to.
     setOpen(false);
 
+    /*
+     * WHO HOLDS IT, and it is a position in a list rather than a rank anybody
+     * chose. `assignee_id` is one column and the picker hands up several names,
+     * so somebody has to be first: the reader if they ticked themselves —
+     * filing work you are part of makes you the answerable one — otherwise the
+     * first colleague ticked.
+     *
+     * P7-43 is why this is a smaller decision than it reads: an INTERNAL task
+     * draws no person in charge at all. Everybody on it is shown as an equal
+     * assignee, so the column here is what notifications and board ordering
+     * use, not a hierarchy the screen puts on anyone.
+     */
+    const [accountable, ...alongside] = includesMe
+      ? [selfId, ...chosenColleagues]
+      : chosenColleagues;
+
     startTransition(async () => {
       const result = forSomebodyElse
         ? await createTask({
@@ -178,7 +261,15 @@ export function NewPersonalTaskDialog({
             // SQL function takes one, and the function is what refuses any
             // department that is neither theirs nor one they lead.
             department_id: departmentId,
-            assignee_id: assignee,
+            assignee_id: accountable,
+            /*
+             * Added one at a time AFTER the row exists — `create_task` takes a
+             * single assignee and widening an applied function's signature is a
+             * drop and a regrant (trap 3). If one of them is refused the task
+             * still exists and `createTask` says so by name, which is the honest
+             * shape rather than discarding what somebody just typed.
+             */
+            extra_assignee_ids: alongside,
             // A member does not appoint reviewers. Internal work moves freely
             // (P7-13a), so a task with no QA reviewer is not a task that is
             // stuck — it is the ordinary shape of internal work.
@@ -195,9 +286,7 @@ export function NewPersonalTaskDialog({
       }
 
       toast.success(
-        forSomebodyElse
-          ? `Assigned to ${colleagues.find((person) => person.id === assignee)?.full_name ?? "them"}.`
-          : "Added to your tasks.",
+        forSomebodyElse ? `Assigned to ${nameList(chosenColleagues, includesMe)}.` : "Added to your tasks.",
       );
       reset();
     });
@@ -237,9 +326,11 @@ export function NewPersonalTaskDialog({
           {/* The description follows the picker, because the two endings are
               genuinely different and this is the only place that says so. */}
           <DialogDescription>
-            {forSomebodyElse
-              ? "Work for a colleague in your department. They can move it through any stage themselves."
-              : "Your own work — it goes straight to your task list, and you can close it yourself when it is done."}
+            {!forSomebodyElse
+              ? "Your own work — it goes straight to your task list, and you can close it yourself when it is done."
+              : chosenColleagues.length === 1 && !includesMe
+                ? "Work for a colleague in your department. They can move it through any stage themselves."
+                : "Shared work in your department. Everyone on it can open it, log time against it and move it through any stage."}
           </DialogDescription>
         </DialogHeader>
 
@@ -255,17 +346,30 @@ export function NewPersonalTaskDialog({
           {canAssign ? (
             <div className="space-y-2">
               <Label htmlFor="assignee">Assign to</Label>
-              {/* No hidden input: `assignee` is read from state in `submit`,
-                  not from FormData, so this one never travelled through the
-                  form in the first place. */}
+              {/* `multiple`: the popup STAYS OPEN and each row toggles, which
+                  is what puts three people on a task in three clicks rather
+                  than one create plus two visits to the task page.
+
+                  Still no hidden input. The picked ids are read from state in
+                  `submit` and never travel through FormData — just as well,
+                  since a `multiple` Select would emit one input per value. */}
               <Select
+                multiple
                 items={assigneeItems}
-                value={assignee}
+                value={assignees}
                 disabled={pending}
-                onValueChange={(value) => value !== null && setAssignee(value)}
+                onValueChange={(value) => setAssignees(value.length === 0 ? [MINE] : value)}
               >
                 <SelectTrigger id="assignee" className="w-full">
-                  <SelectValue />
+                  {/* The trigger says WHO, not "3 selected" — a count is a
+                      number you have to reopen the menu to check. */}
+                  <SelectValue>
+                    {(value) => {
+                      const picked = value as string[];
+                      const ids = picked.filter((id) => id !== MINE);
+                      return ids.length === 0 ? "Myself" : nameList(ids, picked.includes(MINE));
+                    }}
+                  </SelectValue>
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value={MINE}>Myself</SelectItem>
@@ -277,9 +381,13 @@ export function NewPersonalTaskDialog({
                 </SelectContent>
               </Select>
               <p className="text-2xs text-muted-foreground">
-                Only your own department. Work belongs to the department doing it, or somebody ends
+                {forSomebodyElse
+                  ? "Everyone on it can open it, edit it, log time against it and move it. "
+                  : "Pick as many people as are on it. "}
+                Only your own department — work belongs to the department doing it, or somebody ends
                 up holding a task their own Team Leader cannot see.
               </p>
+              <FieldError messages={errors.assignee_id ?? errors.extra_assignee_ids} />
             </div>
           ) : null}
 
@@ -385,6 +493,12 @@ export function NewPersonalTaskDialog({
  * Not the member's own user id, deliberately: the two branches call two
  * different functions and produce two different `is_personal` values, so "me"
  * has to be distinguishable from "a person who happens to be me".
+ *
+ * Still true now the picker takes several people — MORE true, since "me" is a
+ * row that can be ticked alongside others. `selfId` is what the sentinel
+ * resolves to at submit time, and only when somebody else is ticked too; ticked
+ * alone it never becomes an id at all, because `create_personal_task` reads the
+ * caller off their own row and takes no assignee.
  */
 const MINE = "__mine__";
 

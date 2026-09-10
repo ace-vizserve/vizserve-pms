@@ -93,6 +93,7 @@ export async function NewTaskButton({
           lists={[personalList]}
           colleagues={[]}
           departmentId={context.primaryDepartmentId}
+          selfId={context.userId}
           trigger={trigger}
           defaultListId={personalList.id}
         />
@@ -152,6 +153,7 @@ export async function NewTaskButton({
         lists={myLists ?? []}
         colleagues={colleagues ?? []}
         departmentId={myDepartment}
+        selfId={context.userId}
         trigger={trigger}
         defaultListId={listId}
       />

@@ -59,6 +59,7 @@ export async function HomeNewTaskAction() {
       lists={lists ?? []}
       colleagues={colleagues ?? []}
       departmentId={myDepartment}
+      selfId={context.userId}
       trigger="quick"
     />
   );

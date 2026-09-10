@@ -884,7 +884,20 @@ export async function createTask(input: unknown): Promise<ActionResult<{ taskId:
   if (error) return { ok: false, error: readableError(error) };
 
   const taskId = (data as { task_id: string }).task_id;
-  const extras = await writeCreationExtras(supabase, taskId, values);
+  const extras = await writeCreationExtras(supabase, taskId, {
+    ...values,
+    /*
+     * ⚠️ THE PIC IS NOT ONE OF THE OTHERS. `vizserve_pms_create_task` has
+     * already written them to `assignee_id`, and a picker that lets somebody be
+     * ticked as both would put them on the join table as well — a second row
+     * for a person who is already on the task, which `AssigneePicker` then has
+     * to filter back out on every render. Deduped for the same reason: two
+     * clicks on one name must not become two calls.
+     */
+    extra_assignee_ids: [...new Set(values.extra_assignee_ids)].filter(
+      (id) => id !== values.assignee_id,
+    ),
+  });
 
   dispatchPendingEmailsInBackground();
   refresh();

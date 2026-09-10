@@ -799,6 +799,26 @@ export const createTaskSchema = z.object({
    * internal work moves without one (P7-13a).
    */
   assignee_id: z.uuid("Choose who will do this."),
+  /**
+   * P7-13 — EVERYBODY ELSE ON THE TASK, chosen at creation instead of added
+   * afterwards one click at a time.
+   *
+   * ⚠️ NOT A SECOND `assignee_id`. The column stays the one accountable name —
+   * what the board sorts by and what "assigned to you" means in a notification
+   * — and these become rows in `vizserve_pms_task_assignees`, which is who is
+   * WORKING on it. `writeCreationExtras` adds them one call each through
+   * `vizserve_pms_add_task_assignee`, so the department rule and the actor rule
+   * are the function's, not this schema's: every name here still has to be an
+   * active member of the task's own department.
+   *
+   * The plumbing has been in `writeCreationExtras` since it was written and
+   * nothing ever filled it, because the field was missing from here — and zod
+   * strips what it is not told about, so the array never survived the parse.
+   */
+  extra_assignee_ids: z
+    .array(z.uuid())
+    .max(20, "That is more people than one task can sensibly hold.")
+    .default([]),
   qa_assignee_id: z.uuid().nullable().default(null),
   due_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Pick a due date."),
   list_id: z.uuid().nullable().default(null),
