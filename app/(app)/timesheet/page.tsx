@@ -444,10 +444,8 @@ export default async function TimesheetPage({
         /* Strictly before this week. It chooses which sentence the bar says, not
            whether it says one: a finished week gets the shortfall warning, a
            week still being worked gets a neutral progress line with the same
-           target in it. Both matter, because `vizserve_pms_submit_timesheet_week`
-           applies the full minimum to the CURRENT week and refuses only a future
-           one — so a Thursday submission can be refused, and the target must be
-           on screen before it is. A FUTURE week cannot be submitted at all
+           target in it. Either way a submission below the target is confirmed
+           first (P8-05b). A FUTURE week cannot be submitted at all
            (`v_week > v_this_week` refuses it), so "not current" and "finished"
            are the same set here. */
         weekHasEnded={thisWeek ? monday < thisWeek : false}
@@ -455,16 +453,14 @@ export default async function TimesheetPage({
 
       {/* Said out loud rather than swallowed, the same way the DTR says it when
           its leave query dies. Without this the page would simply stop warning
-          about short weeks and nobody would know it had — and the person would
-          meet the rule as a refusal at submit time instead. */}
+          about short weeks and nobody would know it had. */}
       {scheduleReadFailed ? (
         <p
           role="status"
           className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-foreground"
         >
           {scheduleReadFailure} could not be loaded, so this week cannot be checked against your
-          schedule before you hand it in. Your hours are unaffected — the check still runs when you
-          submit.
+          schedule before you hand it in. Your hours are unaffected.
         </p>
       ) : null}
 

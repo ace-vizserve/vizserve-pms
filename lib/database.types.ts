@@ -2639,6 +2639,11 @@ export type Database = {
         Args: { p_week_start: string };
         Returns: Json;
       };
+      vizserve_pms_withdraw_timesheet_week: {
+        /** P7-05b. The caller's own SUBMITTED week only; deletes the row. */
+        Args: { p_week_start: string };
+        Returns: Json;
+      };
       vizserve_pms_decide_timesheet_week: {
         /** 'approved' or 'returned'. 'rejected' is refused by the function. */
         Args: {

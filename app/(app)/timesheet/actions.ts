@@ -200,6 +200,33 @@ export async function submitTimesheetWeek(input: unknown): Promise<ActionResult>
   return { ok: true, data: undefined };
 }
 
+/**
+ * P7-05b — cancel a submitted week so it can be revised.
+ *
+ * The week is the caller's by construction: the function reads `auth.uid()` and
+ * takes no user. The lead's screens are revalidated too, because the week has
+ * just left their queue.
+ */
+export async function withdrawTimesheetWeek(input: unknown): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const parsed = submitTimesheetWeekSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Pick a week." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("vizserve_pms_withdraw_timesheet_week", {
+    p_week_start: parsed.data.week_start,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  revalidateTimesheet();
+  revalidatePath("/timesheet/team");
+  revalidatePath("/approvals");
+  revalidatePath("/inbox");
+  return { ok: true, data: undefined };
+}
+
 export async function decideTimesheetWeek(
   weekId: string,
   input: unknown,

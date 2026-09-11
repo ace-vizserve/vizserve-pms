@@ -457,6 +457,71 @@ describe.skipIf(!run)("P7-05 — deciding", () => {
   });
 });
 
+describe.skipIf(!run)("P7-05b — cancelling a submitted week", () => {
+  it("removes the submission, unlocks the entries, and lets it be resubmitted", async () => {
+    const { client } = await signIn("member1VizBytes");
+    await reset(picId);
+    await logMinutes(client, picId, lastMonday, 120);
+    await client.rpc("vizserve_pms_submit_timesheet_week", { p_week_start: lastMonday });
+
+    const { error } = await client.rpc("vizserve_pms_withdraw_timesheet_week", {
+      p_week_start: lastMonday,
+    });
+    expect(error).toBeNull();
+
+    // No row IS the draft state.
+    const { data: weeks } = await adminClient()
+      .from("vizserve_pms_timesheet_weeks")
+      .select("id")
+      .eq("user_id", picId);
+    expect(weeks).toHaveLength(0);
+
+    const { data: added, error: addError } = await client
+      .from("vizserve_pms_timesheet_entries")
+      .insert({ user_id: picId, task_id: taskId, work_date: lastMonday, minutes: 30 })
+      .select("id");
+    expect(addError).toBeNull();
+    expect(added).toHaveLength(1);
+
+    const resubmit = await client.rpc("vizserve_pms_submit_timesheet_week", {
+      p_week_start: lastMonday,
+    });
+    expect(resubmit.error).toBeNull();
+  });
+
+  it("refuses an approved week — reopening that is the lead's decision", async () => {
+    const { client } = await signIn("member1VizBytes");
+    await reset(picId);
+    await logMinutes(client, picId, lastMonday, 120);
+    await client.rpc("vizserve_pms_submit_timesheet_week", { p_week_start: lastMonday });
+
+    const { data: week } = await adminClient()
+      .from("vizserve_pms_timesheet_weeks")
+      .select("id")
+      .eq("user_id", picId)
+      .single();
+
+    const tl = await signIn("tlVizBytes");
+    await tl.client.rpc("vizserve_pms_decide_timesheet_week", {
+      p_id: week!.id,
+      p_decision: "approved",
+      p_reason: null,
+    });
+
+    const { error } = await client.rpc("vizserve_pms_withdraw_timesheet_week", {
+      p_week_start: lastMonday,
+    });
+    expect(error).not.toBeNull();
+
+    const { data: still } = await adminClient()
+      .from("vizserve_pms_timesheet_weeks")
+      .select("status")
+      .eq("id", week!.id)
+      .single();
+    expect(still!.status).toBe("APPROVED");
+  });
+});
+
 describe.skipIf(!run)("P7-05 — who can see a week", () => {
   beforeAll(async () => {
     if (!run) return;

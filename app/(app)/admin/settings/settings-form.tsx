@@ -106,11 +106,11 @@ export function SettingsForm({
       {/* ----------------------------------------------------------------
           P8-05 — the unpaid break.
 
-          The one field on this screen that can REFUSE something. The grace
-          period changes what the DTR says; this changes what a scheduled day
-          is worth, and a timesheet week short of it cannot be handed in at
-          all. The hint says that in as many words, because an admin raising
-          this by an hour is lowering everybody's weekly minimum by five.
+          The grace period changes what the DTR says; this changes what a
+          scheduled day is worth, and a timesheet week short of it is flagged
+          to the person before they hand it in (P8-05b — warned, not refused).
+          An admin raising this by an hour is lowering everybody's weekly
+          minimum by five.
           ---------------------------------------------------------------- */}
       <div className="space-y-2">
         <Label htmlFor="break_minutes">Unpaid break</Label>
@@ -141,7 +141,7 @@ export function SettingsForm({
         <p id="break_minutes_hint" className="text-xs text-muted-foreground">
           The break sitting inside the scheduled day. Work hours of 08:00 to 17:00 with an hour
           here describe an eight-hour day, and that is the figure a timesheet week is measured
-          against — a week short of it is refused when someone tries to hand it in. Anybody whose
+          against — someone handing in a week short of it is asked to confirm first. Anybody whose
           break differs gets their own figure on their staff record; this is what everyone else
           inherits. Zero means no unpaid break.
         </p>

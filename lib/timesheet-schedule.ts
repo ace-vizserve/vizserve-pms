@@ -16,10 +16,8 @@ import { scheduledWeekMinutes } from "@/lib/schemas/timesheet";
  *
  * The fix is not to copy the page's arithmetic into the dashboard. THREE COPIES
  * OF THIS RULE IS HOW TWO SCREENS START DISAGREEING ABOUT SOMEBODY'S WEEK, and
- * a disagreement here is not cosmetic: `vizserve_pms_submit_timesheet_week`
- * recomputes the minimum from its own tables and REFUSES the submission below
- * it, so a screen that is wrong in the low direction stays quiet and lets the
- * database do the telling, after the button was pressed.
+ * a disagreement here is not cosmetic: this figure decides whether `/timesheet`
+ * asks somebody to confirm a short week before it goes to their lead.
  *
  * PURE, AND SEPARATE FROM THE READS ON PURPOSE. `lib/timesheet-schedule-server.ts`
  * is the four queries and nothing else — the same division
@@ -27,9 +25,9 @@ import { scheduledWeekMinutes } from "@/lib/schemas/timesheet";
  * what lets every exemption below be pinned by a unit test with no database in
  * sight.
  *
- * THE DATABASE REMAINS THE AUTHORITY. Nothing here can let a short week through.
- * A disagreement shows up as a screen that said "fine" and a submission that was
- * refused, which is annoying and safe, rather than the reverse.
+ * P8-05b — A SHORT WEEK IS NO LONGER REFUSED. The database used to recompute
+ * this minimum and refuse below it; it now accepts the week, and the only check
+ * is the confirmation on `/timesheet` that this figure drives.
  */
 
 /** What the four reads produced, errors and all. Nothing here is optional. */

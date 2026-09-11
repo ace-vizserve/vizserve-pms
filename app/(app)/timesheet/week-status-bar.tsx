@@ -1,10 +1,18 @@
 "use client";
 
-import { useTransition } from "react";
-import { Send } from "lucide-react";
+import { useState, useTransition } from "react";
+import { Send, Undo2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { formatDateTime } from "@/lib/dates";
 import {
   TIMESHEET_WEEK_LABELS,
@@ -14,7 +22,7 @@ import {
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
-import { submitTimesheetWeek } from "./actions";
+import { submitTimesheetWeek, withdrawTimesheetWeek } from "./actions";
 
 export type WeekState = {
   status: TimesheetWeekStatus;
@@ -38,6 +46,9 @@ export type WeekState = {
  * `vizserve_pms_timesheet_week_locked`. This bar says so in words, because a
  * grid that silently refuses to accept a keystroke is worse than one that
  * explains why.
+ *
+ * P7-05b — a SUBMITTED week the lead has not decided yet can be cancelled by
+ * its owner to revise it. That deletes the row, so the week is a draft again.
  */
 export function WeekStatusBar({
   weekStart,
@@ -59,22 +70,17 @@ export function WeekStatusBar({
   /**
    * P8-05. Whether the week being shown has finished.
    *
-   * ⚠️ IT CHOOSES WHICH SENTENCE IS SAID, AND NEVER WHETHER ONE IS. That is the
-   * correction: this flag used to suppress the schedule line outright on the
-   * current week, on the reasoning that the minimum covers all five working days
-   * and somebody with 8h logged on Tuesday would be told they were "32h short"
-   * every day of every week. The reasoning is right and the accusation is gone.
-   * The SILENCE was wrong — `vizserve_pms_submit_timesheet_week` refuses only a
-   * FUTURE week and applies the full minimum to the current one, so submitting
-   * on Thursday with 32h logged met the database's refusal with no prior warning:
-   * exactly the surprise this bar exists to prevent. Submitting on Friday
-   * afternoon is ordinary and still works.
+   * ⚠️ IT CHOOSES WHICH SENTENCE IS SAID, AND NEVER WHETHER ONE IS. On the
+   * current week the minimum covers all five working days, so somebody with 8h
+   * logged on Tuesday would be told they were "32h short" every day of every
+   * week. So:
    *
-   * So both weeks say something, and they say different things:
-   *
-   *   ended    → the warning. Short, why, and what to do about it.
+   *   ended    → the warning. Short, and what to do about it.
    *   current  → a neutral progress line. The target, and how far along it is.
    *              Muted, not `text-warning`, and it accuses nobody of anything.
+   *
+   * It does NOT decide whether the short-week confirmation appears — submitting
+   * on Thursday with 32h logged is just as short as submitting it next Monday.
    *
    * Decided on the server, not from a clock here: this is a client component,
    * and a browser in another timezone deciding whether a Manila week is over
@@ -83,6 +89,7 @@ export function WeekStatusBar({
   weekHasEnded?: boolean;
 }) {
   const [pending, start] = useTransition();
+  const [confirmOpen, setConfirmOpen] = useState(false);
 
   const status = week?.status ?? null;
   const locked = isWeekLocked(status);
@@ -93,23 +100,14 @@ export function WeekStatusBar({
   const returnedReason = status === "RETURNED" ? (week?.decisionReason ?? null) : null;
 
   /*
-   * P8-05 — the shortfall, said BEFORE the button is pressed.
+   * P8-05b — how far below the scheduled week this is, finished or not.
    *
-   * `vizserve_pms_submit_timesheet_week` refuses a week below its scheduled
-   * minimum. Without this the refusal arrives as a toast on a week somebody
-   * thought was finished, which is the worst moment to learn it and the one
-   * place a person cannot see what to do about it — this line names the figure
-   * and the remedy while the grid is still in front of them.
-   *
-   * ADVISORY ONLY, AND THE BUTTON STAYS ENABLED. Disabling it would put this
-   * client-side arithmetic in charge of a rule the database owns: a
-   * disagreement between the two would then read as "the app is broken" with no
-   * way to find out why. Let it be pressed; let the database have the last word;
-   * and make sure it is never a surprise.
+   * A short week is no longer refused by `vizserve_pms_submit_timesheet_week`.
+   * The person decides, and this figure is what the confirmation shows them
+   * before the week goes to their lead.
    */
-  const shortfall =
+  const short =
     !locked &&
-    weekHasEnded &&
     scheduledWeek &&
     weekTotalMinutes > 0 &&
     weekTotalMinutes < scheduledWeek.minimumMinutes
@@ -117,24 +115,23 @@ export function WeekStatusBar({
       : null;
 
   /*
+   * The shortfall, said BEFORE the button is pressed — on a finished week only.
+   * See `weekHasEnded` for why the current week gets a progress line instead.
+   */
+  const shortfall = weekHasEnded ? short : null;
+
+  /*
    * The same figure on a week still being worked, said as progress rather than
    * as a shortfall.
    *
-   * ⚠️ THE DATABASE APPLIES THE FULL WEEK'S MINIMUM TO THE CURRENT WEEK. It
-   * refuses only a week in the FUTURE; the current one is checked in full, and
-   * Friday afternoon is a perfectly normal time to hand a week in. Somebody who
-   * never sees the target until they press the button meets it as a refusal.
+   * NEUTRAL, AND THAT IS THE ENTIRE DESIGN. No "short", no `text-warning` — a
+   * person is mid-week and has done nothing wrong. It states the target and
+   * where they are against it, and lets them draw the conclusion, which is the
+   * difference between a bar people read and a nag they learn to look past.
    *
-   * NEUTRAL, AND THAT IS THE ENTIRE DESIGN. No "short", no "cannot be handed
-   * in", no `text-warning` — a person is mid-week and has done nothing wrong.
-   * It states the target and where they are against it, and lets them draw the
-   * conclusion, which is the difference between a bar people read and a nag they
-   * learn to look past.
-   *
-   * `weekTotalMinutes > 0` mirrors the shortfall's own guard and is load-bearing
-   * for a second reason here: the submit button is DISABLED at zero, so an empty
-   * week cannot be refused and has no surprise to warn about. Its existing
-   * sentence — "nothing to hand in" — is the more useful one.
+   * `weekTotalMinutes > 0` mirrors the shortfall's own guard: the submit button
+   * is DISABLED at zero, and its existing sentence — "nothing to hand in" — is
+   * the more useful one.
    */
   const progress =
     !locked && !weekHasEnded && scheduledWeek && weekTotalMinutes > 0 ? scheduledWeek : null;
@@ -150,7 +147,8 @@ export function WeekStatusBar({
         ? "border-warning-border bg-warning-subtle text-warning"
         : "border-accent-border bg-accent text-accent-foreground";
 
-  function submit() {
+  function send() {
+    setConfirmOpen(false);
     start(async () => {
       const result = await submitTimesheetWeek({ week_start: weekStart });
       if (!result.ok) {
@@ -158,6 +156,27 @@ export function WeekStatusBar({
         return;
       }
       toast.success("Week sent to your department lead.");
+    });
+  }
+
+  function submit() {
+    if (short) {
+      setConfirmOpen(true);
+      return;
+    }
+    send();
+  }
+
+  /* No confirmation: nothing is lost — the hours stay exactly as logged and
+     the week can be submitted again straight away. */
+  function cancelSubmission() {
+    start(async () => {
+      const result = await withdrawTimesheetWeek({ week_start: weekStart });
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      toast.success("Submission cancelled. Edit the week and submit it again when it is ready.");
     });
   }
 
@@ -180,12 +199,10 @@ export function WeekStatusBar({
 
           "Here is why it came back" and "it is still short" answer different
           questions, and the person who needs both at once is exactly the one
-          resubmitting a week that was sent back. This used to be the first arm
-          of the ternary below — and `vizserve_pms_timesheet_weeks` has a
-          constraint guaranteeing a RETURNED week carries a reason, so that arm
-          ALWAYS won: the shortfall warning could not render on a returned week
-          at all. The likeliest short week in the system was the one week that
-          got the database's refusal instead of the warning.
+          resubmitting a week that was sent back. `vizserve_pms_timesheet_weeks`
+          guarantees a RETURNED week carries a reason, so if this were the first
+          arm of the ternary below the shortfall could never render on a
+          returned week — the likeliest short week in the system.
         */}
         {returnedReason ? (
           <p className="text-sm text-foreground-muted">
@@ -193,7 +210,13 @@ export function WeekStatusBar({
           </p>
         ) : null}
 
-        {locked ? (
+        {status === "SUBMITTED" ? (
+          <p className="text-sm text-foreground-muted">
+            Locked — {formatCellDuration(weekTotalMinutes)} handed in
+            {week?.submittedAt ? ` on ${formatDateTime(week.submittedAt)}` : null}. Waiting on
+            your lead. Need to change something? Cancel the submission to edit it.
+          </p>
+        ) : locked ? (
           <p className="text-sm text-foreground-muted">
             Locked — {formatCellDuration(weekTotalMinutes)} handed in
             {week?.submittedAt ? ` on ${formatDateTime(week.submittedAt)}` : null}. Ask your
@@ -201,16 +224,15 @@ export function WeekStatusBar({
           </p>
         ) : shortfall ? (
           /* THE LABEL CARRIES THE STATE, never the colour — the same rule every
-             status in this app follows, and it matters more here than usual
-             because this sentence is the only warning before a refusal. */
+             status in this app follows. */
           <p className="text-sm text-warning">
             <span className="font-medium">
               {formatCellDuration(shortfall.minutes)} short of your schedule.
             </span>{" "}
             {formatCellDuration(weekTotalMinutes)} logged against{" "}
             {formatCellDuration(shortfall.minimumMinutes)} for the {shortfall.expectedDays}{" "}
-            {shortfall.expectedDays === 1 ? "day" : "days"} you were due in. Log the missing time,
-            or file leave for any day you were away — a short week cannot be handed in.
+            {shortfall.expectedDays === 1 ? "day" : "days"} you were due in. If you were on leave
+            or had an emergency, let your team leader know.
           </p>
         ) : progress ? (
           /* Muted, like the plain "N logged" line it replaces — the state here is
@@ -226,10 +248,9 @@ export function WeekStatusBar({
             {/* ⚠️ NOT AFTER A SEND-BACK. "Submitting locks the week" is the
                 right nudge on a week nobody has looked at, and the wrong one
                 under "Sent back: …" — that week has already been submitted and
-                already been locked, and the person reading it is being told the
-                mechanic they just experienced. The FIGURE still belongs here:
-                somebody fixing a returned week is exactly who needs to know
-                what it has to reach. */}
+                already been locked. The FIGURE still belongs here: somebody
+                fixing a returned week is exactly who needs to know what it has
+                to reach. */}
             {returnedReason ? null : " Submitting locks the week until your lead decides."}
           </p>
         ) : returnedReason ? (
@@ -245,14 +266,51 @@ export function WeekStatusBar({
         )}
       </div>
 
-      {/* Hidden rather than disabled once locked: there is no second submission
-          to make, so a greyed button would only invite the question. */}
-      {locked ? null : (
+      {/* SUBMITTED → cancel it to revise (P7-05b). APPROVED → nothing: reopening
+          a signed week is the lead's call, and a greyed button would only
+          invite the question. Anything else → submit. */}
+      {status === "SUBMITTED" ? (
+        <Button variant="outline" onClick={cancelSubmission} loading={pending}>
+          <Undo2 />
+          Cancel submission
+        </Button>
+      ) : locked ? null : (
         <Button onClick={submit} loading={pending} disabled={weekTotalMinutes <= 0}>
           <Send />
           {status === "RETURNED" ? "Resubmit week" : "Submit for approval"}
         </Button>
       )}
+
+      {/* P8-05b — the short week is confirmed, not refused. */}
+      {short ? (
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle>Submit a short week?</DialogTitle>
+              <DialogDescription>
+                You logged {formatCellDuration(weekTotalMinutes)} of the{" "}
+                {formatCellDuration(short.minimumMinutes)} expected this week —{" "}
+                {formatCellDuration(short.minutes)} short. Your team leader will see that this week
+                is short of your working hours.
+              </DialogDescription>
+            </DialogHeader>
+
+            <p className="text-sm text-foreground-muted">
+              If you were on leave or had an emergency, please let your team leader know.
+            </p>
+
+            <DialogFooter>
+              <Button variant="ghost" onClick={() => setConfirmOpen(false)}>
+                Go back
+              </Button>
+              <Button onClick={send}>
+                <Send />
+                Submit anyway
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      ) : null}
     </div>
   );
 }

@@ -705,7 +705,7 @@ function UserForm({
               Leave blank to use the company break set in Settings — that is the usual answer.
               Fill it in only for someone whose break differs, and type 0 for someone who takes
               none. The hours above less this break is the day a timesheet week is measured
-              against, so a week short of it cannot be handed in.
+              against, so a week short of it is flagged when it is handed in.
             </p>
           )}
         </div>
