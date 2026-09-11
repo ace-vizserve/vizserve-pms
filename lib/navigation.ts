@@ -115,6 +115,7 @@ export type NavIconName =
   | "tasks"
   | "timesheet"
   | "reports"
+  | "analytics"
   | "inbox"
   | "users"
   | "calendar-off"
@@ -155,6 +156,17 @@ export const NAV_ITEMS: NavItem[] = [
     minRole: "team_leader",
     enabled: true,
     icon: "inbox-stack",
+  },
+  {
+    // P11-14. Per-person task counts for the departments a lead runs. Floor
+    // matches the page's `requireRole("team_leader")` — the nav must agree with
+    // the gate. A department admin tick does NOT reach it: the tick shapes
+    // structure, it does not make somebody anyone's lead.
+    label: "Department analytics",
+    href: "/analytics",
+    minRole: "team_leader",
+    enabled: true,
+    icon: "analytics",
   },
   {
     /*
@@ -502,7 +514,7 @@ export const NAV_GROUPS: NavGroup[] = [
   // is reached through it. Listing a child href beside its parent is what put
   // them side by side in the rail in the first place.
   { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
-  { label: "Manage", hrefs: ["/forms", "/reports"] },
+  { label: "Manage", hrefs: ["/forms", "/analytics", "/reports"] },
   // P7-52. Above Admin and below Manage: HR is a job somebody does daily, not
   // an administration screen you open when something is wrong. Pinned only by
   // sitting here — `pinBottom` stays Admin's, so an HR person who is not an

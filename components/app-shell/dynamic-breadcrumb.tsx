@@ -65,6 +65,7 @@ const SEGMENT_LABELS: Record<string, string> = {
   forms: "Forms",
   new: "New",
   requests: "Requests",
+  analytics: "Department analytics",
   tasks: "Tasks",
   board: "Board",
   lists: "Lists",
