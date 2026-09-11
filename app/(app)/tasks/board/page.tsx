@@ -769,7 +769,8 @@ async function BoardColumns({
                             same problem, one card at a time. */}
                         <HoverPrefetchLink
                           href={`/tasks/${task.id}`}
-                          className="line-clamp-2 min-w-0 flex-1 text-sm leading-snug font-medium hover:underline">
+                          // Full title, wrapped — never clamped. See tasks-table.
+                          className="min-w-0 flex-1 text-sm leading-snug font-medium wrap-anywhere hover:underline">
                           {task.title}
                         </HoverPrefetchLink>
 
@@ -904,7 +905,7 @@ async function BoardColumns({
                             <div className="flex items-start gap-1.5">
                               <HoverPrefetchLink
                                 href={`/tasks/${child.id}`}
-                                className="line-clamp-2 min-w-0 flex-1 text-2xs leading-snug hover:underline">
+                                className="min-w-0 flex-1 text-2xs leading-snug wrap-anywhere hover:underline">
                                 {child.title}
                               </HoverPrefetchLink>
 

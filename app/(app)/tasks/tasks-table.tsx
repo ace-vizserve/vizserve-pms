@@ -337,7 +337,7 @@ export function TaskGroupTable({
       pin: "left",
       sortKey: "title",
       header: "Task",
-      className: "max-w-sm whitespace-normal",
+      className: "min-w-72 max-w-md whitespace-normal",
       cell: (task, _index, controls) => {
         /*
          * ⚠️ THE PENDING ROW IS INERT, AND THIS IS THE BUG IT FIXES.
@@ -356,7 +356,7 @@ export function TaskGroupTable({
         if (isPlaceholder(task.id)) {
           return (
             <span className="flex min-w-0 items-center gap-2 pl-7 opacity-60">
-              <span className="truncate font-medium">{task.title}</span>
+              <span className="font-medium wrap-anywhere">{task.title}</span>
               <span aria-live="polite" className="shrink-0 text-2xs text-muted-foreground">
                 Adding…
               </span>
@@ -468,7 +468,11 @@ export function TaskGroupTable({
               <HoverPrefetchLink
                 href={`/tasks/${task.id}`}
                 className={cn(
-                  "truncate hover:underline",
+                  // WRAPS, NEVER TRUNCATES. `truncate` hid most of every title:
+                  // the column is capped, and the hover strip beside it is only
+                  // `opacity-0`, so it spends its ~110px even when invisible.
+                  // `wrap-anywhere` so one unbroken string cannot widen the column.
+                  "wrap-anywhere hover:underline",
                   // A subtask is a smaller thing than its parent and should not
                   // compete with it for the eye.
                   isChild ? "text-sm font-normal" : "font-medium",
