@@ -17,6 +17,7 @@ import {
   type OvertimeApproval,
   type TimesheetWeekStatus,
 } from "@/lib/schemas/timesheet";
+import { loadApprovedOvertime } from "@/lib/overtime-server";
 import { loadAppSettings } from "@/lib/settings-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
@@ -127,16 +128,11 @@ export default async function TeamWeekPage({
       .eq("week_start", monday),
 
     // The team's approved overtime, not just the viewer's. This widens from
-    // the member's page with NO policy change: the SELECT policy on internal
-    // requests already returns `requester_id = auth.uid() or
-    // vizserve_pms_manages_department(department_id)`.
-    supabase
-      .from("vizserve_pms_internal_requests")
-      .select("id, requester_id, work_date, overtime_minutes")
-      .eq("request_type", "OVERTIME")
-      .eq("status", "APPROVED")
-      .gte("work_date", monday)
-      .lte("work_date", lastDay),
+    // the member's page with NO policy change and NO second query: the SELECT
+    // policy on internal requests already returns `requester_id = auth.uid() or
+    // vizserve_pms_manages_department(department_id)`, so the difference
+    // between this call and /timesheet's is the absent user id.
+    loadApprovedOvertime(monday, lastDay),
 
     /*
      * P7-10 — who was away.
@@ -413,10 +409,9 @@ export default async function TeamWeekPage({
    * the day simply keeps the plain 480 threshold, exactly as it did before.
    */
   const overtime = new Map<string, Record<string, OvertimeApproval[]>>();
-  for (const row of overtimeResult.data ?? []) {
-    if (!row.work_date) continue;
+  for (const row of overtimeResult) {
     const byDay = overtime.get(row.requester_id) ?? {};
-    (byDay[row.work_date] ??= []).push({ id: row.id, minutes: row.overtime_minutes ?? 0 });
+    (byDay[row.work_date] ??= []).push({ id: row.id, minutes: row.overtime_minutes });
     overtime.set(row.requester_id, byDay);
   }
 

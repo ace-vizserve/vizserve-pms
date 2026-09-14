@@ -13,6 +13,7 @@ import {
 import { isTerminal } from "@/lib/schemas/tasks";
 import { isWeekLocked, type OvertimeApproval } from "@/lib/schemas/timesheet";
 import { loadScheduledWeek } from "@/lib/timesheet-schedule-server";
+import { loadApprovedOvertime } from "@/lib/overtime-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
@@ -168,14 +169,7 @@ export default async function TimesheetPage({
      * `OvertimeApproval`: the id is safe to put in a link precisely because it
      * arrived through this policy-scoped read.
      */
-    supabase
-      .from("vizserve_pms_internal_requests")
-      .select("id, work_date, overtime_minutes")
-      .eq("requester_id", context.userId)
-      .eq("request_type", "OVERTIME")
-      .eq("status", "APPROVED")
-      .gte("work_date", monday)
-      .lte("work_date", days[days.length - 1]!),
+    loadApprovedOvertime(monday, days[days.length - 1]!, context.userId),
 
     // Names for the location line under each task. Two small reference reads
     // rather than a deeper embed on the entries query: the entries embed is
@@ -301,10 +295,9 @@ export default async function TimesheetPage({
    * constraint on (requester, work_date, OVERTIME), because that is a legitimate
    * thing that happened and each needed a lead's signature.
    */
-  const overtimeApprovals = (overtimeResult.data ?? []).reduce<Record<string, OvertimeApproval[]>>(
+  const overtimeApprovals = overtimeResult.reduce<Record<string, OvertimeApproval[]>>(
     (byDay, row) => {
-      if (!row.work_date) return byDay;
-      (byDay[row.work_date] ??= []).push({ id: row.id, minutes: row.overtime_minutes ?? 0 });
+      (byDay[row.work_date] ??= []).push({ id: row.id, minutes: row.overtime_minutes });
       return byDay;
     },
     {},

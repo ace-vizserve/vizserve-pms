@@ -5,6 +5,7 @@ import { summariseAttendance, type AttendanceDay, type AttendancePerson } from "
 import { todayInAppZone } from "@/lib/dates";
 import { expandLeaveDays, leaveKey } from "@/lib/leave";
 import { loadApprovedLeaveSpans } from "@/lib/leave-server";
+import { loadApprovedOvertime } from "@/lib/overtime-server";
 import { loadAppSettings } from "@/lib/settings-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
@@ -80,7 +81,7 @@ export default async function AttendancePage({
     { data: entries, error: entriesError },
     leave,
     { data: holidays },
-    { data: overtime },
+    overtime,
     { data: departments },
     settings,
   ] = await Promise.all([
@@ -113,13 +114,7 @@ export default async function AttendancePage({
       .select("holiday_date")
       .gte("holiday_date", from)
       .lte("holiday_date", to),
-    supabase
-      .from("vizserve_pms_internal_requests")
-      .select("requester_id, work_date, overtime_minutes")
-      .eq("request_type", "OVERTIME")
-      .eq("status", "APPROVED")
-      .gte("work_date", from)
-      .lte("work_date", to),
+    loadApprovedOvertime(from, to),
     supabase.from("vizserve_pms_departments").select("id, name").order("name"),
     // Was awaited on its own line above this batch, holding all six reads
     // behind it. It takes no argument and is `cache()`d, so it depends on
@@ -144,10 +139,9 @@ export default async function AttendancePage({
   }
 
   const overtimeByKey = new Map<string, number>();
-  for (const row of overtime ?? []) {
-    if (!row.work_date) continue;
+  for (const row of overtime) {
     const key = `${row.requester_id}:${row.work_date}`;
-    overtimeByKey.set(key, (overtimeByKey.get(key) ?? 0) + (row.overtime_minutes ?? 0));
+    overtimeByKey.set(key, (overtimeByKey.get(key) ?? 0) + row.overtime_minutes);
   }
 
   /*
