@@ -8,14 +8,19 @@ import {
   isSameMonth,
   monthGrid,
 } from "@/lib/dates";
-import {
-  EVENT_CATEGORIES,
-  EVENT_CATEGORY_LABELS,
-  EVENT_CATEGORY_TONE,
-  type EventCategory,
-} from "@/lib/schemas/events";
+import { EVENT_CATEGORY_TONE, type EventCategory } from "@/lib/schemas/events";
 import { cn } from "@/lib/utils";
 import { buttonVariants } from "@/components/ui/button";
+
+import {
+  CALENDAR_FILTER_KINDS,
+  CALENDAR_NEUTRAL_SURFACE,
+  CALENDAR_OUTSIDE_SURFACE,
+  CALENDAR_TONES,
+  type CalendarFilterKind,
+  type CalendarMatch,
+} from "./calendar-tones";
+import { CalendarLegend, type LegendItem } from "./calendar-legend";
 
 import { LeaveEntry, MoreLeaveTooltip } from "./leave-entry";
 import type { LeaveSpan } from "./leave-entry";
@@ -154,6 +159,68 @@ export function LeaveCalendar({
     if (hits.length > 0) eventsByDay.set(day, hits);
   }
 
+  /*
+   * P7-35c — what the legend can filter to, gathered in the same pass that
+   * paints the cells.
+   *
+   * ONLY DAYS OF THE MONTH ON SCREEN, which is why `isSameMonth` guards every
+   * push. The grid draws trailing days of the previous month and leading days of
+   * the next so the weeks line up, and a holiday on one of those cells is
+   * genuinely painted — but counting it would tell somebody looking at September
+   * that it holds a holiday that is really in August, and clicking through would
+   * point at a date outside the month they are reading.
+   */
+  const matchesByKind = new Map<CalendarFilterKind, CalendarMatch[]>(
+    CALENDAR_FILTER_KINDS.map((kind) => [kind, []]),
+  );
+
+  /** Every kind a given cell holds, for `data-day-kinds` and for the counts. */
+  const kindsByDay = new Map<string, CalendarFilterKind[]>();
+
+  for (const day of days) {
+    const kinds: CalendarFilterKind[] = [];
+    const inMonth = isSameMonth(day, month);
+    const record = (kind: CalendarFilterKind, label: string) => {
+      kinds.push(kind);
+      if (inMonth) matchesByKind.get(kind)?.push({ date: day, label });
+    };
+
+    if (day === today) record("today", "You are here");
+
+    const holiday = holidayByDay.get(day);
+    if (holiday) record("holiday", holiday);
+
+    const hits = byDay.get(day) ?? [];
+    /*
+     * A day can hold both kinds at once — your own request still awaiting a
+     * lead while a colleague's is already approved — so these are two
+     * independent tests rather than the `pendingOnly` either/or the cell's
+     * PAINT uses. The paint has to choose one colour; the filter does not.
+     */
+    const approved = hits.filter((span) => !span.pending);
+    const pending = hits.filter((span) => span.pending);
+    if (approved.length > 0) {
+      record("approved", `${approved.length} away`);
+    }
+    if (pending.length > 0) {
+      record("pending", pending.length === 1 ? "Awaiting a decision" : `${pending.length} awaiting`);
+    }
+
+    for (const event of eventsByDay.get(day) ?? []) {
+      const kind = `event-${event.category}` as const;
+      // Guarded because a multi-day event occupies several cells and a cell can
+      // hold two events of one category — neither should list the day twice.
+      if (!kinds.includes(kind)) record(kind, event.title);
+    }
+
+    if (kinds.length > 0) kindsByDay.set(day, kinds);
+  }
+
+  const legendItems: LegendItem[] = CALENDAR_FILTER_KINDS.map((kind) => ({
+    kind,
+    matches: matchesByKind.get(kind) ?? [],
+  }));
+
   const previous = addMonths(month, -1);
   const next = addMonths(month, 1);
 
@@ -201,200 +268,166 @@ export function LeaveCalendar({
           ))}
         </div>
 
-        {/* `minmax(3.5rem,auto)`, NOT `auto-rows-fr`.
+        {/* P7-35c. The legend renders the grid as its children rather than
+            beside it, which is what keeps 42 cells on the server while the
+            filter state lives in the browser — see `calendar-legend.tsx`. */}
+        <CalendarLegend items={legendItems} footnote="Hover a name for details · some leave is private">
+          {/* `minmax(3.5rem,auto)`, NOT `auto-rows-fr`.
 
-            `auto-rows-fr` expands to `minmax(0,1fr)`, and the zero is the whole
-            problem: it lets a row shrink to nothing while each cell's own
-            `overflow-hidden` quietly amputates the names inside it. That is the
-            "cramped" grid — six rows squeezed to ~36px, drawing the top half of
-            a name and no more.
+              `auto-rows-fr` expands to `minmax(0,1fr)`, and the zero is the whole
+              problem: it lets a row shrink to nothing while each cell's own
+              `overflow-hidden` quietly amputates the names inside it. That is the
+              "cramped" grid — six rows squeezed to ~36px, drawing the top half of
+              a name and no more.
 
-            `auto` as the maximum rather than `1fr` because the page scrolls now.
-            A row takes the height its fullest cell needs, so a week where three
-            people are out is taller than an empty one instead of every row
-            paying for the worst case, and 3.5rem keeps an empty week from
-            collapsing to a line of dates. */}
-        <div className="grid auto-rows-[minmax(3.5rem,auto)] grid-cols-7 gap-1">
-          {days.map((day) => {
-            const inMonth = isSameMonth(day, month);
-            const hits = byDay.get(day) ?? [];
-            const pendingOnly = hits.length > 0 && hits.every((span) => span.pending);
-            const isToday = day === today;
-            const holiday = holidayByDay.get(day);
-            const dayEvents = eventsByDay.get(day) ?? [];
-            // Named once rather than written as `holiday ? 1 : 2` in three
-            // places — the slice and the counter that reads it have to agree,
-            // and they are eight lines apart.
-            const shown = holiday ? 1 : 2;
+              `auto` as the maximum rather than `1fr` because the page scrolls now.
+              A row takes the height its fullest cell needs, so a week where three
+              people are out is taller than an empty one instead of every row
+              paying for the worst case, and 3.5rem keeps an empty week from
+              collapsing to a line of dates. */}
+          <div className="grid auto-rows-[minmax(3.5rem,auto)] grid-cols-7 gap-1">
+            {days.map((day) => {
+              const inMonth = isSameMonth(day, month);
+              const hits = byDay.get(day) ?? [];
+              const pendingOnly = hits.length > 0 && hits.every((span) => span.pending);
+              const isToday = day === today;
+              const holiday = holidayByDay.get(day);
+              const dayEvents = eventsByDay.get(day) ?? [];
+              // Named once rather than written as `holiday ? 1 : 2` in three
+              // places — the slice and the counter that reads it have to agree,
+              // and they are eight lines apart.
+              const shown = holiday ? 1 : 2;
 
-            return (
-              <div
-                key={day}
-                className={cn(
-                  // The real floor is the row's `minmax(3.5rem,auto)` above; this
-                  // min-h-8 is the older, smaller one and now only matters if
-                  // that ever changes. `overflow-hidden` stays for the truncated
-                  // holiday name, NOT to absorb a squeeze — the row grows to its
-                  // content, so there is nothing left for it to cut vertically.
-                  "flex min-h-8 flex-col gap-0.5 overflow-hidden rounded-md border p-1 px-1.5",
-                  // Order matters: today's ring wins over a leave tint, because
-                  // "where am I" is the first question anyone asks of a
-                  // calendar. The leave still reads from the name in the cell.
-                  !inMonth
-                    ? "border-border/60 bg-muted/40"
-                    : isToday
-                      ? "border-accent-border bg-accent"
-                      : // P7-35. Above leave, below today. A closed day is a fact
-                        // about the calendar, but "where am I" is still the first
-                        // question anybody asks of one.
-                        holiday
-                        ? "border-success-border bg-success-subtle"
-                        : hits.length === 0
-                          ? "border-border bg-muted/50"
-                          : pendingOnly
-                            ? "border-warning-border bg-warning-subtle"
-                            : "border-info-border bg-info-subtle",
-                )}
-              >
-                <span
+              /*
+               * WHICH KIND PAINTS THE CELL. Order matters and has not changed:
+               * today's ring wins, because "where am I" is the first question
+               * anyone asks of a calendar; then a holiday, since a day nobody
+               * works is not a day somebody is absent; then leave. An event is
+               * below all three — it prints its title in the cell and takes the
+               * tint only on a day that is otherwise ordinary.
+               *
+               * A cell can BE several of these at once. This chooses the one
+               * colour it wears; `kindsByDay` above keeps all of them, which is
+               * what the filter matches on.
+               */
+              const paint = isToday
+                ? CALENDAR_TONES.today
+                : holiday
+                  ? CALENDAR_TONES.holiday
+                  : hits.length > 0
+                    ? pendingOnly
+                      ? CALENDAR_TONES.pending
+                      : CALENDAR_TONES.approved
+                    : dayEvents.length > 0
+                      ? CALENDAR_TONES[`event-${dayEvents[0].category}`]
+                      : null;
+
+              return (
+                <div
+                  key={day}
+                  // P7-35c. Space-separated so the CSS can match one kind with
+                  // `~=` without a day that holds three of them defeating it.
+                  //
+                  // ALWAYS PRESENT, EMPTY STRING AND ALL. The base fade selects
+                  // on `[data-day-kinds]`, so a quiet Wednesday that dropped the
+                  // attribute would be the one cell a filter left at full
+                  // strength — the opposite of what was asked for, and on the
+                  // days that make up most of the grid.
+                  data-day-kinds={(kindsByDay.get(day) ?? []).join(" ")}
                   className={cn(
-                    "text-2xs font-semibold tabular-nums",
+                    // The real floor is the row's `minmax(3.5rem,auto)` above; this
+                    // min-h-8 is the older, smaller one and now only matters if
+                    // that ever changes. `overflow-hidden` stays for the truncated
+                    // holiday name, NOT to absorb a squeeze — the row grows to its
+                    // content, so there is nothing left for it to cut vertically.
+                    "flex min-h-8 flex-col gap-0.5 overflow-hidden rounded-md border p-1 px-1.5",
+                    // P7-35c. 150ms, the system's instant, and it only ever runs
+                    // on a filter click. `motion-reduce` drops it outright rather
+                    // than shortening it — a fade is the one thing here that a
+                    // vestibular trigger would notice.
+                    "transition-opacity duration-150 motion-reduce:transition-none",
                     !inMonth
-                      ? "text-foreground-faint"
-                      : isToday
-                        ? "text-accent-foreground"
-                        : holiday
-                          ? "text-success"
-                          : hits.length === 0
-                            ? "text-muted-foreground"
-                            : pendingOnly
-                              ? "text-warning"
-                              : "text-info",
+                      ? CALENDAR_OUTSIDE_SURFACE
+                      : (paint?.surface ?? CALENDAR_NEUTRAL_SURFACE),
                   )}
                 >
-                  {Number(day.slice(8, 10))}
-                  {isToday ? <span className="sr-only"> — today</span> : null}
-                </span>
-
-                {/* P7-35. The holiday name comes first, because it explains the
-                    whole cell rather than one person in it. `title` carries the
-                    full text: "Immaculate Conception" does not fit 90px, and the
-                    tint alone would not say WHICH holiday it is. */}
-                {holiday ? (
-                  <span title={holiday} className="truncate text-2xs font-semibold text-success">
-                    {holiday}
-                  </span>
-                ) : null}
-
-                {/* P7-46 — events, under any holiday name and above the leave
-                    names. The ordering is the cell's priority: a day nobody
-                    works outranks a thing happening on it, which outranks who
-                    happens to be away.
-
-                    Each carries its TITLE, so the category colour is never the
-                    only thing saying what it is, and a `title` attribute with
-                    the scope because "Q4 Town Hall" in a 90px cell is going to
-                    truncate however careful the wording. */}
-                {dayEvents.slice(0, 1).map((event) => (
                   <span
-                    key={event.id}
-                    title={`${event.title} — ${event.scope}`}
                     className={cn(
-                      "truncate text-2xs font-medium",
-                      EVENT_CATEGORY_TONE[event.category].text,
+                      "text-2xs font-semibold tabular-nums",
+                      !inMonth
+                        ? "text-foreground-faint"
+                        : (paint?.text ?? "text-muted-foreground"),
                     )}
                   >
-                    {event.title}
+                    {Number(day.slice(8, 10))}
+                    {isToday ? <span className="sr-only"> — today</span> : null}
                   </span>
-                ))}
-                {dayEvents.length > 1 ? (
-                  <span className="text-2xs text-muted-foreground">
-                    +{dayEvents.length - 1} event{dayEvents.length - 1 === 1 ? "" : "s"}
-                  </span>
-                ) : null}
 
-                {/* Two names, then a count. Three names in a 90px cell is three
-                    truncated names, which tells you less than "+2 more". One
-                    fewer on a holiday cell, since the holiday name took a line. */}
-                {hits.slice(0, shown).map((span) => (
-                  <LeaveEntry key={`${span.userId}-${span.start}`} span={span} day={day} />
-                ))}
-                {/* Counted from what was actually rendered rather than a fixed 2,
-                    which is what keeps this number true on a holiday cell. P7-42
-                    made it hoverable: the names behind it have nowhere else to be
-                    read, because a cell deliberately links to nothing. */}
-                {hits.length > shown ? (
-                  <MoreLeaveTooltip spans={hits.slice(shown)} day={day} />
-                ) : null}
-              </div>
-            );
-          })}
-        </div>
+                  {/* P7-35. The holiday name comes first, because it explains the
+                      whole cell rather than one person in it. `title` carries the
+                      full text: "Immaculate Conception" does not fit 90px, and the
+                      tint alone would not say WHICH holiday it is. */}
+                  {holiday ? (
+                    <span
+                      title={holiday}
+                      className={cn(
+                        "truncate text-2xs font-semibold",
+                        // The holiday's OWN tone, not the cell's. On today's cell
+                        // the paint is the brand accent, and printing the name in
+                        // that would make the one day of the year you most need to
+                        // read as closed look like any other Tuesday.
+                        CALENDAR_TONES.holiday.text,
+                      )}
+                    >
+                      {holiday}
+                    </span>
+                  ) : null}
 
-        {/* The legend is not decoration here. Two tints carry two different
-            facts, and the design rule is that colour is never the only carrier
-            — the names in the cells and this key are what actually say which
-            is which. */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 pt-1 text-2xs text-muted-foreground">
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-2.5 shrink-0 rounded-xs border border-info-border bg-info-subtle"
-            />
-            Approved leave
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-2.5 shrink-0 rounded-xs border border-warning-border bg-warning-subtle"
-            />
-            Your pending leave
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-2.5 shrink-0 rounded-xs border border-success-border bg-success-subtle"
-            />
-            Holiday
-          </span>
+                  {/* P7-46 — events, under any holiday name and above the leave
+                      names. The ordering is the cell's priority: a day nobody
+                      works outranks a thing happening on it, which outranks who
+                      happens to be away.
 
-          {/* P7-46. One swatch per category, and the label beside it is what
-              actually carries the meaning — the tints exist so a glance can
-              group them, not so colour alone has to be decoded. Rendered from
-              the same constant the admin screen and the event pills use, so a
-              fourth category could never appear in one place and not the
-              other. */}
-          {EVENT_CATEGORIES.map((category) => (
-            <span key={category} className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className={cn(
-                  "size-2.5 shrink-0 rounded-xs border",
-                  EVENT_CATEGORY_TONE[category].swatch,
-                )}
-              />
-              {EVENT_CATEGORY_LABELS[category].label}
-            </span>
-          ))}
-          <span className="inline-flex items-center gap-1.5">
-            <span
-              aria-hidden
-              className="size-2.5 shrink-0 rounded-xs border border-accent-border bg-accent"
-            />
-            Today
-          </span>
-          {/* P7-42 rewrote this line, and the second clause is the load-bearing
-              half: a calendar that withholds two leave types outright owes its
-              readers one sentence saying so, or it is quietly wrong about who is
-              in. KEPT TO ONE LINE, and that is a layout constraint rather than a
-              stylistic one — the grid above is `flex-1` over six `auto-rows-fr`
-              rows with a `min-h-8` floor, so it cannot give height back. A
-              legend that wraps to two lines does not shrink the grid, it pushes
-              the sixth week under the panel's `overflow-hidden`. The first
-              attempt at this sentence ran to 88 characters and did exactly
-              that. */}
-          <span className="ml-auto">Hover a name for details · some leave is private</span>
-        </div>
+                      Each carries its TITLE, so the category colour is never the
+                      only thing saying what it is, and a `title` attribute with
+                      the scope because "Q4 Town Hall" in a 90px cell is going to
+                      truncate however careful the wording. */}
+                  {dayEvents.slice(0, 1).map((event) => (
+                    <span
+                      key={event.id}
+                      title={`${event.title} — ${event.scope}`}
+                      className={cn(
+                        "truncate text-2xs font-medium",
+                        EVENT_CATEGORY_TONE[event.category].text,
+                      )}
+                    >
+                      {event.title}
+                    </span>
+                  ))}
+                  {dayEvents.length > 1 ? (
+                    <span className="text-2xs text-muted-foreground">
+                      +{dayEvents.length - 1} event{dayEvents.length - 1 === 1 ? "" : "s"}
+                    </span>
+                  ) : null}
+
+                  {/* Two names, then a count. Three names in a 90px cell is three
+                      truncated names, which tells you less than "+2 more". One
+                      fewer on a holiday cell, since the holiday name took a line. */}
+                  {hits.slice(0, shown).map((span) => (
+                    <LeaveEntry key={`${span.userId}-${span.start}`} span={span} day={day} />
+                  ))}
+                  {/* Counted from what was actually rendered rather than a fixed 2,
+                      which is what keeps this number true on a holiday cell. P7-42
+                      made it hoverable: the names behind it have nowhere else to be
+                      read, because a cell deliberately links to nothing. */}
+                  {hits.length > shown ? (
+                    <MoreLeaveTooltip spans={hits.slice(shown)} day={day} />
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </CalendarLegend>
       </div>
     </section>
   );

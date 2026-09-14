@@ -338,7 +338,7 @@ export const MONTH_GRID_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "S
 // ---------------------------------------------------------------------------
 
 /**
- * The 2026 regular Philippine holidays, as SEEDED. Not a live mirror.
+ * The 2026 holidays AS SEEDED, Singapore's. Not a live mirror.
  *
  * ⚠️ THIS WAS A MIRROR OF `vizserve_pms_holidays` AND IS NO LONGER ONE. P7-35
  * made that table admin-editable, so it now holds special non-working days and
@@ -349,12 +349,24 @@ export const MONTH_GRID_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "S
  *   `vizserve_pms_is_working_day` and `vizserve_pms_leave_days` decide how many
  *   days of leave a request consumes,
  *
- * and all three read the table. What survives here is a BASELINE: the statutory
- * dates the P4 migration seeded, which `tests/db/client-approval.test.ts` still
- * asserts are present — so deleting Good Friday from the calendar fails a test,
- * while ADDING a proclaimed non-working day does not. Equality was the right
- * assertion while only a migration could write the table; a subset is the right
- * one now.
+ * and all three read the table. What survives here is a BASELINE: the dates the
+ * migrations seeded, which `tests/db/client-approval.test.ts` still asserts are
+ * present — so deleting Good Friday from the calendar fails a test, while ADDING
+ * a proclaimed non-working day does not. Equality was the right assertion while
+ * only a migration could write the table; a subset is the right one now.
+ *
+ * ⚠️ RENAMED FROM `PH_HOLIDAYS` BY P7-35b, and the rename is the point rather
+ * than tidying. The P4 seed was Philippine — Araw ng Kagitingan, Rizal Day — and
+ * the company observes SINGAPORE's calendar, so the old name described dates that
+ * are no longer in it. A constant that lies about which country it belongs to is
+ * worse than one with an awkward name. The app's clock still reads `Asia/Manila`
+ * everywhere and correctly so: Manila and Singapore are both UTC+8, so the zone
+ * was never the thing that was wrong.
+ *
+ * WEEKENDS ARE IN THIS LIST, which the business-day helpers below do not need —
+ * they reject Saturday and Sunday before ever consulting it. They are here
+ * because this mirrors what the table holds, and the table holds them so the
+ * calendar can say WHY the following Monday is closed.
  *
  * `isBusinessDay` and `addBusinessDays` below are built on it and are therefore
  * APPROXIMATE for any year but 2026. Nothing in `app/` calls them today. Anything
@@ -362,25 +374,33 @@ export const MONTH_GRID_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "S
  * `vizserve_pms_is_working_day` on the server, or by selecting the holidays for
  * the range and checking against them, which is what the home calendar does.
  */
-export const PH_HOLIDAYS: readonly string[] = [
-  "2026-01-01",
-  "2026-04-02",
-  "2026-04-03",
-  "2026-04-09",
-  "2026-05-01",
-  "2026-06-12",
-  "2026-08-31",
-  "2026-11-30",
-  "2026-12-25",
-  "2026-12-30",
+export const SEEDED_HOLIDAYS: readonly string[] = [
+  "2026-01-01", // New Year's Day
+  "2026-01-02", // Non-working Day
+  "2026-02-17", // Chinese New Year
+  "2026-02-18", // Chinese New Year
+  "2026-03-21", // Hari Raya Puasa — Saturday
+  "2026-03-23", // In lieu of Hari Raya Puasa
+  "2026-04-02", // Maundy Thursday — special non-working day
+  "2026-04-03", // Good Friday
+  "2026-05-01", // Labour Day
+  "2026-05-27", // Hari Raya Haji
+  "2026-05-31", // Vesak Day — Sunday
+  "2026-06-01", // In lieu of Vesak Day
+  "2026-08-09", // National Day — Sunday
+  "2026-08-10", // In lieu of National Day
+  "2026-11-08", // Deepavali — Sunday
+  "2026-11-09", // In lieu of Deepavali
+  "2026-12-25", // Christmas Day
 ];
 
-const HOLIDAY_SET = new Set(PH_HOLIDAYS);
+
+const HOLIDAY_SET = new Set(SEEDED_HOLIDAYS);
 
 /**
  * Is this a working day in Manila? Weekends and the SEEDED 2026 holidays are not.
  *
- * Read the caveat on `PH_HOLIDAYS`: this does not know about anything an admin
+ * Read the caveat on `SEEDED_HOLIDAYS`: this does not know about anything an admin
  * has added, so it is a hint for a screen and never an authority. The server
  * functions that decide deadlines and leave days consult the table.
  */

@@ -49,28 +49,55 @@ export const EVENT_CATEGORY_LABELS: Record<EventCategory, { label: string; hint:
  *
  * Colour is never the only carrier: every event renders its title in the cell,
  * and the calendar legend names each category.
+ *
+ * P7-35c ADDED THE LAST TWO FIELDS, and they are literal class strings rather
+ * than something derived from `text` at runtime. That is a build constraint, not
+ * a style: Tailwind v4 finds classes by SCANNING SOURCE for them, so a swatch
+ * assembled as `text.replace("text-", "bg-")` names a class that is never
+ * generated and paints nothing at all. Every Tailwind class in this repo has to
+ * appear somewhere as a literal.
+ *
+ *   calendarSwatch  the solid key in the home calendar legend. SOLID, because a
+ *                   10px square of a `-subtle` wash reads as an empty box
+ *   calendarSurface the cell, when an event is the strongest thing on the day
  */
 export const EVENT_CATEGORY_TONE: Record<
   EventCategory,
-  { text: string; surface: string; border: string; swatch: string }
+  {
+    text: string;
+    surface: string;
+    border: string;
+    swatch: string;
+    calendarSwatch: string;
+    calendarSurface: string;
+  }
 > = {
   COMPANY: {
     text: "text-event-company",
     surface: "bg-event-company-subtle",
     border: "border-event-company-border",
     swatch: "bg-event-company-subtle border-event-company-border",
+    calendarSwatch: "bg-event-company border-event-company",
+    calendarSurface:
+      "border-event-company/45 border-l-4 border-l-event-company bg-event-company-subtle",
   },
   MANAGEMENT: {
     text: "text-event-management",
     surface: "bg-event-management-subtle",
     border: "border-event-management-border",
     swatch: "bg-event-management-subtle border-event-management-border",
+    calendarSwatch: "bg-event-management border-event-management",
+    calendarSurface:
+      "border-event-management/45 border-l-4 border-l-event-management bg-event-management-subtle",
   },
   DEPARTMENT: {
     text: "text-event-department",
     surface: "bg-event-department-subtle",
     border: "border-event-department-border",
     swatch: "bg-event-department-subtle border-event-department-border",
+    calendarSwatch: "bg-event-department border-event-department",
+    calendarSurface:
+      "border-event-department/45 border-l-4 border-l-event-department bg-event-department-subtle",
   },
 };
 

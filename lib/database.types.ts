@@ -1453,7 +1453,7 @@ export type Database = {
           },
         ];
       };
-      /** Mirrored in lib/dates.ts PH_HOLIDAYS; a test asserts they agree. */
+      /** Mirrored in lib/dates.ts SEEDED_HOLIDAYS; a test asserts they agree. */
       /**
        * P7-46. Things HAPPENING, not days off.
        *

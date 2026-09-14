@@ -1046,3 +1046,44 @@
     animation-duration: 1ms;
   }
 }
+
+/* ---------------------------------------------------------------------------
+   P7-35c — the home calendar's legend filter.
+
+   Clicking a swatch in `app/_home/calendar-legend.tsx` publishes that kind as
+   `data-calendar-filter` on the wrapper around the grid. Every cell the grid
+   rendered carries its own `data-day-kinds` — space-separated, because a Tuesday
+   can be a holiday AND somebody's approved leave AND today at once. These rules
+   fade every cell that does not hold the active kind.
+
+   ⚠️ WHY THIS IS SEVEN NEAR-IDENTICAL RULES AND NOT ONE. CSS cannot compare an
+   attribute on one element against an attribute on an ancestor, so the kind has
+   to be written as a literal on both sides of the match. It cannot be done in
+   the component either: the grid is server-rendered and passed to the legend as
+   children, so the client component that owns the filter state never gets to
+   touch a cell. Keeping the grid off the browser is a P7-42 decision worth more
+   than the seven lines.
+
+   `tests/unit/calendar-tones.test.ts` asserts this block names every kind in
+   `CALENDAR_FILTER_KINDS`, so an eighth kind fails a test instead of silently
+   shipping a swatch that dims nothing.
+
+   Opacity only — no `display: none`. The thing being filtered is a CALENDAR, and
+   a February with the other 26 days removed is a list, not a calendar. Seeing
+   that the two Chinese New Year days are a Tuesday and a Wednesday is the whole
+   point of the shape around them. The fade itself is on the cell, via Tailwind's
+   `transition-opacity`, which carries the `motion-reduce` guard with it.
+   --------------------------------------------------------------------------- */
+[data-calendar-filter] [data-day-kinds] {
+  opacity: 0.22;
+}
+
+[data-calendar-filter="approved"] [data-day-kinds~="approved"],
+[data-calendar-filter="pending"] [data-day-kinds~="pending"],
+[data-calendar-filter="holiday"] [data-day-kinds~="holiday"],
+[data-calendar-filter="event-COMPANY"] [data-day-kinds~="event-COMPANY"],
+[data-calendar-filter="event-MANAGEMENT"] [data-day-kinds~="event-MANAGEMENT"],
+[data-calendar-filter="event-DEPARTMENT"] [data-day-kinds~="event-DEPARTMENT"],
+[data-calendar-filter="today"] [data-day-kinds~="today"] {
+  opacity: 1;
+}
