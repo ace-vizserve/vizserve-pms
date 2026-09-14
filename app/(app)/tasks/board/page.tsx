@@ -717,7 +717,7 @@ async function BoardColumns({
               read as the same object.
             */}
             <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2.5">
-              <TaskStatusBadge status={status} icon className="uppercase tracking-[0.03em]" />
+              <TaskStatusBadge status={status} icon solid className="uppercase tracking-[0.03em]" />
               <span className="font-mono text-2xs font-semibold tabular-nums text-muted-foreground">
                 {totalOf(status)}
               </span>

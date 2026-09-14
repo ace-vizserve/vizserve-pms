@@ -60,6 +60,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-chart-done: var(--chart-done);
+  --color-chart-overdue: var(--chart-overdue);
   --color-success: var(--success);
   --color-success-subtle: var(--success-subtle);
   --color-success-border: var(--success-border);
@@ -86,6 +88,33 @@
   --color-event-department: var(--event-department);
   --color-event-department-subtle: var(--event-department-subtle);
   --color-event-department-border: var(--event-department-border);
+
+  /*
+   * P11-14 — THE TASK PIPELINE'S OWN PALETTE.
+   *
+   * Four families the semantic set does not contain, for the four stages that
+   * had to share a colour with another stage. Before this, three statuses were
+   * all "brand" and two were both "neutral", so half the stage groups in the
+   * task list were indistinguishable from another group — the exact failure
+   * P7-46 added the event families to avoid on the calendar.
+   *
+   * They are a SEQUENCE, not a set of meanings: light violet hands over to deep
+   * violet (queued for QA, then being checked), and orange is the one gate that
+   * leaves the building. Naming them after the stage rather than the hue is
+   * what keeps `status-badge.tsx` the only place a status becomes a colour.
+   */
+  --color-stage-qa: var(--stage-qa);
+  --color-stage-qa-subtle: var(--stage-qa-subtle);
+  --color-stage-qa-border: var(--stage-qa-border);
+  --color-stage-qa-deep: var(--stage-qa-deep);
+  --color-stage-qa-deep-subtle: var(--stage-qa-deep-subtle);
+  --color-stage-qa-deep-border: var(--stage-qa-deep-border);
+  --color-stage-client: var(--stage-client);
+  --color-stage-client-subtle: var(--stage-client-subtle);
+  --color-stage-client-border: var(--stage-client-border);
+  --color-stage-lapsed: var(--stage-lapsed);
+  --color-stage-lapsed-subtle: var(--stage-lapsed-subtle);
+  --color-stage-lapsed-border: var(--stage-lapsed-border);
   --color-warning: var(--warning);
   --color-warning-subtle: var(--warning-subtle);
   --color-warning-border: var(--warning-border);
@@ -273,6 +302,36 @@
   --chart-4: #eda100;
   --chart-5: #e87ba4;
 
+  /* --- the two STAGE series that carry meaning ---------------------------
+     A stage chart is not a categorical one. "Completed" and "overdue" are
+     states, and the house rule is that identity colours cannot carry state —
+     so these two do not come from the numbered slots above, and the numbered
+     slots must never be reassigned to mean them.
+
+     WHY THEY ARE NOT JUST --success AND --destructive: a chart fill and a chip
+     label are measured against different things. Run through the dataviz
+     validator as a series against the surface it is drawn on, --success' dark
+     step (#4CB483) sits at L 0.696 against a band ceiling of 0.67, and
+     --destructive's (#E0736A) fails harder. These are the same hues re-stepped
+     to pass on BOTH surfaces, which is what the design system means by dark
+     mode being selected rather than flipped.
+
+     MEASURED, both themes, as a three-series stage palette
+     (--chart-1 · --chart-2 · --chart-done):
+       light  #4359A5 #EB6834 #1C7A52 — all five checks PASS; worst pair
+              green↔orange ΔE 7.0 (protan), which is the 6–8 floor band and is
+              legal ONLY because every slice is direct-labelled with its count.
+       dark   #6B83D0 #D95926 #199E70 — all five checks PASS outright; worst
+              pair ΔE 9.4 (deutan), normal-vision floor 19.9.
+
+     ⚠️ --chart-overdue IS NOT A SLICE AND MUST NOT BECOME ONE. Seated as a
+     fourth series beside the orange it measures ΔE 7.7 for NORMAL colour
+     vision in dark — two stages a full-colour reader cannot tell apart. It is
+     the colour of the overdue FIGURE, carried with the word "overdue" beside
+     it, never a band of a bar or an arc of a ring. */
+  --chart-done: #1c7a52;
+  --chart-overdue: #b3352c;
+
   /* The refresh sets radius=10px. */
   --radius: 0.625rem;
 
@@ -347,6 +406,31 @@
   --event-department: #8a5a12;
   --event-department-subtle: #fbf1e2;
   --event-department-border: #ecd6ae;
+
+  /*
+   * P11-14. The four stage families. Each solid is measured on its OWN subtle
+   * fill (chip text, 4.5:1) and on --card (the group spine and the row glyph's
+   * ring, 3:1); each subtle fill is measured against --foreground-muted, which
+   * is what a tinted task row re-points its meta text to.
+   *
+   * ⚠️ TOLD APART BY HUE, NOT BY LIGHTNESS. As row washes, amber vs orange and
+   * green vs sage sit 1.01–1.03:1 apart — they are the same lightness in
+   * different hues, and in greyscale they are the same colour. That is legal
+   * here only because every stage also carries a labelled chip and its own
+   * lucide glyph; it would not be legal if the wash were the carrier.
+   */
+  --stage-qa: #6d4baf;
+  --stage-qa-subtle: #f2edfc;
+  --stage-qa-border: #dccff2;
+  --stage-qa-deep: #4c3286;
+  --stage-qa-deep-subtle: #e9e2f6;
+  --stage-qa-deep-border: #cdbde9;
+  --stage-client: #a9520b;
+  --stage-client-subtle: #fceee2;
+  --stage-client-border: #f0cfae;
+  --stage-lapsed: #446f5c;
+  --stage-lapsed-subtle: #eef4f1;
+  --stage-lapsed-border: #d3e2da;
   --warning: #8a6206;
   --warning-subtle: #fbf2e0;
   --warning-border: #e8d6ac;
@@ -445,6 +529,10 @@
   --chart-4: #c98500;
   --chart-5: #d55181;
 
+  /* Re-stepped for the dark surface, not flipped — see the light block. */
+  --chart-done: #199e70;
+  --chart-overdue: #e0736a;
+
   /* Depth, inverted. The highlight thins to a rim of light — a 0.9-alpha white
      edge on a dark face reads as a scratch, not a lit edge — and the shadows
      deepen so a lift still registers against a dark ground. */
@@ -480,6 +568,20 @@
   --event-department: #d9a961;
   --event-department-subtle: #2a1f10;
   --event-department-border: #4a3819;
+
+  /* P11-14. The four stage families, lifted for a dark ground the same way. */
+  --stage-qa: #b9a3ea;
+  --stage-qa-subtle: #261e3a;
+  --stage-qa-border: #3d3352;
+  --stage-qa-deep: #9878d6;
+  --stage-qa-deep-subtle: #18132d;
+  --stage-qa-deep-border: #332a52;
+  --stage-client: #e0904f;
+  --stage-client-subtle: #2c2015;
+  --stage-client-border: #4a3621;
+  --stage-lapsed: #8ab89f;
+  --stage-lapsed-subtle: #17241f;
+  --stage-lapsed-border: #2b3f36;
   --warning: #d8a94a;
   --warning-subtle: #2a2213;
   --warning-border: #463a1f;
@@ -943,4 +1045,45 @@
   .link-pending {
     animation-duration: 1ms;
   }
+}
+
+/* ---------------------------------------------------------------------------
+   P7-35c — the home calendar's legend filter.
+
+   Clicking a swatch in `app/_home/calendar-legend.tsx` publishes that kind as
+   `data-calendar-filter` on the wrapper around the grid. Every cell the grid
+   rendered carries its own `data-day-kinds` — space-separated, because a Tuesday
+   can be a holiday AND somebody's approved leave AND today at once. These rules
+   fade every cell that does not hold the active kind.
+
+   ⚠️ WHY THIS IS SEVEN NEAR-IDENTICAL RULES AND NOT ONE. CSS cannot compare an
+   attribute on one element against an attribute on an ancestor, so the kind has
+   to be written as a literal on both sides of the match. It cannot be done in
+   the component either: the grid is server-rendered and passed to the legend as
+   children, so the client component that owns the filter state never gets to
+   touch a cell. Keeping the grid off the browser is a P7-42 decision worth more
+   than the seven lines.
+
+   `tests/unit/calendar-tones.test.ts` asserts this block names every kind in
+   `CALENDAR_FILTER_KINDS`, so an eighth kind fails a test instead of silently
+   shipping a swatch that dims nothing.
+
+   Opacity only — no `display: none`. The thing being filtered is a CALENDAR, and
+   a February with the other 26 days removed is a list, not a calendar. Seeing
+   that the two Chinese New Year days are a Tuesday and a Wednesday is the whole
+   point of the shape around them. The fade itself is on the cell, via Tailwind's
+   `transition-opacity`, which carries the `motion-reduce` guard with it.
+   --------------------------------------------------------------------------- */
+[data-calendar-filter] [data-day-kinds] {
+  opacity: 0.22;
+}
+
+[data-calendar-filter="approved"] [data-day-kinds~="approved"],
+[data-calendar-filter="pending"] [data-day-kinds~="pending"],
+[data-calendar-filter="holiday"] [data-day-kinds~="holiday"],
+[data-calendar-filter="event-COMPANY"] [data-day-kinds~="event-COMPANY"],
+[data-calendar-filter="event-MANAGEMENT"] [data-day-kinds~="event-MANAGEMENT"],
+[data-calendar-filter="event-DEPARTMENT"] [data-day-kinds~="event-DEPARTMENT"],
+[data-calendar-filter="today"] [data-day-kinds~="today"] {
+  opacity: 1;
 }

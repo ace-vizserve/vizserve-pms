@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   OUTSIDE_NAME,
+  STAGE_SAMPLE_LIMIT,
   summariseWorkload,
   type WorkloadAssignment,
   type WorkloadPerson,
@@ -22,6 +23,7 @@ const DEPT = "dept-1";
 function task(overrides: Partial<WorkloadTask> = {}): WorkloadTask {
   return {
     id: "t1",
+    title: "A task",
     status: "OPEN",
     department_id: DEPT,
     due_date: null,
@@ -39,8 +41,15 @@ function summarise(
   assignments: WorkloadAssignment[] = [],
   roster: WorkloadPerson[] = [],
   nameOf: Map<string, string> = new Map(),
+  departmentIds: string[] = [],
 ) {
-  return summariseWorkload({ tasks, assignments, roster, nameOf, today: TODAY });
+  return summariseWorkload({ tasks, assignments, roster, departmentIds, nameOf, today: TODAY });
+}
+
+function departmentOf(summary: ReturnType<typeof summarise>, id: string) {
+  const department = summary.departments.find((candidate) => candidate.departmentId === id);
+  if (!department) throw new Error(`no department for ${id}`);
+  return department;
 }
 
 function rowOf(summary: ReturnType<typeof summarise>, id: string) {
@@ -169,5 +178,233 @@ describe("summariseWorkload — totals", () => {
       [person("cal", "Cal"), person("ana", "Ana"), person("ben", "Ben")],
     );
     expect(summary.rows.map((row) => row.name)).toEqual(["Ben", "Ana", "Cal"]);
+  });
+});
+
+
+/**
+ * The per-department roll-up behind /analytics' rings. The property that makes a
+ * ring honest is the one worth pinning: these add up to `totals`, where the
+ * per-person rows deliberately do not.
+ */
+describe("summariseWorkload — per department", () => {
+  const OTHER = "dept-2";
+
+  it("splits the counts by the department a task is filed under", () => {
+    const summary = summarise(
+      [
+        task({ id: "a", status: "OPEN" }),
+        task({ id: "b", status: "ONGOING" }),
+        task({ id: "c", status: TERMINAL_STATUSES[0], department_id: OTHER }),
+      ],
+      [],
+      [],
+      new Map(),
+      [DEPT, OTHER],
+    );
+
+    expect(departmentOf(summary, DEPT)).toMatchObject({ total: 2, notStarted: 1, active: 1 });
+    expect(departmentOf(summary, OTHER)).toMatchObject({ total: 1, completed: 1 });
+  });
+
+  it("counts a task shared by three people ONCE — the rings are a true part-to-whole", () => {
+    const summary = summarise(
+      [task({ id: "a", assignee_id: "ana" })],
+      [
+        { task_id: "a", user_id: "ben" },
+        { task_id: "a", user_id: "cara" },
+      ],
+      [person("ana", "Ana"), person("ben", "Ben"), person("cara", "Cara")],
+      new Map(),
+      [DEPT],
+    );
+
+    // Three per-person rows of 1 each, and one task in the department.
+    expect(summary.rows.filter((row) => row.total === 1)).toHaveLength(3);
+    expect(departmentOf(summary, DEPT).total).toBe(1);
+  });
+
+  it("adds up to the totals, including tasks with nobody on them", () => {
+    const summary = summarise(
+      [
+        task({ id: "a", assignee_id: "ana" }),
+        task({ id: "b" }),
+        task({ id: "c", department_id: OTHER }),
+      ],
+      [],
+      [person("ana", "Ana")],
+      new Map(),
+      [DEPT, OTHER],
+    );
+
+    const summed = summary.departments.reduce((count, department) => count + department.total, 0);
+    expect(summed).toBe(summary.totals.total);
+    expect(summary.unassigned).toBe(2);
+  });
+
+  it("keeps a department with no tasks, so the page can draw an empty ring", () => {
+    const summary = summarise([task()], [], [], new Map(), [DEPT, OTHER]);
+
+    expect(departmentOf(summary, OTHER)).toMatchObject({ total: 0, notStarted: 0, completed: 0 });
+  });
+
+  it("keeps the order the ids were passed in, not the busiest first", () => {
+    const summary = summarise(
+      [task({ id: "a", department_id: OTHER }), task({ id: "b", department_id: OTHER })],
+      [],
+      [],
+      new Map(),
+      [DEPT, OTHER],
+    );
+
+    expect(summary.departments.map((department) => department.departmentId)).toEqual([DEPT, OTHER]);
+  });
+
+  it("still counts a task from outside the seeded list, rather than losing it", () => {
+    const summary = summarise([task({ department_id: "dept-x" })], [], [], new Map(), [DEPT]);
+
+    expect(departmentOf(summary, "dept-x").total).toBe(1);
+    expect(summary.totals.total).toBe(1);
+  });
+});
+
+
+/**
+ * The sample behind the ring's hover panel. The cap and the ORDER are the whole
+ * contract: a panel showing four arbitrary titles is trivia, and four the
+ * reader should look at next is the reason to open it.
+ */
+describe("summariseWorkload — the hover sample", () => {
+  function samplesOf(summary: ReturnType<typeof summarise>) {
+    return departmentOf(summary, DEPT).samples;
+  }
+
+  it("files each task under the stage its status puts it in", () => {
+    const summary = summarise(
+      [
+        task({ id: "a", title: "Open one", status: "OPEN" }),
+        task({ id: "b", title: "Running", status: "ONGOING" }),
+        task({ id: "c", title: "Finished", status: TERMINAL_STATUSES[0] }),
+      ],
+      [],
+      [],
+      new Map(),
+      [DEPT],
+    );
+
+    const samples = samplesOf(summary);
+    expect(samples.notStarted.map((sample) => sample.title)).toEqual(["Open one"]);
+    expect(samples.active.map((sample) => sample.title)).toEqual(["Running"]);
+    expect(samples.completed.map((sample) => sample.title)).toEqual(["Finished"]);
+  });
+
+  it("puts overdue first, then the soonest due date, then the undated", () => {
+    const summary = summarise(
+      [
+        task({ id: "a", title: "No date", due_date: null }),
+        task({ id: "b", title: "Due later", due_date: "2026-12-01" }),
+        task({ id: "c", title: "Late", due_date: "2026-09-01" }),
+        task({ id: "d", title: "Due soon", due_date: "2026-09-15" }),
+      ],
+      [],
+      [],
+      new Map(),
+      [DEPT],
+    );
+
+    expect(samplesOf(summary).notStarted.map((sample) => sample.title)).toEqual([
+      "Late",
+      "Due soon",
+      "Due later",
+      "No date",
+    ]);
+  });
+
+  it("never marks finished work overdue, however late it landed", () => {
+    const summary = summarise(
+      [task({ title: "Shipped late", status: TERMINAL_STATUSES[0], due_date: "2026-01-01" })],
+      [],
+      [],
+      new Map(),
+      [DEPT],
+    );
+
+    expect(samplesOf(summary).completed[0]).toMatchObject({ overdue: false });
+  });
+
+  it("caps the sample while the count stays whole", () => {
+    const tasks = Array.from({ length: STAGE_SAMPLE_LIMIT + 3 }, (_, index) =>
+      task({ id: `t${index}`, title: `Task ${index}`, due_date: `2026-09-0${index + 1}` }),
+    );
+
+    const summary = summarise(tasks, [], [], new Map(), [DEPT]);
+
+    expect(samplesOf(summary).notStarted).toHaveLength(STAGE_SAMPLE_LIMIT);
+    expect(departmentOf(summary, DEPT).notStarted).toBe(STAGE_SAMPLE_LIMIT + 3);
+  });
+
+  it("gives an empty department an empty sample for every stage, not undefined", () => {
+    const summary = summarise([], [], [], new Map(), [DEPT]);
+
+    expect(samplesOf(summary)).toEqual({ notStarted: [], active: [], completed: [] });
+  });
+});
+
+
+/**
+ * The same sample, per person — what /analytics hovers once a single department
+ * is picked and the rings become one per team member.
+ */
+describe("summariseWorkload — the per-person sample", () => {
+  it("gives each person on a shared task the same task in their own sample", () => {
+    const summary = summarise(
+      [task({ id: "a", title: "Shared work", assignee_id: "ana" })],
+      [{ task_id: "a", user_id: "ben" }],
+      [person("ana", "Ana"), person("ben", "Ben")],
+      new Map(),
+      [DEPT],
+    );
+
+    expect(rowOf(summary, "ana").samples.notStarted.map((s) => s.title)).toEqual(["Shared work"]);
+    expect(rowOf(summary, "ben").samples.notStarted.map((s) => s.title)).toEqual(["Shared work"]);
+    // And once in the department, which is the asymmetry the card warns about.
+    expect(departmentOf(summary, DEPT).samples.notStarted).toHaveLength(1);
+  });
+
+  it("keeps a person's sample to their own work, not the department's", () => {
+    const summary = summarise(
+      [
+        task({ id: "a", title: "Ana's", assignee_id: "ana" }),
+        task({ id: "b", title: "Bens", assignee_id: "ben" }),
+      ],
+      [],
+      [person("ana", "Ana"), person("ben", "Ben")],
+      new Map(),
+      [DEPT],
+    );
+
+    expect(rowOf(summary, "ana").samples.notStarted.map((s) => s.title)).toEqual(["Ana's"]);
+    expect(departmentOf(summary, DEPT).samples.notStarted).toHaveLength(2);
+  });
+
+  it("gives somebody with nothing on an empty sample for every stage", () => {
+    const summary = summarise([], [], [person("ana", "Ana")], new Map(), [DEPT]);
+
+    expect(rowOf(summary, "ana").samples).toEqual({
+      notStarted: [],
+      active: [],
+      completed: [],
+    });
+  });
+
+  it("caps a person's sample the same way, while their count stays whole", () => {
+    const tasks = Array.from({ length: STAGE_SAMPLE_LIMIT + 2 }, (_, index) =>
+      task({ id: `t${index}`, title: `Task ${index}`, assignee_id: "ana" }),
+    );
+
+    const summary = summarise(tasks, [], [person("ana", "Ana")], new Map(), [DEPT]);
+
+    expect(rowOf(summary, "ana").samples.notStarted).toHaveLength(STAGE_SAMPLE_LIMIT);
+    expect(rowOf(summary, "ana").notStarted).toBe(STAGE_SAMPLE_LIMIT + 2);
   });
 });

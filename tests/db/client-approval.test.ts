@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import type { Json } from "@/lib/database.types";
-import { PH_HOLIDAYS, addBusinessDays } from "@/lib/dates";
+import { SEEDED_HOLIDAYS, addBusinessDays } from "@/lib/dates";
 
 import { DEPARTMENTS, adminClient, anonClient, dbTestsEnabled, signIn, skipReason } from "./helpers";
 
@@ -600,7 +600,7 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
   // =========================================================================
   describe("the approval window", () => {
     it.skipIf(!migrationApplied)(
-      "vizserve_pms_holidays still contains every seeded 2026 regular holiday",
+      "vizserve_pms_holidays still contains every seeded 2026 holiday",
       async () => {
         /*
          * A SUBSET, NOT AN EQUALITY, and the change is deliberate.
@@ -608,7 +608,7 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
          * This asserted the two were identical, which was correct while only a
          * migration could write the table. P7-35 made it admin-editable, so
          * special non-working days and future years arrive by proclamation and
-         * legitimately have no counterpart in `PH_HOLIDAYS` — equality would now
+         * legitimately have no counterpart in `SEEDED_HOLIDAYS` — equality would now
          * fail on an admin doing exactly what the screen is for.
          *
          * What is still worth guarding is the other direction: a statutory
@@ -623,7 +623,7 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
           .lte("holiday_date", "2026-12-31");
 
         const fromDb = new Set((rows ?? []).map((row) => row.holiday_date));
-        const missing = PH_HOLIDAYS.filter((date) => !fromDb.has(date));
+        const missing = SEEDED_HOLIDAYS.filter((date) => !fromDb.has(date));
 
         expect(missing).toEqual([]);
       },
@@ -633,25 +633,38 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
       // Friday + 3 business days = Wednesday. On calendar days it would be
       // Monday, having given the client roughly one working day — which is the
       // version that produces the angry phone call.
+      //
+      // SEPTEMBER 2026, which P7-35b picked deliberately: it is the longest
+      // stretch of the seeded year with no holiday in it, so this measures the
+      // weekend rule and nothing else. It ran on 7 August until the Singapore
+      // calendar landed, and 10 August is now the in-lieu National Day — which
+      // would have made this pass or fail on the HOLIDAY rule while claiming to
+      // be a test about weekends.
       const { data } = await adminClient().rpc("vizserve_pms_add_business_days", {
-        p_from: "2026-08-07T09:00:00+08:00",
+        p_from: "2026-09-04T09:00:00+08:00",
         p_days: 3,
       });
 
-      expect((data as string).slice(0, 10)).toBe("2026-08-12");
+      expect((data as string).slice(0, 10)).toBe("2026-09-09");
       // And the TypeScript mirror agrees.
-      expect(addBusinessDays("2026-08-07", 3)).toBe("2026-08-12");
+      expect(addBusinessDays("2026-09-04", 3)).toBe("2026-09-09");
     });
 
     it.skipIf(!migrationApplied)("skips a holiday", async () => {
-      // 31 Aug 2026 is National Heroes Day, a Monday.
+      // 10 Aug 2026 is a Monday, and the public holiday given in lieu of National
+      // Day falling on Sunday the 9th. So Friday + 1 working day is TUESDAY: the
+      // weekend goes first, and then the Monday nobody is in.
+      //
+      // Was 31 Aug (National Heroes Day) until P7-35b replaced the Philippine
+      // seed. An in-lieu Monday is the better fixture anyway — it is the shape
+      // this calendar has four of, and the one a five-day week actually feels.
       const { data } = await adminClient().rpc("vizserve_pms_add_business_days", {
-        p_from: "2026-08-28T09:00:00+08:00",
+        p_from: "2026-08-07T09:00:00+08:00",
         p_days: 1,
       });
 
-      expect((data as string).slice(0, 10)).toBe("2026-09-01");
-      expect(addBusinessDays("2026-08-28", 1)).toBe("2026-09-01");
+      expect((data as string).slice(0, 10)).toBe("2026-08-11");
+      expect(addBusinessDays("2026-08-07", 1)).toBe("2026-08-11");
     });
 
     it.skipIf(!migrationApplied)("sets a deadline in the future when a token is issued", async () => {
