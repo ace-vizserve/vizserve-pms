@@ -25,8 +25,8 @@ import {
   expandLeaveDays,
   leaveKey,
   type LeaveDay,
-  type LeaveSpan,
 } from "@/lib/leave";
+import { loadApprovedLeaveSpans } from "@/lib/leave-server";
 import { createClient } from "@/utils/supabase/server";
 import { DtrTable, type DayRequest, type Entry, type PunchRow } from "./dtr-table";
 import { EmptyState } from "@/components/empty-state";
@@ -166,32 +166,13 @@ async function loadDtrView({
      * from a day the system lost. Worse, a lead reading a member's record saw a
      * silent hole.
      *
-     * The ordinary policy on internal requests, NOT
-     * `vizserve_pms_leave_calendar`. The calendar is SECURITY DEFINER and
-     * returns every active user; this page is scoped, and borrowing the
-     * calendar would show a member days belonging to people whose DTR they
-     * cannot read. `requester_id = auth.uid() or manages_department(...)` is
-     * the same shape as the DTR's own policy, so the two agree by construction
-     * — and, like the list above, this query carries no department filter.
-     *
-     * `reason` is not selected. The absence belongs on this screen; why belongs
-     * to the requester and the lead who decided it.
+     * ⚠️ ONE DEFINITION, SHARED WITH THE PAYROLL EXPORT AND /hr/attendance. All
+     * three used to spell this query out; the attendance one omitted the halves
+     * and so counted every half day as a whole one. Why it is the ordinary
+     * policy and not `vizserve_pms_leave_calendar` now lives with the query, in
+     * `lib/leave-server.ts`.
      */
-    (() => {
-      let query = supabase
-        .from("vizserve_pms_internal_requests")
-        .select(
-          "requester_id, start_date, end_date, start_half, end_half, vizserve_pms_leave_types(label)",
-        )
-        .eq("request_type", "LEAVE")
-        .eq("status", "APPROVED")
-        // Overlap, not containment — see vizserve_pms_leave_calendar.
-        .lte("start_date", to)
-        .gte("end_date", from);
-
-      if (selectedUser) query = query.eq("requester_id", selectedUser);
-      return query;
-    })(),
+    loadApprovedLeaveSpans(from, to, selectedUser),
 
     /*
      * P7-40 — THE REQUESTS ATTACHED TO THESE DAYS.
@@ -240,27 +221,7 @@ async function loadDtrView({
   const people = peopleResult.data ?? [];
   const nameOf = new Map(people.map((row) => [row.id, row.full_name] as const));
 
-  type LeaveRequestRow = {
-    requester_id: string;
-    start_date: string | null;
-    end_date: string | null;
-    start_half: "MORNING" | "AFTERNOON" | null;
-    end_half: "MORNING" | "AFTERNOON" | null;
-    vizserve_pms_leave_types: { label: string } | null;
-  };
-
-  const spans: LeaveSpan[] = ((leaveResult.data ?? []) as unknown as LeaveRequestRow[])
-    // The shape constraint guarantees both dates on a LEAVE row; the types do
-    // not, and a null would expand into an unbounded walk.
-    .filter((row) => row.start_date !== null && row.end_date !== null)
-    .map((row) => ({
-      user_id: row.requester_id,
-      start_date: row.start_date!,
-      end_date: row.end_date!,
-      start_half: row.start_half,
-      end_half: row.end_half,
-      type_name: row.vizserve_pms_leave_types?.label ?? null,
-    }));
+  const spans = leaveResult.spans;
 
   // An inverted range would otherwise expand into nothing anyway, but the guard
   // keeps this honest with the empty state that explains itself below.

@@ -1,3 +1,4 @@
+import type { LeavePortion } from "@/lib/leave";
 import { deviation, effectiveEnd, scheduleFor, DEFAULT_GRACE_MINUTES } from "@/lib/dtr-schedule";
 
 /**
@@ -47,7 +48,16 @@ export type AttendanceDay = {
   timeIn: string | null;
   timeOut: string | null;
   hasEntry: boolean;
-  onLeave: boolean;
+  /**
+   * How much of the day approved leave covers, or null for none.
+   *
+   * ⚠️ WAS `onLeave: boolean`, AND THE BOOLEAN WAS WRONG TWICE OVER. A morning
+   * half day counted as a whole day of leave, and — because leave short-circuits
+   * the checks below — the AFTERNOON the person actually worked was never judged
+   * for lateness or undertime. The screen feeding this did not even select the
+   * halves; `lib/leave-server.ts` is why every caller now does.
+   */
+  leavePortion: LeavePortion | null;
   isHoliday: boolean;
   /** Approved overtime for the day, in minutes. Extends the END only. */
   overtimeMinutes: number;
@@ -69,6 +79,21 @@ export type AttendanceSummary = {
   /** True when no schedule is recorded — every count below is then zero. */
   unscheduled: boolean;
   workingDays: number;
+  /**
+   * ⚠️ THESE THREE CAN CARRY A `.5`, and the halves are why.
+   *
+   * A day is one unit split between them: a morning off that is then worked is
+   * 0.5 leave and 0.5 present. That is what keeps `present + onLeave + absent`
+   * summing to `workingDays` — the property the old day-granular version was
+   * protecting and lost the moment a half day appeared, because it spent the
+   * whole day on leave and never counted the worked half at all.
+   *
+   * ⚠️ ANYTHING RENDERING THESE MUST NOT `Math.round`. That puts the original
+   * overstatement straight back.
+   *
+   * `late` and `undertime` below are NOT fractional: they count events, not
+   * days. Arriving late on a half day is one late arrival.
+   */
   present: number;
   onLeave: number;
   absent: number;
@@ -120,24 +145,39 @@ export function summariseAttendance(
 
       summary.workingDays += 1;
 
-      // Leave is checked FIRST and wins over everything. Somebody who punched in
-      // on a half day of leave is present for the half they worked, and this
-      // roll-up is a count of days rather than hours — counting the day as both
-      // would make the columns stop summing to workingDays.
-      if (day.onLeave) {
+      /*
+       * Leave first, because it is the only thing that excuses an empty day.
+       *
+       * ⚠️ A HALF DAY NO LONGER WINS THE WHOLE DAY. It used to: the roll-up
+       * added 1 and `continue`d, so somebody who took the morning off and then
+       * went home two hours early was neither counted for the leave they took
+       * nor checked for the undertime they took after it.
+       *
+       * A FULL day still short-circuits — there is nothing left to judge. A
+       * HALF day books 0.5 and falls through, and `share` below is what keeps
+       * the remaining half from being counted as a whole day present or absent.
+       */
+      const portion = day.leavePortion;
+
+      if (portion === "full") {
         summary.onLeave += 1;
         continue;
       }
+
+      /** What is left of this day after leave has taken its part. */
+      const share = portion ? 0.5 : 1;
+
+      if (portion) summary.onLeave += 0.5;
 
       if (!day.hasEntry) {
         // Unscheduled people are not marked absent — see the header. The day
         // still counts as a working day, so the columns visibly do not sum,
         // which is honest: nothing is known about it.
-        if (!unscheduled) summary.absent += 1;
+        if (!unscheduled) summary.absent += share;
         continue;
       }
 
-      summary.present += 1;
+      summary.present += share;
 
       if (unscheduled) continue;
 

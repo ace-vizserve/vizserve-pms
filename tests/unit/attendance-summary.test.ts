@@ -28,7 +28,7 @@ function day(date: string, overrides: Partial<AttendanceDay> = {}): AttendanceDa
     timeIn: null,
     timeOut: null,
     hasEntry: false,
-    onLeave: false,
+    leavePortion: null,
     isHoliday: false,
     overtimeMinutes: 0,
     ...overrides,
@@ -87,25 +87,56 @@ describe("summariseAttendance — absent", () => {
     // ⚠️ The decision this file exists for. A person on approved leave is
     // accounted for; folding the two together would make the one figure HR
     // actually looks at — unexplained absence — unreadable.
-    const result = summarise(person({ days: [day(MON, { onLeave: true }), day(TUE)] }));
+    const result = summarise(
+      person({ days: [day(MON, { leavePortion: "full" }), day(TUE)] }),
+    );
 
     expect(result.onLeave).toBe(1);
     expect(result.absent).toBe(1);
   });
 
-  it("counts leave over a punch, so the columns still sum", () => {
-    // A half day of leave where the person also punched in. Counted once, as
-    // leave — this roll-up counts DAYS, and counting the day twice would make
-    // present + onLeave + absent exceed workingDays.
+  it("splits a half day between leave and the half that was worked", () => {
+    /*
+     * ⚠️ THE BUG THIS REPLACES. A half day used to book a WHOLE day of leave
+     * and `continue`, so the afternoon somebody actually worked was never
+     * counted as present — and was never checked for lateness or undertime
+     * either. /hr/attendance could not even see the halves: its query left
+     * `start_half` and `end_half` out of the select, which is why the read
+     * moved into `lib/leave-server.ts`.
+     */
     const result = summarise(
       person({
-        days: [day(MON, { onLeave: true, hasEntry: true, timeIn: at(MON, "13:00") })],
+        days: [day(MON, { leavePortion: "morning", hasEntry: true, timeIn: at(MON, "13:00") })],
       }),
     );
 
-    expect(result.onLeave).toBe(1);
-    expect(result.present).toBe(0);
+    expect(result.onLeave).toBe(0.5);
+    expect(result.present).toBe(0.5);
     expect(result.present + result.onLeave + result.absent).toBe(result.workingDays);
+  });
+
+  it("counts the missed half of a half day as absence, not a whole day", () => {
+    // Morning off and then no punch at all: they missed the afternoon they were
+    // due. Half a day of leave, half a day absent — and a full day of absence
+    // here would overstate it by exactly the half they had booked off.
+    const result = summarise(
+      person({ days: [day(MON, { leavePortion: "afternoon", hasEntry: false })] }),
+    );
+
+    expect(result.onLeave).toBe(0.5);
+    expect(result.absent).toBe(0.5);
+    expect(result.present + result.onLeave + result.absent).toBe(result.workingDays);
+  });
+
+  it("still short-circuits a full day, because there is nothing left to judge", () => {
+    // No punch, no absence, no lateness. The whole day is accounted for.
+    const result = summarise(
+      person({ days: [day(MON, { leavePortion: "full", hasEntry: false })] }),
+    );
+
+    expect(result.onLeave).toBe(1);
+    expect(result.absent).toBe(0);
+    expect(result.late).toBe(0);
   });
 });
 
@@ -224,7 +255,7 @@ describe("summariseAttendance — the whole shape", () => {
       person({
         days: [
           day(MON, { hasEntry: true, timeIn: at(MON, "09:00"), timeOut: at(MON, "18:00") }),
-          day(TUE, { onLeave: true }),
+          day(TUE, { leavePortion: "full" }),
           day(WED),
           day(SAT),
         ],
@@ -241,7 +272,7 @@ describe("summariseAttendance — the whole shape", () => {
   it("summarises each person independently", () => {
     const results = summariseAttendance([
       person({ userId: "a", days: [day(MON)] }),
-      person({ userId: "b", days: [day(MON, { onLeave: true })] }),
+      person({ userId: "b", days: [day(MON, { leavePortion: "full" })] }),
     ]);
 
     expect(results.map((row) => row.userId)).toEqual(["a", "b"]);

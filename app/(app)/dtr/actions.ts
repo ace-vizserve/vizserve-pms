@@ -8,8 +8,8 @@ import {
   describeLeaveDay,
   expandLeaveDays,
   leaveKey,
-  type LeaveSpan,
 } from "@/lib/leave";
+import { loadApprovedLeaveSpans } from "@/lib/leave-server";
 import { dtrExportSchema, punchSchema, type PunchResult } from "@/lib/schemas/dtr";
 import { createClient } from "@/utils/supabase/server";
 import { flattenIssues, readableError } from "@/lib/action-result";
@@ -138,20 +138,7 @@ export async function exportDtrCsv(
      * OVERLAP, not containment — leave running across the range boundary counts
      * for the days that fall inside it. `expandLeaveDays` clamps.
      */
-    (() => {
-      let query = supabase
-        .from("vizserve_pms_internal_requests")
-        .select(
-          "requester_id, start_date, end_date, start_half, end_half, vizserve_pms_leave_types(label)",
-        )
-        .eq("request_type", "LEAVE")
-        .eq("status", "APPROVED")
-        .lte("start_date", to)
-        .gte("end_date", from);
-
-      if (user_id) query = query.eq("requester_id", user_id);
-      return query;
-    })(),
+    loadApprovedLeaveSpans(from, to, user_id),
 
     // Names for people who appear ONLY in the leave rows. Somebody away for the
     // whole range has no DTR row to carry their name, and an unnamed line in a
@@ -179,29 +166,7 @@ export async function exportDtrCsv(
     } | null;
   };
 
-  type LeaveRequestRow = {
-    requester_id: string;
-    start_date: string | null;
-    end_date: string | null;
-    start_half: "MORNING" | "AFTERNOON" | null;
-    end_half: "MORNING" | "AFTERNOON" | null;
-    vizserve_pms_leave_types: { label: string } | null;
-  };
-
-  const spans: LeaveSpan[] = ((leaveResult.data ?? []) as unknown as LeaveRequestRow[])
-    // The shape constraint guarantees both dates on a LEAVE row; the types do
-    // not, and a null here would expand into an unbounded walk.
-    .filter((row) => row.start_date !== null && row.end_date !== null)
-    .map((row) => ({
-      user_id: row.requester_id,
-      start_date: row.start_date!,
-      end_date: row.end_date!,
-      start_half: row.start_half,
-      end_half: row.end_half,
-      type_name: row.vizserve_pms_leave_types?.label ?? null,
-    }));
-
-  const leaveDays = expandLeaveDays(spans, from, to);
+  const leaveDays = expandLeaveDays(leaveResult.spans, from, to);
 
   const person = new Map(
     ((peopleResult.data ?? []) as { id: string; full_name: string; email: string }[]).map(

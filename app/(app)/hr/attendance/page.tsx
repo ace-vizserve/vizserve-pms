@@ -3,6 +3,8 @@ import type { Metadata } from "next";
 import { requireHr } from "@/lib/auth/authorization";
 import { summariseAttendance, type AttendanceDay, type AttendancePerson } from "@/lib/attendance-summary";
 import { todayInAppZone } from "@/lib/dates";
+import { expandLeaveDays, leaveKey } from "@/lib/leave";
+import { loadApprovedLeaveSpans } from "@/lib/leave-server";
 import { loadAppSettings } from "@/lib/settings-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
@@ -76,7 +78,7 @@ export default async function AttendancePage({
   const [
     { data: people, error: peopleError },
     { data: entries, error: entriesError },
-    { data: leave },
+    leave,
     { data: holidays },
     { data: overtime },
     { data: departments },
@@ -96,14 +98,16 @@ export default async function AttendancePage({
       .select("user_id, work_date, time_in, time_out")
       .gte("work_date", from)
       .lte("work_date", to),
-    supabase
-      .from("vizserve_pms_internal_requests")
-      .select("requester_id, start_date, end_date")
-      .eq("request_type", "LEAVE")
-      .eq("status", "APPROVED")
-      // Overlap, not containment — matching vizserve_pms_leave_calendar.
-      .lte("start_date", to)
-      .gte("end_date", from),
+    /*
+     * ⚠️ THIS READ USED TO OMIT `start_half` AND `end_half`, AND THAT WAS THE
+     * BUG. Without them a half day was indistinguishable from a whole one, so
+     * the roll-up counted it as a full day of leave AND exempted the half the
+     * person actually worked from the lateness and undertime checks. /dtr had
+     * the halves all along, so the same day read two different ways on two
+     * screens. The shared loader is what stops a third caller selecting a
+     * different set of columns.
+     */
+    loadApprovedLeaveSpans(from, to),
     supabase
       .from("vizserve_pms_holidays")
       .select("holiday_date")
@@ -146,18 +150,14 @@ export default async function AttendancePage({
     overtimeByKey.set(key, (overtimeByKey.get(key) ?? 0) + (row.overtime_minutes ?? 0));
   }
 
-  // Expanded from ranges to days. Compared as STRINGS, which works only because
-  // `YYYY-MM-DD` sorts lexicographically — the property `lib/dates.ts` relies on
-  // and the reason nothing here goes near `Date` parsing.
-  const leaveByKey = new Set<string>();
-  for (const request of leave ?? []) {
-    if (!request.start_date || !request.end_date) continue;
-    for (const date of dates) {
-      if (date >= request.start_date && date <= request.end_date) {
-        leaveByKey.add(`${request.requester_id}:${date}`);
-      }
-    }
-  }
+  /*
+   * Expanded from ranges to days, HALVES AND ALL.
+   *
+   * `expandLeaveDays` is the same arithmetic /dtr and the payroll export use,
+   * and it is unit-tested (`tests/unit/leave-days.test.ts`). The hand-rolled
+   * string walk this replaces had no notion of a portion at all.
+   */
+  const leaveDays = expandLeaveDays(leave.spans, from, to);
 
   const attendance: AttendancePerson[] = (people ?? []).map((person) => ({
     userId: person.id,
@@ -176,7 +176,9 @@ export default async function AttendancePage({
         timeIn: entry?.time_in ?? null,
         timeOut: entry?.time_out ?? null,
         hasEntry: entry !== undefined,
-        onLeave: leaveByKey.has(key),
+        // The PORTION, not a boolean. A morning half day is half a day of
+        // leave and half a day the person was expected at their desk.
+        leavePortion: leaveDays.get(leaveKey(person.id, date))?.portion ?? null,
         isHoliday: holidayDates.has(date),
         overtimeMinutes: overtimeByKey.get(key) ?? 0,
       };
