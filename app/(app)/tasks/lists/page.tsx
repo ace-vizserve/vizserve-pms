@@ -8,6 +8,7 @@ import {
   ForbiddenError,
   requireAuthContext,
 } from "@/lib/auth/authorization";
+import { countOpenTasksByList } from "@/lib/counts-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 
@@ -62,7 +63,7 @@ export default async function ListsPage() {
   // The task counts used to be awaited on their own, after the department
   // scoping below — but they depend on nothing computed there, so waiting was
   // a round trip spent on nothing. Four independent reads, one wave.
-  const [{ data: lists }, { data: departments }, { data: groups }, { data: taskCounts }] =
+  const [{ data: lists }, { data: departments }, { data: groups }, openByList] =
     await Promise.all([
       supabase
         .from("vizserve_pms_lists")
@@ -94,11 +95,12 @@ export default async function ListsPage() {
         .order("name"),
       // How many tasks each list holds, so nobody archives a list that is
       // carrying live work without knowing.
-      supabase
-        .from("vizserve_pms_tasks")
-        .select("list_id")
-        .not("list_id", "is", null)
-        .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+      //
+      // ⚠️ SHARED WITH THE RAIL. `sidebar-panel.tsx` shows the same number as a
+      // badge and is on screen beside this table — it was the same query and
+      // the same reduce loop written out twice, and the two had already drifted
+      // once. `cache()` inside the loader means both get it in one read.
+      countOpenTasksByList(),
     ]);
 
   /*
@@ -122,12 +124,6 @@ export default async function ListsPage() {
       : scope.kind === "none"
         ? []
         : (departments ?? []).filter((department) => scope.ids.includes(department.id));
-
-  const openByList = new Map<string, number>();
-  for (const row of taskCounts ?? []) {
-    if (!row.list_id) continue;
-    openByList.set(row.list_id, (openByList.get(row.list_id) ?? 0) + 1);
-  }
 
   return (
     <PageShell className="mx-auto w-full max-w-4xl">

@@ -4,6 +4,7 @@ import {
   canShapeAnyDepartment,
   type AuthContext,
 } from "@/lib/auth/authorization";
+import { countOpenTasksByList, countUnreadNotifications } from "@/lib/counts-server";
 import { groupedNavItems } from "@/lib/navigation";
 import { formatNavBadge } from "@/lib/navigation";
 import { createClient } from "@/utils/supabase/server";
@@ -132,12 +133,12 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
 
   const [
     managedDepartments,
-    { count: unread },
+    unread,
     { count: awaitingReview },
     { data: departments },
     { data: lists },
     { data: groups },
-    { data: openTasks },
+    openTasks,
     { data: pendingRequests },
     { data: myLists },
   ] = await Promise.all([
@@ -145,13 +146,11 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
 
     // The unread badge, deferred at P0-10 (Amier, 21:20) and asked for since.
     //
-    // `head: true` — a count with no rows, so this costs one indexable aggregate
-    // per navigation rather than shipping notification bodies the shell never
-    // renders. RLS scopes it to the caller, so there is no user filter here.
-    supabase
-      .from("vizserve_pms_notifications")
-      .select("id", { count: "exact", head: true })
-      .is("read_at", null),
+    // ⚠️ THE SHARED LOADER, NOT A FOURTH COPY. The rail renders on every page,
+    // so this ran alongside /dashboard's and /inbox's identical aggregates in
+    // one render. `countUnreadNotifications` is `cache()`d: three call sites,
+    // one round trip, and no way for the badge and the page to disagree.
+    countUnreadNotifications(),
 
     /*
      * P7-50 — the Requests badge: how many are sitting at Gate 1.
@@ -228,13 +227,12 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
       .eq("is_active", true)
       .order("sort_order")
       .order("name"),
-    // Live work only. A count including everything ever finished would grow
-    // forever and stop meaning "how much is in here".
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("list_id")
-      .not("list_id", "is", null)
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+    // ⚠️ SHARED WITH /tasks/lists, which shows the same number as a column.
+    // This was the identical query AND the identical reduce loop written out
+    // twice, and the note above records that the pair had already drifted once
+    // on ordering. `countOpenTasksByList` is `cache()`d, so opening
+    // /tasks/lists now costs one read for the column and the badge together.
+    countOpenTasksByList(),
     /*
      * P7-26 — client requests waiting on Gate 1, counted per list.
      *
@@ -286,11 +284,7 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
 
   const departmentNames = (managedDepartments?.data ?? []).map((row) => row.name);
 
-  const countByList = new Map<string, number>();
-  for (const task of openTasks ?? []) {
-    if (!task.list_id) continue;
-    countByList.set(task.list_id, (countByList.get(task.list_id) ?? 0) + 1);
-  }
+  const countByList = openTasks;
 
   // Same shape as the task count above, keyed by the list the request will land
   // in rather than one it is already in.

@@ -27,6 +27,33 @@ const nextConfig: NextConfig = {
 
   experimental: {
     /**
+     * P12-01 — THE CLIENT ROUTER CACHE, WHICH WAS OFF.
+     *
+     * `dynamic` has defaulted to 0 since Next 15, so nothing a dynamic route
+     * returned was reused on navigation: /tasks -> /tasks/board -> /tasks ran
+     * every query three times, and the same is true of /dashboard <-> / and
+     * /timesheet <-> /timesheet/team. Those pairs are the ones people flip
+     * between all day.
+     *
+     * ⚠️ THIS IS NOT `use cache`, AND THE DISTINCTION IS THE WHOLE REASON IT IS
+     * SAFE. The rule above stands: no RLS-scoped read may be cached across
+     * requests. This cache lives in ONE BROWSER TAB and holds the RSC payload
+     * that tab already received — it can only ever show somebody their own rows
+     * again. There is no shared store and no cross-user path.
+     *
+     * Thirty seconds, matched to how long a flip takes rather than picked. A
+     * mutation still invalidates it: every server action here calls
+     * `revalidatePath`, and `router.refresh()` clears it outright — which is
+     * what the optimistic paths on the board and the task list already do.
+     *
+     * `static` is left at its default: those are the prerendered shells, and
+     * they carry no rows.
+     */
+    staleTimes: {
+      dynamic: 30,
+    },
+
+    /**
      * Attachments are uploaded through a Server Action, and Next caps a Server
      * Action body at 1 MB by default. `vizserve_pms_attachment_rules.max_bytes`
      * has said 10 MiB since P1-09, so every file between those two numbers

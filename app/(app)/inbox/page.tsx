@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/empty-state";
 import { ListSearch } from "@/components/list-search";
 import { PageShell } from "@/components/page-shell";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
+import { countUnreadNotifications } from "@/lib/counts-server";
 import { isNotificationType, isReadFilter, type ReadFilter } from "@/lib/notifications";
 import { ilikeAnyOf } from "@/lib/search";
 import { InboxFilters } from "./inbox-filters";
@@ -129,11 +130,11 @@ export default async function InboxPage({
     // Counted separately, and this is not optional. It used to be derived from
     // the fetched rows, which was correct only while the page held everything —
     // with paging that would report "3 unread" meaning "3 on this page".
-    supabase.from("vizserve_pms_notifications").select("id", { count: "exact", head: true }).is("read_at", null),
+    countUnreadNotifications(),
   ]);
 
   const total = count ?? 0;
-  const unreadCount = unread.count ?? 0;
+  const unreadCount = unread;
   const rows = (notifications ?? []) as Notification[];
   const isFiltered = Boolean(term) || Boolean(type) || read !== "all";
 

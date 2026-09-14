@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { DayHalf } from "@/lib/leave";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { listWaitingOnYou } from "@/lib/approvals-queue-server";
+import { countMyOpenTasks, countMyQaQueue, countUnreadNotifications } from "@/lib/counts-server";
 import { loadPunchState } from "@/lib/dtr-server";
 import {
   addMonths,
@@ -350,7 +351,7 @@ async function YoursToMoveCell({
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   context: Awaited<ReturnType<typeof requireAuthContext>>;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<number>;
 }) {
   const [myTasks, myOpenTasks] = await Promise.all([
     myTasksPromise,
@@ -371,7 +372,7 @@ async function YoursToMoveCell({
     <Cell span="sm:col-span-3" label="Your work">
       <CellHead
         title="Yours to move"
-        count={myTasks.count ?? 0}
+        count={myTasks}
         tone="brand"
         action={
           <Link
@@ -427,36 +428,30 @@ async function YoursToMoveCell({
 
 /** Row 2, left — three counts in one cell. */
 async function StatStripSection({
-  supabase,
   context,
   myTasks: myTasksPromise,
 }: {
-  supabase: Awaited<ReturnType<typeof createClient>>;
+  // No `supabase` any more: all three counts come from `lib/counts-server.ts`,
+  // which opens its own client and is `cache()`d so the rail, the dashboard and
+  // this strip share one round trip each.
   context: Awaited<ReturnType<typeof requireAuthContext>>;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<number>;
 }) {
   const [unread, myTasks, myQa] = await Promise.all([
-    supabase
-      .from("vizserve_pms_notifications")
-      .select("id", { count: "exact", head: true })
-      .is("read_at", null),
+    countUnreadNotifications(),
 
     myTasksPromise,
 
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id", { count: "exact", head: true })
-      .eq("qa_assignee_id", context.userId)
-      .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
+    countMyQaQueue(context.userId),
   ]);
 
   return (
     <StatStrip
       span="sm:col-span-2"
       stats={[
-        { label: "My tasks", value: myTasks.count ?? 0, href: "/tasks?view=mine" },
-        { label: "On my QA", value: myQa.count ?? 0, href: "/tasks?view=qa" },
-        { label: "Unread", value: unread.count ?? 0, href: "/inbox" },
+        { label: "My tasks", value: myTasks, href: "/tasks?view=mine" },
+        { label: "On my QA", value: myQa, href: "/tasks?view=qa" },
+        { label: "Unread", value: unread, href: "/inbox" },
       ]}
     />
   );
@@ -706,13 +701,11 @@ export default async function DashboardPage({
   // ⚠️ Wrapped, because TWO tiles read it — the stat strip and, for a member,
   // "Yours to move". A PostgREST builder fires a fresh request on every
   // `.then()`, so sharing the bare builder would run this count twice.
-  const myTasksPromise = Promise.resolve(
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id", { count: "exact", head: true })
-      .eq("assignee_id", context.userId)
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
-  );
+  // ⚠️ ONE DEFINITION, SHARED WITH /dashboard. Both screens show "My tasks"
+  // and each used to spell the query out; `countMyOpenTasks` is `cache()`d, so
+  // the two cannot drift and the count runs once per request however many
+  // boundaries ask for it.
+  const myTasksPromise = countMyOpenTasks(context.userId);
 
   const spansPromise = loadHomeSpans({ supabase, context, gridFrom, gridTo });
 
@@ -922,7 +915,7 @@ export default async function DashboardPage({
               </Cell>
             }
           >
-            <StatStripSection supabase={supabase} context={context} myTasks={myTasksPromise} />
+            <StatStripSection context={context} myTasks={myTasksPromise} />
           </Suspense>
 
           <Cell span="sm:col-span-2" label="Quick actions">

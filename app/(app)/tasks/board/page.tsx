@@ -1,9 +1,8 @@
-import { Suspense } from "react";
 import { CalendarDays, Link2, ListTree } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
+import { Suspense } from "react";
 
-import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
@@ -24,28 +23,29 @@ import {
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
+import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { isRichTextEmpty } from "@/lib/rich-text";
 import {
   INITIAL_TASK_STATUS,
   TASK_STATUSES,
   TASK_STATUS_LABELS,
-  type TaskPriority,
   availableTransitions,
   isTaskOverdue,
   isTerminal,
   taskCategory,
+  type TaskPriority,
 } from "@/lib/schemas/tasks";
+import { MINE_COLUMN, fetchJoinedTaskIdSet } from "@/lib/tasks-server";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
-import { fetchJoinedTaskIdSet, MINE_COLUMN } from "@/lib/tasks-server";
 
+import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
-import { TaskStatusSelect } from "../status-select";
 import { PendingRequestColumn } from "../pending-requests";
+import { TaskStatusSelect } from "../status-select";
 import { TaskToolbar } from "../toolbar";
 import { BoardCard, BoardColumn, BoardDnd, BoardTaskGroup } from "./board-dnd";
-import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 
 export const metadata: Metadata = { title: "Board" };
 
@@ -116,11 +116,7 @@ type Kind = "all" | "internal" | "client";
  * while the browser paints the chrome. The boundaries decide who WAITS on them,
  * not when they start.
  */
-export default async function TaskBoardPage({
-  searchParams,
-}: {
-  searchParams: Promise<BoardSearchParams>;
-}) {
+export default async function TaskBoardPage({ searchParams }: { searchParams: Promise<BoardSearchParams> }) {
   const context = await requireAuthContext();
   const params = await searchParams;
 
@@ -198,9 +194,9 @@ export default async function TaskBoardPage({
       <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-2">
         <TaskToolbar view="board" />
         <p className="min-w-0 text-xs text-muted-foreground">
-          Drag a card by its handle, or use the status control. Internal work goes to any stage; client work follows its gates.
+          Drag a card by its handle, or use the status control. Internal work goes to any stage; client work follows its
+          gates.
         </p>
-
       </div>
 
       {/*
@@ -210,7 +206,7 @@ export default async function TaskBoardPage({
         card from being shaved off by the scroll box's own edge.
       */}
       <BoardDnd>
-      {/*
+        {/*
         ⚠️ THE FADE IS AN AFFORDANCE, NOT DECORATION.
 
         Six live columns at w-64 need roughly 1600px and a laptop with the
@@ -225,8 +221,8 @@ export default async function TaskBoardPage({
         16px wash over the last column's own padding costs nothing when there is
         nothing to scroll to.
       */}
-      <div className="relative min-h-0 min-w-0 flex-1">
-      {/*
+        <div className="relative min-h-0 min-w-0 flex-1">
+          {/*
         ⚠️ ABSOLUTE, AND THAT IS WHAT CAPS THE BOARD AT ONE SCREEN.
 
         It was `h-full` in normal flow, and the board ran past the bottom of the
@@ -246,9 +242,9 @@ export default async function TaskBoardPage({
         would cap every page in the app at a screen and clip the ones that are
         meant to scroll.
       */}
-      <div className="absolute inset-0 -mx-1 overflow-x-auto overflow-y-hidden px-1 pb-1">
-        <div className="flex h-full min-w-max items-stretch gap-3">
-          {/* Before every stage, and deliberately not one of them: nothing in
+          <div className="absolute inset-0 -mx-1 overflow-x-auto overflow-y-hidden px-1 pb-1">
+            <div className="flex h-full min-w-max items-stretch gap-3">
+              {/* Before every stage, and deliberately not one of them: nothing in
               it has a status yet. It is not a `BoardColumn` either — that is a
               drop target, and approving needs a PIC, a QA reviewer and a list
               that a drag cannot express. Renders nothing for a member.
@@ -261,11 +257,11 @@ export default async function TaskBoardPage({
               than saying nothing. It also must not be held behind the card
               query: this column is the reason somebody opened the board on a
               morning when three requests are waiting. */}
-          <Suspense fallback={null}>
-            <PendingColumn listId={listId} kind={kind} scope={scope} />
-          </Suspense>
+              <Suspense fallback={null}>
+                <PendingColumn listId={listId} kind={kind} scope={scope} />
+              </Suspense>
 
-          {/*
+              {/*
             THE CARDS, AND EVERYTHING THAT COSTS A QUERY.
 
             One boundary around the whole column strip rather than one per
@@ -287,25 +283,25 @@ export default async function TaskBoardPage({
             loading message — and the label is what speaks. `sr-only` is
             absolutely positioned, so it takes no space in this flex row.
           */}
-          <Suspense
-            fallback={
-              <>
-                <span role="status" aria-busy="true" className="sr-only">
-                  Loading the board…
-                </span>
-                <BoardColumnSkeleton />
-              </>
-            }>
-            <BoardColumns context={context} params={params} listId={listId} kind={kind} />
-          </Suspense>
-        </div>
-      </div>
+              <Suspense
+                fallback={
+                  <>
+                    <span role="status" aria-busy="true" className="sr-only">
+                      Loading the board…
+                    </span>
+                    <BoardColumnSkeleton />
+                  </>
+                }>
+                <BoardColumns context={context} params={params} listId={listId} kind={kind} />
+              </Suspense>
+            </div>
+          </div>
 
-      <div
-        aria-hidden
-        className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent"
-      />
-      </div>
+          <div
+            aria-hidden
+            className="pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-background to-transparent"
+          />
+        </div>
       </BoardDnd>
     </PageShell>
   );
@@ -320,11 +316,7 @@ export default async function TaskBoardPage({
  */
 async function BoardCrumb({ listId }: { listId: string }) {
   const supabase = await createClient();
-  const { data: openList } = await supabase
-    .from("vizserve_pms_lists")
-    .select("name")
-    .eq("id", listId)
-    .maybeSingle();
+  const { data: openList } = await supabase.from("vizserve_pms_lists").select("name").eq("id", listId).maybeSingle();
 
   return openList ? <BreadcrumbLabel value={openList.name} /> : null;
 }
@@ -346,15 +338,7 @@ async function BoardCrumb({ listId }: { listId: string }) {
  * The board has no status or priority filter to honour, so the only task-only
  * filter it can carry is none — `hasTaskOnlyFilter` stays false.
  */
-async function PendingColumn({
-  listId,
-  kind,
-  scope,
-}: {
-  listId: string | null;
-  kind: Kind;
-  scope: Scope;
-}) {
+async function PendingColumn({ listId, kind, scope }: { listId: string | null; kind: Kind; scope: Scope }) {
   const pendingRequests = await loadPendingRequests({ listId, kind, scope });
 
   return <PendingRequestColumn requests={pendingRequests} />;
@@ -467,71 +451,70 @@ async function BoardColumns({
    * boundaries render concurrently; they simply no longer have to land before
    * the first card is drawn.
    */
-  const [joinedTaskIdSet, { data: tasks }, { data: people }, finishedColumns] =
-    await Promise.all([
-      /**
-       * P7-13 / P7-43 — the tasks this person is on without being named in
-       * `assignee_id`, for `seat()`.
-       *
-       * ⚠️ P9-05 took the id-LIST caller away: "Mine" was widened by spreading
-       * these into a PostgREST filter, which broke at 444 of them. That is the
-       * `is_mine` computed column now. Only the per-row membership test is left,
-       * and it never leaves the server.
-       */
-      fetchJoinedTaskIdSet(context.userId),
+  const [joinedTaskIdSet, { data: tasks }, { data: people }, finishedColumns] = await Promise.all([
+    /**
+     * P7-13 / P7-43 — the tasks this person is on without being named in
+     * `assignee_id`, for `seat()`.
+     *
+     * ⚠️ P9-05 took the id-LIST caller away: "Mine" was widened by spreading
+     * these into a PostgREST filter, which broke at 444 of them. That is the
+     * `is_mine` computed column now. Only the per-row membership test is left,
+     * and it never leaves the server.
+     */
+    fetchJoinedTaskIdSet(context.userId),
 
-      query,
-      supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
-      /*
-       * Finished work — ONE BOUNDED READ PER COLUMN, not one shared between them.
-       *
-       * A separate read from the live query above, because the two want opposite
-       * things. Live work is ordered by due date and unbounded — there is only
-       * ever so much of it. Finished work is ordered by RECENCY and capped: what
-       * closed this week is worth a glance, what closed in March is what the
-       * list view and its filters are for.
-       *
-       * ⚠️ ONE QUERY PER STATUS, AND THAT IS THE FIX. A single `in(...)` read
-       * capped at `FINISHED_PER_COLUMN * 2 + 1` was dealt into two columns
-       * afterwards, so whichever status happened to be more recently touched ate
-       * the whole budget and the other column showed a handful of cards under a
-       * heading that reported that handful as the total.
-       *
-       * ⚠️ `count: "exact"` IS WHAT MAKES THE HEADING TRUE. It counts every row
-       * the filters match, ignoring `limit`, so the column can draw twelve cards
-       * and still say there are a hundred and seventy-one — which is the number
-       * the list view shows for the same stage.
-       *
-       * `is("parent_task_id", null)` is in the QUERY rather than applied to the
-       * rows afterwards, because the count has to describe the same population
-       * as the cards. Filtering after the count is how a heading and the cards
-       * under it start disagreeing.
-       *
-       * Carries the same list/scope/kind filters as the board, so the columns
-       * agree with the ones beside them.
-       */
-      Promise.all(
-        FINISHED_COLUMNS.map((status) => {
-          let done = supabase
-            .from("vizserve_pms_tasks")
-            .select(
-              "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
-              { count: "exact" },
-            )
-            .eq("status", status)
-            .is("parent_task_id", null)
-            .order("updated_at", { ascending: false })
-            .limit(FINISHED_PER_COLUMN);
+    query,
+    supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
+    /*
+     * Finished work — ONE BOUNDED READ PER COLUMN, not one shared between them.
+     *
+     * A separate read from the live query above, because the two want opposite
+     * things. Live work is ordered by due date and unbounded — there is only
+     * ever so much of it. Finished work is ordered by RECENCY and capped: what
+     * closed this week is worth a glance, what closed in March is what the
+     * list view and its filters are for.
+     *
+     * ⚠️ ONE QUERY PER STATUS, AND THAT IS THE FIX. A single `in(...)` read
+     * capped at `FINISHED_PER_COLUMN * 2 + 1` was dealt into two columns
+     * afterwards, so whichever status happened to be more recently touched ate
+     * the whole budget and the other column showed a handful of cards under a
+     * heading that reported that handful as the total.
+     *
+     * ⚠️ `count: "exact"` IS WHAT MAKES THE HEADING TRUE. It counts every row
+     * the filters match, ignoring `limit`, so the column can draw twelve cards
+     * and still say there are a hundred and seventy-one — which is the number
+     * the list view shows for the same stage.
+     *
+     * `is("parent_task_id", null)` is in the QUERY rather than applied to the
+     * rows afterwards, because the count has to describe the same population
+     * as the cards. Filtering after the count is how a heading and the cards
+     * under it start disagreeing.
+     *
+     * Carries the same list/scope/kind filters as the board, so the columns
+     * agree with the ones beside them.
+     */
+    Promise.all(
+      FINISHED_COLUMNS.map((status) => {
+        let done = supabase
+          .from("vizserve_pms_tasks")
+          .select(
+            "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
+            { count: "exact" },
+          )
+          .eq("status", status)
+          .is("parent_task_id", null)
+          .order("updated_at", { ascending: false })
+          .limit(FINISHED_PER_COLUMN);
 
-          if (listId) done = done.eq("list_id", listId);
-          if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
-          if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
-          if (kind === "client") done = done.not("request_id", "is", null);
-          if (kind === "internal") done = done.is("request_id", null);
-          return done;
-        }),
-      ),
-    ]);
+        if (listId) done = done.eq("list_id", listId);
+        if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
+        if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
+        if (kind === "client") done = done.not("request_id", "is", null);
+        if (kind === "internal") done = done.is("request_id", null);
+        return done;
+      }),
+    ),
+  ]);
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
 
@@ -611,8 +594,7 @@ async function BoardColumns({
         person.is_active &&
         person.id !== context.userId &&
         person.primary_department_id !== null &&
-        (roleAtLeast(context.role, "owner") ||
-          assignableScope.has(person.primary_department_id)),
+        (roleAtLeast(context.role, "owner") || assignableScope.has(person.primary_department_id)),
     )
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
@@ -627,18 +609,14 @@ async function BoardColumns({
       // Mirrors vizserve_pms_transition_task's v_is_pic: the column OR the
       // join table. See lib/tasks-server.ts for why this is not the column
       // alone.
-      isAssignee:
-        task.assignee_id === context.userId || joinedTaskIdSet.has(task.id),
+      isAssignee: task.assignee_id === context.userId || joinedTaskIdSet.has(task.id),
       isQa: task.qa_assignee_id === context.userId,
-      leadsDepartment:
-        roleAtLeast(context.role, "owner") ||
-        context.managedDepartmentIds.includes(task.department_id),
+      leadsDepartment: roleAtLeast(context.role, "owner") || context.managedDepartmentIds.includes(task.department_id),
       // P11-05. Mirrors `v_in_dept` — see `lib/schemas/tasks.ts`.
       inDepartment: context.primaryDepartmentId === task.department_id,
       isAdmin,
     };
   }
-
 
   /**
    * P7-19 — whether to offer the trash on this row.
@@ -659,9 +637,7 @@ async function BoardColumns({
     if (task.request_id !== null) return false;
     // The lead test inline rather than through `seat()`, which also wants a
     // `qa_assignee_id` that has nothing to do with deleting.
-    const leads =
-      roleAtLeast(context.role, "owner") ||
-      context.managedDepartmentIds.includes(task.department_id);
+    const leads = roleAtLeast(context.role, "owner") || context.managedDepartmentIds.includes(task.department_id);
     return (
       leads ||
       // P8-01c. Beside the lead test, never folded into it: leading a department
@@ -705,8 +681,7 @@ async function BoardColumns({
    * Live columns are unbounded, so the rows in hand ARE the total. Finished
    * columns are capped, so they carry a count of their own.
    */
-  const totalOf = (status: VizservePmsTaskStatus) =>
-    totals.get(status) ?? (byStatus.get(status) ?? []).length;
+  const totalOf = (status: VizservePmsTaskStatus) => totals.get(status) ?? (byStatus.get(status) ?? []).length;
 
   return (
     <>
@@ -798,41 +773,41 @@ async function BoardColumns({
                       count={subtasks}
                       label={task.title}
                       parent={
-                    <BoardCard
-                      taskId={task.id}
-                      title={task.title}
-                      status={task.status}
-                      // P7-20. The SAME function the status dropdown uses,
-                      // which mirrors `vizserve_pms_transition_task`. The
-                      // board does not get an opinion of its own about what
-                      // is legal — that would be a fourth copy of the rules.
-                      allowed={availableTransitions(task.status, seat(task), task).map(
-                        (transition) => transition.to,
-                      )}
-                      className={cn(
-                        "group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg",
-                        // P7-27. Client work carries an accented edge, so a
-                        // column of cards says which ones have somebody
-                        // outside waiting without anybody reading a word.
-                        taskCategoryEdge(taskCategory(task)),
-                      )}>
-                      {/* `relative`, because the strip below leaves the flow
+                        <BoardCard
+                          taskId={task.id}
+                          title={task.title}
+                          status={task.status}
+                          // P7-20. The SAME function the status dropdown uses,
+                          // which mirrors `vizserve_pms_transition_task`. The
+                          // board does not get an opinion of its own about what
+                          // is legal — that would be a fourth copy of the rules.
+                          allowed={availableTransitions(task.status, seat(task), task).map(
+                            (transition) => transition.to,
+                          )}
+                          className={cn(
+                            "group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg",
+                            // P7-27. Client work carries an accented edge, so a
+                            // column of cards says which ones have somebody
+                            // outside waiting without anybody reading a word.
+                            taskCategoryEdge(taskCategory(task)),
+                          )}>
+                          {/* `relative`, because the strip below leaves the flow
                           on anything that can hover — see it for why. */}
-                      <div className="relative flex items-start gap-1.5">
-                        {/* See the note in tasks-table: a board column is the
+                          <div className="relative flex items-start gap-1.5">
+                            {/* See the note in tasks-table: a board column is the
                             same problem, one card at a time. */}
-                        <HoverPrefetchLink
-                          href={`/tasks/${task.id}`}
-                          // Full title, wrapped — never clamped, and never cut
-                          // mid-word: `wrap-break-word` rather than `wrap-anywhere`,
-                          // for the reason spelled out in tasks-table. A card is a
-                          // fixed width, so a word too long for one line still
-                          // breaks rather than running out of the card.
-                          className="min-w-0 flex-1 text-sm leading-snug font-medium wrap-break-word hover:underline">
-                          {task.title}
-                        </HoverPrefetchLink>
+                            <HoverPrefetchLink
+                              href={`/tasks/${task.id}`}
+                              // Full title, wrapped — never clamped, and never cut
+                              // mid-word: `wrap-break-word` rather than `wrap-anywhere`,
+                              // for the reason spelled out in tasks-table. A card is a
+                              // fixed width, so a word too long for one line still
+                              // breaks rather than running out of the card.
+                              className="min-w-0 flex-1 text-sm leading-snug font-medium wrap-break-word hover:underline">
+                              {task.title}
+                            </HoverPrefetchLink>
 
-                        {/*
+                            {/*
                           ⚠️ OUT OF THE FLOW ON A DEVICE THAT CAN HOVER, AND THE
                           TITLE IS WHY.
 
@@ -854,82 +829,79 @@ async function BoardColumns({
                           strip that is always visible cannot sit on top of the
                           text it is always visible over.
                         */}
-                        <TaskRowActions
-                          className="hoverable:absolute hoverable:top-0 hoverable:right-0 hoverable:z-10 hoverable:rounded-md hoverable:border hoverable:bg-card hoverable:px-1 hoverable:shadow-raised"
-                          taskId={task.id}
-                          title={task.title}
-                          priority={task.priority as TaskPriority | null}
-                          assignable={assignable}
-                          deletable={canDelete(task)}>
-                          {/* The glyph, not the chip: this card sits IN the
+                            <TaskRowActions
+                              className="hoverable:absolute hoverable:top-0 hoverable:right-0 hoverable:z-10 hoverable:rounded-md hoverable:border hoverable:bg-card hoverable:px-1 hoverable:shadow-raised"
+                              taskId={task.id}
+                              title={task.title}
+                              priority={task.priority as TaskPriority | null}
+                              assignable={assignable}
+                              deletable={canDelete(task)}>
+                              {/* The glyph, not the chip: this card sits IN the
                               column whose heading is its status. */}
-                          <TaskStatusSelect
-                            taskId={task.id}
-                            status={task.status}
-                            viewer={seat(task)}
-                            task={task}
-                            resolutionMissing={isRichTextEmpty(task.resolution)}
-                            variant="compact"
-                            align="end"
-                          />
-                        </TaskRowActions>
-                      </div>
+                              <TaskStatusSelect
+                                taskId={task.id}
+                                status={task.status}
+                                viewer={seat(task)}
+                                task={task}
+                                resolutionMissing={isRichTextEmpty(task.resolution)}
+                                variant="compact"
+                                align="end"
+                              />
+                            </TaskRowActions>
+                          </div>
 
-                      <span className="flex flex-wrap items-center gap-1.5">
-                        {/* P7-27 — WHICH KIND OF WORK THIS IS, which the
+                          <span className="flex flex-wrap items-center gap-1.5">
+                            {/* P7-27 — WHICH KIND OF WORK THIS IS, which the
                             board did not say at all. The list has said it
                             since P7-01 and the board never did, so the same
                             card meant two different things depending on
                             which view you opened it from. Client work is the
                             only category that takes an accent. */}
-                        <TaskCategoryBadge
-                          category={taskCategory(task)}
-                          className="h-5 px-1.5"
-                        />
-                        {/* Renders nothing when unranked, which is most
+                            <TaskCategoryBadge category={taskCategory(task)} className="h-5 px-1.5" />
+                            {/* Renders nothing when unranked, which is most
                             tasks: a mark carried by everything marks
                             nothing. Read-only here, because the hover
                             strip's flag is where it changes and one field
                             does not get two controls on one card. */}
-                        <TaskPriorityBadge priority={task.priority as TaskPriority | null} className="h-5 px-1.5" />
+                            <TaskPriorityBadge priority={task.priority as TaskPriority | null} className="h-5 px-1.5" />
 
-                        {/* PIC and QA, in that order. The second assignee is
+                            {/* PIC and QA, in that order. The second assignee is
                             the thing this product turns on, so a board that
                             showed only the PIC would be hiding half of who
                             is on the hook. */}
-                        {pic ? <Avatar name={pic} title={`PIC ${pic}`} /> : null}
-                        {qa ? <Avatar name={qa} title={`QA ${qa}`} tone="qa" /> : null}
-                        {!pic && !qa ? <span className="text-2xs text-muted-foreground">Unassigned</span> : null}
+                            {pic ? <Avatar name={pic} title={`PIC ${pic}`} /> : null}
+                            {qa ? <Avatar name={qa} title={`QA ${qa}`} tone="qa" /> : null}
+                            {!pic && !qa ? <span className="text-2xs text-muted-foreground">Unassigned</span> : null}
 
-                        {task.due_date ? (
-                          <span
-                            className={cn(
-                              // A bordered chip rather than loose text, so
-                              // the date reads as one object beside the
-                              // avatars instead of a second line of prose.
-                              "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-2xs tabular-nums",
-                              late
-                                ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
-                                : "border-border bg-muted text-muted-foreground",
-                            )}>
-                            <CalendarDays className="size-3.5 shrink-0" aria-hidden />
-                            {task.start_date
-                              ? `${formatDate(task.start_date)} – ${formatDate(task.due_date)}`
-                              : formatDate(task.due_date)}
-                            {/* Never colour alone. */}
-                            {late ? " · overdue" : null}
+                            {task.due_date ? (
+                              <span
+                                className={cn(
+                                  // A bordered chip rather than loose text, so
+                                  // the date reads as one object beside the
+                                  // avatars instead of a second line of prose.
+                                  "inline-flex items-center gap-1 rounded-sm border px-1.5 py-0.5 text-2xs tabular-nums",
+                                  late
+                                    ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
+                                    : "border-border bg-muted text-muted-foreground",
+                                )}>
+                                <CalendarDays className="size-3.5 shrink-0" aria-hidden />
+                                {task.start_date
+                                  ? `${formatDate(task.start_date)} – ${formatDate(task.due_date)}`
+                                  : formatDate(task.due_date)}
+                                {/* Never colour alone. */}
+                                {late ? " · overdue" : null}
+                              </span>
+                            ) : null}
+
+                            {task.output_link ? (
+                              <Link2 className="size-3.5 text-foreground-faint" aria-label="Has an output link" />
+                            ) : null}
                           </span>
-                        ) : null}
 
-                        {task.output_link ? (
-                          <Link2 className="size-3.5 text-foreground-faint" aria-label="Has an output link" />
-                        ) : null}
-                      </span>
-
-                      {/* Its own line under a rule, as on the reference
+                          {/* Its own line under a rule, as on the reference
                           board: a subtask count is about the task's shape,
                           not about who or when. */}
-                      {/*
+                          {/*
                         THE COUNT AND THE RATIO COME FROM DIFFERENT QUERIES,
                         deliberately. `subtasks` counts the children still
                         live on this board; `bars` counts every child,
@@ -938,18 +910,18 @@ async function BoardColumns({
                         preferred — the count is the fallback for a parent
                         whose children the policy did not return.
                       */}
-                      {bars ? (
-                        <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
-                          <ListTree className="size-3.5 shrink-0" aria-hidden />
-                          <SubtaskProgress done={bars.done} total={bars.total} />
-                        </span>
-                      ) : subtasks > 0 ? (
-                        <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
-                          <ListTree className="size-3.5 shrink-0" aria-hidden />
-                          {subtasks} {subtasks === 1 ? "subtask" : "subtasks"}
-                        </span>
-                      ) : null}
-                    </BoardCard>
+                          {bars ? (
+                            <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
+                              <ListTree className="size-3.5 shrink-0" aria-hidden />
+                              <SubtaskProgress done={bars.done} total={bars.total} />
+                            </span>
+                          ) : subtasks > 0 ? (
+                            <span className="inline-flex items-center gap-1.5 border-t pt-2 text-2xs text-muted-foreground">
+                              <ListTree className="size-3.5 shrink-0" aria-hidden />
+                              {subtasks} {subtasks === 1 ? "subtask" : "subtasks"}
+                            </span>
+                          ) : null}
+                        </BoardCard>
                       }>
                       {(childrenByParent.get(task.id) ?? []).map((child) => {
                         const childPic = child.assignee_id ? nameOf.get(child.assignee_id) : null;
@@ -1073,9 +1045,8 @@ async function BoardColumns({
             */}
             {totalOf(status) > column.length ? (
               <Link
-                href={`/tasks?status=${status}`}
-                className="block border-t px-2.5 py-2 text-center text-2xs text-muted-foreground hover:text-foreground"
-              >
+                href={`/tasks?list=${column[0].list_id}&status=${status}`}
+                className="block border-t px-2.5 py-2 text-center text-2xs text-muted-foreground hover:text-foreground">
                 Showing the {column.length} most recent of {totalOf(status)} — see all in the list
               </Link>
             ) : null}

@@ -6,6 +6,7 @@ import { ArrowRight, Bell, ClipboardCheck, ListChecks, ShieldCheck, Users } from
 import { cn } from "@/lib/utils";
 import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
 import { countWaitingOnYou, listWaitingOnYou } from "@/lib/approvals-queue-server";
+import { countMyOpenTasks, countMyQaQueue, countUnreadNotifications } from "@/lib/counts-server";
 import {
   NEEDS_YOU_LIMIT,
   bucketTask,
@@ -413,7 +414,7 @@ async function StatTiles({
   supabase: Awaited<ReturnType<typeof createClient>>;
   context: Awaited<ReturnType<typeof requireAuthContext>>;
   isApprover: boolean;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<number>;
 }) {
   const [waiting, unread, myQa, myTasks] = await Promise.all([
     // Three queues, not one — see `countWaitingOnYou`. This tile counted client
@@ -421,21 +422,14 @@ async function StatTiles({
     // and no client work was told they had nothing to do.
     countWaitingOnYou(supabase, context, isApprover),
 
-    supabase
-      .from("vizserve_pms_notifications")
-      .select("id", { count: "exact", head: true })
-      .is("read_at", null),
+    countUnreadNotifications(),
 
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id", { count: "exact", head: true })
-      .eq("qa_assignee_id", context.userId)
-      .in("status", ["FOR_QA", "QA_IN_PROGRESS"]),
+    countMyQaQueue(context.userId),
 
     myTasksPromise,
   ]);
 
-  const showQa = (myQa.count ?? 0) > 0;
+  const showQa = myQa > 0;
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -459,7 +453,7 @@ async function StatTiles({
 
       <StatTile
         label="My tasks"
-        value={myTasks.count ?? 0}
+        value={myTasks}
         hint="Assigned to you, still open"
         icon={<ListChecks />}
         tone="info"
@@ -472,7 +466,7 @@ async function StatTiles({
       {showQa ? (
         <StatTile
           label="Waiting on my QA"
-          value={myQa.count ?? 0}
+          value={myQa}
           hint="Work that needs your review"
           icon={<ShieldCheck />}
           tone="info"
@@ -483,7 +477,7 @@ async function StatTiles({
 
       <StatTile
         label="Inbox"
-        value={unread.count ?? 0}
+        value={unread}
         hint="Unread notifications about your work"
         icon={<Bell />}
         href="/inbox"
@@ -499,7 +493,7 @@ async function NeedsYouSection({
   myTasks: myTasksPromise,
 }: {
   needsYou: ReturnType<typeof loadNeedsYou>;
-  myTasks: Promise<{ count: number | null }>;
+  myTasks: Promise<number>;
 }) {
   const [{ shown, overflow }, myTasks] = await Promise.all([needsYou, myTasksPromise]);
 
@@ -508,7 +502,7 @@ async function NeedsYouSection({
       rows={shown}
       overflow={overflow}
       overflowHref="/tasks?view=mine"
-      empty={emptyNeedsYouMessage(myTasks.count ?? 0)}
+      empty={emptyNeedsYouMessage(myTasks)}
     />
   );
 }
@@ -589,13 +583,12 @@ export default async function DashboardPage() {
   // ⚠️ Wrapped, because TWO boundaries read it — the tiles and the empty
   // message under "Needs you". A PostgREST builder fires a fresh request on
   // every `.then()`, so sharing the bare builder would run this count twice.
-  const myTasksPromise = Promise.resolve(
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id", { count: "exact", head: true })
-      .eq("assignee_id", context.userId)
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
-  );
+  // ⚠️ NO LONGER A HAND-ROLLED SHARED PROMISE. The wrapper here existed because
+  // two boundaries read this count and a PostgREST builder fires a fresh
+  // request on every `.then()`. `countMyOpenTasks` is `cache()`d, so React
+  // dedupes it per request and `/` can ask the same question through the same
+  // definition — which is what stopped the two dashboards agreeing before.
+  const myTasksPromise = countMyOpenTasks(context.userId);
 
   const week = loadWeek({
     supabase,
