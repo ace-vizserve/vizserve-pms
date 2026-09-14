@@ -31,7 +31,7 @@ import {
 
 import { EmptyState } from "@/components/empty-state";
 import { loadPendingRequests } from "@/lib/pending-requests-server";
-import { MINE_COLUMN } from "@/lib/tasks-server";
+import { applyTaskScope, QA_STAGES } from "@/lib/tasks-server";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
@@ -630,30 +630,28 @@ async function TaskGroups({
     // between renders.
     .order("created_at", { ascending: false });
 
+  /*
+   * The list's OWN filters. The board's toolbar does not offer these — see the
+   * note on `applyTaskScope`, which holds the four both views share.
+   */
   if (isTaskStatus(params.status)) query = query.eq("status", params.status);
-  if (params.list) query = query.eq("list_id", params.list);
   if (params.group) query = query.eq("vizserve_pms_lists.group_id", params.group);
   if (priorityFilter) query = query.eq("priority", priorityFilter);
-  if (kind === "client") query = query.not("request_id", "is", null);
-  if (kind === "internal") query = query.is("request_id", null);
   /*
-   * P7-43 semantics, P9-05 mechanism. "Mine" is the accountable name PLUS, on
-   * internal tasks only, being on the task at all — internal work has no person
-   * in charge, so membership is the whole of the claim.
+   * P12-02 — list, kind and scope, through the definition `/tasks/board` uses.
    *
-   * ⚠️ A COMPUTED COLUMN, not a filter assembled here. This was
-   * `.or(mineFilter(userId, joinedTaskIds))`, which put every joined task id in
-   * the URL — 16,542 characters for a user with 444 of them, and `fetch` failed
-   * with no status code. `data ?? []` below turned that into an empty board.
-   * `is_mine` answers the same question in Postgres and sends nothing but a
-   * boolean, so this query keeps its six filters, its sort and its tie-break.
+   * P3-08 said the QA queue is a view of this list rather than a separate screen
+   * with rules that can drift from it. That was true of the two QA stages and
+   * false of everything else: the board spelled the same four filters out twice
+   * more, and `?group=`/`?status=`/`?priority=` reached only one of the views.
+   * This is the half that is genuinely shared.
    */
-  if (view === "mine") query = query.eq(MINE_COLUMN, true);
-  // P3-08 — the QA queue is a view of this list, not a separate screen with a
-  // separate set of rules that can drift from it.
-  if (view === "qa") {
-    query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
-  }
+  query = applyTaskScope(query, {
+    listId: params.list ?? null,
+    view,
+    kind,
+    userId: context.userId,
+  });
 
   const [
     { data: tasks, error: tasksError },
@@ -966,7 +964,9 @@ async function TaskGroups({
   const visibleStatuses: readonly VizservePmsTaskStatus[] = isTaskStatus(params.status)
     ? [params.status]
     : view === "qa"
-      ? (["FOR_QA", "QA_IN_PROGRESS"] as const)
+        // The same two the QA scope filters on — one list, so a heading cannot
+      // appear for a stage the query excludes.
+      ? QA_STAGES
       : TASK_STATUSES;
 
   /**

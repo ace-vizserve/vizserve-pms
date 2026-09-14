@@ -163,3 +163,82 @@ export async function fetchHandoverTasks(
 
   return { tasks, error: error ? { message: error.message } : null };
 }
+
+/**
+ * P12-02 — THE SCOPE FILTERS BOTH TASK VIEWS SHARE.
+ *
+ * `/tasks` and `/tasks/board` are the same rows drawn two ways, and each wrote
+ * the filter chain out by hand — three times in total, because the board's
+ * finished columns are a second query of their own. They had already drifted:
+ * `?group=`, `?status=` and `?priority=` were added to the list and never to the
+ * board, and the board's finished copy quietly grew an extra filter its own live
+ * copy did not have. A shared cap bug on top of that is what made the Completed
+ * column report 1 where the list reported 171.
+ *
+ * ⚠️ TAKES AND RETURNS THE BUILDER, which `lib/timesheet-tasks-server.ts` warns
+ * against — and the warning does not apply here. What that header refuses is
+ * threading ONE helper through two queries with DIFFERENT row shapes (a task
+ * and a join-table embed), which needs a cast that throws the column checking
+ * away. All three callers here select from `vizserve_pms_tasks`, so the builder
+ * is the same type going in and coming out and nothing is cast.
+ *
+ * ⚠️ WHAT IS DELIBERATELY NOT HERE: `?group=`, `?status=` and `?priority=`.
+ * They are list-only, and that is a decision rather than an omission — the
+ * toolbar drops them on the way to a board that is ORGANISED by status, and
+ * `group` needs the `vizserve_pms_lists!inner(group_id)` embed in the select,
+ * which the board's select does not carry. A filter this helper cannot express
+ * for every caller does not belong in it.
+ */
+
+/** The three scopes the toolbar offers on both views. */
+export type TaskView = "all" | "mine" | "qa";
+
+/** Client work and internal work are two different jobs — see the toolbar. */
+export type TaskKind = "all" | "client" | "internal";
+
+/** The QA queue's two stages. */
+export const QA_STAGES = ["FOR_QA", "QA_IN_PROGRESS"] as const;
+
+export type TaskScope = {
+  /** The list somebody is inside, or null for every list they can read. */
+  listId: string | null;
+  view: TaskView;
+  kind: TaskKind;
+  /** Whose view it is. Read only by `mine` and `qa`. */
+  userId: string;
+};
+
+/** The subset of the PostgREST builder this touches. */
+type ScopableTaskQuery<T> = {
+  eq(column: "list_id" | "qa_assignee_id" | "is_mine", value: string | boolean): T;
+  is(column: "request_id", value: null): T;
+  not(column: "request_id", operator: "is", value: null): T;
+  in(column: "status", values: readonly string[]): T;
+};
+
+export function applyTaskScope<T extends ScopableTaskQuery<T>>(query: T, scope: TaskScope): T {
+  let scoped = query;
+
+  if (scope.listId) scoped = scoped.eq("list_id", scope.listId);
+
+  if (scope.kind === "client") scoped = scoped.not("request_id", "is", null);
+  if (scope.kind === "internal") scoped = scoped.is("request_id", null);
+
+  // P7-43 semantics, P9-05 mechanism — see MINE_COLUMN above.
+  if (scope.view === "mine") scoped = scoped.eq(MINE_COLUMN, true);
+
+  /*
+   * ⚠️ THE STAGE NARROWING IS PART OF THE QA VIEW AND TRAVELS WITH IT.
+   *
+   * The board's finished query applied only the `qa_assignee_id` half, so the
+   * QA view showed Completed cards there and none on the list — the same view,
+   * two answers. Applied to a query already pinned to one terminal status it
+   * yields nothing, which is the correct nothing: "waiting on my QA" is not a
+   * question finished work can answer.
+   */
+  if (scope.view === "qa") {
+    scoped = scoped.eq("qa_assignee_id", scope.userId).in("status", QA_STAGES);
+  }
+
+  return scoped;
+}

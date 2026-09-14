@@ -57,13 +57,35 @@ describe("the Mine view asks Postgres, not the URL", () => {
     expect(read("lib/tasks-server.ts")).toMatch(/export const MINE_COLUMN = "is_mine"/);
   });
 
+  it("applies the column in exactly one place", () => {
+    /*
+     * ⚠️ THIS USED TO ASSERT THAT BOTH PAGES MENTIONED `MINE_COLUMN`, and P12-02
+     * is why it no longer can: the scope filters moved into `applyTaskScope`,
+     * so the pages name the SCOPE and the helper names the column. Asserting on
+     * the old shape would now be asserting that the duplication comes back.
+     *
+     * The rule being guarded is unchanged — one definition, and a boolean on
+     * the wire rather than an id list.
+     */
+    const helper = read("lib/tasks-server.ts");
+    expect(helper).toMatch(/scoped = scoped\.eq\(MINE_COLUMN, true\)/);
+    // Never the literal, or the constant is decoration.
+    expect(helper).not.toMatch(/\.eq\("is_mine"/);
+  });
+
   it.each(["app/(app)/tasks/page.tsx", "app/(app)/tasks/board/page.tsx"])(
-    "%s filters through MINE_COLUMN",
+    "%s scopes through the shared helper rather than its own copy",
     (path) => {
       const source = read(path);
-      expect(source).toContain("MINE_COLUMN");
-      // Never the literal, or the constant is decoration.
-      expect(source).not.toMatch(/\.eq\("is_mine"/);
+      expect(source).toContain("applyTaskScope");
+      /*
+       * The three copies this replaced are what let `?group=`, `?status=` and
+       * `?priority=` reach one view and not the other, and what let the board's
+       * finished query apply half the QA filter. A page assembling `is_mine` or
+       * the QA stages again has started a fourth.
+       */
+      expect(source).not.toMatch(/\.eq\(MINE_COLUMN/);
+      expect(source).not.toMatch(/"FOR_QA", "QA_IN_PROGRESS"/);
     },
   );
 

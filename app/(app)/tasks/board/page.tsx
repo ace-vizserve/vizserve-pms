@@ -35,7 +35,7 @@ import {
   taskCategory,
   type TaskPriority,
 } from "@/lib/schemas/tasks";
-import { MINE_COLUMN, fetchJoinedTaskIdSet } from "@/lib/tasks-server";
+import { applyTaskScope, fetchJoinedTaskIdSet } from "@/lib/tasks-server";
 import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
 
@@ -292,7 +292,7 @@ export default async function TaskBoardPage({ searchParams }: { searchParams: Pr
                     <BoardColumnSkeleton />
                   </>
                 }>
-                <BoardColumns context={context} params={params} listId={listId} kind={kind} />
+                <BoardColumns context={context} listId={listId} kind={kind} scope={scope} />
               </Suspense>
             </div>
           </div>
@@ -353,20 +353,24 @@ async function PendingColumn({ listId, kind, scope }: { listId: string | null; k
  * hold the toolbar, the drag hint and the scroller off the screen while they
  * ran.
  *
- * `listId` and `kind` are read on the page rather than here because the pending
- * column needs the same two, and two readings of "what does `?kind=` mean" is
- * exactly one too many.
+ * `listId`, `kind` and `scope` are read on the page rather than here because the
+ * pending column needs the same three, and two readings of "what does `?kind=`
+ * mean" is exactly one too many.
  */
 async function BoardColumns({
   context,
-  params,
   listId,
   kind,
+  scope,
 }: {
   context: AuthContext;
-  params: BoardSearchParams;
+  // No raw `params`: P12-02 narrowed `?view=` into `scope` on the page, beside
+  // `listId` and `kind`, so this component reads three settled values rather
+  // than re-deciding what a URL means.
   listId: string | null;
   kind: Kind;
+  /** `all` | `mine` | `qa`, already narrowed from `?view=` on the page. */
+  scope: Scope;
 }) {
   const supabase = await createClient();
 
@@ -420,20 +424,11 @@ async function BoardColumns({
 
   query = query.not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)");
 
-  if (listId) query = query.eq("list_id", listId);
-
-  // The same three scopes the toolbar offers on both views. The board used to
-  // read `mine` and silently ignore `qa`, which is what a control living on only
-  // one of the two routes gets you.
-  // P7-43 — same rule as the list view, through the same computed column.
-  // P9-05 replaced the id-list filter here too; see the note on /tasks.
-  if (params.view === "mine") query = query.eq(MINE_COLUMN, true);
-  if (params.view === "qa") {
-    query = query.eq("qa_assignee_id", context.userId).in("status", ["FOR_QA", "QA_IN_PROGRESS"]);
-  }
-
-  if (kind === "client") query = query.not("request_id", "is", null);
-  if (kind === "internal") query = query.is("request_id", null);
+  // P12-02 — the same four filters /tasks applies, through one definition. The
+  // board used to read `mine` and silently ignore `qa`, which is what a control
+  // living on only one of two routes gets you; two copies of the fix is how it
+  // comes back.
+  query = applyTaskScope(query, { listId, view: scope, kind, userId: context.userId });
 
   /*
    * ONE WAVE, and it used to be three.
@@ -494,25 +489,31 @@ async function BoardColumns({
      * agree with the ones beside them.
      */
     Promise.all(
-      FINISHED_COLUMNS.map((status) => {
-        let done = supabase
-          .from("vizserve_pms_tasks")
-          .select(
-            "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
-            { count: "exact" },
-          )
-          .eq("status", status)
-          .is("parent_task_id", null)
-          .order("updated_at", { ascending: false })
-          .limit(FINISHED_PER_COLUMN);
-
-        if (listId) done = done.eq("list_id", listId);
-        if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
-        if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
-        if (kind === "client") done = done.not("request_id", "is", null);
-        if (kind === "internal") done = done.is("request_id", null);
-        return done;
-      }),
+      FINISHED_COLUMNS.map((status) =>
+        applyTaskScope(
+          supabase
+            .from("vizserve_pms_tasks")
+            .select(
+              "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
+              { count: "exact" },
+            )
+            .eq("status", status)
+            .is("parent_task_id", null)
+            .order("updated_at", { ascending: false })
+            .limit(FINISHED_PER_COLUMN),
+          /*
+           * ⚠️ THE SAME SCOPE AS THE LIVE QUERY, WHICH THIS COPY DID NOT HAVE.
+           *
+           * It applied only the `qa_assignee_id` half of the QA view, so the
+           * board showed Completed cards in a view where the list showed none —
+           * the same view answering differently on two routes. Through
+           * `applyTaskScope` the stage narrowing comes too, and a query already
+           * pinned to a terminal status then correctly returns nothing:
+           * "waiting on my QA" is not a question finished work answers.
+           */
+          { listId, view: scope, kind, userId: context.userId },
+        ),
+      ),
     ),
   ]);
 
