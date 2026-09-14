@@ -128,6 +128,7 @@ export function TaskRowActions({
   priority,
   assignable = [],
   deletable = false,
+  className,
   children,
 }: {
   taskId: string;
@@ -145,6 +146,16 @@ export function TaskRowActions({
    * open. The database refuses regardless; this is about not asking.
    */
   deletable?: boolean;
+  /**
+   * Where the strip sits, for a view that cannot afford it in the flow.
+   *
+   * ⚠️ IT GOES ON THIS SPAN, NOT ON A WRAPPER, and that is the point of the
+   * prop. The strip is `opacity-0` until the row is hovered; a wrapper carrying
+   * the background and the border of a floating toolbar would still be opaque
+   * while the buttons inside it are invisible — an empty white box on every
+   * card. On the span itself, the whole toolbar fades as one thing.
+   */
+  className?: string;
   /** Anything view-specific — the status control on a board card. */
   children?: ReactNode;
 }) {
@@ -157,6 +168,7 @@ export function TaskRowActions({
         // Focus stays outside the query: a keyboard is a fine pointer's
         // companion, but a tabbed-to control must appear on any device.
         "focus-within:opacity-100",
+        className,
       )}>
       {children}
       <InlineTitle taskId={taskId} title={title} />

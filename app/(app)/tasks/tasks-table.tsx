@@ -356,7 +356,10 @@ export function TaskGroupTable({
         if (isPlaceholder(task.id)) {
           return (
             <span className="flex min-w-0 items-center gap-2 pl-7 opacity-60">
-              <span className="font-medium wrap-anywhere">{task.title}</span>
+              {/* The same rule the real row uses — see the note on the link
+                  below. A title that breaks mid-word while it is being created
+                  and stops when it lands reads as the app changing its mind. */}
+              <span className="font-medium wrap-break-word">{task.title}</span>
               <span aria-live="polite" className="shrink-0 text-2xs text-muted-foreground">
                 Adding…
               </span>
@@ -471,8 +474,24 @@ export function TaskGroupTable({
                   // WRAPS, NEVER TRUNCATES. `truncate` hid most of every title:
                   // the column is capped, and the hover strip beside it is only
                   // `opacity-0`, so it spends its ~110px even when invisible.
-                  // `wrap-anywhere` so one unbroken string cannot widen the column.
-                  "wrap-anywhere hover:underline",
+                  //
+                  // ⚠️ `wrap-break-word`, NOT `wrap-anywhere`, AND THE DIFFERENCE
+                  // IS THE WHOLE FIX. `anywhere` counts toward a box's MIN-CONTENT
+                  // contribution as a single character — so in this flex row,
+                  // where the leading slot, the glyph, the priority chip and that
+                  // ~110px strip are all `shrink-0`, the title was the only thing
+                  // left that could give, and it gave all the way down. A narrow
+                  // window drew "Implementation of SOW" as "Implemen / tation of /
+                  // SOW": a word cut mid-syllable on every row, which is the one
+                  // thing a list of names must not do.
+                  //
+                  // `break-word` contributes its LONGEST WORD instead, so the
+                  // column can no longer squeeze below one — it widens, and the
+                  // table scrolls, which is what the panel's `overflow-x-auto` is
+                  // for. A word is still broken when it genuinely cannot fit a
+                  // line on its own, so the pathological unbroken string the old
+                  // rule was written against still cannot run out of the cell.
+                  "wrap-break-word hover:underline",
                   // A subtask is a smaller thing than its parent and should not
                   // compete with it for the eye.
                   isChild ? "text-sm font-normal" : "font-medium",

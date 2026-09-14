@@ -764,17 +764,46 @@ async function BoardColumns({
                         // outside waiting without anybody reading a word.
                         taskCategoryEdge(taskCategory(task)),
                       )}>
-                      <div className="flex items-start gap-1.5">
+                      {/* `relative`, because the strip below leaves the flow
+                          on anything that can hover — see it for why. */}
+                      <div className="relative flex items-start gap-1.5">
                         {/* See the note in tasks-table: a board column is the
                             same problem, one card at a time. */}
                         <HoverPrefetchLink
                           href={`/tasks/${task.id}`}
-                          // Full title, wrapped — never clamped. See tasks-table.
-                          className="min-w-0 flex-1 text-sm leading-snug font-medium wrap-anywhere hover:underline">
+                          // Full title, wrapped — never clamped, and never cut
+                          // mid-word: `wrap-break-word` rather than `wrap-anywhere`,
+                          // for the reason spelled out in tasks-table. A card is a
+                          // fixed width, so a word too long for one line still
+                          // breaks rather than running out of the card.
+                          className="min-w-0 flex-1 text-sm leading-snug font-medium wrap-break-word hover:underline">
                           {task.title}
                         </HoverPrefetchLink>
 
+                        {/*
+                          ⚠️ OUT OF THE FLOW ON A DEVICE THAT CAN HOVER, AND THE
+                          TITLE IS WHY.
+
+                          Five icon buttons is ~110px, held whether they are
+                          visible or not — on a ~196px card that left the title
+                          about 100px, and a title squeezed narrower than its own
+                          longest word gets that word BROKEN: "Phase 2
+                          Implementatio / n". Widening the card is not available
+                          (a board column is a fixed width) and shrinking the
+                          strip on hover would reflow the title under the cursor
+                          that arrived to use it.
+
+                          So it floats in the card's top corner instead, fading in
+                          over the title it briefly covers, and the title gets the
+                          whole card. `wrap-break-word` then has room to do what it
+                          says: break a word only when one genuinely cannot fit.
+
+                          Where there is NO hover it stays in the flow, because a
+                          strip that is always visible cannot sit on top of the
+                          text it is always visible over.
+                        */}
                         <TaskRowActions
+                          className="hoverable:absolute hoverable:top-0 hoverable:right-0 hoverable:z-10 hoverable:rounded-md hoverable:border hoverable:bg-card hoverable:px-1 hoverable:shadow-raised"
                           taskId={task.id}
                           title={task.title}
                           priority={task.priority as TaskPriority | null}
@@ -902,18 +931,25 @@ async function BoardColumns({
                           <div
                             key={child.id}
                             className="group/task flex flex-col gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
-                            <div className="flex items-start gap-1.5">
+                            <div className="relative flex items-start gap-1.5">
                               <HoverPrefetchLink
                                 href={`/tasks/${child.id}`}
-                                className="min-w-0 flex-1 text-2xs leading-snug wrap-anywhere hover:underline">
+                                // Same rule as the parent card above.
+                                className="min-w-0 flex-1 text-2xs leading-snug wrap-break-word hover:underline">
                                 {child.title}
                               </HoverPrefetchLink>
 
                               {/* The same hover strip the parent carries, so
                                   a subtask can be renamed, re-flagged and
                                   deleted where it lives. Without it the only
-                                  way to rename one was to open it. */}
+                                  way to rename one was to open it.
+
+                                  Floated in the corner for the reason spelled
+                                  out on the parent's: this card is narrower
+                                  still, so the strip in the flow left even less
+                                  for the title. */}
                               <TaskRowActions
+                                className="hoverable:absolute hoverable:top-0 hoverable:right-0 hoverable:z-10 hoverable:rounded-md hoverable:border hoverable:bg-card hoverable:px-1 hoverable:shadow-raised"
                                 taskId={child.id}
                                 title={child.title}
                                 priority={child.priority as TaskPriority | null}

@@ -4,6 +4,21 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/*
+ * "This device can hover", as a variant.
+ *
+ * `any-hover: hover` and not `hover: hover`: a laptop with a touchscreen has
+ * both, and the question a hover-revealed control is asking is whether ANY
+ * pointer here can hover — not whether the primary one does.
+ *
+ * It exists because a control that is revealed on hover has to be laid out
+ * differently on a device that cannot hover, and that means several utilities
+ * under one condition. Written inline as `[@media(any-hover:hover)]:` — which is
+ * how `TaskRowActions` states the same condition — six of those in one
+ * className is a string nobody can read or safely edit.
+ */
+@custom-variant hoverable (@media (any-hover: hover));
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
