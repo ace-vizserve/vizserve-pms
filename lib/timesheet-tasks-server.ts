@@ -1,5 +1,6 @@
 import "server-only";
 
+import { MAX_LAYOUT_ROWS } from "@/lib/schemas/timesheet";
 import { createClient } from "@/utils/supabase/server";
 
 /**
@@ -336,4 +337,81 @@ export async function loadLoggableTaskLists(userId: string): Promise<string[]> {
   ];
 
   return [...new Set(ids.filter((id): id is string => Boolean(id)))];
+}
+
+/**
+ * P6-02d — turn stored layout ids back into rows.
+ *
+ * The third caller of the scoping above, and it exists because the empty rows
+ * on a week are now ids in `vizserve_pms_timesheet_layouts` rather than task
+ * snapshots in sessionStorage. Same rule as the other two: `is_on_task` — the
+ * accountable name, the QA reviewer, or a row in `vizserve_pms_task_assignees`.
+ *
+ * ⚠️ A MISS IS THE ANSWER, NOT A FAILURE. An id whose task has been deleted, or
+ * that has left this person's scope, simply does not come back — and its row
+ * disappears from the week, which is right: they could not log against it
+ * anyway. The id stays in the table so the row returns if they are put back on
+ * it. Nothing here reports the difference, because there is nothing the person
+ * could do about either.
+ *
+ * ⚠️ `id.in.(…)` IS THE ONE PLACE THIS FILE ALLOWS IT. The header warns at
+ * length about that shape, and the warning is about an UNBOUNDED list — the
+ * `TypeError: fetch failed` that reads like the network being down. This list
+ * is capped at `MAX_LAYOUT_ROWS` by a zod schema on the way in and by a CHECK
+ * constraint in the table, and sliced again below in case a row predates
+ * either. A hundred uuids is about 3.7 KB of query string.
+ *
+ * ORDER IS THE CALLER'S. The rows come back in whatever order PostgREST
+ * returns; `orderRows` in lib/timesheet-row-order.ts arranges the grid.
+ */
+export async function loadLoggableTasksByIds(
+  userId: string,
+  ids: string[],
+): Promise<LoggableTask[]> {
+  // Deduped and capped before anything is put in a URL. The cap repeats the
+  // schema's rather than trusting it: this is the function whose failure mode
+  // is unreadable.
+  const wanted = [...new Set(ids)].slice(0, MAX_LAYOUT_ROWS);
+  if (wanted.length === 0) return [];
+
+  const supabase = await createClient();
+
+  // Both halves of the same two-request shape `loadLoggableTasks` uses, for the
+  // same reason: PostgREST cannot express "or exists in that other table".
+  const [mine, added] = await Promise.all([
+    supabase
+      .from("vizserve_pms_tasks")
+      .select(TASK_COLUMNS)
+      .in("id", wanted)
+      .or(`assignee_id.eq.${userId},qa_assignee_id.eq.${userId}`),
+
+    supabase
+      .from("vizserve_pms_task_assignees")
+      .select(`vizserve_pms_tasks!inner(${TASK_COLUMNS})`)
+      .eq("user_id", userId)
+      // Dotted column, the way the search half filters the embed above.
+      .in("vizserve_pms_tasks.id", wanted),
+  ]);
+
+  // One failure is not total failure — see the same guard in `loadLoggableTasks`.
+  // Logged with the cause attached, because the rows just quietly go missing.
+  if (mine.error || added.error) {
+    console.error("[timesheet] layout rows", {
+      userId,
+      count: wanted.length,
+      direct: mine.error ?? null,
+      joined: added.error ?? null,
+    });
+  }
+
+  const rows: TaskRow[] = [
+    ...((mine.data ?? []) as unknown as TaskRow[]),
+    ...((added.data ?? []) as unknown as { vizserve_pms_tasks: TaskRow | null }[])
+      .map((row) => row.vizserve_pms_tasks)
+      .filter((row): row is TaskRow => row !== null),
+  ];
+
+  // Being the PIC and carrying a join-table row is ordinary, and the same task
+  // twice would be the same ROW twice, writing into one cell.
+  return [...new Map(rows.map((row) => [row.id, row])).values()].map(toLoggable);
 }

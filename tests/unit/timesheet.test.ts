@@ -14,6 +14,7 @@ import {
   nearestQuarterHour,
   parseCellDuration,
   pickedTimesheetRowSchema,
+  sameTimesheetLayout,
   spanFrom,
   spellDuration,
   withDuration,
@@ -24,7 +25,10 @@ import {
   punchComparison,
   timesheetEntrySchema,
   timesheetEntryUpdateSchema,
+  timesheetLayoutSchema,
   timesheetWeekDecisionSchema,
+  MAX_LAYOUT_ROWS,
+  type TimesheetLayoutInput,
   toMinutes,
 } from "@/lib/schemas/timesheet";
 
@@ -907,11 +911,11 @@ describe("pickedTimesheetRowSchema — the row survives without a lookup", () =>
     ).toBe(true);
   });
 
-  it("rejects the id-only shape this replaced", () => {
-    // The legacy payload was a bare string per row. It must not parse — the
-    // reader drops what fails, and dropping a legacy entry is exactly right:
-    // it is an empty row in sessionStorage, and it may be one of the ids the
-    // old bug wedged in there.
+  it("rejects a bare id where a row is expected", () => {
+    // This shape describes a row in flight in the browser, where there is
+    // nothing to resolve an id against. P6-02d stores IDS — see
+    // `timesheetLayoutSchema` below — and the server resolves those before they
+    // ever reach here, so the two must not be confusable for one another.
     expect(pickedTimesheetRowSchema.safeParse(task.id).success).toBe(false);
   });
 
@@ -924,3 +928,111 @@ describe("pickedTimesheetRowSchema — the row survives without a lookup", () =>
   });
 });
 
+
+/**
+ * P6-02d — the week's LAYOUT, on its way to `vizserve_pms_timesheet_layouts`.
+ *
+ * ⚠️ WHAT THIS IS NOT: a draft timesheet. There are no minutes in it, and
+ * P7-05's "the absence of a week row IS the draft state" is untouched. It
+ * carries which empty rows the grid draws, what order every row sits in, and
+ * whether the last-week shortcut has been used — the three facts that used to
+ * live in web storage, two of which died with the tab.
+ *
+ * Every bound below mirrors a CHECK in the migration. The DATABASE is the
+ * enforcement; this is what stops a bad payload leaving the browser.
+ */
+const LAYOUT_TASK_A = "11111111-1111-4111-8111-111111111111";
+const LAYOUT_TASK_B = "22222222-2222-4222-8222-222222222222";
+
+function layout(overrides: Partial<TimesheetLayoutInput> = {}): TimesheetLayoutInput {
+  return {
+    week_start: "2026-09-14",
+    extra_task_ids: [LAYOUT_TASK_A],
+    row_order: [LAYOUT_TASK_A, LAYOUT_TASK_B],
+    copied_last_week: false,
+    ...overrides,
+  };
+}
+
+describe("timesheetLayoutSchema — the arrangement, not the hours", () => {
+  it("accepts an empty week", () => {
+    // The ordinary state: nothing added, nothing dragged, shortcut unpressed.
+    // An untouched week must read exactly as it did before any of this existed.
+    expect(
+      timesheetLayoutSchema.safeParse(layout({ extra_task_ids: [], row_order: [] })).success,
+    ).toBe(true);
+  });
+
+  it("refuses anything that is not a task id", () => {
+    // These ids go into an `id.in.(...)` filter in `loadLoggableTasksByIds`.
+    // Free text there is a fragment of query string somebody else wrote.
+    expect(
+      timesheetLayoutSchema.safeParse({ ...layout(), extra_task_ids: ["nope"] }).success,
+    ).toBe(false);
+    expect(timesheetLayoutSchema.safeParse({ ...layout(), row_order: ["nope"] }).success).toBe(
+      false,
+    );
+  });
+
+  it("caps the empty rows at what one week can hold", () => {
+    // Mirrors `vizserve_pms_timesheet_layouts_rows_bounded`. A typo guard on
+    // this side and a URL budget on the other: a hundred uuids is ~3.7 KB of
+    // query string, and an unbounded list fails as `TypeError: fetch failed`
+    // rather than a tidy 414 — the trap lib/timesheet-tasks-server.ts documents
+    // at length in its header.
+    const many = Array.from(
+      { length: MAX_LAYOUT_ROWS + 1 },
+      (_, index) => `1111111a-1111-4111-8111-${String(index).padStart(12, "0")}`,
+    );
+
+    expect(timesheetLayoutSchema.safeParse(layout({ extra_task_ids: many })).success).toBe(false);
+    expect(
+      timesheetLayoutSchema.safeParse(layout({ extra_task_ids: many.slice(0, MAX_LAYOUT_ROWS) }))
+        .success,
+    ).toBe(true);
+  });
+
+  it("wants a date for the week, and leaves Monday-ness to the database", () => {
+    // The CHECK is `extract(isodow from week_start) = 1`. Restating it here
+    // would be a second copy of a rule the database already enforces, and the
+    // client only ever sends what `startOfWeek` produced.
+    expect(timesheetLayoutSchema.safeParse({ ...layout(), week_start: "banana" }).success).toBe(
+      false,
+    );
+    expect(timesheetLayoutSchema.safeParse(layout({ week_start: "2026-09-15" })).success).toBe(
+      true,
+    );
+  });
+});
+
+describe("sameTimesheetLayout — what the debounce refuses to write", () => {
+  it("calls an unchanged layout unchanged", () => {
+    // A drag that ends where it began, or a re-render that rebuilds the same
+    // arrays. A no-change UPDATE still fires the `updated_at` trigger, which is
+    // the same reason `cellCommit` returns `noop` rather than writing a cell
+    // nobody altered.
+    expect(sameTimesheetLayout(layout(), layout())).toBe(true);
+  });
+
+  it("notices a reorder that keeps every row", () => {
+    // Same ids, different arrangement. Comparing as sets would silently drop
+    // the one change the drag was for.
+    expect(
+      sameTimesheetLayout(layout(), layout({ row_order: [LAYOUT_TASK_B, LAYOUT_TASK_A] })),
+    ).toBe(false);
+  });
+
+  it("notices a row added, a row removed, and the shortcut being used", () => {
+    expect(
+      sameTimesheetLayout(layout(), layout({ extra_task_ids: [LAYOUT_TASK_A, LAYOUT_TASK_B] })),
+    ).toBe(false);
+    expect(sameTimesheetLayout(layout(), layout({ extra_task_ids: [] }))).toBe(false);
+    expect(sameTimesheetLayout(layout(), layout({ copied_last_week: true }))).toBe(false);
+  });
+
+  it("notices a different week", () => {
+    // The week is in the payload, so a flush queued on one week cannot be
+    // mistaken for a no-op against the next one.
+    expect(sameTimesheetLayout(layout(), layout({ week_start: "2026-09-21" }))).toBe(false);
+  });
+});

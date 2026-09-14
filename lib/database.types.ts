@@ -1915,6 +1915,52 @@ export type Database = {
           },
         ];
       };
+      vizserve_pms_timesheet_layouts: {
+        Row: {
+          id: string;
+          user_id: string;
+          /** Always a Monday — a CHECK enforces it. */
+          week_start: string;
+          /**
+           * P6-02d. Tasks put on the week that have no hours yet, as ids. The
+           * server resolves them through `loadLoggableTasksByIds`, so a title
+           * is never stale and an id out of scope simply drops its row.
+           *
+           * ⚠️ NOT A DRAFT TIMESHEET. No minutes live here; hours have always
+           * gone to vizserve_pms_timesheet_entries on blur.
+           */
+          extra_task_ids: string[];
+          /** The arrangement, covering logged rows too. Empty = alphabetical. */
+          row_order: string[];
+          copied_last_week: boolean;
+          created_at: string;
+          updated_at: string;
+        };
+        // Owner-only, all four verbs, and written as one whole-layout upsert on
+        // `unique (user_id, week_start)` — so Insert carries every column the
+        // action sends rather than being partial.
+        Insert: {
+          id?: string;
+          user_id: string;
+          week_start: string;
+          extra_task_ids?: string[];
+          row_order?: string[];
+          copied_last_week?: boolean;
+        };
+        Update: Partial<{
+          extra_task_ids: string[];
+          row_order: string[];
+          copied_last_week: boolean;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_timesheet_layouts_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_internal_requests: {
         Row: {
           id: string;

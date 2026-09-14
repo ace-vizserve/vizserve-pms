@@ -943,18 +943,17 @@ export function breakAdjustedPunches({
 /**
  * P6-03 — a row put on the week before anything has been logged against it.
  *
- * It lives in sessionStorage rather than a table, because an empty row is not
- * a fact and storing one would mean a migration to remember that somebody
- * opened a dropdown. That makes it UNTRUSTED INPUT on the way back in: JSON
- * anyone can edit, rendered as a row and used as a `task_id` on write.
+ * The shape the picker hands to the grid, and the shape the server resolves a
+ * stored id back into. It carries the WHOLE TASK rather than an id because it
+ * is used where there is nothing to resolve an id against — a search result
+ * arriving in the browser long after the page's task maps were rendered.
  *
- * ⚠️ THE WHOLE TASK, NOT ITS ID, AND THE ID-ONLY VERSION IS THE BUG THIS
- * REPLACES. The grid could only turn an id back into a row by looking it up
- * in the twenty tasks the server had sent — so a task found by SEARCH added
- * nothing at all: the id was stored, the lookup missed, the row was silently
- * dropped, and the stored id then hid that task from the picker for the rest
- * of the session. Carrying the fields the row needs is what removes the
- * lookup, and the lookup was the only thing that could fail.
+ * ⚠️ P6-02d MOVED WHAT IS *KEPT* TO `timesheetLayoutSchema` BELOW, and the
+ * difference is the whole point of having two schemas. This one is a row in
+ * flight; that one is ids in a table. An empty row used to be held as JSON in
+ * sessionStorage, which made it untrusted input on the way back in and made
+ * its title as stale as the moment it was added. Neither is true now: the
+ * table holds ids, and the server rebuilds this shape from the live task.
  */
 export const pickedTimesheetRowSchema = z.object({
   id: z.uuid(),
@@ -969,3 +968,73 @@ export const pickedTimesheetRowSchema = z.object({
 
 export type PickedTimesheetRow = z.infer<typeof pickedTimesheetRowSchema>;
 
+
+/**
+ * P6-02d CONTRACT — the week's LAYOUT, as it travels to the database.
+ *
+ * The three facts that used to live in web storage, sent together: which empty
+ * rows the grid draws, what order every row sits in, and whether the last-week
+ * shortcut has been used. One object, because the client coalesces a burst of
+ * changes into a single upsert and a partial payload would blank the fields it
+ * left out.
+ *
+ * ⚠️ NOT A DRAFT TIMESHEET. No minutes, no dates, no intention to submit —
+ * P7-05's "the absence of a row IS the draft state" is untouched. See
+ * `20260912090000_p6_02d_timesheet_layout_survives_the_tab.sql`.
+ *
+ * ⚠️ IDS, WHERE `pickedTimesheetRowSchema` ABOVE CARRIES WHOLE TASKS, and both
+ * are correct. That one describes a row in flight in the browser, where there
+ * is nothing to resolve an id against. This one is written to a table the
+ * server reads, and the server resolves ids through the same scoping the picker
+ * uses — so the title on a stored row is never stale and a task that has left
+ * somebody's scope takes its row with it.
+ */
+
+/**
+ * The most empty rows one week may carry.
+ *
+ * Mirrors `vizserve_pms_timesheet_layouts_rows_bounded`; the CHECK is the
+ * enforcement. It is a typo guard on this side and a URL budget on the other —
+ * `loadLoggableTasksByIds` puts these ids in an `id.in.(…)` filter.
+ */
+export const MAX_LAYOUT_ROWS = 100;
+
+/** The arrangement covers logged rows too, so it may be longer than the above. */
+export const MAX_LAYOUT_ORDER = MAX_LAYOUT_ROWS * 2;
+
+export const timesheetLayoutSchema = z.object({
+  /** The Monday. The Monday-ness itself is the database's CHECK to make. */
+  week_start: z.iso.date(),
+  extra_task_ids: z
+    .array(z.uuid())
+    .max(MAX_LAYOUT_ROWS, { error: "That is more rows than one week can hold." }),
+  row_order: z
+    .array(z.uuid())
+    .max(MAX_LAYOUT_ORDER, { error: "That is more rows than one week can hold." }),
+  copied_last_week: z.boolean(),
+});
+
+export type TimesheetLayoutInput = z.infer<typeof timesheetLayoutSchema>;
+
+/**
+ * Are two layouts the same arrangement?
+ *
+ * The debounce needs this: a drag that ends where it began, or a re-render that
+ * rebuilds the same arrays, must not become a write. A no-change UPDATE still
+ * fires the `updated_at` trigger, which is the same reason `cellCommit` returns
+ * `noop` rather than writing an unchanged cell.
+ *
+ * ORDER-SENSITIVE ON BOTH ARRAYS. `row_order` obviously is. `extra_task_ids` is
+ * too, because it is what the picker appends to and a reshuffle of it is a
+ * change worth keeping even though nothing renders from its order today.
+ */
+export function sameTimesheetLayout(a: TimesheetLayoutInput, b: TimesheetLayoutInput): boolean {
+  return (
+    a.week_start === b.week_start &&
+    a.copied_last_week === b.copied_last_week &&
+    a.extra_task_ids.length === b.extra_task_ids.length &&
+    a.row_order.length === b.row_order.length &&
+    a.extra_task_ids.every((id, index) => id === b.extra_task_ids[index]) &&
+    a.row_order.every((id, index) => id === b.row_order[index])
+  );
+}

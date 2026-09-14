@@ -8,6 +8,7 @@ import {
   submitTimesheetWeekSchema,
   timesheetEntrySchema,
   timesheetEntryUpdateSchema,
+  timesheetLayoutSchema,
   timesheetWeekDecisionSchema,
 } from "@/lib/schemas/timesheet";
 import {
@@ -197,6 +198,60 @@ export async function submitTimesheetWeek(input: unknown): Promise<ActionResult>
   if (error) return { ok: false, error: readableError(error) };
 
   revalidateTimesheet();
+  return { ok: true, data: undefined };
+}
+
+/**
+ * P6-02d — the week's LAYOUT: which empty rows the grid draws, what order every
+ * row sits in, and whether the last-week shortcut has been used.
+ *
+ * Called on a debounce from `use-layout-autosave.ts`, which coalesces a burst
+ * of changes into ONE of these. The whole layout goes every time, so a partial
+ * payload cannot blank the two thirds it left out.
+ *
+ * ⚠️ NO `revalidateTimesheet()`, AND THAT IS THE POINT RATHER THAN AN OMISSION.
+ * Revalidating re-runs `/timesheet` as a server component, which would rebuild
+ * the grid under somebody's cursor every time a debounce fires — fighting the
+ * local state that is already showing them the right thing, and throwing away a
+ * half-typed cell on the way past. The stored layout only has to be right on
+ * the NEXT load. `use-task-autosave.ts` makes the same call with `refresh: false`.
+ *
+ * ⚠️ NO WEEK-LOCK CHECK, here or in the policies. An arrangement is not hours;
+ * refusing it on a submitted week would put an error toast on a read-only
+ * screen for a write nobody asked for.
+ *
+ * The upsert is expressible because the table has a natural key — `unique
+ * (user_id, week_start)`. The entries table deliberately does not, which is why
+ * this is a table of its own rather than columns on something existing.
+ */
+export async function saveTimesheetLayout(input: unknown): Promise<ActionResult> {
+  const context = await requireAuthContextOrThrow();
+
+  const parsed = timesheetLayoutSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Could not save the week's layout.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
+  }
+
+  const supabase = await createClient();
+  const { error } = await supabase.from("vizserve_pms_timesheet_layouts").upsert(
+    {
+      // Written explicitly because the column is NOT NULL with no default. The
+      // policy still has the final say — this only ever equals auth.uid().
+      user_id: context.userId,
+      week_start: parsed.data.week_start,
+      extra_task_ids: parsed.data.extra_task_ids,
+      row_order: parsed.data.row_order,
+      copied_last_week: parsed.data.copied_last_week,
+    },
+    { onConflict: "user_id,week_start" },
+  );
+
+  if (error) return { ok: false, error: sharedReadableError(error) };
+
   return { ok: true, data: undefined };
 }
 

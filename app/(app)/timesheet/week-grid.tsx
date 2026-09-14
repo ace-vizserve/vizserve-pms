@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Fragment, useCallback, useEffect, useRef, useState, useSyncExternalStore, useTransition, useOptimistic } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState, useTransition, useOptimistic } from "react";
 
 import { OvertimeApprovalLinks } from "@/components/overtime-approval-links";
 import { TaskStatusBadge } from "@/components/status-badge";
@@ -44,13 +44,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
-import {
-  orderRows,
-  parseRowOrder,
-  planRowDrop,
-  planRowMove,
-  type RowMove,
-} from "@/lib/timesheet-row-order";
+import { orderRows, planRowDrop, planRowMove, type RowMove } from "@/lib/timesheet-row-order";
 import {
   type CellCommit,
   type DayState,
@@ -63,7 +57,6 @@ import {
   formatCellDuration,
   overtimeGranted,
   parseCellDuration,
-  pickedTimesheetRowSchema,
   spanFrom,
   withDuration,
   withEnd,
@@ -75,6 +68,7 @@ import { searchLoggableTasks } from "./actions";
 
 import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
 import { CellDetail } from "./cell-detail";
+import { useLayoutAutosave } from "./use-layout-autosave";
 import { ClockSelect, clockLabel, normaliseClock } from "./clock-select";
 import { DurationSuggestion } from "./duration-suggestion";
 import { RowDndProvider, RowGrip, SortableRow } from "./row-dnd";
@@ -124,195 +118,26 @@ function sum(entries: CellEntry[] | undefined): number {
 }
 
 // ---------------------------------------------------------------------------
-// Rows added to a week but not yet logged against, kept in sessionStorage.
+// P6-02d — THE WEEK'S LAYOUT NO LONGER LIVES IN THIS FILE.
 //
-// They are not in the database on purpose: an empty row is not a fact, and
-// storing one would mean a table and a migration to remember that somebody once
-// opened a dropdown. A reload is as long as it needs to survive.
+// Three stores used to sit here: the empty rows in sessionStorage, the drag
+// order in localStorage, and the last-week flag in sessionStorage — each with a
+// module cache, all three read through `useSyncExternalStore` because
+// `getSnapshot` must return the same array between notifications. Two of them
+// died with the tab, and that was the bug: five presses of + Add task, close
+// the tab, and there is nowhere left to type.
 //
-// Read through `useSyncExternalStore` rather than an effect — sessionStorage is
-// an external store, and this is the API for one. The snapshots are cached per
-// key because `getSnapshot` must return the SAME array between notifications or
-// React re-renders forever.
+// They are now one row in `vizserve_pms_timesheet_layouts`, read by `page.tsx`
+// and handed in as props. Writing is `use-layout-autosave.ts`, which coalesces
+// a burst of changes into one debounced upsert. Everything the old comments
+// argued about — session versus local, whether an empty row is a fact, whether
+// to store an id or the whole task — is settled there and in the migration.
 //
-// ⚠️ THE WHOLE TASK IS STORED, NOT ITS ID, AND THAT IS THE BUG THIS FIXES.
-// Ids alone meant the row had to be rebuilt by looking the id up in the
-// server's initial twenty — so a task reached through SEARCH added no row at
-// all: the id went in, the lookup missed, the row was silently dropped, and
-// the id then excluded that task from the picker for the rest of the session.
-// A task somebody could see and click became one they could neither add nor
-// find again. The picker already holds everything the row needs; keeping it is
-// what removes the lookup, and with it the only way this can fail.
-//
-// `:v2:` in the key retires the id-only payloads rather than parsing both:
-// they are shaped differently, one may already carry a wedged id, and this is
-// sessionStorage — the cost of dropping them is one tab's empty rows.
+// ⚠️ ONE THING THOSE COMMENTS GOT RIGHT SURVIVES: hours were never in web
+// storage and are not here either. `TimeCell.persist` below writes each cell to
+// `vizserve_pms_timesheet_entries` on blur. This is an ARRANGEMENT, not a draft
+// timesheet, and P7-05's "the absence of a week row IS the draft state" stands.
 // ---------------------------------------------------------------------------
-
-const NO_ROWS: PickableTask[] = [];
-const rowCache = new Map<string, PickableTask[]>();
-
-/**
- * ONE NOTIFIER FOR BOTH STORES — the empty rows here and the row order below.
- *
- * Both are read by the same component, so a listener woken by the other store's
- * write costs one render of a grid that was about to render anyway. Two sets
- * would be two chances to forget one.
- */
-const storeListeners = new Set<() => void>();
-
-function subscribeToStores(onChange: () => void) {
-  storeListeners.add(onChange);
-  return () => {
-    storeListeners.delete(onChange);
-  };
-}
-
-function readRows(key: string): PickableTask[] {
-  const cached = rowCache.get(key);
-  if (cached) return cached;
-
-  let rows: PickableTask[] = NO_ROWS;
-
-  try {
-    const stored = window.sessionStorage.getItem(key);
-    const parsed: unknown = stored ? JSON.parse(stored) : null;
-    // Validated per entry, not trusted per array: one edited or half-written
-    // row should cost that row, not the week's other empty rows.
-    if (Array.isArray(parsed))
-      rows = parsed
-        .map((entry) => pickedTimesheetRowSchema.safeParse(entry))
-        .filter((result) => result.success)
-        .map((result) => result.data);
-  } catch {
-    // A corrupt key, private mode, an embedded webview. The week still reads;
-    // only the empty rows are lost, and they are the cheapest thing here.
-  }
-
-  rowCache.set(key, rows);
-  return rows;
-}
-
-function writeRows(key: string, rows: PickableTask[]) {
-  // Deduped on the way in. Nothing in the UI should be able to add the same
-  // task twice, but a duplicate here is a duplicate ROW, and two rows for one
-  // task writing into the same cell is not a state worth trusting a caller
-  // to avoid.
-  const unique = [...new Map(rows.map((task) => [task.id, task])).values()];
-  rowCache.set(key, unique);
-
-  try {
-    window.sessionStorage.setItem(key, JSON.stringify(unique));
-  } catch {
-    // Quota or a blocked store. The cache above still holds it for this visit.
-  }
-
-  for (const onChange of storeListeners) onChange();
-}
-
-// ---------------------------------------------------------------------------
-// P6-02c — WHAT ORDER THE ROWS SIT IN, kept in localStorage.
-//
-// The rules are in `lib/timesheet-row-order.ts`; this is only where they are
-// kept. Same store shape as the empty rows above — a module cache so
-// `getSnapshot` returns the same array between notifications, and every access
-// wrapped.
-//
-// ⚠️ localStorage, NOT sessionStorage, and the difference is deliberate. An
-// empty row is a half-finished action and a tab is as long as it needs to
-// survive. An arrangement is a PREFERENCE, like the columns menu (P7-65):
-// re-dragging it every morning is the feature failing rather than working.
-//
-// ⚠️ READING CAN THROW. It is not merely empty in a private window — site data
-// blocked and some embedded webviews raise instead, and an unguarded read would
-// take the week down with it. Somebody who cannot store a preference gets the
-// alphabetical default, which is what everybody had before this existed.
-// ---------------------------------------------------------------------------
-
-const NO_ORDER: string[] = [];
-const orderCache = new Map<string, string[]>();
-
-function readOrder(key: string): string[] {
-  const cached = orderCache.get(key);
-  if (cached) return cached;
-
-  let order: string[] = NO_ORDER;
-
-  try {
-    const stored = parseRowOrder(window.localStorage.getItem(key));
-    // The constant when there is nothing, so the snapshot is referentially
-    // stable across renders — a fresh `[]` each time is a render loop.
-    if (stored.length > 0) order = stored;
-  } catch {
-    // See above. The week still reads, alphabetically.
-  }
-
-  orderCache.set(key, order);
-  return order;
-}
-
-function writeOrder(key: string, order: string[]) {
-  orderCache.set(key, order);
-
-  try {
-    window.localStorage.setItem(key, JSON.stringify(order));
-  } catch {
-    // Quota or a blocked store. The cache above still holds it for this visit,
-    // and a preference that cannot be saved is not worth a toast.
-  }
-
-  for (const onChange of storeListeners) onChange();
-}
-
-// ---------------------------------------------------------------------------
-// P6-02b — WHETHER "LAST WEEK'S TASKS" HAS ALREADY BEEN PRESSED ON THIS WEEK.
-//
-// `copyable` empties itself the moment the rows land, so the button goes on its
-// own. It came BACK, though, the moment one of those rows was taken off again
-// with the × — offering, on its own, the one task somebody had just said they
-// did not want this week. A shortcut that argues with you is worse than no
-// shortcut, so pressing it retires it: the week has been offered last week's
-// tasks, and that offer is not made twice.
-//
-// Everything it can still do is a press away in Add task, which reaches every
-// one of those tasks by name.
-//
-// ⚠️ sessionStorage, beside the ROWS it describes rather than in localStorage
-// with the order. The rows die with the tab; a flag that outlived them would
-// silence the shortcut on a week that no longer has any of it. A fresh tab gets
-// neither, which is the right answer to both questions at once.
-// ---------------------------------------------------------------------------
-
-const copiedCache = new Map<string, boolean>();
-
-function readCopied(key: string): boolean {
-  const cached = copiedCache.get(key);
-  if (cached !== undefined) return cached;
-
-  let copied = false;
-
-  try {
-    copied = window.sessionStorage.getItem(key) === "1";
-  } catch {
-    // A blocked store. The button stays offered, which is the old behaviour
-    // rather than a broken one.
-  }
-
-  copiedCache.set(key, copied);
-  return copied;
-}
-
-function writeCopied(key: string) {
-  copiedCache.set(key, true);
-
-  try {
-    window.sessionStorage.setItem(key, "1");
-  } catch {
-    // The cache above still holds it for this visit.
-  }
-
-  for (const onChange of storeListeners) onChange();
-}
 
 /**
  * P6-02 / P6-03 — the week, as a grid.
@@ -339,6 +164,7 @@ export function WeekGrid({
   locked,
   overtimeApprovals = {},
   previousWeekTasks = [],
+  layout,
 }: {
   monday: string;
   days: string[];
@@ -384,78 +210,67 @@ export function WeekGrid({
    * beside "Add task".
    *
    * ⚠️ TASKS, NOT HOURS, and that is the whole design of the shortcut. It adds
-   * empty rows through the same sessionStorage list the picker writes to, so
-   * pressing it writes nothing anywhere: the week gains somewhere to type, not
-   * hours nobody has worked. See the read in `page.tsx`.
+   * empty rows to the same layout the picker writes to, so pressing it logs
+   * nothing: the week gains somewhere to type, not hours nobody has worked.
    *
-   * Not filtered against this week by the server — it cannot see the empty rows
-   * held here — so `copyable` below does it. The offer is also made ONCE per
-   * week per tab: see `readCopied`.
+   * Not filtered against this week by the server — `copyable` below does it,
+   * where both halves of what is on the week are in one place. The offer is
+   * made ONCE per week, and `copiedLastWeek` is what remembers that.
    */
   previousWeekTasks?: PickableTask[];
+  /**
+   * P6-02d — the week's layout, as the server last stored it.
+   *
+   * `extraTasks` are rows put on the week with no hours yet, resolved from
+   * stored ids through `loadLoggableTasksByIds` — so a title is never stale and
+   * a task that has left this person's scope has already dropped out.
+   * `rowOrder` is the arrangement, empty meaning alphabetical. `alreadyCopied`
+   * is whether the last-week shortcut has been used.
+   *
+   * ⚠️ SEED VALUES, NOT LIVE ONES. `useLayoutAutosave` takes them once and owns
+   * the layout from then on; the grid is keyed on `monday` in `page.tsx`, so a
+   * week change remounts it and re-seeds. A `router.refresh()` after a cell
+   * save must NOT be able to snap a half-arranged week back to what the server
+   * had before the debounce landed.
+   */
+  layout?: { extraTasks: PickableTask[]; rowOrder: string[]; alreadyCopied: boolean };
 }) {
-  // The week is in the key, so navigating to another week reads that week's
-  // rows rather than carrying this week's across.
-  const storageKey = `vizserve-pms:timesheet-rows:v2:${monday}`;
-  const extraTasks = useSyncExternalStore(
-    subscribeToStores,
-    () => readRows(storageKey),
-    // The server has no sessionStorage. A constant here is what makes the first
-    // paint and the hydrated render agree instead of mismatching.
-    () => NO_ROWS,
-  );
-
-  const remember = useCallback((next: PickableTask[]) => writeRows(storageKey, next), [storageKey]);
-
   /*
-   * P6-02c — this week's arrangement.
+   * P6-02d — the layout, and the one thing that writes it.
    *
-   * The week is in the key, like the rows' key above: an order dragged on one
-   * week is not a claim about another. Empty is the ordinary state and means
-   * alphabetical, which is what the grid did before anybody could drag anything.
+   * The empty rows, the arrangement and the last-week flag are one row in the
+   * database now, so they are one hook here. Every setter below schedules the
+   * SAME debounced upsert, which is what turns a drag through four positions
+   * into one write. See `use-layout-autosave.ts`.
    */
-  const orderKey = `vizserve-pms:timesheet-order:v1:${monday}`;
-  const rowOrder = useSyncExternalStore(
-    subscribeToStores,
-    () => readOrder(orderKey),
-    // The server has no localStorage: alphabetical on both sides of hydration.
-    () => NO_ORDER,
-  );
-
-  const rememberOrder = useCallback((next: string[]) => writeOrder(orderKey, next), [orderKey]);
-
-  /*
-   * P6-02b — has this week already been offered last week's tasks?
-   *
-   * A primitive, so the snapshot is stable by construction and needs no cached
-   * array the way the two stores above do.
-   */
-  const copiedKey = `vizserve-pms:timesheet-copied:v1:${monday}`;
-  const alreadyCopied = useSyncExternalStore(
-    subscribeToStores,
-    () => readCopied(copiedKey),
-    // The server has no sessionStorage: the button renders, then hydration
-    // takes it away on a week that has had it.
-    () => false,
-  );
+  const {
+    extraTasks,
+    rowOrder,
+    copiedLastWeek: alreadyCopied,
+    setExtraTasks: remember,
+    setRowOrder: rememberOrder,
+    markCopied,
+  } = useLayoutAutosave(monday, {
+    extraTasks: layout?.extraTasks ?? [],
+    rowOrder: layout?.rowOrder ?? [],
+    copiedLastWeek: layout?.alreadyCopied ?? false,
+  });
 
   const logged = new Set(rows.map((row) => row.taskId));
 
-  /**
-   * The server's twenty, used ONLY to refresh what is already stored.
-   *
-   * It used to be the source of the row itself, which is what made a searched
-   * task unaddable — anything outside these twenty resolved to nothing. A miss
-   * is now ordinary and harmless: the stored copy stands. A hit only means the
-   * title or status has been re-read since the row was added.
-   */
-  const byId = new Map(tasks.map((task) => [task.id, task]));
-
   const extraTaskIds = extraTasks.map((task) => task.id);
 
+  /*
+   * ⚠️ NO `byId` REFRESH AGAINST `tasks` ANY MORE, and its absence is the point.
+   *
+   * While the rows were stored as task snapshots they went stale, so this
+   * re-read each one out of the picker's first twenty when it happened to be
+   * there. The server resolves stored ids through the same scoping the picker
+   * uses now, so what arrives is already current — and a lookup that can miss
+   * is one less thing that can drop a row.
+   */
   const extraRows: TaskRow[] = extraTasks
     .filter((task) => !logged.has(task.id))
-    .map((task) => byId.get(task.id) ?? task)
     .map((task) => ({
       taskId: task.id,
       title: task.title,
@@ -505,11 +320,11 @@ export function WeekGrid({
    * P6-02b — what "Last week's tasks" would actually add.
    *
    * Filtered against BOTH halves of what is on this week: the rows the server
-   * returned because they carry hours, and the empty rows sitting in
-   * sessionStorage. Pressing the shortcut twice therefore adds nothing the
-   * second time rather than a duplicate row — and `writeRows` dedupes behind it
-   * anyway, because one task with two rows writing into the same cell is not a
-   * state worth trusting a caller to avoid.
+   * returned because they carry hours, and the empty rows in the layout.
+   * Pressing the shortcut twice therefore adds nothing the second time rather
+   * than a duplicate row — and the layout dedupes behind it anyway, because one
+   * task with two rows writing into the same cell is not a state worth trusting
+   * a caller to avoid.
    *
    * Empty is the ordinary state, not a failure: a first week, a week off, or a
    * week already fully copied across. The control simply is not rendered.
@@ -521,12 +336,13 @@ export function WeekGrid({
   /**
    * The press: the rows, and the flag that stops the offer being made again.
    *
-   * Both in one place, because they are one action. Two writes means two
-   * notifications and two renders of a grid that was rendering anyway.
+   * Two calls, ONE WRITE. They land in the same tick, so the second reads the
+   * first through the hook's ref and the debounce coalesces both into a single
+   * upsert — which is exactly what the old pair of storage writes could not do.
    */
   const copyLastWeek = (added: PickableTask[]) => {
     remember([...extraTasks, ...added]);
-    writeCopied(copiedKey);
+    markCopied();
   };
 
   /*
@@ -566,9 +382,9 @@ export function WeekGrid({
   const keepRow = useCallback(
     (row: TaskRow) => {
       if (extraTasks.some((task) => task.id === row.taskId)) return;
-      // Rebuilt from the row rather than looked up, for the same reason the
-      // picker now stores the whole task: the row is right here, and a lookup
-      // that can miss is a row that can disappear.
+      // Rebuilt from the row rather than looked up: the row is right here, and
+      // a lookup that can miss is a row that can disappear. Only the id is
+      // stored — the rest is what the grid draws until the next load.
       remember([
         ...extraTasks,
         {
@@ -1908,12 +1724,12 @@ function RowOrderMenu({
  * something the week itself already knew — so the first thing anybody did on a
  * Monday was re-answer a question with last Monday's answer.
  *
- * ⚠️ IT ADDS ROWS, NOT HOURS. Everything it adds goes into the same
- * sessionStorage list the picker writes to, so nothing reaches the database
- * until a duration is typed into a cell. A shortcut that copied last week's
- * MINUTES would be this screen filling in a timesheet on somebody's behalf and
- * then asking them to sign it; the rows are the part that was tedious, and the
- * numbers are the part that has to be true.
+ * ⚠️ IT ADDS ROWS, NOT HOURS. Everything it adds goes into the same layout
+ * list the picker writes to, so no ENTRY is created until a duration is typed
+ * into a cell. A shortcut that copied last week's MINUTES would be this screen
+ * filling in a timesheet on somebody's behalf and then asking them to sign it;
+ * the rows are the part that was tedious, and the numbers are the part that
+ * has to be true.
  *
  * The count is on the button because the press is otherwise unpredictable —
  * "adds some rows" is not something to commit to before seeing it — and the

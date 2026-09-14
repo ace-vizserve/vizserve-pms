@@ -16,7 +16,11 @@ import { loadScheduledWeek } from "@/lib/timesheet-schedule-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
-import { loadLoggableTaskLists, loadLoggableTasks } from "@/lib/timesheet-tasks-server";
+import {
+  loadLoggableTaskLists,
+  loadLoggableTasks,
+  loadLoggableTasksByIds,
+} from "@/lib/timesheet-tasks-server";
 import { buttonVariants } from "@/components/ui/button";
 import { WeekGrid, type PickableTask, type TaskRow } from "./week-grid";
 import { WeekStatusBar, type WeekState } from "./week-status-bar";
@@ -80,6 +84,7 @@ export default async function TimesheetPage({
     listsResult,
     schedule,
     lastWeekResult,
+    layoutResult,
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_timesheet_entries")
@@ -228,7 +233,59 @@ export default async function TimesheetPage({
       .eq("user_id", context.userId)
       .gte("work_date", lastMonday)
       .lte("work_date", lastSunday),
+
+    /*
+     * P6-02d — THIS WEEK'S LAYOUT: the empty rows, the arrangement, and whether
+     * the last-week shortcut has been used.
+     *
+     * All three lived in web storage until now, two of them in sessionStorage,
+     * which is why setting a week up and closing the tab lost the lot. Reading
+     * them here is what makes them survive the tab, the device and a refresh.
+     *
+     * ⚠️ NOT A DRAFT TIMESHEET. No minutes are stored; hours have always gone
+     * straight to `vizserve_pms_timesheet_entries` on blur. P7-05's "the
+     * absence of a week row IS the draft state" is untouched.
+     *
+     * `maybeSingle`, because no row is the ordinary state — an untouched week
+     * has no layout and reads exactly as it did before P6-02c.
+     */
+    supabase
+      .from("vizserve_pms_timesheet_layouts")
+      .select("extra_task_ids, row_order, copied_last_week")
+      .eq("user_id", context.userId)
+      .eq("week_start", monday)
+      .maybeSingle(),
   ]);
+
+  /*
+   * P6-02d — stored ids back into rows.
+   *
+   * A SECOND ROUND TRIP, DELIBERATELY, because it cannot join the batch above:
+   * the ids come out of it. It is one small `id.in.(…)` read against a list a
+   * CHECK constraint caps at a hundred, and it only runs at all on a week
+   * somebody has arranged.
+   *
+   * ⚠️ SCOPED THE SAME WAY THE PICKER IS. `loadLoggableTasksByIds` uses
+   * `is_on_task`, so an id whose task has been deleted, or that has left this
+   * person's scope, simply does not come back and its row is gone. That is
+   * right — they could not log against it anyway — and it is also why the id
+   * stays in the table: put back on the task, they get the row back.
+   *
+   * The title and status are therefore always CURRENT, which the sessionStorage
+   * snapshots they replace never were.
+   */
+  const layoutRow = layoutResult.data;
+
+  const layoutTasks: PickableTask[] = layoutRow
+    ? (await loadLoggableTasksByIds(context.userId, layoutRow.extra_task_ids)).map((task) => ({
+        id: task.id,
+        title: task.title,
+        status: task.status as PickableTask["status"],
+        where: task.where,
+        start_date: task.start_date,
+        due_date: task.due_date,
+      }))
+    : [];
 
   /**
    * Approved overtime per day — the minutes, and the request each came from.
@@ -599,6 +656,16 @@ export default async function TimesheetPage({
           overtimeApprovals={overtimeApprovals}
           // P6-02b. Offered as empty rows, never as hours — see the read above.
           previousWeekTasks={lastWeekTasks}
+          // P6-02d. Seed values — `useLayoutAutosave` owns the layout from the
+          // first render on. The `key` below is what re-seeds it on a week
+          // change, and what makes a pending debounce flush against the week it
+          // was editing rather than the one being opened.
+          layout={{
+            extraTasks: layoutTasks,
+            rowOrder: layoutRow?.row_order ?? [],
+            alreadyCopied: layoutRow?.copied_last_week ?? false,
+          }}
+          key={monday}
         />
       )}
     </PageShell>
