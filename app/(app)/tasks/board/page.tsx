@@ -414,10 +414,19 @@ async function BoardColumns({
    * it is naturally bounded; finished work is capped at
    * `FINISHED_PER_COLUMN` and says so when there is more.
    *
-   * ⚠️ A cap without a stated limit is a lie about the number. `+ 1` is asked
-   * for so truncation is DETECTABLE without a second count query — the same
-   * trick the DTR list uses, and for the same reason: a board that quietly
-   * shows twenty of forty is a board somebody counts off.
+   * ⚠️ A CAP WITHOUT A STATED LIMIT IS A LIE ABOUT THE NUMBER, and this column
+   * told that lie for months. The two finished columns shared ONE query with
+   * `limit(FINISHED_PER_COLUMN * 2 + 1)`, split by status afterwards — so the
+   * cap was on the PAIR, not on each. A list whose recent finishes happened to
+   * be mostly COMPLETED_NO_RESPONSE left one COMPLETED card, the header read
+   * `1` where the list view read `171`, and the `> FINISHED_PER_COLUMN`
+   * truncation test never fired because one is not more than twelve. The board
+   * reported a wrong number and then declined to say it was capped.
+   *
+   * Each column now has its OWN query and its own `count: "exact"`, so the
+   * heading is the real total and the cap is only ever about how many cards are
+   * drawn. The `+ 1` trick it replaces could not survive two columns sharing a
+   * budget.
    *
    * ⚠️ IT IS A COMPILE-TIME CONSTANT, which is why the page above can draw the
    * whole frame before this component has a single row: the columns and their
@@ -458,7 +467,7 @@ async function BoardColumns({
    * boundaries render concurrently; they simply no longer have to land before
    * the first card is drawn.
    */
-  const [joinedTaskIdSet, { data: tasks }, { data: people }, { data: finishedTasks }] =
+  const [joinedTaskIdSet, { data: tasks }, { data: people }, finishedColumns] =
     await Promise.all([
       /**
        * P7-13 / P7-43 — the tasks this person is on without being named in
@@ -474,34 +483,54 @@ async function BoardColumns({
       query,
       supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
       /*
-       * Finished work, as its own bounded read.
+       * Finished work — ONE BOUNDED READ PER COLUMN, not one shared between them.
        *
-       * A SEPARATE QUERY rather than relaxing the filter above, because the two
-       * want opposite things. Live work is ordered by due date and unbounded —
-       * there is only ever so much of it. Finished work is ordered by RECENCY and
-       * capped: what closed this week is worth a glance, what closed in March is
-       * what the list view and its filters are for.
+       * A separate read from the live query above, because the two want opposite
+       * things. Live work is ordered by due date and unbounded — there is only
+       * ever so much of it. Finished work is ordered by RECENCY and capped: what
+       * closed this week is worth a glance, what closed in March is what the
+       * list view and its filters are for.
+       *
+       * ⚠️ ONE QUERY PER STATUS, AND THAT IS THE FIX. A single `in(...)` read
+       * capped at `FINISHED_PER_COLUMN * 2 + 1` was dealt into two columns
+       * afterwards, so whichever status happened to be more recently touched ate
+       * the whole budget and the other column showed a handful of cards under a
+       * heading that reported that handful as the total.
+       *
+       * ⚠️ `count: "exact"` IS WHAT MAKES THE HEADING TRUE. It counts every row
+       * the filters match, ignoring `limit`, so the column can draw twelve cards
+       * and still say there are a hundred and seventy-one — which is the number
+       * the list view shows for the same stage.
+       *
+       * `is("parent_task_id", null)` is in the QUERY rather than applied to the
+       * rows afterwards, because the count has to describe the same population
+       * as the cards. Filtering after the count is how a heading and the cards
+       * under it start disagreeing.
        *
        * Carries the same list/scope/kind filters as the board, so the columns
        * agree with the ones beside them.
        */
-      (() => {
-        let done = supabase
-          .from("vizserve_pms_tasks")
-          .select(
-            "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
-          )
-          .in("status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
-          .order("updated_at", { ascending: false })
-          .limit(FINISHED_PER_COLUMN * 2 + 1);
+      Promise.all(
+        FINISHED_COLUMNS.map((status) => {
+          let done = supabase
+            .from("vizserve_pms_tasks")
+            .select(
+              "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution",
+              { count: "exact" },
+            )
+            .eq("status", status)
+            .is("parent_task_id", null)
+            .order("updated_at", { ascending: false })
+            .limit(FINISHED_PER_COLUMN);
 
-        if (listId) done = done.eq("list_id", listId);
-        if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
-        if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
-        if (kind === "client") done = done.not("request_id", "is", null);
-        if (kind === "internal") done = done.is("request_id", null);
-        return done;
-      })(),
+          if (listId) done = done.eq("list_id", listId);
+          if (params.view === "mine") done = done.eq(MINE_COLUMN, true);
+          if (params.view === "qa") done = done.eq("qa_assignee_id", context.userId);
+          if (kind === "client") done = done.not("request_id", "is", null);
+          if (kind === "internal") done = done.is("request_id", null);
+          return done;
+        }),
+      ),
     ]);
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
@@ -647,24 +676,37 @@ async function BoardColumns({
   for (const task of topLevel) byStatus.get(task.status)?.push(task);
 
   /*
-   * The two finished columns, from their own bounded query.
+   * The two finished columns, each from its own bounded query.
    *
-   * Subtasks are dropped here for the same reason they are above: a board that
-   * deals a parent and its ten children as eleven equal cards has stopped
-   * saying how much work there is.
+   * Subtasks are excluded in the query, not here: a board that deals a parent
+   * and its ten children as eleven equal cards has stopped saying how much work
+   * there is, and the COUNT has to describe the same set the cards do.
    *
-   * `truncated` is per column, and it is the reason the query asks for more
-   * than it renders: a column that silently shows twelve of forty is a column
-   * somebody counts off and then stops trusting.
+   * ⚠️ THE HEADING IS THE EXACT COUNT, NOT `column.length`. That is the whole
+   * point of this pair of reads — a column drawing twelve of a hundred and
+   * seventy-one must say a hundred and seventy-one, or it disagrees with the
+   * list view about the same stage and there is no way to tell which is lying.
    */
-  const truncated = new Map<VizservePmsTaskStatus, boolean>();
-  for (const status of FINISHED_COLUMNS) {
-    const all = ((finishedTasks ?? []) as typeof topLevel).filter(
-      (task) => task.status === status && !task.parent_task_id,
-    );
-    truncated.set(status, all.length > FINISHED_PER_COLUMN);
-    byStatus.set(status, all.slice(0, FINISHED_PER_COLUMN));
-  }
+  const totals = new Map<VizservePmsTaskStatus, number>();
+
+  FINISHED_COLUMNS.forEach((status, index) => {
+    const result = finishedColumns[index];
+    const rows = (result?.data ?? []) as typeof topLevel;
+
+    byStatus.set(status, rows);
+    // `count` is null only if the read failed; the rows in hand are then the
+    // most honest number available.
+    totals.set(status, result?.count ?? rows.length);
+  });
+
+  /**
+   * What the heading says.
+   *
+   * Live columns are unbounded, so the rows in hand ARE the total. Finished
+   * columns are capped, so they carry a count of their own.
+   */
+  const totalOf = (status: VizservePmsTaskStatus) =>
+    totals.get(status) ?? (byStatus.get(status) ?? []).length;
 
   return (
     <>
@@ -701,7 +743,7 @@ async function BoardColumns({
             <div className="flex shrink-0 items-center gap-2 border-b px-2.5 py-2.5">
               <TaskStatusBadge status={status} icon className="uppercase tracking-[0.03em]" />
               <span className="font-mono text-2xs font-semibold tabular-nums text-muted-foreground">
-                {column.length}
+                {totalOf(status)}
               </span>
             </div>
 
@@ -1019,18 +1061,22 @@ async function BoardColumns({
             </div>
 
             {/*
-              ⚠️ THE CAP, STATED. A finished column shows the most recent
-              `FINISHED_PER_COLUMN` and no more — and a column that quietly
-              shows twelve of forty is a column somebody counts off once and
-              then stops trusting. The list view is where the rest lives,
-              because it has the filters and the sorting for it.
+              ⚠️ THE CAP, STATED, IN BOTH NUMBERS. A finished column draws the
+              most recent `FINISHED_PER_COLUMN` and no more, and a column that
+              quietly shows twelve of a hundred and seventy-one is one somebody
+              counts off once and then stops trusting. The heading already
+              carries the true total; this says which part of it is on screen.
+
+              Driven off the exact count rather than off whether the fetch
+              overflowed — the old test compared two columns’ shared budget and
+              stayed false exactly when it mattered most.
             */}
-            {truncated.get(status) ? (
+            {totalOf(status) > column.length ? (
               <Link
                 href={`/tasks?status=${status}`}
                 className="block border-t px-2.5 py-2 text-center text-2xs text-muted-foreground hover:text-foreground"
               >
-                Showing the {FINISHED_PER_COLUMN} most recent — see all in the list
+                Showing the {column.length} most recent of {totalOf(status)} — see all in the list
               </Link>
             ) : null}
 
