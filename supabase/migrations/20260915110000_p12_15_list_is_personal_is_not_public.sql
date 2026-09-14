@@ -1,0 +1,33 @@
+-- ---------------------------------------------------------------------------
+-- P12-15 — `vizserve_pms_list_is_personal` stops being callable by `anon`.
+--
+-- Found while reviewing P12-14. `20260908110000_p11_08_privacy_belongs_to_the_list.sql`
+-- granted this function to `authenticated` but never revoked PUBLIC's implicit
+-- EXECUTE, which every function is created with. So an ANON-KEY caller can ask
+-- `POST /rest/v1/rpc/vizserve_pms_list_is_personal` whether any given list uuid
+-- is somebody's personal list — with no session at all.
+--
+-- ⚠️ THE HOUSE STYLE IS `revoke` THEN `grant`, AND THIS IS WHY IT EXISTS.
+-- `20260729110000_p0_06_grants.sql` sets it out: a `grant` alone does not remove
+-- the default every function is born with. `p12_01`, `p12_04` and `p12_14` all
+-- do the revoke; `p11_08` is the one that did not.
+--
+-- ⚠️ `anon` HOLDS NO TABLE PRIVILEGES AT ALL (CLAUDE.md), so this was the rare
+-- path by which an unauthenticated caller could learn anything about a private
+-- list. It is a small leak — a boolean, about a uuid you would have to already
+-- possess — but it is one the public form's own design says should not exist.
+--
+-- ⚠️ THE FUNCTION IS NOW ORPHANED and is deliberately NOT dropped. P12-14
+-- replaced its only caller with a set membership test, so nothing in the
+-- migrations or the app references it. Dropping a function that a live policy
+-- might still be holding a reference to is how a query fails at run time; the
+-- cost of leaving it is one unused row in `pg_proc`.
+--
+-- `service_role` is unaffected: `20260804110000_p4_function_grants.sql` set
+-- `alter default privileges … grant execute on functions to service_role`, and
+-- this function was created after it, so it holds an explicit grant that a
+-- revoke from PUBLIC cannot touch.
+-- ---------------------------------------------------------------------------
+
+revoke all on function vizserve_pms_list_is_personal(uuid) from public, anon;
+grant execute on function vizserve_pms_list_is_personal(uuid) to authenticated;
