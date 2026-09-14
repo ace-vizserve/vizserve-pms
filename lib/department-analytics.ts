@@ -267,16 +267,17 @@ export function summariseWorkload({
      * person on it. The samples are never mutated after this, so three people
      * on one task cost three pointers rather than three copies.
      */
-    const days = task.due_date ? daysBetween(today, task.due_date) : null;
     const stage = stageOf(task);
     const sample: StageSample = {
       id: task.id,
       title: task.title,
       dueDate: task.due_date,
-      // The same rule `tally` uses: finished work is never late, however it
-      // landed. A panel calling a delivered task overdue would contradict the
-      // red figure beside the ring.
-      overdue: !isTerminal(task.status) && days !== null && days < 0,
+      // ⚠️ THE SHARED RULE, NOT A RESTATEMENT OF IT. Finished work is never
+      // late however it landed, and a panel calling a delivered task overdue
+      // would contradict the red figure beside the ring. This read the rule
+      // inline until P12-02 — see `isTaskOverdue`, which is what `tally` above
+      // and every other screen now ask.
+      overdue: isTaskOverdue(task, today),
     };
     sampleFor(task.department_id)[stage].push(sample);
 
