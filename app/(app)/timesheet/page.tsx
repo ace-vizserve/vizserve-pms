@@ -18,7 +18,7 @@ import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { loadLoggableTaskLists, loadLoggableTasks } from "@/lib/timesheet-tasks-server";
 import { buttonVariants } from "@/components/ui/button";
-import { WeekGrid, type TaskRow } from "./week-grid";
+import { WeekGrid, type PickableTask, type TaskRow } from "./week-grid";
 import { WeekStatusBar, type WeekState } from "./week-status-bar";
 
 export const metadata: Metadata = { title: "Timesheet" };
@@ -58,6 +58,18 @@ export default async function TimesheetPage({
   const days = weekDates(monday);
   const sunday = days[6];
 
+  /*
+   * P6-02b — last week's bounds, computed HERE rather than beside the other week
+   * arithmetic further down, because the "Last week's tasks" shortcut reads that
+   * week inside the same batch below.
+   *
+   * The `!` is safe for the reason the one on `startOfWeek` above is: `monday`
+   * came out of `startOfWeek`, so it is a real date and `addDays` cannot fail
+   * on it.
+   */
+  const lastMonday = addDays(monday, -7)!;
+  const lastSunday = addDays(monday, -1)!;
+
   const [
     entriesResult,
     loggable,
@@ -67,6 +79,7 @@ export default async function TimesheetPage({
     departmentsResult,
     listsResult,
     schedule,
+    lastWeekResult,
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_timesheet_entries")
@@ -186,6 +199,35 @@ export default async function TimesheetPage({
      * the five above instead of after them.
      */
     loadScheduledWeek(context.userId, days),
+
+    /*
+     * P6-02b — WHAT THIS PERSON WORKED ON LAST WEEK, for the shortcut that puts
+     * those same tasks back on this one.
+     *
+     * ⚠️ THE TASKS, NOT THE HOURS, and the shortcut is built that way on
+     * purpose: it adds empty ROWS — the same thing "Add task" adds — so nothing
+     * reaches the database until somebody types a duration. Copying the minutes
+     * across would have this screen inventing hours for a week nobody has
+     * worked yet, on the one screen where every number is a claim somebody
+     * signs.
+     *
+     * A LEFT embed for the same reason the current week's read has one, but it
+     * costs something different here. There, a task that has moved out of this
+     * person's scope keeps its row and loses its name. Here it loses the OFFER:
+     * a task they can no longer read is one `vizserve_pms_may_log_time` will no
+     * longer accept, so it is dropped below rather than offered as a row every
+     * keystroke would be refused on.
+     *
+     * A failed read costs the shortcut and nothing else — no banner, because a
+     * missing shortcut states nothing false, and "Add task" still reaches every
+     * one of these tasks by name.
+     */
+    supabase
+      .from("vizserve_pms_timesheet_entries")
+      .select("task_id, vizserve_pms_tasks(title, status, list_id, department_id)")
+      .eq("user_id", context.userId)
+      .gte("work_date", lastMonday)
+      .lte("work_date", lastSunday),
   ]);
 
   /**
@@ -215,6 +257,27 @@ export default async function TimesheetPage({
     (departmentsResult.data ?? []).map((row) => [row.id, row.name]),
   );
   const listName = new Map((listsResult.data ?? []).map((row) => [row.id, row.name]));
+
+  /**
+   * "Department / List" for a task, from the two reference reads above.
+   *
+   * ONE IMPLEMENTATION, TWO CALLERS — this week's rows and last week's shortcut.
+   * The location line under a task name reading one way in the grid and another
+   * in the control that adds it is the kind of difference nobody reports and
+   * everybody notices.
+   *
+   * An id whose name did not come back DROPS OUT rather than rendering as a
+   * uuid: both reference reads are policy-scoped, so a missing name means "not
+   * yours to read".
+   */
+  function whereOf(task: { department_id: string | null; list_id: string | null } | null): string {
+    return [
+      task?.department_id ? departmentName.get(task.department_id) : null,
+      task?.list_id ? listName.get(task.list_id) : null,
+    ]
+      .filter(Boolean)
+      .join(" / ");
+  }
 
   /*
    * The List filter's options, named and sorted.
@@ -282,16 +345,7 @@ export default async function TimesheetPage({
         // Null for the same reason the title is: the task moved out of scope.
         // The row still carries its hours; it just cannot say what they were for.
         status: (entry.vizserve_pms_tasks?.status ?? null) as TaskRow["status"],
-        where: [
-          entry.vizserve_pms_tasks?.department_id
-            ? departmentName.get(entry.vizserve_pms_tasks.department_id)
-            : null,
-          entry.vizserve_pms_tasks?.list_id
-            ? listName.get(entry.vizserve_pms_tasks.list_id)
-            : null,
-        ]
-          .filter(Boolean)
-          .join(" / "),
+        where: whereOf(entry.vizserve_pms_tasks),
         // Marks the row, nothing more. An hour spent on something since
         // completed is still an hour that was spent, and the picker offers
         // finished tasks too — see `loggableTasks`.
@@ -315,6 +369,43 @@ export default async function TimesheetPage({
   // Alphabetical. The alternative — first-logged-first — reorders the grid under
   // the cursor as soon as somebody fills a cell on a row that had none.
   const taskRows = [...rows.values()].sort((a, b) => a.title.localeCompare(b.title));
+
+  /**
+   * P6-02b — last week's tasks, one entry each, for the shortcut in the grid.
+   *
+   * A task appears ONCE however many days it ran, which is the same collapse the
+   * grid does above: the shortcut adds rows, and a row is a task, not an entry.
+   *
+   * Tasks already on THIS week are deliberately not filtered out here. The grid
+   * also holds the empty rows somebody added by hand — they live in
+   * sessionStorage, which this file cannot see — so a filter applied here would
+   * be applied against half the picture. The grid does it, where the whole
+   * picture is.
+   */
+  type LastWeekEntry = { task_id: string; vizserve_pms_tasks: Entry["vizserve_pms_tasks"] };
+
+  const lastWeekTasks: PickableTask[] = [
+    ...new Map(
+      ((lastWeekResult.data ?? []) as unknown as LastWeekEntry[]).flatMap((entry) => {
+        const task = entry.vizserve_pms_tasks;
+        // Dropped rather than named — see the read. A task this person can no
+        // longer see is one they can no longer log against.
+        if (!task) return [];
+
+        return [
+          [
+            entry.task_id,
+            {
+              id: entry.task_id,
+              title: task.title,
+              status: task.status as PickableTask["status"],
+              where: whereOf(task),
+            },
+          ] as const,
+        ];
+      }),
+    ).values(),
+  ].sort((a, b) => a.title.localeCompare(b.title));
 
   const weekRow = weekResult.data;
   const week: WeekState = weekRow
@@ -506,6 +597,8 @@ export default async function TimesheetPage({
           // both — which is the whole "unlock when sent back" mechanism.
           locked={isWeekLocked(week?.status ?? null)}
           overtimeApprovals={overtimeApprovals}
+          // P6-02b. Offered as empty rows, never as hours — see the read above.
+          previousWeekTasks={lastWeekTasks}
         />
       )}
     </PageShell>

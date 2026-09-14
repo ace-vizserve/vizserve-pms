@@ -2,10 +2,15 @@
 
 import { toast } from "@/components/ui/toast";
 import {
+  ArrowDown,
+  ArrowDownToLine,
+  ArrowUp,
+  ArrowUpToLine,
   CalendarDays,
   Check,
   ChevronRight,
   Clock,
+  CopyPlus,
   Filter,
   FolderInput,
   MoreHorizontal,
@@ -40,6 +45,13 @@ import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate, formatDuration, formatWeekday } from "@/lib/dates";
 import { isTerminal } from "@/lib/schemas/tasks";
 import {
+  orderRows,
+  parseRowOrder,
+  planRowDrop,
+  planRowMove,
+  type RowMove,
+} from "@/lib/timesheet-row-order";
+import {
   type CellCommit,
   type DayState,
   type EntryDraft,
@@ -65,6 +77,7 @@ import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
 import { CellDetail } from "./cell-detail";
 import { ClockSelect, clockLabel, normaliseClock } from "./clock-select";
 import { DurationSuggestion } from "./duration-suggestion";
+import { RowDndProvider, RowGrip, SortableRow } from "./row-dnd";
 
 export type PickableTask = {
   id: string;
@@ -138,12 +151,20 @@ function sum(entries: CellEntry[] | undefined): number {
 
 const NO_ROWS: PickableTask[] = [];
 const rowCache = new Map<string, PickableTask[]>();
-const rowListeners = new Set<() => void>();
 
-function subscribeToRows(onChange: () => void) {
-  rowListeners.add(onChange);
+/**
+ * ONE NOTIFIER FOR BOTH STORES — the empty rows here and the row order below.
+ *
+ * Both are read by the same component, so a listener woken by the other store's
+ * write costs one render of a grid that was about to render anyway. Two sets
+ * would be two chances to forget one.
+ */
+const storeListeners = new Set<() => void>();
+
+function subscribeToStores(onChange: () => void) {
+  storeListeners.add(onChange);
   return () => {
-    rowListeners.delete(onChange);
+    storeListeners.delete(onChange);
   };
 }
 
@@ -186,7 +207,61 @@ function writeRows(key: string, rows: PickableTask[]) {
     // Quota or a blocked store. The cache above still holds it for this visit.
   }
 
-  for (const onChange of rowListeners) onChange();
+  for (const onChange of storeListeners) onChange();
+}
+
+// ---------------------------------------------------------------------------
+// P6-02c — WHAT ORDER THE ROWS SIT IN, kept in localStorage.
+//
+// The rules are in `lib/timesheet-row-order.ts`; this is only where they are
+// kept. Same store shape as the empty rows above — a module cache so
+// `getSnapshot` returns the same array between notifications, and every access
+// wrapped.
+//
+// ⚠️ localStorage, NOT sessionStorage, and the difference is deliberate. An
+// empty row is a half-finished action and a tab is as long as it needs to
+// survive. An arrangement is a PREFERENCE, like the columns menu (P7-65):
+// re-dragging it every morning is the feature failing rather than working.
+//
+// ⚠️ READING CAN THROW. It is not merely empty in a private window — site data
+// blocked and some embedded webviews raise instead, and an unguarded read would
+// take the week down with it. Somebody who cannot store a preference gets the
+// alphabetical default, which is what everybody had before this existed.
+// ---------------------------------------------------------------------------
+
+const NO_ORDER: string[] = [];
+const orderCache = new Map<string, string[]>();
+
+function readOrder(key: string): string[] {
+  const cached = orderCache.get(key);
+  if (cached) return cached;
+
+  let order: string[] = NO_ORDER;
+
+  try {
+    const stored = parseRowOrder(window.localStorage.getItem(key));
+    // The constant when there is nothing, so the snapshot is referentially
+    // stable across renders — a fresh `[]` each time is a render loop.
+    if (stored.length > 0) order = stored;
+  } catch {
+    // See above. The week still reads, alphabetically.
+  }
+
+  orderCache.set(key, order);
+  return order;
+}
+
+function writeOrder(key: string, order: string[]) {
+  orderCache.set(key, order);
+
+  try {
+    window.localStorage.setItem(key, JSON.stringify(order));
+  } catch {
+    // Quota or a blocked store. The cache above still holds it for this visit,
+    // and a preference that cannot be saved is not worth a toast.
+  }
+
+  for (const onChange of storeListeners) onChange();
 }
 
 /**
@@ -213,6 +288,7 @@ export function WeekGrid({
   taskLists,
   locked,
   overtimeApprovals = {},
+  previousWeekTasks = [],
 }: {
   monday: string;
   days: string[];
@@ -253,12 +329,25 @@ export function WeekGrid({
    * approved overtime is capped at 960 so `480 + approved` can never exceed it.
    */
   overtimeApprovals?: Record<string, OvertimeApproval[]>;
+  /**
+   * P6-02b — the tasks this person logged against LAST week, for the shortcut
+   * beside "Add task".
+   *
+   * ⚠️ TASKS, NOT HOURS, and that is the whole design of the shortcut. It adds
+   * empty rows through the same sessionStorage list the picker writes to, so
+   * pressing it writes nothing anywhere: the week gains somewhere to type, not
+   * hours nobody has worked. See the read in `page.tsx`.
+   *
+   * Not filtered against this week by the server — it cannot see the empty rows
+   * held here — so `copyable` below does it.
+   */
+  previousWeekTasks?: PickableTask[];
 }) {
   // The week is in the key, so navigating to another week reads that week's
   // rows rather than carrying this week's across.
   const storageKey = `vizserve-pms:timesheet-rows:v2:${monday}`;
   const extraTasks = useSyncExternalStore(
-    subscribeToRows,
+    subscribeToStores,
     () => readRows(storageKey),
     // The server has no sessionStorage. A constant here is what makes the first
     // paint and the hydrated render agree instead of mismatching.
@@ -266,6 +355,23 @@ export function WeekGrid({
   );
 
   const remember = useCallback((next: PickableTask[]) => writeRows(storageKey, next), [storageKey]);
+
+  /*
+   * P6-02c — this week's arrangement.
+   *
+   * The week is in the key, like the rows' key above: an order dragged on one
+   * week is not a claim about another. Empty is the ordinary state and means
+   * alphabetical, which is what the grid did before anybody could drag anything.
+   */
+  const orderKey = `vizserve-pms:timesheet-order:v1:${monday}`;
+  const rowOrder = useSyncExternalStore(
+    subscribeToStores,
+    () => readOrder(orderKey),
+    // The server has no localStorage: alphabetical on both sides of hydration.
+    () => NO_ORDER,
+  );
+
+  const rememberOrder = useCallback((next: string[]) => writeOrder(orderKey, next), [orderKey]);
 
   const logged = new Set(rows.map((row) => row.taskId));
 
@@ -296,12 +402,55 @@ export function WeekGrid({
       cells: {},
     }));
 
-  // Sorted as one list rather than logged-rows-then-added-rows. An added row put
-  // at the bottom would leap into alphabetical position the moment its first
-  // cell was filled — under the cursor that filled it, because that is when the
-  // server starts returning it.
-  const allRows = [...rows, ...extraRows].sort((a, b) => a.title.localeCompare(b.title));
+  /*
+   * ONE LIST, in whatever order this person put it in.
+   *
+   * Ordered as one list rather than logged-rows-then-added-rows: an added row
+   * put at the bottom would leap into position the moment its first cell was
+   * filled — under the cursor that filled it, because that is when the server
+   * starts returning it.
+   *
+   * `orderRows` falls back to alphabetical for every row the stored order does
+   * not name, and for the whole week when nothing is stored, so an untouched
+   * week reads exactly as it did before P6-02c.
+   */
+  const allRows = orderRows([...rows, ...extraRows], rowOrder);
+
+  /**
+   * The ids as they are on screen — what both move paths are planned against.
+   *
+   * ⚠️ THE VISIBLE ORDER, NOT THE STORED ONE. On the first drag nothing is
+   * stored, so planning against storage would save a single id and leave every
+   * other row falling back to alphabetical underneath it. Passing what is on
+   * screen makes the first move capture the arrangement it was applied to.
+   */
+  const visibleIds = allRows.map((row) => row.taskId);
+
+  /** A row dropped on another. Same planner as the menu — see `row-dnd.tsx`. */
+  const dropRow = (activeId: string, overId: string) =>
+    rememberOrder(planRowDrop(visibleIds, activeId, overId));
+
+  /** The same move without a pointer. WCAG 2.2 AA 2.1.1 and 2.5.7. */
+  const moveRow = (taskId: string, move: RowMove) =>
+    rememberOrder(planRowMove(visibleIds, taskId, move));
   const pickable = tasks.filter((task) => !logged.has(task.id) && !extraTaskIds.includes(task.id));
+
+  /**
+   * P6-02b — what "Last week's tasks" would actually add.
+   *
+   * Filtered against BOTH halves of what is on this week: the rows the server
+   * returned because they carry hours, and the empty rows sitting in
+   * sessionStorage. Pressing the shortcut twice therefore adds nothing the
+   * second time rather than a duplicate row — and `writeRows` dedupes behind it
+   * anyway, because one task with two rows writing into the same cell is not a
+   * state worth trusting a caller to avoid.
+   *
+   * Empty is the ordinary state, not a failure: a first week, a week off, or a
+   * week already fully copied across. The control simply is not rendered.
+   */
+  const copyable = previousWeekTasks.filter(
+    (task) => !logged.has(task.id) && !extraTaskIds.includes(task.id),
+  );
 
   /*
    * P11-05 — THE CELL'S OPTIMISTIC MINUTES LIVE HERE, NOT IN THE CELL.
@@ -477,6 +626,18 @@ export function WeekGrid({
       {/* The grid is 8 columns wide before it is readable, so it scrolls inside
           its own box rather than pushing the page sideways. */}
       <div className="overflow-x-auto">
+        {/*
+          P6-02c — the drag context, around the whole table.
+
+          `onDragStart` closes every expanded row. The working underneath a task
+          is its own set of `<tr>`s that the sortable row knows nothing about, so
+          a row dragged while one is open would slide out from over its own
+          entries and leave them behind under whatever landed there.
+        */}
+        <RowDndProvider
+          itemIds={visibleIds}
+          onDrop={dropRow}
+          onDragStart={() => setExpanded(new Set())}>
         <table className="w-full min-w-232 border-collapse text-sm">
           <caption className="sr-only">
             Time logged per task per day, for the week beginning {formatDate(monday)}
@@ -487,7 +648,23 @@ export function WeekGrid({
               <th
                 scope="col"
                 className="sticky left-0 z-10 bg-card px-3 py-2 text-left text-xs font-medium text-muted-foreground">
-                Task
+                <span className="flex items-center justify-between gap-2">
+                  Task
+                  {/* P6-02c — THE WAY BACK. Once a week has been arranged by
+                      hand there is otherwise no route to alphabetical again, and
+                      an arrangement somebody has forgotten making is one they
+                      read as the grid sorting at random. Shown only when there
+                      is something to undo. */}
+                  {rowOrder.length > 0 ? (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="-my-1 h-6 px-1.5 text-2xs font-normal"
+                      onClick={() => rememberOrder([])}>
+                      Reset order
+                    </Button>
+                  ) : null}
+                </span>
               </th>
 
               {days.map((day) => (
@@ -547,7 +724,7 @@ export function WeekGrid({
           </thead>
 
           <tbody>
-            {allRows.map((row) => {
+            {allRows.map((row, index) => {
               /*
                * Every entry on the row, in the order the week runs.
                *
@@ -567,7 +744,7 @@ export function WeekGrid({
 
               return (
                 <Fragment key={row.taskId}>
-                  <tr className="border-b">
+                  <SortableRow id={row.taskId} className="border-b">
                     {/*
                   `max-w-0` is what makes a table cell truncate at all; the
                   percentage is what stops it eating the week.
@@ -583,6 +760,16 @@ export function WeekGrid({
                       scope="row"
                       className="sticky left-0 z-10 w-[34%] max-w-0 bg-card px-3 py-2 text-left font-normal">
                       <span className="flex items-center gap-1.5">
+                        {/* P6-02c — the grip.
+
+                        Only from the second row onwards: a week with one task in
+                        it has one possible order, and a handle that cannot change
+                        anything is a control that looks broken. The menu at the
+                        other end of the row is held back on the same count. */}
+                        {allRows.length > 1 ? (
+                          <RowGrip label={`Reorder ${row.title}`} className="-ml-2" />
+                        ) : null}
+
                         {/* The way into the row's working. A row with nothing on it
                         keeps the space rather than the control, so every title
                         in the column still starts at the same pixel. */}
@@ -646,6 +833,22 @@ export function WeekGrid({
                             <span className="sr-only">Take {row.title} off this week</span>
                           </Button>
                         ) : null}
+
+                        {/* ⚠️ DRAG IS AN ENHANCEMENT, NEVER THE ONLY PATH — WCAG
+                        2.2 AA 2.1.1, and 2.5.7 on dragging movements, the same
+                        rule the form builder's rail follows. This does the whole
+                        job with a keyboard, with a screen reader, and for anybody
+                        whose pointer cannot hold a button down and travel at the
+                        same time. It is also the path the rule underneath is
+                        tested through. */}
+                        {allRows.length > 1 ? (
+                          <RowOrderMenu
+                            title={row.title}
+                            index={index}
+                            count={allRows.length}
+                            onMove={(move) => moveRow(row.taskId, move)}
+                          />
+                        ) : null}
                       </span>
                     </th>
 
@@ -669,7 +872,7 @@ export function WeekGrid({
                     <td className="border-l px-2 py-1.5 text-right text-sm font-medium tabular-nums">
                       {rowTotal(row) > 0 ? formatCellDuration(rowTotal(row)) : "—"}
                     </td>
-                  </tr>
+                  </SortableRow>
 
                   {/*
                 THE WORKING, ONE ROW PER ENTRY.
@@ -722,18 +925,38 @@ export function WeekGrid({
             {locked ? null : (
               <tr className="border-b last:border-b-0">
                 <th scope="row" className="sticky left-0 z-10 bg-card px-3 py-1.5 text-left">
-                  <AddTaskRow
-                    tasks={pickable}
-                    taskLists={taskLists}
-                    // Search results come from the server and know nothing about
-                    // this week, so the exclusion has to travel with them.
-                    excludeIds={[...logged, ...extraTaskIds]}
-                    today={today}
-                    // THE TASK, not its id. Search results never reach this
-                    // component, so an id alone is a row it cannot build.
-                    onAdd={(task) => remember([...extraTasks, task])}
-                    hasRows={allRows.length > 0}
-                  />
+                  {/* Two controls, one row. Wrapping rather than scrolling,
+                      because this cell is the sticky first column and a control
+                      pushed out of it is one nobody can reach. */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <AddTaskRow
+                      tasks={pickable}
+                      taskLists={taskLists}
+                      // Search results come from the server and know nothing about
+                      // this week, so the exclusion has to travel with them.
+                      excludeIds={[...logged, ...extraTaskIds]}
+                      today={today}
+                      // THE TASK, not its id. Search results never reach this
+                      // component, so an id alone is a row it cannot build.
+                      onAdd={(task) => remember([...extraTasks, task])}
+                      hasRows={allRows.length > 0}
+                    />
+
+                    {/*
+                      P6-02b — last week, in one press.
+
+                      Held back in exactly the case the picker calls a dead end —
+                      `tasks.length === 0 && !hasRows`, where AddTaskRow replaces
+                      itself with "you are not on any task yet". Somebody in that
+                      state may well have logged hours last week and been taken off
+                      those tasks since; offering to add rows they can no longer
+                      log against would contradict the sentence next to it and hand
+                      them a row that refuses every keystroke.
+                    */}
+                    {copyable.length > 0 && (pickable.length > 0 || allRows.length > 0) ? (
+                      <CopyLastWeek tasks={copyable} onCopy={(added) => remember([...extraTasks, ...added])} />
+                    ) : null}
+                  </div>
                 </th>
                 <td colSpan={days.length + 1} />
               </tr>
@@ -802,6 +1025,7 @@ export function WeekGrid({
             </tr>
           </tfoot>
         </table>
+        </RowDndProvider>
       </div>
 
       <p className="border-t px-3 py-2 text-xs text-muted-foreground">
@@ -1530,6 +1754,121 @@ function TimeCell({
         />
       )}
     </td>
+  );
+}
+
+/**
+ * P6-02c — move a row without dragging it.
+ *
+ * Four commands rather than two: "up" is the one anybody wants at the top of a
+ * long week, and "to top" is the one they want at the bottom of it — pressing
+ * Move up eleven times is a way of saying the menu is missing an item.
+ *
+ * ⚠️ DISABLED AT THE EDGES, NOT HIDDEN. The columns menu omits what it will
+ * never list, which is a different thing: a column somebody may never use is not
+ * a control, but Move up on the top row is a control that is temporarily spent —
+ * and a menu whose items move around between rows is one nobody can build a
+ * habit with. `planRowMove` refuses the same moves anyway; this is the first
+ * guard, not the only one.
+ */
+function RowOrderMenu({
+  title,
+  index,
+  count,
+  onMove,
+}: {
+  title: string;
+  /** Where this row is right now, and how many there are. */
+  index: number;
+  count: number;
+  onMove: (move: RowMove) => void;
+}) {
+  const first = index === 0;
+  const last = index === count - 1;
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button variant="ghost" size="icon-xs" className="shrink-0">
+            <MoreHorizontal />
+            {/* The position is said out loud, because it is what the menu is
+                about and a screen reader has no column to see it in. */}
+            <span className="sr-only">
+              Move {title}, row {index + 1} of {count}
+            </span>
+          </Button>
+        }
+      />
+
+      <DropdownMenuContent align="end" className="w-44">
+        <DropdownMenuItem disabled={first} onClick={() => onMove("top")}>
+          <ArrowUpToLine />
+          Move to top
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={first} onClick={() => onMove("up")}>
+          <ArrowUp />
+          Move up
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={last} onClick={() => onMove("down")}>
+          <ArrowDown />
+          Move down
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={last} onClick={() => onMove("bottom")}>
+          <ArrowDownToLine />
+          Move to bottom
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/**
+ * P6-02b — "Last week's tasks", beside "Add task".
+ *
+ * Most weeks are mostly last week. The picker could reach every one of these
+ * tasks already, but it took a press, a scroll and a decision per row to say
+ * something the week itself already knew — so the first thing anybody did on a
+ * Monday was re-answer a question with last Monday's answer.
+ *
+ * ⚠️ IT ADDS ROWS, NOT HOURS. Everything it adds goes into the same
+ * sessionStorage list the picker writes to, so nothing reaches the database
+ * until a duration is typed into a cell. A shortcut that copied last week's
+ * MINUTES would be this screen filling in a timesheet on somebody's behalf and
+ * then asking them to sign it; the rows are the part that was tedious, and the
+ * numbers are the part that has to be true.
+ *
+ * The count is on the button because the press is otherwise unpredictable —
+ * "adds some rows" is not something to commit to before seeing it — and the
+ * toast says the other half: that nothing has been logged.
+ */
+function CopyLastWeek({
+  tasks,
+  onCopy,
+}: {
+  /** Already filtered to what is not on this week — see `copyable`. */
+  tasks: PickableTask[];
+  onCopy: (tasks: PickableTask[]) => void;
+}) {
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      onClick={() => {
+        onCopy(tasks);
+        toast.success(`${tasks.length} task${tasks.length === 1 ? "" : "s"} from last week added to this week.`, {
+          // The whole point of the shortcut, said once where it cannot be
+          // missed: these are empty rows. Nobody should leave this press
+          // believing their week is filled in.
+          description: "Empty rows — nothing is logged until you type the hours.",
+        });
+      }}>
+      <CopyPlus />
+      Last week&rsquo;s tasks
+      {/* The number is part of the label, not decoration, so it is not hidden
+          from assistive tech — "Last week's tasks, 6" is the button. */}
+      <span className="tabular-nums text-muted-foreground">{tasks.length}</span>
+    </Button>
   );
 }
 
