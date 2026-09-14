@@ -264,6 +264,56 @@ function writeOrder(key: string, order: string[]) {
   for (const onChange of storeListeners) onChange();
 }
 
+// ---------------------------------------------------------------------------
+// P6-02b — WHETHER "LAST WEEK'S TASKS" HAS ALREADY BEEN PRESSED ON THIS WEEK.
+//
+// `copyable` empties itself the moment the rows land, so the button goes on its
+// own. It came BACK, though, the moment one of those rows was taken off again
+// with the × — offering, on its own, the one task somebody had just said they
+// did not want this week. A shortcut that argues with you is worse than no
+// shortcut, so pressing it retires it: the week has been offered last week's
+// tasks, and that offer is not made twice.
+//
+// Everything it can still do is a press away in Add task, which reaches every
+// one of those tasks by name.
+//
+// ⚠️ sessionStorage, beside the ROWS it describes rather than in localStorage
+// with the order. The rows die with the tab; a flag that outlived them would
+// silence the shortcut on a week that no longer has any of it. A fresh tab gets
+// neither, which is the right answer to both questions at once.
+// ---------------------------------------------------------------------------
+
+const copiedCache = new Map<string, boolean>();
+
+function readCopied(key: string): boolean {
+  const cached = copiedCache.get(key);
+  if (cached !== undefined) return cached;
+
+  let copied = false;
+
+  try {
+    copied = window.sessionStorage.getItem(key) === "1";
+  } catch {
+    // A blocked store. The button stays offered, which is the old behaviour
+    // rather than a broken one.
+  }
+
+  copiedCache.set(key, copied);
+  return copied;
+}
+
+function writeCopied(key: string) {
+  copiedCache.set(key, true);
+
+  try {
+    window.sessionStorage.setItem(key, "1");
+  } catch {
+    // The cache above still holds it for this visit.
+  }
+
+  for (const onChange of storeListeners) onChange();
+}
+
 /**
  * P6-02 / P6-03 — the week, as a grid.
  *
@@ -339,7 +389,8 @@ export function WeekGrid({
    * hours nobody has worked. See the read in `page.tsx`.
    *
    * Not filtered against this week by the server — it cannot see the empty rows
-   * held here — so `copyable` below does it.
+   * held here — so `copyable` below does it. The offer is also made ONCE per
+   * week per tab: see `readCopied`.
    */
   previousWeekTasks?: PickableTask[];
 }) {
@@ -372,6 +423,21 @@ export function WeekGrid({
   );
 
   const rememberOrder = useCallback((next: string[]) => writeOrder(orderKey, next), [orderKey]);
+
+  /*
+   * P6-02b — has this week already been offered last week's tasks?
+   *
+   * A primitive, so the snapshot is stable by construction and needs no cached
+   * array the way the two stores above do.
+   */
+  const copiedKey = `vizserve-pms:timesheet-copied:v1:${monday}`;
+  const alreadyCopied = useSyncExternalStore(
+    subscribeToStores,
+    () => readCopied(copiedKey),
+    // The server has no sessionStorage: the button renders, then hydration
+    // takes it away on a week that has had it.
+    () => false,
+  );
 
   const logged = new Set(rows.map((row) => row.taskId));
 
@@ -451,6 +517,17 @@ export function WeekGrid({
   const copyable = previousWeekTasks.filter(
     (task) => !logged.has(task.id) && !extraTaskIds.includes(task.id),
   );
+
+  /**
+   * The press: the rows, and the flag that stops the offer being made again.
+   *
+   * Both in one place, because they are one action. Two writes means two
+   * notifications and two renders of a grid that was rendering anyway.
+   */
+  const copyLastWeek = (added: PickableTask[]) => {
+    remember([...extraTasks, ...added]);
+    writeCopied(copiedKey);
+  };
 
   /*
    * P11-05 — THE CELL'S OPTIMISTIC MINUTES LIVE HERE, NOT IN THE CELL.
@@ -953,8 +1030,8 @@ export function WeekGrid({
                       log against would contradict the sentence next to it and hand
                       them a row that refuses every keystroke.
                     */}
-                    {copyable.length > 0 && (pickable.length > 0 || allRows.length > 0) ? (
-                      <CopyLastWeek tasks={copyable} onCopy={(added) => remember([...extraTasks, ...added])} />
+                    {!alreadyCopied && copyable.length > 0 && (pickable.length > 0 || allRows.length > 0) ? (
+                      <CopyLastWeek tasks={copyable} onCopy={copyLastWeek} />
                     ) : null}
                   </div>
                 </th>
