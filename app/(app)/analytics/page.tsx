@@ -31,11 +31,22 @@ export const metadata: Metadata = { title: "Department analytics" };
 const PAGE = 1000;
 
 /**
- * A join row as the embedded read returns it. The nested task is not wanted —
- * it is selected only so PostgREST will accept a filter on it — so it is typed
- * loosely here and dropped the moment the rows arrive.
+ * How many task ids go into one `.in(...)`.
+ *
+ * TWO CEILINGS, AND THIS SITS UNDER BOTH. `lib/reports-server.ts` records the
+ * URL breaking at 444 ids; 100 uuids is about 3.7 KB of query string, nowhere
+ * near it. The lower ceiling is the one that actually bit: Postgres cancels a
+ * statement that runs too long, and the per-row cost here is an RLS policy
+ * calling a SECURITY DEFINER function. Splitting the work across statements
+ * keeps every one of them short, and they are fired together.
  */
-type AssignmentRow = WorkloadAssignment & { vizserve_pms_tasks: unknown };
+const ID_CHUNK = 100;
+
+function chunked<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let at = 0; at < items.length; at += size) chunks.push(items.slice(at, at + size));
+  return chunks;
+}
 
 /**
  * ⚠️ THE PAGES AFTER THE FIRST ARE FETCHED IN PARALLEL, not in a loop.
@@ -224,76 +235,69 @@ export default async function AnalyticsPage({
     );
   }
 
-  const [tasksResult, assignmentsResult, peopleResult] = await Promise.all([
-    inverted
-      ? Promise.resolve({ data: [] as WorkloadTask[], error: null })
-      : readAll<WorkloadTask>((offset, end) => {
-          let query = supabase
-            .from("vizserve_pms_tasks")
-            // `count` so `readAll` can fire the remaining pages at once.
-            .select("id, title, status, department_id, due_date, assignee_id", { count: "exact" })
-            .in("department_id", ids);
+  /*
+   * ⚠️ EVERY STATEMENT HERE IS DELIBERATELY SMALL, and that is a correctness
+   * requirement rather than a tuning preference. Production failed with
+   * `canceling statement due to statement timeout` on this page.
+   *
+   * The reason is not the row count on its own — it is what a row costs. Both
+   * policies in play call a SECURITY DEFINER function PER ROW:
+   *
+   *   vizserve_pms_tasks           ... manages_department(department_id)
+   *                                    or is_on_task(id, auth.uid())
+   *   vizserve_pms_task_assignees  ... is_on_task(task_id, auth.uid())
+   *                                    or exists(... manages_department ...)
+   *
+   * P9-06 measured that shape at about 0.44 ms a row before it was inlined, and
+   * Postgres cannot inline a definer function. One statement over four thousand
+   * tasks is therefore seconds of function calls, and it is killed before it
+   * returns anything at all.
+   *
+   * ⚠️ NONE OF THIS IS VISIBLE TO A SERVICE-ROLE PROBE. The service key bypasses
+   * policies, so the same queries measured in hundreds of milliseconds from a
+   * script while production was timing out. Anything measured about this page
+   * has to be measured as a real signed-in user or it is measuring nothing.
+   *
+   * So the reads are split along the dimensions that are already indexed —
+   * tasks by department, join rows by task id — and fired together. Same rows,
+   * same RLS, same answer; no single statement long enough to be cancelled.
+   *
+   * The durable fix is the one /reports already names: a SECURITY DEFINER
+   * aggregate scoped once through `vizserve_pms_approvable_department_ids()`,
+   * so the department test runs a handful of times instead of once per row.
+   * That is a migration and it has to re-state the P11-07/P11-08 personal-list
+   * privacy rules exactly, which is why it is not being done casually here.
+   */
+  const [taskPages, peopleResult] = await Promise.all([
+    // ONE STATEMENT PER DEPARTMENT rather than one `.in(...)` over all of them.
+    // `department_id` is indexed, so each is a short scan, and four short
+    // statements outrun one long one even before the timeout is considered.
+    Promise.all(
+      ids.map((departmentId) =>
+        inverted
+          ? Promise.resolve({ data: [] as WorkloadTask[], error: null })
+          : readAll<WorkloadTask>((offset, end) => {
+              let query = supabase
+                .from("vizserve_pms_tasks")
+                // `count` so `readAll` can fire the remaining pages at once.
+                .select("id, title, status, department_id, due_date, assignee_id", {
+                  count: "exact",
+                })
+                .eq("department_id", departmentId);
 
-          // Inclusive at both ends, and no timestamp arithmetic: `due_date` is
-          // a real DATE column, so the bare strings compare directly. A task
-          // with no due date matches neither and drops out of the period — the
-          // filter bar says so.
-          if (from) query = query.gte("due_date", from);
-          if (to) query = query.lte("due_date", to);
+              // Inclusive at both ends, and no timestamp arithmetic: `due_date`
+              // is a real DATE column, so the bare strings compare directly. A
+              // task with no due date matches neither and drops out of the
+              // period — the filter bar says so.
+              if (from) query = query.gte("due_date", from);
+              if (to) query = query.lte("due_date", to);
 
-          return (
-            query
               // A stable order, or paging can skip and repeat rows between
               // requests.
-              .order("id")
-              .range(offset, end)
-          );
-        }),
-
-    /*
-     * THE JOIN ROWS FOR THE TASKS ON SCREEN, narrowed in the QUERY through an
-     * `!inner` embed — the same filters the read above carries, pushed down to
-     * the same tables Postgres is already visiting.
-     *
-     * ⚠️ THIS READ USED TO IGNORE BOTH FILTERS, and that is what made narrowing
-     * the period feel slower than not narrowing it. It fetched every join row
-     * the viewer could read — the whole 3,888-row table, four sequential pages —
-     * and then threw away all but the handful belonging to the 35 tasks on
-     * screen. The cost did not move when a lead picked a department or a month,
-     * so the page had a fixed floor underneath every filter change. Worse, it is
-     * 3,888 rows of RLS policy evaluation to keep fifteen of them.
-     *
-     * The old comment gave two reasons for that, and neither survives:
-     *
-     *   "`.in(\"task_id\", ids)` breaks at 444 ids" — true, and `lib/reports-server.ts`
-     *   records it: the ids go in the URL and it exceeds the length limit. But
-     *   that argues against listing ids, not against filtering at all.
-     *
-     *   "an `!inner` embed is untyped" — not any more, and /reports has been
-     *   embedding `vizserve_pms_tasks!inner(department_id)` on the timesheet
-     *   table all along. The embed sends the FILTERS rather than the ids, so the
-     *   URL stays a fixed short length no matter how many tasks match.
-     *
-     * The embedded columns are discarded below; they are in the select only
-     * because PostgREST requires an embed to be selected before it can be
-     * filtered on.
-     */
-    inverted
-      ? Promise.resolve({ data: [] as AssignmentRow[], error: null })
-      : readAll<AssignmentRow>((offset, end) => {
-          let query = supabase
-            .from("vizserve_pms_task_assignees")
-            .select("task_id, user_id, vizserve_pms_tasks!inner(department_id, due_date)", {
-              count: "exact",
-            })
-            .in("vizserve_pms_tasks.department_id", ids);
-
-          if (from) query = query.gte("vizserve_pms_tasks.due_date", from);
-          if (to) query = query.lte("vizserve_pms_tasks.due_date", to);
-
-          // A stable order, or paging can skip and repeat rows between requests.
-          return query.order("task_id").order("user_id").range(offset, end);
-        }),
+              return query.order("id").range(offset, end);
+            }),
+      ),
+    ),
 
     // RLS scopes this to the departments the viewer leads (everybody, for an
     // owner). No `is_active` filter here: this doubles as the NAME lookup, and a
@@ -301,22 +305,51 @@ export default async function AnalyticsPage({
     supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
   ]);
 
-  const error = tasksResult.error ?? assignmentsResult.error ?? peopleResult.error;
+  const tasksResult = {
+    data: taskPages.flatMap((result) => result.data),
+    error: taskPages.find((result) => result.error)?.error ?? null,
+  };
 
-  // The embed is dropped on the way in: `summariseWorkload` wants two uuids a
-  // row and nothing else, and carrying the nested task into it would put a
-  // second copy of every task in memory.
-  const assignments: WorkloadAssignment[] = assignmentsResult.data.map((row) => ({
-    task_id: row.task_id,
-    user_id: row.user_id,
-  }));
+  /*
+   * THE JOIN ROWS FOR THE TASKS ON SCREEN, and nothing else.
+   *
+   * This read used to ignore both filters and scan the whole 3,888-row table to
+   * keep fifteen rows — a fixed floor under every filter change, and 3,888
+   * definer calls. Listing the task ids instead means the `(task_id, user_id)`
+   * key narrows FIRST and the policy only ever runs on rows that survive.
+   *
+   * ⚠️ NOT AN `!inner` EMBED, which is what this briefly was. An embed reads
+   * correctly and measures beautifully against a service key, but under RLS it
+   * makes a statement that evaluates BOTH tables' policies across the join —
+   * strictly more per-row work than the scan it replaced, in one statement that
+   * cannot be split. That version is what timed out in production.
+   *
+   * It has to wait for the tasks, so it is a second round trip rather than a
+   * third parallel one. That is the trade: one more hop, in exchange for a
+   * query whose cost is the size of what is on screen.
+   */
+  const assignmentChunks = await Promise.all(
+    chunked(
+      tasksResult.data.map((task) => task.id),
+      ID_CHUNK,
+    ).map((taskIds) =>
+      supabase.from("vizserve_pms_task_assignees").select("task_id, user_id").in("task_id", taskIds),
+    ),
+  );
+
+  const assignmentsResult = {
+    data: assignmentChunks.flatMap((chunk) => chunk.data ?? []) as WorkloadAssignment[],
+    error: assignmentChunks.find((chunk) => chunk.error)?.error ?? null,
+  };
+
+  const error = tasksResult.error ?? assignmentsResult.error ?? peopleResult.error;
 
   const people = peopleResult.data ?? [];
   const departmentName = new Map(departments.map((department) => [department.id, department.name]));
 
   const summary = summariseWorkload({
     tasks: tasksResult.data,
-    assignments,
+    assignments: assignmentsResult.data,
     // The roster — who gets a row with nothing on it — is ACTIVE people whose
     // home is one of the departments on screen.
     roster: people
