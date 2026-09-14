@@ -18,7 +18,13 @@ import { Monogram } from "../tasks/assignees";
  * sorting in the browser reorders the complete table.
  */
 
-export type AnalyticsRow = WorkloadRow & { departmentName: string | null };
+/**
+ * ⚠️ `samples` IS OMITTED, NOT FORGOTTEN. Every row here crosses to the browser
+ * as props, and this table renders counts — carrying four task titles per stage
+ * per person for a column that does not exist would pay the payload twice. The
+ * rings above the table get their own copies; the page drops it on the way in.
+ */
+export type AnalyticsRow = Omit<WorkloadRow, "samples"> & { departmentName: string | null };
 
 /** A dash rather than a zero — a column of zeroes hides the numbers in it. */
 const NONE = <span className="text-foreground-faint">—</span>;

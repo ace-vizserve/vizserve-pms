@@ -7,6 +7,7 @@ import {
   decimalHours,
   formatDate,
   formatDuration,
+  isDateOnly,
   isOverdue,
   parseDateOnly,
   toAppDateString,
@@ -265,5 +266,33 @@ describe("weeksSpanned — the Mondays a date range covers", () => {
 
   it("returns nothing for an unparseable date", () => {
     expect(weeksSpanned("banana", "2026-08-20")).toEqual([]);
+  });
+});
+
+
+/**
+ * The guard /analytics narrows its date range with. Pinned because the bug it
+ * replaces was invisible: a regex missing its backslashes matched nothing, so
+ * the filter quietly did nothing and every other check stayed green.
+ */
+describe("isDateOnly", () => {
+  it("accepts a bare YYYY-MM-DD", () => {
+    expect(isDateOnly("2026-09-14")).toBe(true);
+    expect(isDateOnly("2025-02-13")).toBe(true);
+  });
+
+  it("rejects the literal text a backslash-less regex would have matched", () => {
+    expect(isDateOnly("dddd-dd-dd")).toBe(false);
+  });
+
+  it("rejects anything that is not that shape", () => {
+    for (const value of ["", "banana", "2026-9-14", "26-09-14", "2026/09/14", "2026-09-14T00:00:00Z"]) {
+      expect(isDateOnly(value)).toBe(false);
+    }
+  });
+
+  it("rejects null and undefined rather than throwing", () => {
+    expect(isDateOnly(null)).toBe(false);
+    expect(isDateOnly(undefined)).toBe(false);
   });
 });

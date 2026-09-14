@@ -557,3 +557,26 @@ export function relativeDays(target: string | null | undefined): string {
   if (days > 1) return `in ${days} days`;
   return `${Math.abs(days)} days ago`;
 }
+
+
+/**
+ * Is this a bare `YYYY-MM-DD`, of the shape every date column and every zod
+ * schema in this repo accepts?
+ *
+ * For narrowing a URL parameter before it reaches Postgres as a date literal: a
+ * hand-edited `?from=banana` should render the default period, not a 500.
+ *
+ * ⚠️ IT EXISTS BECAUSE THE INLINE VERSION FAILED SILENTLY. /analytics shipped
+ * with `/^d{4}-d{2}-d{2}$/` — no backslashes — which matches the literal text
+ * "dddd-dd-dd" and therefore no date at all. Every range narrowed to "" and the
+ * filter did nothing, while typecheck, lint and 1,580 tests stayed green,
+ * because a wrong regex is still a regex. A page cannot test its own inline
+ * constant; this one has `tests/unit/dates.test.ts` behind it.
+ *
+ * SHAPE ONLY, NOT VALIDITY. "2026-02-31" passes here and `parseDateOnly` is
+ * what rejects it — this guards the string before it is interpolated, which is
+ * a different job from deciding whether the day exists.
+ */
+export function isDateOnly(value: string | null | undefined): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}

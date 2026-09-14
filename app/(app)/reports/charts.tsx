@@ -13,9 +13,16 @@ import { cn } from "@/lib/utils";
  * insists on. Both questions this page answers are magnitude-and-composition per
  * department — a category axis of at most a handful of departments and one
  * measure — so: horizontal bars, sorted by value, direct-labelled. Not a pie
- * (angles are unreadable at these counts), not a line (departments are not a
- * sequence), and no sparkline anywhere (change-over-time is P6-04's question and
- * P6-04 is explicitly out of this plan).
+ * (angles are unreadable when the job is RANKING departments against each
+ * other), not a line (departments are not a sequence), and no sparkline anywhere
+ * (change-over-time is P6-04's question and P6-04 is explicitly out of this plan).
+ *
+ * ⚠️ /analytics' `StageDonut` IS NOT A COUNTER-EXAMPLE TO THAT RULE, and it
+ * lives in its own file rather than here because it ships a hover layer and so
+ * must be a client component. It answers a different question: not "which
+ * department has the most" — which is what angles are bad at, and what
+ * `BarRow` is for — but "what is THIS department's work made of", one
+ * department at a time. It shares this file's three stage colours.
  *
  * NO DUAL AXIS anywhere on this page. Hours and task counts are two measures of
  * different scale, so they are two charts.
@@ -123,7 +130,7 @@ export function StageBar({
             [
               ["chart-1", notStarted],
               ["chart-2", active],
-              ["chart-3", done],
+              ["done", done],
             ] as const
           ).map(([tone, count], index) =>
             count === 0 ? null : (
@@ -170,7 +177,7 @@ export function StageLegend({
         [
           ["chart-1", "Not started", notStarted],
           ["chart-2", "Active", active],
-          ["chart-3", "Done", done],
+          ["done", "Done", done],
         ] as const
       ).map(([tone, label, count]) => (
         <span key={label} className="inline-flex items-center gap-1.5 text-2xs">
@@ -184,14 +191,23 @@ export function StageLegend({
 }
 
 /**
- * The categorical slots, ASSIGNED IN FIXED ORDER and never cycled.
+ * The fill for each slot.
  *
- * These are `--chart-1..3` from `app/globals.css`, which were re-stepped on
- * 19 Aug 2026 because the previous five failed four of the validator's five
- * checks — including the hard normal-vision floor. See the comment on the tokens.
+ * `chart-1..3` are the categorical slots from `app/globals.css`, ASSIGNED IN
+ * FIXED ORDER and never cycled — re-stepped on 19 Aug 2026 because the previous
+ * five failed four of the validator's five checks, including the hard
+ * normal-vision floor. See the comment on the tokens.
+ *
+ * `done` is NOT one of them. The stage bands are states rather than identities,
+ * and the house rule is that identity colours cannot carry state — so the
+ * finished band wears `--chart-done`, a green that says finished, measured as a
+ * series against both surfaces. `chart-3` survives only for `BarRow`'s third
+ * categorical slot, which really is an identity.
  */
 const TONE = {
   "chart-1": "bg-chart-1",
   "chart-2": "bg-chart-2",
   "chart-3": "bg-chart-3",
+  done: "bg-chart-done",
 } as const;
+

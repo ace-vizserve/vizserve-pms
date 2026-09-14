@@ -60,6 +60,8 @@
   --color-chart-3: var(--chart-3);
   --color-chart-2: var(--chart-2);
   --color-chart-1: var(--chart-1);
+  --color-chart-done: var(--chart-done);
+  --color-chart-overdue: var(--chart-overdue);
   --color-success: var(--success);
   --color-success-subtle: var(--success-subtle);
   --color-success-border: var(--success-border);
@@ -300,6 +302,36 @@
   --chart-4: #eda100;
   --chart-5: #e87ba4;
 
+  /* --- the two STAGE series that carry meaning ---------------------------
+     A stage chart is not a categorical one. "Completed" and "overdue" are
+     states, and the house rule is that identity colours cannot carry state —
+     so these two do not come from the numbered slots above, and the numbered
+     slots must never be reassigned to mean them.
+
+     WHY THEY ARE NOT JUST --success AND --destructive: a chart fill and a chip
+     label are measured against different things. Run through the dataviz
+     validator as a series against the surface it is drawn on, --success' dark
+     step (#4CB483) sits at L 0.696 against a band ceiling of 0.67, and
+     --destructive's (#E0736A) fails harder. These are the same hues re-stepped
+     to pass on BOTH surfaces, which is what the design system means by dark
+     mode being selected rather than flipped.
+
+     MEASURED, both themes, as a three-series stage palette
+     (--chart-1 · --chart-2 · --chart-done):
+       light  #4359A5 #EB6834 #1C7A52 — all five checks PASS; worst pair
+              green↔orange ΔE 7.0 (protan), which is the 6–8 floor band and is
+              legal ONLY because every slice is direct-labelled with its count.
+       dark   #6B83D0 #D95926 #199E70 — all five checks PASS outright; worst
+              pair ΔE 9.4 (deutan), normal-vision floor 19.9.
+
+     ⚠️ --chart-overdue IS NOT A SLICE AND MUST NOT BECOME ONE. Seated as a
+     fourth series beside the orange it measures ΔE 7.7 for NORMAL colour
+     vision in dark — two stages a full-colour reader cannot tell apart. It is
+     the colour of the overdue FIGURE, carried with the word "overdue" beside
+     it, never a band of a bar or an arc of a ring. */
+  --chart-done: #1c7a52;
+  --chart-overdue: #b3352c;
+
   /* The refresh sets radius=10px. */
   --radius: 0.625rem;
 
@@ -496,6 +528,10 @@
   --chart-3: #199e70;
   --chart-4: #c98500;
   --chart-5: #d55181;
+
+  /* Re-stepped for the dark surface, not flipped — see the light block. */
+  --chart-done: #199e70;
+  --chart-overdue: #e0736a;
 
   /* Depth, inverted. The highlight thins to a rim of light — a 0.9-alpha white
      edge on a dark face reads as a scratch, not a lit edge — and the shadows
