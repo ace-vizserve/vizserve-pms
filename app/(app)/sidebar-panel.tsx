@@ -1,3 +1,4 @@
+import { loadActiveDepartments, loadManagedDepartmentNames } from "@/lib/departments-server";
 import {
   canAdminDepartment,
   canDoHr,
@@ -118,24 +119,19 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
   // thing that decides the contents of every list they open, and is otherwise
   // invisible.
   //
-  // ⚠️ STILL CONDITIONAL, and it has to be. `.in("id", [])` is a filter that
-  // matches nothing, which is the trap written out at length above
-  // `departmentPickerScope` — a plain member leads nothing, so the query is not
-  // built at all and a plain `null` rides through the batch in its place.
-  const managedDepartmentsQuery =
-    context.managedDepartmentIds.length > 0
-      ? supabase
-          .from("vizserve_pms_departments")
-          .select("name")
-          .in("id", context.managedDepartmentIds)
-          .order("name")
-      : null;
+  // ⚠️ THE EMPTY-ID GUARD MOVED INTO THE LOADER, and it is still load-bearing.
+  // `.in("id", [])` is a filter that matches nothing — the trap written out at
+  // length above `departmentPickerScope` — so `loadManagedDepartmentNames`
+  // returns an empty array WITHOUT a query for a plain member, who leads
+  // nothing. The conditional that used to sit here did the same job in the one
+  // place that needed it; the loader does it for both callers.
+  const managedDepartmentsQuery = loadManagedDepartmentNames(context.managedDepartmentIds);
 
   const [
     managedDepartments,
     unread,
     { count: awaitingReview },
-    { data: departments },
+    departments,
     { data: lists },
     { data: groups },
     openTasks,
@@ -185,11 +181,11 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
      * cannot aggregate a related table and a per-list count would be an N+1 in the
      * SHELL — the one component on every single page in the app.
      */
-    supabase
-      .from("vizserve_pms_departments")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name"),
+    // Active only: the rail is a place to file new work, and a tree offering an
+    // archived department offers a queue nobody reads. `/tasks/lists` asks the
+    // same question through the same loader — this pair had already drifted
+    // once on ordering, see the note below.
+    loadActiveDepartments(),
     // `sort_order` first, to agree with /tasks/lists — which has always
     // ordered that way while this query silently did not.
     supabase
@@ -282,7 +278,7 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
       .order("name"),
   ]);
 
-  const departmentNames = (managedDepartments?.data ?? []).map((row) => row.name);
+  const departmentNames = managedDepartments;
 
   const countByList = openTasks;
 
@@ -304,7 +300,7 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
     pendingRequests: pendingByList.get(list.id) ?? 0,
   });
 
-  const spaces = (departments ?? [])
+  const spaces = departments
     .map((department) => {
       const own = (lists ?? []).filter((list) => list.department_id === department.id);
 

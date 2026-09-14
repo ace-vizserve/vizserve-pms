@@ -13,6 +13,7 @@ import {
 import { isTerminal } from "@/lib/schemas/tasks";
 import { isWeekLocked, type OvertimeApproval } from "@/lib/schemas/timesheet";
 import { loadScheduledWeek } from "@/lib/timesheet-schedule-server";
+import { loadDepartmentNames } from "@/lib/departments-server";
 import { loadApprovedOvertime } from "@/lib/overtime-server";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
@@ -176,7 +177,7 @@ export default async function TimesheetPage({
     // already a LEFT join guarding against a task that left this person's
     // scope, and nesting two more levels under it makes that guard harder to
     // read than the thing it is guarding.
-    supabase.from("vizserve_pms_departments").select("id, name"),
+    loadDepartmentNames(),
     supabase.from("vizserve_pms_lists").select("id, name"),
 
     /*
@@ -303,9 +304,7 @@ export default async function TimesheetPage({
     {},
   );
 
-  const departmentName = new Map(
-    (departmentsResult.data ?? []).map((row) => [row.id, row.name]),
-  );
+  const departmentName = departmentsResult;
   const listName = new Map((listsResult.data ?? []).map((row) => [row.id, row.name]));
 
   /**

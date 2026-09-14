@@ -1,6 +1,7 @@
 "use server";
 
 
+import { loadManagedDepartmentNames } from "@/lib/departments-server";
 import {
   canDoHr,
   requireAuthContextOrThrow,
@@ -58,14 +59,9 @@ async function describeScope(context: AuthContext): Promise<string> {
 
   if (context.managedDepartmentIds.length === 0) return "Your own record";
 
-  const supabase = await createClient();
-  const { data } = await supabase
-    .from("vizserve_pms_departments")
-    .select("name")
-    .in("id", context.managedDepartmentIds)
-    .order("name");
-
-  const names = (data ?? []).map((row) => row.name);
+  // The rail asks the same question on every page; `loadManagedDepartmentNames`
+  // is `cache()`d and carries the empty-id guard the check above duplicates.
+  const names = await loadManagedDepartmentNames(context.managedDepartmentIds);
   if (names.length === 0) return "Your own record";
 
   // "and your own record", because the four-branch authority clause in both

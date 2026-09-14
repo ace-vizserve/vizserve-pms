@@ -1,3 +1,4 @@
+import { loadAllDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
 import { requireRole } from "@/lib/auth/authorization";
@@ -49,7 +50,7 @@ export default async function EventsPage({
   const parsedYear = holidayYearSchema.safeParse(requested ?? currentYear);
   const year = parsedYear.success ? parsedYear.data : currentYear;
 
-  const [{ data: events, error }, { data: departments }] = await Promise.all([
+  const [{ data: events, error }, departments] = await Promise.all([
     supabase
       .from("vizserve_pms_events")
       .select("id, title, description, category, department_id, start_date, end_date")
@@ -59,7 +60,7 @@ export default async function EventsPage({
       .lte("start_date", `${year}-12-31`)
       .gte("end_date", `${year}-01-01`)
       .order("start_date"),
-    supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+    loadAllDepartments(),
   ]);
 
   return (
@@ -78,7 +79,7 @@ export default async function EventsPage({
       ) : (
         <EventsTable
           events={events ?? []}
-          departments={departments ?? []}
+          departments={departments}
           year={year}
           currentYear={currentYear}
         />

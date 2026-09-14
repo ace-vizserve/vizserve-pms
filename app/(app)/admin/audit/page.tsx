@@ -1,3 +1,4 @@
+import { loadDepartmentNames } from "@/lib/departments-server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { History, SearchX } from "lucide-react";
@@ -162,7 +163,7 @@ export default async function AuditPage({
     }
   }
 
-  const [{ data: entries, count, error }, { data: people }, { data: leaveTypes }, { data: departments }] =
+  const [{ data: entries, count, error }, { data: people }, { data: leaveTypes }, departments] =
     await Promise.all([
       query,
       // Every user, active or not. A deactivated account's past actions are
@@ -173,7 +174,7 @@ export default async function AuditPage({
       // the keys of the allocation map; departments arrive as `department_id`.
       // Fetched once for the whole page rather than per row.
       supabase.from("vizserve_pms_leave_types").select("id, label"),
-      supabase.from("vizserve_pms_departments").select("id, name"),
+      loadDepartmentNames(),
     ]);
 
   const actors = people ?? [];
@@ -188,7 +189,7 @@ export default async function AuditPage({
   const lookup: AuditLookup = {
     ...Object.fromEntries(actors.map((person) => [person.id, person.full_name])),
     ...Object.fromEntries((leaveTypes ?? []).map((type) => [type.id, type.label])),
-    ...Object.fromEntries((departments ?? []).map((department) => [department.id, department.name])),
+    ...Object.fromEntries(departments),
   };
 
   const total = count ?? 0;

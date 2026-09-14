@@ -10,6 +10,7 @@ import {
   isTaskOverdue,
   isTerminal,
 } from "@/lib/schemas/tasks";
+import { loadDepartmentNames } from "@/lib/departments-server";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { ReportsTable, type ReportRow } from "./reports-table";
 import { EmptyState } from "@/components/empty-state";
@@ -153,7 +154,7 @@ export default async function ReportsPage({
           .gte("work_date", from)
           .lte("work_date", to),
 
-    supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+    loadDepartmentNames(),
 
     /*
      * P6-04 / P6-06 / P6-07 — the four metrics P6-05 left out, in the SAME WAVE
@@ -169,9 +170,7 @@ export default async function ReportsPage({
     inverted ? null : loadFeedback(supabase, period),
   ]);
 
-  const departmentName = new Map(
-    (departmentsResult.data ?? []).map((row) => [row.id, row.name] as const),
-  );
+  const departmentName = departmentsResult;
 
   type TaskRow = {
     id: string;

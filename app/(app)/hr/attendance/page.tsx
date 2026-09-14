@@ -5,6 +5,7 @@ import { summariseAttendance, type AttendanceDay, type AttendancePerson } from "
 import { todayInAppZone } from "@/lib/dates";
 import { expandLeaveDays, leaveKey } from "@/lib/leave";
 import { loadApprovedLeaveSpans } from "@/lib/leave-server";
+import { loadDepartmentNames } from "@/lib/departments-server";
 import { loadApprovedOvertime } from "@/lib/overtime-server";
 import { loadAppSettings } from "@/lib/settings-server";
 import { createClient } from "@/utils/supabase/server";
@@ -82,7 +83,7 @@ export default async function AttendancePage({
     leave,
     { data: holidays },
     overtime,
-    { data: departments },
+    departmentName,
     settings,
   ] = await Promise.all([
     supabase
@@ -115,7 +116,7 @@ export default async function AttendancePage({
       .gte("holiday_date", from)
       .lte("holiday_date", to),
     loadApprovedOvertime(from, to),
-    supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+    loadDepartmentNames(),
     // Was awaited on its own line above this batch, holding all six reads
     // behind it. It takes no argument and is `cache()`d, so it depends on
     // nothing here — it is simply the seventh thing to go out at once.
@@ -125,7 +126,6 @@ export default async function AttendancePage({
   const error = peopleError ?? entriesError;
   const dates = datesIn(month);
   const holidayDates = new Set((holidays ?? []).map((row) => row.holiday_date));
-  const departmentName = new Map((departments ?? []).map((row) => [row.id, row.name]));
 
   // Indexed once, keyed `userId:date`. A linear scan per person per day would
   // be O(people x days x rows) on the one screen that renders the whole company

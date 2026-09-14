@@ -1,3 +1,4 @@
+import { loadAllDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
 import { requireHr } from "@/lib/auth/authorization";
@@ -30,14 +31,14 @@ export default async function LeaveReportsPage() {
   await requireHr();
   const supabase = await createClient();
 
-  const [{ data: people, error: peopleError }, { data: departments }, { data: types }] =
+  const [{ data: people, error: peopleError }, departments, { data: types }] =
     await Promise.all([
       supabase
         .from("vizserve_pms_users")
         .select("id, full_name, is_active")
         .order("is_active", { ascending: false })
         .order("full_name"),
-      supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+      loadAllDepartments(),
       // Retired types included, deliberately: filtering TO a retired type is
       // exactly the case this report exists for — an auditor checking what was
       // taken under a type that was withdrawn mid-year.
@@ -64,7 +65,7 @@ export default async function LeaveReportsPage() {
           currentYear={currentYear}
           today={todayInAppZone()}
           people={people ?? []}
-          departments={departments ?? []}
+          departments={departments}
           leaveTypes={types ?? []}
         />
       )}

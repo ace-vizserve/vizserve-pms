@@ -1,3 +1,4 @@
+import { loadActiveDepartments } from "@/lib/departments-server";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
@@ -166,12 +167,8 @@ export async function NewTaskButton({
 
   // RLS scopes all three: a TL sees the departments they lead, the people in
   // them, and those departments' lists. No `.in(...)` needed here.
-  const [{ data: departments }, { data: people }, { data: lists }] = await Promise.all([
-    supabase
-      .from("vizserve_pms_departments")
-      .select("id, name")
-      .eq("is_active", true)
-      .order("name"),
+  const [departments, { data: people }, { data: lists }] = await Promise.all([
+    loadActiveDepartments(),
     supabase
       .from("vizserve_pms_users")
       .select("id, full_name, primary_department_id")
@@ -193,8 +190,8 @@ export async function NewTaskButton({
   // An admin sees every department; a TL should only be offered the ones they
   // actually lead, or the create call fails after they have filled in the form.
   const allowed = roleAtLeast(context.role, "owner")
-      ? (departments ?? [])
-      : (departments ?? []).filter((department) =>
+      ? departments
+      : departments.filter((department) =>
           context.managedDepartmentIds.includes(department.id),
         );
 

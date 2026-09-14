@@ -1,3 +1,4 @@
+import { loadActiveDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
@@ -63,7 +64,7 @@ export default async function ListsPage() {
   // The task counts used to be awaited on their own, after the department
   // scoping below — but they depend on nothing computed there, so waiting was
   // a round trip spent on nothing. Four independent reads, one wave.
-  const [{ data: lists }, { data: departments }, { data: groups }, openByList] =
+  const [{ data: lists }, departments, { data: groups }, openByList] =
     await Promise.all([
       supabase
         .from("vizserve_pms_lists")
@@ -80,11 +81,7 @@ export default async function ListsPage() {
         .is("owner_id", null)
         .order("sort_order")
         .order("name"),
-      supabase
-        .from("vizserve_pms_departments")
-        .select("id, name")
-        .eq("is_active", true)
-        .order("name"),
+      loadActiveDepartments(),
       // P7-18. NO `is_active` FILTER, deliberately — same as the lists query above.
       // This is the screen where an archived folder is un-archived, so filtering it
       // out here would make that impossible from the only place it is offered.
@@ -120,10 +117,10 @@ export default async function ListsPage() {
   const scope = departmentTreeScope(context);
   const allowed =
     scope.kind === "all"
-      ? (departments ?? [])
+      ? departments
       : scope.kind === "none"
         ? []
-        : (departments ?? []).filter((department) => scope.ids.includes(department.id));
+        : departments.filter((department) => scope.ids.includes(department.id));
 
   return (
     <PageShell className="mx-auto w-full max-w-4xl">

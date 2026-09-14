@@ -1,3 +1,4 @@
+import { loadDepartmentNames } from "@/lib/departments-server";
 import { Plus } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
@@ -50,7 +51,7 @@ export default async function FormsPage() {
    * department names and the submission tally are three independent facts, so
    * the page was paying three round trips for one wave's worth of dependency.
    */
-  const [{ data: forms }, { data: departments }, { data: submissions }] = await Promise.all([
+  const [{ data: forms }, departmentNameMap, { data: submissions }] = await Promise.all([
     supabase
       .from("vizserve_pms_forms")
       // P7-66 — `purpose` for the Type column, `is_public` still for the public
@@ -64,7 +65,7 @@ export default async function FormsPage() {
       )
       .order("created_at", { ascending: false }),
 
-    supabase.from("vizserve_pms_departments").select("id, name"),
+    loadDepartmentNames(),
 
     /*
      * P7-66 — HOW MUCH EACH FORM IS ACTUALLY USED.
@@ -92,7 +93,7 @@ export default async function FormsPage() {
   }
 
   /* A Map cannot cross the RSC boundary. */
-  const departmentNames = Object.fromEntries((departments ?? []).map((d) => [d.id, d.name]));
+  const departmentNames = Object.fromEntries(departmentNameMap);
 
   /*
    * Filtered here rather than in the query, because the predicate is a union

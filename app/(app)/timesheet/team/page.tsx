@@ -17,6 +17,7 @@ import {
   type OvertimeApproval,
   type TimesheetWeekStatus,
 } from "@/lib/schemas/timesheet";
+import { loadDepartmentNames } from "@/lib/departments-server";
 import { loadApprovedOvertime } from "@/lib/overtime-server";
 import { loadAppSettings } from "@/lib/settings-server";
 import { createClient } from "@/utils/supabase/server";
@@ -224,7 +225,7 @@ export default async function TeamWeekPage({
      * breadcrumb — see `where` below, which drops what it cannot name rather than
      * printing a gap.
      */
-    supabase.from("vizserve_pms_departments").select("id, name"),
+    loadDepartmentNames(),
     supabase.from("vizserve_pms_lists").select("id, name, group_id"),
     supabase.from("vizserve_pms_task_groups").select("id, name"),
 
@@ -259,7 +260,7 @@ export default async function TeamWeekPage({
     ]),
   );
 
-  const departmentName = new Map((departmentsResult.data ?? []).map((row) => [row.id, row.name]));
+  const departmentName = departmentsResult;
   const listRow = new Map((listsResult.data ?? []).map((row) => [row.id, row]));
   const groupName = new Map((groupsResult.data ?? []).map((row) => [row.id, row.name]));
 

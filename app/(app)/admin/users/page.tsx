@@ -1,3 +1,4 @@
+import { loadAllDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
 import { requireRole } from "@/lib/auth/authorization";
@@ -38,7 +39,7 @@ export default async function UsersPage() {
 
   const [
     { data: users, error: usersError },
-    { data: departments },
+    departments,
     { data: managed },
     { data: leaveTypes },
     { data: allocations },
@@ -51,7 +52,7 @@ export default async function UsersPage() {
       // Deactivated accounts sink to the bottom; the rest read alphabetically.
       .order("is_active", { ascending: false })
       .order("full_name"),
-    supabase.from("vizserve_pms_departments").select("id, name").order("name"),
+    loadAllDepartments(),
     supabase
       .from("vizserve_pms_user_managed_departments")
       .select("user_id, department_id"),
@@ -130,7 +131,7 @@ export default async function UsersPage() {
       ) : (
       <UsersTable
         users={rows}
-        departments={departments ?? []}
+        departments={departments}
         leaveTypes={leaveTypes ?? []}
         balanceYear={balanceYear}
         today={today}
