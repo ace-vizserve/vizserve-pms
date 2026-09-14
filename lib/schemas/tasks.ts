@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
+import { daysBetween, todayInAppZone } from "@/lib/dates";
 import { richTextSchema } from "@/lib/schemas/rich-text";
 
 /**
@@ -662,6 +663,47 @@ export const TERMINAL_STATUSES: readonly TaskStatus[] = ["COMPLETED", "COMPLETED
 
 export function isTerminal(status: TaskStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
+}
+
+/**
+ * Is this task late RIGHT NOW?
+ *
+ * ⚠️ USE THIS, NOT `isOverdue` FROM `lib/dates.ts`, FOR ANY TASK. That one
+ * answers a question about a DATE and cannot answer this one: it has no status
+ * to look at, so every caller had to remember `&& !isTerminal(task.status)`
+ * itself. Eleven did and one did not — the board (`/tasks/board`) is the only
+ * screen that renders the finished columns, so a task completed after its due
+ * date drew a red `· overdue` chip in the Completed column, permanently. A
+ * helper whose name promises the whole rule has to enforce the whole rule.
+ *
+ * `isOverdue` stays for the things that are NOT tasks: a request's
+ * `target_date`, where the equivalent gate is `status === "PENDING_REVIEW"`.
+ *
+ * THE RULE, and every part of it is deliberate:
+ *
+ *   - LIVE WORK ONLY. A task delivered late is history. Counting it makes a
+ *     figure that can only ever grow, which is a figure nobody can act on.
+ *     This is not "was it finished late" — nothing in this app asks that, and
+ *     there is no `completed_at` column to ask it with.
+ *   - STRICTLY BEFORE TODAY. Due today is not overdue.
+ *   - CALENDAR DAYS IN MANILA, never instants, so nothing turns red at 00:01
+ *     or stays fine at 23:59 tomorrow. See `APP_TIME_ZONE`.
+ *   - NO DUE DATE IS NEVER OVERDUE. A date nobody set is not a promise broken.
+ *
+ * `today` is injectable so callers that already hold it — and the tests — do
+ * not each read the clock and disagree about the day near midnight.
+ */
+export function isTaskOverdue(
+  task: { status: TaskStatus | null; due_date?: string | null },
+  today: string = todayInAppZone(),
+): boolean {
+  // Null status means the task has left this person's scope (the timesheet's
+  // rows carry that case). Unknown is not finished, so the date still decides.
+  if (task.status !== null && isTerminal(task.status)) return false;
+  if (!task.due_date) return false;
+
+  const days = daysBetween(today, task.due_date);
+  return days !== null && days < 0;
 }
 
 /** Human labels. Every status pill carries its label — never colour alone. */

@@ -23,7 +23,7 @@ import {
 } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
-import { formatDate, isOverdue } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 import { isRichTextEmpty } from "@/lib/rich-text";
 import {
   INITIAL_TASK_STATUS,
@@ -31,6 +31,7 @@ import {
   TASK_STATUS_LABELS,
   type TaskPriority,
   availableTransitions,
+  isTaskOverdue,
   isTerminal,
   taskCategory,
 } from "@/lib/schemas/tasks";
@@ -724,7 +725,16 @@ async function BoardColumns({
                 </p>
               ) : (
                 column.map((task) => {
-                  const late = isOverdue(task.due_date);
+                  /*
+                   * ⚠️ THE STATUS IS PART OF THIS QUESTION, and on THIS screen
+                   * more than any other. The board is the one place that
+                   * renders the finished columns (`FINISHED_COLUMNS`, and the
+                   * separate query that fills them), so a bare date comparison
+                   * marked every task completed after its due date `· overdue`
+                   * in the Completed column, for good. `isTaskOverdue` carries
+                   * the terminal check so it cannot be left out again.
+                   */
+                  const late = isTaskOverdue(task);
                   const subtasks = subtaskCount.get(task.id) ?? 0;
                   const bars = progress.get(task.id);
                   const pic = task.assignee_id ? nameOf.get(task.assignee_id) : null;
@@ -901,7 +911,11 @@ async function BoardColumns({
                       }>
                       {(childrenByParent.get(task.id) ?? []).map((child) => {
                         const childPic = child.assignee_id ? nameOf.get(child.assignee_id) : null;
-                        const childLate = isOverdue(child.due_date);
+                        // Guarded here, not left to the query that fills
+                        // `childrenByParent`. It excludes terminal statuses
+                        // today; a correctness rule should not depend on a
+                        // filter three hundred lines away staying that way.
+                        const childLate = isTaskOverdue(child);
 
                         return (
                           /*

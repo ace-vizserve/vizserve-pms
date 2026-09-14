@@ -12,10 +12,10 @@ import {
   addMonths,
   formatAppTime,
   formatDate,
-  isOverdue,
   relativeDays,
   todayInAppZone,
 } from "@/lib/dates";
+import { isTaskOverdue } from "@/lib/schemas/tasks";
 import { BrandLockup } from "@/components/brand-lockup";
 import { PageShell } from "@/components/page-shell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -391,10 +391,10 @@ async function YoursToMoveCell({
           </p>
         ) : (
           (myOpenTasks.data ?? []).map((task) => {
-            // Overdue matters on live work only, and every one of these
-            // is live by construction — the query excludes both
-            // terminal statuses.
-            const late = isOverdue(task.due_date);
+            // Overdue matters on live work only. The query above already
+            // excludes both terminal statuses; asking again costs nothing and
+            // means this line stays right if that filter ever moves.
+            const late = isTaskOverdue(task);
 
             return (
               <Link

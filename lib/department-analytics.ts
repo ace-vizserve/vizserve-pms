@@ -1,6 +1,5 @@
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
-import { daysBetween } from "@/lib/dates";
-import { INITIAL_TASK_STATUS, isTerminal } from "@/lib/schemas/tasks";
+import { INITIAL_TASK_STATUS, isTaskOverdue, isTerminal } from "@/lib/schemas/tasks";
 
 /**
  * P11-14 — DEPARTMENT ANALYTICS: how much work each person is carrying, and how
@@ -89,10 +88,10 @@ function tally(counts: WorkloadCounts, task: WorkloadTask, today: string) {
   if (task.status === INITIAL_TASK_STATUS) counts.notStarted += 1;
   else counts.active += 1;
 
-  // `daysBetween`, not `isOverdue`: that one reads the real clock, and this
-  // function is handed `today` so it can be tested.
-  const days = task.due_date ? daysBetween(today, task.due_date) : null;
-  if (days !== null && days < 0) counts.overdue += 1;
+  // `today` is passed through rather than read here: this function is handed
+  // the day so it can be tested, and two reads of the clock in one tally can
+  // disagree near midnight.
+  if (isTaskOverdue(task, today)) counts.overdue += 1;
 }
 
 export function summariseWorkload({

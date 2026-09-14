@@ -23,12 +23,13 @@ import {
 } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { RichText } from "@/components/ui/rich-text";
-import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
+import { formatDate, formatDateTime } from "@/lib/dates";
 import { richTextToPlainText } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
   TASK_STATUS_LABELS,
   availableTransitions,
+  isTaskOverdue,
   isTerminal,
   parseTaskRequestBrief,
   taskCategory,
@@ -414,7 +415,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     administersDepartment: canAdminDepartment(context, task.department_id),
   };
 
-  const late = isOverdue(task.due_date) && !isTerminal(task.status);
+  const late = isTaskOverdue(task);
 
   /**
    * On the task, leading it, or IN ITS DEPARTMENT. The single test behind

@@ -21,9 +21,10 @@ import type {
   VizservePmsTaskStatus,
   VizservePmsUserRole,
 } from "@/lib/database.types";
-import { formatDate, isOverdue } from "@/lib/dates";
+import { formatDate } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
+  isTaskOverdue,
   isTerminal,
   taskCategory,
   type TaskPriority,
@@ -690,11 +691,12 @@ export function TaskGroupTable({
             value={task.due_date}
             label="Due"
             // Overdue only matters on work that is still live. A completed task
-            // delivered late is history, not an alarm.
-            emphasis={isOverdue(task.due_date) && !isTerminal(task.status)}
+            // delivered late is history, not an alarm — `isTaskOverdue` is
+            // where that rule lives now.
+            emphasis={isTaskOverdue(task)}
           />
           {/* Never colour alone. */}
-          {isOverdue(task.due_date) && !isTerminal(task.status) ? (
+          {isTaskOverdue(task) ? (
             <span className="ml-1 text-2xs text-destructive">overdue</span>
           ) : null}
         </>

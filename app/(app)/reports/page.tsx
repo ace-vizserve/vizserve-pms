@@ -3,10 +3,11 @@ import { BarChart3, Clock, ListChecks, TriangleAlert } from "lucide-react";
 
 import { requireRole } from "@/lib/auth/authorization";
 import type { VizservePmsRequestStatus, VizservePmsTaskStatus } from "@/lib/database.types";
-import { addDays, addMonths, isOverdue, startOfMonth, todayInAppZone } from "@/lib/dates";
+import { addDays, addMonths, startOfMonth, todayInAppZone } from "@/lib/dates";
 import {
   INITIAL_TASK_STATUS,
   TASK_STATUSES,
+  isTaskOverdue,
   isTerminal,
 } from "@/lib/schemas/tasks";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
@@ -230,7 +231,7 @@ export default async function ReportsPage({
 
     // Overdue only counts on live work. A completed task delivered late is
     // history, and counting it would make the figure only ever grow.
-    if (isOverdue(task.due_date) && !isTerminal(task.status)) row.overdue += 1;
+    if (isTaskOverdue(task, today)) row.overdue += 1;
   }
 
   for (const entry of (hoursResult.data ?? []) as {

@@ -1,8 +1,13 @@
 import Link from "next/link";
 
 import { TaskPriorityBadge, TaskStatusGlyph } from "@/components/status-badge";
-import { formatDate, isOverdue } from "@/lib/dates";
-import { isTerminal, type TaskPriority, type TaskStatus } from "@/lib/schemas/tasks";
+import { formatDate } from "@/lib/dates";
+import {
+  isTaskOverdue,
+  isTerminal,
+  type TaskPriority,
+  type TaskStatus,
+} from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 
 import { SubtaskProgress } from "../inline";
@@ -73,7 +78,7 @@ export function SubtaskList({
         ) : (
           <ul className="-my-1">
             {subtasks.map((subtask) => {
-              const late = isOverdue(subtask.due_date) && !isTerminal(subtask.status);
+              const late = isTaskOverdue(subtask);
 
               return (
                 <li key={subtask.id} className="border-b py-1.5 last:border-0">
