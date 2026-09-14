@@ -1,3 +1,4 @@
+import { loadTimesheetEntries } from "@/lib/timesheet-entries-server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -88,31 +89,19 @@ export default async function TimesheetPage({
     lastWeekResult,
     layoutResult,
   ] = await Promise.all([
-    supabase
-      .from("vizserve_pms_timesheet_entries")
-      // A LEFT embed, deliberately not `!inner`.
-      //
-      // The entries policy returns a row on `user_id = auth.uid()`. The TASKS
-      // policy is narrower — PIC, QA, or department lead — so the two diverge
-      // the moment a task is reassigned away from somebody who already logged
-      // time against it. An inner join turns "I cannot see that task" into
-      // "that row does not exist", and their hours disappear from their own
-      // week, from the day totals, and from anything derived from them.
-      //
-      // Pinned by a test: tests/db/timesheet.test.ts, "entries survive losing
-      // sight of their task".
-      .select(
-        "id, task_id, work_date, minutes, note, started_at, ended_at, vizserve_pms_tasks(title, status, list_id, department_id)",
-      )
-      // No `user_id` filter would still be correct — the SELECT policy returns
-      // the caller's own rows plus their team's — and this page shows only their
-      // own, which is what the eq is for. It narrows a policy result; it does
-      // not replace it.
-      .eq("user_id", context.userId)
-      .gte("work_date", monday)
-      .lte("work_date", sunday)
-      .order("work_date")
-      .order("created_at"),
+    /*
+     * This week's entries, with the task each one is against.
+     *
+     * ⚠️ THE LEFT EMBED AND ITS REASONING LIVE IN THE LOADER NOW. It was typed
+     * out three times — here, the last-week read below, and /timesheet/team —
+     * and an `!inner` in any one of them silently deletes somebody's hours from
+     * their own week. See `lib/timesheet-entries-server.ts`.
+     *
+     * The user id NARROWS a policy result rather than replacing it: the policy
+     * returns the caller's rows plus their team's, and this screen is
+     * first-person.
+     */
+    loadTimesheetEntries(monday, sunday, context.userId),
 
     /*
      * The picker's FIRST PAGE — the 20 most recently created tasks this person
@@ -222,12 +211,10 @@ export default async function TimesheetPage({
      * missing shortcut states nothing false, and "Add task" still reaches every
      * one of these tasks by name.
      */
-    supabase
-      .from("vizserve_pms_timesheet_entries")
-      .select("task_id, vizserve_pms_tasks(title, status, list_id, department_id)")
-      .eq("user_id", context.userId)
-      .gte("work_date", lastMonday)
-      .lte("work_date", lastSunday),
+    // Same loader, last week's range. It selects a few columns this shortcut
+    // does not read, which is a far smaller price than a third copy of the
+    // embed that must never become `!inner`.
+    loadTimesheetEntries(lastMonday, lastSunday, context.userId),
 
     /*
      * P6-02d — THIS WEEK'S LAYOUT: the empty rows, the arrangement, and whether
@@ -362,7 +349,7 @@ export default async function TimesheetPage({
     } | null;
   };
 
-  const entries = (entriesResult.data ?? []) as unknown as Entry[];
+  const entries = entriesResult.entries as unknown as Entry[];
 
   /**
    * `09:30:00` → `09:30`, and null stays null.
@@ -435,7 +422,7 @@ export default async function TimesheetPage({
 
   const lastWeekTasks: PickableTask[] = [
     ...new Map(
-      ((lastWeekResult.data ?? []) as unknown as LastWeekEntry[]).flatMap((entry) => {
+      (lastWeekResult.entries as unknown as LastWeekEntry[]).flatMap((entry) => {
         const task = entry.vizserve_pms_tasks;
         // Dropped rather than named — see the read. A task this person can no
         // longer see is one they can no longer log against.

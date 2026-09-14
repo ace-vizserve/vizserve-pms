@@ -1,3 +1,4 @@
+import { loadUserNames } from "@/lib/counts-server";
 import type { Metadata } from "next";
 import { Inbox } from "lucide-react";
 
@@ -346,15 +347,10 @@ export default async function ApprovalsPage({
    */
   const reviewerIds = [...new Set(rows.map((row) => row.reviewed_by).filter(Boolean))] as string[];
 
-  const { data: reviewers } =
-    reviewerIds.length > 0
-      ? await supabase.from("vizserve_pms_users").select("id, full_name").in("id", reviewerIds)
-      : { data: null };
 
-  /* A plain object: a Map cannot cross the RSC boundary. */
-  const reviewerNames = Object.fromEntries(
-    (reviewers ?? []).map((person) => [person.id, person.full_name]),
-  );
+  // The empty-ids guard and the plain-object shape live in the loader —
+  // /approvals and /requests had both written out, verbatim.
+  const reviewerNames = await loadUserNames(reviewerIds);
 
   return (
     <PageShell className="gap-8">

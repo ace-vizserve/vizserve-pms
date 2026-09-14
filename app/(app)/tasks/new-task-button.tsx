@@ -1,3 +1,4 @@
+import { loadPersonalTaskOptions } from "@/lib/personal-task-server";
 import { loadActiveDepartments } from "@/lib/departments-server";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
@@ -125,34 +126,19 @@ export async function NewTaskButton({
    * enforcement.
    */
   if (!roleAtLeast(context.role, "team_leader")) {
-    const { data: me } = await supabase
-      .from("vizserve_pms_users")
-      .select("primary_department_id")
-      .eq("id", context.userId)
-      .maybeSingle();
-
-    const myDepartment = me?.primary_department_id ?? null;
-
-    const [{ data: myLists }, { data: colleagues }] = await Promise.all([
-      supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
-      // `.neq` on themselves: "Myself" is the dialog's default, not a row in the
-      // list, because the two choices call two different functions and produce
-      // two different `is_personal` values.
-      myDepartment
-        ? supabase
-            .from("vizserve_pms_users")
-            .select("id, full_name")
-            .eq("primary_department_id", myDepartment)
-            .eq("is_active", true)
-            .neq("id", context.userId)
-            .order("full_name")
-        : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
-    ]);
+    // ⚠️ SHARED WITH `app/_home/new-task-action.tsx`, WHICH WAS A COPY OF THIS
+    // BLOCK — three queries and their comments, in two route groups. "Who may I
+    // assign to" had two homes; now it has one.
+    const {
+      departmentId: myDepartment,
+      lists: myLists,
+      colleagues,
+    } = await loadPersonalTaskOptions(context.userId);
 
     const dialog = (
       <NewPersonalTaskDialog
-        lists={myLists ?? []}
-        colleagues={colleagues ?? []}
+        lists={myLists}
+        colleagues={colleagues}
         departmentId={myDepartment}
         selfId={context.userId}
         trigger={trigger}

@@ -1,3 +1,4 @@
+import { loadUserNames } from "@/lib/counts-server";
 import type { Metadata } from "next";
 
 import { ListSearch } from "@/components/list-search";
@@ -172,14 +173,10 @@ export default async function RequestsPage({
     ...new Set((requests ?? []).map((request) => request.reviewed_by).filter(Boolean)),
   ] as string[];
 
-  const { data: reviewers } =
-    reviewerIds.length > 0
-      ? await supabase.from("vizserve_pms_users").select("id, full_name").in("id", reviewerIds)
-      : { data: null };
 
-  const reviewerNames = Object.fromEntries(
-    (reviewers ?? []).map((person) => [person.id, person.full_name]),
-  );
+  // The empty-ids guard and the plain-object shape live in the loader —
+  // /approvals and /requests had both written out, verbatim.
+  const reviewerNames = await loadUserNames(reviewerIds);
 
   const isFiltered = Boolean(params.status || params.form || params.from || params.to || term);
   const total = count ?? 0;

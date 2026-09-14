@@ -5,7 +5,11 @@ import {
   canShapeAnyDepartment,
   type AuthContext,
 } from "@/lib/auth/authorization";
-import { countOpenTasksByList, countUnreadNotifications } from "@/lib/counts-server";
+import {
+  countOpenTasksByList,
+  countPendingClientRequests,
+  countUnreadNotifications,
+} from "@/lib/counts-server";
 import { groupedNavItems } from "@/lib/navigation";
 import { formatNavBadge } from "@/lib/navigation";
 import { createClient } from "@/utils/supabase/server";
@@ -130,7 +134,7 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
   const [
     managedDepartments,
     unread,
-    { count: awaitingReview },
+    awaitingReview,
     departments,
     { data: lists },
     { data: groups },
@@ -164,10 +168,10 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
      *
      * `head: true` — one indexable aggregate per navigation, no rows shipped.
      */
-    supabase
-      .from("vizserve_pms_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "PENDING_REVIEW"),
+    // ⚠️ THE SHARED COUNT. `countWaitingOnYou` in approvals-queue-server.ts ran
+    // the identical query, so the rail badge and the dashboard tile could report
+    // different numbers for the same rows.
+    countPendingClientRequests(),
 
     /*
      * The project tree — Department → Folder → List (P7-18).

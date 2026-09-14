@@ -1,3 +1,4 @@
+import { loadTimesheetEntries } from "@/lib/timesheet-entries-server";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -115,13 +116,7 @@ export default async function TeamWeekPage({
      * takes a person's whole week with it. Pinned by
      * tests/db/timesheet.test.ts, "entries survive losing sight of their task".
      */
-    supabase
-      .from("vizserve_pms_timesheet_entries")
-      .select(
-        "id, user_id, task_id, work_date, minutes, note, started_at, ended_at, vizserve_pms_tasks(title, status, list_id, department_id)",
-      )
-      .gte("work_date", monday)
-      .lte("work_date", lastDay),
+    loadTimesheetEntries(monday, lastDay),
 
     supabase
       .from("vizserve_pms_timesheet_weeks")
@@ -305,7 +300,7 @@ export default async function TeamWeekPage({
     } | null;
   };
 
-  const entries = (entriesResult.data ?? []) as unknown as Entry[];
+  const entries = (entriesResult.entries) as unknown as Entry[];
 
   // Minutes per person per day — the collapsed grid, unchanged.
   const cells = new Map<string, Record<string, number>>();

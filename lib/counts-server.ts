@@ -122,3 +122,57 @@ export const countOpenTasksByList = cache(async (): Promise<Map<string, number>>
 
   return counts;
 });
+
+/**
+ * Names for a set of user ids, as a plain object.
+ *
+ * The reviewer backfill on `/approvals` and `/requests`, written out twice
+ * verbatim — the query, the empty-ids guard and the `Object.fromEntries` shape.
+ * Both pages read a list of decided rows and need a name against
+ * `reviewed_by`, and neither wants the hot query widened to answer a question
+ * only the decided rows ask.
+ *
+ * ⚠️ A PLAIN OBJECT, NOT A MAP. A Map cannot cross the RSC boundary, and both
+ * callers hand this straight to a client table.
+ *
+ * ⚠️ EMPTY IN MEANS EMPTY OUT, WITHOUT A QUERY. `.in("id", [])` is a request
+ * that can only return nothing.
+ *
+ * RLS decides which of these rows come back; a withheld one simply has no
+ * entry, and the callers already fall back to something readable.
+ */
+export async function loadUserNames(ids: readonly string[]): Promise<Record<string, string>> {
+  const unique = [...new Set(ids)];
+  if (unique.length === 0) return {};
+
+  const supabase = await createClient();
+
+  const { data } = await supabase
+    .from("vizserve_pms_users")
+    .select("id, full_name")
+    .in("id", unique);
+
+  return Object.fromEntries((data ?? []).map((person) => [person.id, person.full_name]));
+}
+
+/**
+ * Client requests sitting at Gate 1.
+ *
+ * PENDING_REVIEW only — the one status where somebody is waiting on a decision
+ * from whoever is reading. The rail badge and `countWaitingOnYou` in
+ * `lib/approvals-queue-server.ts` were the same query in two files, so the
+ * badge and the dashboard tile could count differently.
+ *
+ * Returns nothing for a member: `vizserve_pms_requests` is lead-only, so the
+ * badge never appears for them and no role check is needed here.
+ */
+export const countPendingClientRequests = cache(async (): Promise<number> => {
+  const supabase = await createClient();
+
+  const { count } = await supabase
+    .from("vizserve_pms_requests")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "PENDING_REVIEW");
+
+  return count ?? 0;
+});

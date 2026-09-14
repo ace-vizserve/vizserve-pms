@@ -1,5 +1,5 @@
+import { loadPersonalTaskOptions } from "@/lib/personal-task-server";
 import { requireAuthContext } from "@/lib/auth/authorization";
-import { createClient } from "@/utils/supabase/server";
 
 import { NewPersonalTaskDialog } from "@/app/(app)/tasks/new-personal-task-dialog";
 
@@ -26,38 +26,17 @@ import { NewPersonalTaskDialog } from "@/app/(app)/tasks/new-personal-task-dialo
  */
 export async function HomeNewTaskAction() {
   const context = await requireAuthContext();
-  const supabase = await createClient();
-
-  const { data: me } = await supabase
-    .from("vizserve_pms_users")
-    .select("primary_department_id")
-    .eq("id", context.userId)
-    .maybeSingle();
-
-  const myDepartment = me?.primary_department_id ?? null;
-
-  const [{ data: lists }, { data: colleagues }] = await Promise.all([
-    // RLS scopes this to the reader's own department — no filter needed here,
-    // and adding one would imply the policy were optional.
-    supabase.from("vizserve_pms_lists").select("id, name").eq("is_active", true).order("name"),
-    // `.neq` on themselves: "Myself" is the dialog's default rather than a row
-    // in the picker, because the two choices call two different functions and
-    // produce two different `is_personal` values.
-    myDepartment
-      ? supabase
-          .from("vizserve_pms_users")
-          .select("id, full_name")
-          .eq("primary_department_id", myDepartment)
-          .eq("is_active", true)
-          .neq("id", context.userId)
-          .order("full_name")
-      : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
-  ]);
+  // ⚠️ THIS WAS A VERBATIM COPY of the member branch in
+  // `app/(app)/tasks/new-task-button.tsx`, comments included. One definition
+  // now, in `lib/personal-task-server.ts`.
+  const { departmentId: myDepartment, lists, colleagues } = await loadPersonalTaskOptions(
+    context.userId,
+  );
 
   return (
     <NewPersonalTaskDialog
-      lists={lists ?? []}
-      colleagues={colleagues ?? []}
+      lists={lists}
+      colleagues={colleagues}
       departmentId={myDepartment}
       selfId={context.userId}
       trigger="quick"
