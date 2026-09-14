@@ -15,6 +15,7 @@ import {
   TaskCategoryBadge,
   TaskStatusGlyph,
   taskCategoryEdge,
+  taskStatusRow,
 } from "@/components/status-badge";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type {
@@ -835,7 +836,12 @@ export function TaskGroupTable({
          which ones have somebody outside waiting without anybody reading a
          word. Empty string for the other two - an accent on every row is not an
          accent. */
-      rowClassName={(task) => taskCategoryEdge(taskCategory(task))}
+      /* AND the stage's own wash, which is what makes a group read as a block
+         of colour rather than a white table under a coloured bar. A SUBTASK
+         TAKES ITS OWN STATUS HERE, not its parent's — it sits in the parent's
+         group whatever stage it is at (P7-09), so the row wash is the only
+         thing that can say so. */
+      rowClassName={(task) => cn(taskCategoryEdge(taskCategory(task)), taskStatusRow(task.status))}
       empty={
         <p className="px-3.5 py-4 text-xs text-muted-foreground">
           {status === INITIAL_TASK_STATUS

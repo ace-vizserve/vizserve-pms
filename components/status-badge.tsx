@@ -58,9 +58,56 @@ const TONE = {
   success: "border-success-border bg-success-subtle text-success",
   warning: "border-warning-border bg-warning-subtle text-warning",
   danger: "border-destructive-border bg-destructive-subtle text-destructive",
+  /*
+   * P11-14 — the four stage families (`--stage-*` in globals.css).
+   *
+   * ⚠️ THEY ARE NOT SEMANTIC AND MUST NOT BE REACHED FOR AS IF THEY WERE. The
+   * six above mean something anywhere in the app — success is approved, danger
+   * is rejected. These four mean a POSITION IN THE TASK PIPELINE and nothing
+   * else, which is why they are named for the stage rather than the hue. A
+   * leave request is never `client`; it has no client gate to be at.
+   */
+  qa: "border-stage-qa-border bg-stage-qa-subtle text-stage-qa",
+  qaDeep: "border-stage-qa-deep-border bg-stage-qa-deep-subtle text-stage-qa-deep",
+  client: "border-stage-client-border bg-stage-client-subtle text-stage-client",
+  lapsed: "border-stage-lapsed-border bg-stage-lapsed-subtle text-stage-lapsed",
 } as const;
 
 type Tone = keyof typeof TONE;
+
+/**
+ * P11-15 — THE SAME TONE AS A SOLID, FOR A CHIP THAT IS A HEADING.
+ *
+ * A chip on a row is a note: it sits among other notes and a tint is right for
+ * it. A chip that HEADS a group is a title, and the reference UI draws it as a
+ * solid block of the stage's colour — which is the one thing that still read as
+ * pale after the heading fill, the spine, the glyph ring and the row wash had
+ * all been strengthened.
+ *
+ * ⚠️ HEADINGS ONLY, AND THAT BOUNDARY IS LOAD-BEARING. `TaskCategoryBadge`
+ * spends a solid `--primary` to say "this needs a client", and it works because
+ * it is the only solid chip on a row. Solid stage chips appear in group and
+ * board-column headings, where no category chip is ever rendered, so a ROW
+ * still carries exactly one solid and it still means client work. Passing
+ * `solid` to a chip inside a row would spend that distinction.
+ *
+ * INK IS `text-background`, the page colour, which inverts with the theme —
+ * #F5F7FA on the light solids (4.95–9.28:1) and #12151C on the dark ones
+ * (5.21–8.43:1). One class, both themes, no per-tone foreground to keep in
+ * step. `text-white` would have failed every dark solid.
+ */
+const TONE_SOLID: Record<Tone, string> = {
+  neutral: "border-foreground-muted bg-foreground-muted",
+  brand: "border-primary bg-primary",
+  info: "border-info bg-info",
+  success: "border-success bg-success",
+  warning: "border-warning bg-warning",
+  danger: "border-destructive bg-destructive",
+  qa: "border-stage-qa bg-stage-qa",
+  qaDeep: "border-stage-qa-deep bg-stage-qa-deep",
+  client: "border-stage-client bg-stage-client",
+  lapsed: "border-stage-lapsed bg-stage-lapsed",
+};
 
 /**
  * The dot is a SECOND non-colour carrier of state, not decoration: it inherits
@@ -96,7 +143,16 @@ const TONE_BUTTON = {
   danger: "destructive",
 } as const;
 
-export function toneButtonVariant(tone: Tone): (typeof TONE_BUTTON)[Tone] {
+/**
+ * ⚠️ NARROWER THAN `Tone` SINCE P11-14, ON PURPOSE. The four stage tones have
+ * no button variant and must never acquire one: a button says what pressing it
+ * DOES, and "light violet" is where a task IS. Every caller feeds this
+ * `transitionTone()`, which returns brand / success / info / warning — the
+ * move's intent — so nothing is lost by refusing the rest at the type level.
+ */
+export type ButtonTone = keyof typeof TONE_BUTTON;
+
+export function toneButtonVariant(tone: ButtonTone): (typeof TONE_BUTTON)[ButtonTone] {
   return TONE_BUTTON[tone];
 }
 
@@ -122,10 +178,13 @@ function Pill({
   tone,
   label,
   icon: Icon,
+  solid = false,
   className,
 }: {
   tone: Tone;
   label: string;
+  /** Solid fill with inverted ink. Headings only — see `TONE_SOLID`. */
+  solid?: boolean;
   /**
    * Replaces the dot rather than joining it. An icon is the same second
    * non-colour carrier the dot is, only a stronger one — a board column reading
@@ -136,7 +195,7 @@ function Pill({
   className?: string;
 }) {
   return (
-    <span className={cn(PILL, TONE[tone], className)}>
+    <span className={cn(PILL, solid ? cn(TONE_SOLID[tone], "text-background") : TONE[tone], className)}>
       {Icon ? (
         <Icon aria-hidden className="size-3.5 shrink-0" />
       ) : (
@@ -261,16 +320,33 @@ const TASK_STATUS_TONES: Record<VizservePmsTaskStatus, Tone> = {
   OPEN: "neutral",
   ONGOING: "brand",
   WAITING_FOR_INFO: "warning",
-  // The two QA states use the brand tint (`--accent` / `--accent-foreground`),
-  // not `--secondary`. Secondary is a near-white neutral, so a wash of it was an
-  // invisible pill on a white card — the label carried the state and the fill
-  // did nothing. `--accent` is #EDF0F8 with brand text at 5.79:1, and it flips
-  // correctly in dark mode.
-  FOR_QA: "brand",
-  QA_IN_PROGRESS: "brand",
-  FOR_CLIENT_APPROVAL: "warning",
+  /*
+   * P11-14 — EIGHT STAGES, EIGHT COLOURS. Before this, FOR_QA and
+   * QA_IN_PROGRESS both took the brand tint that ONGOING already had, and
+   * FOR_CLIENT_APPROVAL took the amber WAITING_FOR_INFO had, and
+   * COMPLETED_NO_RESPONSE took the grey OPEN had. Five stages, three colours:
+   * once the whole row is washed in its stage's tone, two groups that share a
+   * colour are two groups nobody can tell apart at a glance.
+   *
+   * The two QA stages read as one family at two depths because that is what
+   * they are — queued for checking, then being checked. The client gate gets
+   * the one hue that belongs to nothing else in the app, because it is the one
+   * stage where the task has left the building.
+   */
+  FOR_QA: "qa",
+  QA_IN_PROGRESS: "qaDeep",
+  FOR_CLIENT_APPROVAL: "client",
   COMPLETED: "success",
-  COMPLETED_NO_RESPONSE: "neutral",
+  /*
+   * ⚠️ SAGE, AND IT IS A WEAKER SIGNAL THAN THE GREY IT REPLACED. Asked for as
+   * "pale green" alongside COMPLETED's green. As row washes the two sit 1.02:1
+   * apart, which is no lightness difference at all — where grey vs green was
+   * unmissable. The split is what Phase 6 reports on, so what actually keeps it
+   * readable is the pair this file already gives them: distinct labels
+   * ("Completed" / "Completed (no response)") and distinct glyphs
+   * (`CircleCheckBig` / `CircleSlash`). Both must stay.
+   */
+  COMPLETED_NO_RESPONSE: "lapsed",
 };
 
 /**
@@ -325,6 +401,10 @@ export const TASK_STATUS_ICONS: Record<VizservePmsTaskStatus, LucideIcon> = {
  * its own icon and label, and this only tells the eye where one column stops.
  */
 const TONE_SURFACE: Record<Tone, string> = {
+  qa: "border-stage-qa-border bg-stage-qa-subtle/45 dark:bg-stage-qa-subtle/20",
+  qaDeep: "border-stage-qa-deep-border bg-stage-qa-deep-subtle/45 dark:bg-stage-qa-deep-subtle/20",
+  client: "border-stage-client-border bg-stage-client-subtle/45 dark:bg-stage-client-subtle/20",
+  lapsed: "border-stage-lapsed-border bg-stage-lapsed-subtle/45 dark:bg-stage-lapsed-subtle/20",
   neutral: "border-border bg-muted",
   brand: "border-accent-border bg-accent/60 dark:bg-accent/30",
   info: "border-info-border bg-info-subtle/45 dark:bg-info-subtle/20",
@@ -337,14 +417,229 @@ export function taskStatusSurface(status: VizservePmsTaskStatus): string {
   return TONE_SURFACE[TASK_STATUS_TONES[status] ?? "neutral"];
 }
 
+/**
+ * A status as a GROUP HEADING — the bar at the top of a list group.
+ *
+ * ⚠️ NOT `taskStatusSurface`, AND THE DIFFERENCE IS WHAT SITS ON TOP. The board
+ * column wash is thinned to 45%/20% because white cards are laid on it and have
+ * to keep reading as raised. A list heading is a bare 36px bar with nothing on
+ * it but a chip and a count, so the same thinning bought nothing and cost
+ * everything: 60% of `--accent` over a white card is #F2F4FA, and a stack of
+ * groups headed Open / Ongoing / Completed came out three shades of white. The
+ * one job of the heading — say which stage this block of rows is — was being
+ * done by the chip alone.
+ *
+ * So the fill is the tone's `-subtle` at FULL strength here. Measured on the
+ * light fills: `--foreground-muted` 5.52–5.70:1, `--foreground` 15.7–16.2:1; on
+ * the dark fills 5.97–6.62:1 and 13.1–14.6:1. All body-legal, which the 45%
+ * wash was not quite — `--muted-foreground` landed at 4.41–4.46:1 on the
+ * strengthened fills, which is why the count beside the chip moved to
+ * `--foreground-muted`.
+ *
+ * ⚠️ THE FILLS ARE STILL PALE, AND THAT IS THE CEILING. `--success-subtle` is
+ * #E8F3EE; nothing about full strength makes it green enough to find from
+ * across a screen. That is what `taskStatusEdge` is for — the spine carries the
+ * colour, this carries the tint, and neither carries the meaning, which is the
+ * chip's job (§5.5).
+ */
+const TONE_HEADING: Record<Tone, string> = {
+  qa: "border-stage-qa-border bg-stage-qa-subtle",
+  qaDeep: "border-stage-qa-deep-border bg-stage-qa-deep-subtle",
+  client: "border-stage-client-border bg-stage-client-subtle",
+  lapsed: "border-stage-lapsed-border bg-stage-lapsed-subtle",
+  neutral: "border-border bg-muted",
+  brand: "border-accent-border bg-accent",
+  info: "border-info-border bg-info-subtle",
+  success: "border-success-border bg-success-subtle",
+  warning: "border-warning-border bg-warning-subtle",
+  danger: "border-destructive-border bg-destructive-subtle",
+};
+
+export function taskStatusHeading(status: VizservePmsTaskStatus): string {
+  return TONE_HEADING[TASK_STATUS_TONES[status] ?? "neutral"];
+}
+
+/**
+ * The stage as a SOLID SPINE down the left edge of its group panel.
+ *
+ * This is the part that is actually answerable at a glance. A tint on a heading
+ * bar is legible once you are looking at it; 4px of `--success` running the
+ * height of the panel is what makes "where does Completed start" answerable
+ * while scrolling. Against a white card the solids measure 5.21–6.54:1 and in
+ * dark 5.55–7.87:1 — far past the 3:1 a non-text boundary owes.
+ *
+ * NEUTRAL TAKES `--foreground-faint` (3.44:1 light, 3.82:1 dark) RATHER THAN A
+ * SEMANTIC SOLID, and both halves of that matter. Open is the quiet stage and
+ * should read quieter than the coloured ones, so it gets grey — and
+ * `--foreground-faint` exists precisely so the tertiary grey is reachable for
+ * decoration without being reachable for text (§1.1). A spine is decoration:
+ * the chip beside it says "Open" in words.
+ *
+ * Never the sole carrier of state — same rule as every other colour in this
+ * file. Greyscale the screen and the six spines collapse to two or three
+ * lightnesses; the labelled chip is what survives that, and it always renders.
+ */
+/**
+ * ⚠️ ONE MAP, TWO SPELLINGS, BECAUSE TAILWIND CANNOT SHARE THEM. `border-l-success`
+ * sets `border-left-color` and `border-success` sets all four; there is no class
+ * that is both, and a dynamic `border-l-${tone}` is never generated. Holding the
+ * pair in one entry is what stops these becoming two maps that drift — this repo
+ * has lost five tone maps to exactly that.
+ *
+ * `spine` is the group panel's left edge, `ring` the row glyph's outline, and
+ * `rule` the line under a group heading. All one colour on purpose: a row's
+ * glyph, the heading above it and the panel around them must not disagree about
+ * what Ongoing looks like.
+ */
+const TONE_EDGE: Record<Tone, { spine: string; ring: string; rule: string }> = {
+  qa: { spine: "border-l-stage-qa", ring: "border-stage-qa", rule: "border-b-stage-qa" },
+  qaDeep: {
+    spine: "border-l-stage-qa-deep",
+    ring: "border-stage-qa-deep",
+    rule: "border-b-stage-qa-deep",
+  },
+  client: {
+    spine: "border-l-stage-client",
+    ring: "border-stage-client",
+    rule: "border-b-stage-client",
+  },
+  lapsed: {
+    spine: "border-l-stage-lapsed",
+    ring: "border-stage-lapsed",
+    rule: "border-b-stage-lapsed",
+  },
+  neutral: {
+    spine: "border-l-foreground-faint",
+    ring: "border-foreground-faint",
+    rule: "border-b-foreground-faint",
+  },
+  brand: { spine: "border-l-primary", ring: "border-primary", rule: "border-b-primary" },
+  info: { spine: "border-l-info", ring: "border-info", rule: "border-b-info" },
+  success: { spine: "border-l-success", ring: "border-success", rule: "border-b-success" },
+  warning: { spine: "border-l-warning", ring: "border-warning", rule: "border-b-warning" },
+  danger: {
+    spine: "border-l-destructive",
+    ring: "border-destructive",
+    rule: "border-b-destructive",
+  },
+};
+
+export function taskStatusEdge(status: VizservePmsTaskStatus): string {
+  return TONE_EDGE[TASK_STATUS_TONES[status] ?? "neutral"].spine;
+}
+
+/**
+ * The same solid, as the RING around a row's stage glyph.
+ *
+ * ⚠️ THE GLYPH ALREADY HAD ITS COLOUR AND IT STILL READ AS GREY MUSH. The icon
+ * sits on the tone's `-subtle` fill at 4.57–5.74:1 light and 5.40–7.25:1 dark,
+ * which is legible — but it was a 12px glyph inside a 20px disc whose outline
+ * was the tone's `-border` hairline at **1.43–1.81:1 against the card**. At that
+ * size the outline is most of the object, so the disc read as a faint grey
+ * smudge on every row whatever its status. Swapping the hairline for the solid
+ * takes the ring to the icon's own 4.57–5.74:1 and is what actually makes the
+ * stage answerable while scanning a column of rows.
+ *
+ * STILL A TINT FILL, NOT A SOLID DISC. A solid brand fill is spoken for — it is
+ * how `TaskCategoryBadge` says "this needs a client", and it is load-bearing
+ * precisely because nothing else in the list or the board wears it. A solid
+ * blue dot on every ongoing row would spend that.
+ *
+ * Neutral takes `--foreground-faint` for the reason `taskStatusEdge` gives:
+ * Open is the quiet stage, and this is decoration beside a `title` and an
+ * `sr-only` label that both say the word.
+ */
+export function taskStatusRing(status: VizservePmsTaskStatus): string {
+  return TONE_EDGE[TASK_STATUS_TONES[status] ?? "neutral"].ring;
+}
+
+/**
+ * The same solid again, as the RULE under a group heading.
+ *
+ * Needed once the rows below the heading took the same fill it has (see
+ * `taskStatusRow`). Heading and body are one colour now, so the line between
+ * them is the only thing left saying which is which — a `--border` hairline at
+ * 1.16:1 could not do it, and there is no darker fill available that keeps its
+ * text legal. The heading is told apart by its chip, its caps and this rule.
+ */
+export function taskStatusRule(status: VizservePmsTaskStatus): string {
+  return TONE_EDGE[TASK_STATUS_TONES[status] ?? "neutral"].rule;
+}
+
+/**
+ * A status as a TABLE ROW — the whole row washed in its stage's tone.
+ *
+ * ⚠️ THE THIRD ANSWER TO ONE COMPLAINT, AND THE FIRST TWO WERE BOTH TOO TIMID.
+ * The heading went from a 45% wash to a full fill, and the row glyph from a
+ * hairline ring to a solid one; the report back was still "I see white", and it
+ * was correct — a 24px disc and a 36px bar are a rounding error against a 56px
+ * row that runs the width of the screen. The row is the object; colour it.
+ *
+ * THE FILL IS THE TONE'S `-subtle` AT FULL STRENGTH, which is also what the
+ * heading wears. They are deliberately the same: nothing stronger exists that
+ * keeps its text legal — the tone's `-border` as a fill measures 3.39–4.43:1
+ * for `--foreground-muted` and 2.79–3.53:1 for `--muted-foreground`, and it
+ * flattens the heading's own chip to 1.29–1.35:1 against its ground, so the chip
+ * stops reading as a raised object. That was measured and rejected;
+ * `taskStatusRule` separates the two instead.
+ *
+ * HOVER IS `-border/60`, the one ground darker than the row that stays legal:
+ * 1.10–1.26:1 against the row it lifts from, with `--foreground-muted` at
+ * 4.52–5.12:1 light and 4.61–5.71:1 dark. `has-aria-expanded` takes the same
+ * ground — a parent showing its subtasks is held open, which is hover that
+ * stuck. Both restate the base row's grey `hover:bg-muted/50`, which would
+ * otherwise drop the hue on the one row the pointer is on.
+ *
+ * ⚠️ THE LAST CLASS RE-POINTS `--muted-foreground` AND IS NOT A TRICK. On these
+ * fills the tertiary grey measures 4.41–4.55:1 and misses 4.5:1 — and a task row
+ * carries that token in nine places across five components (the meta line, the
+ * subtask count, the list name, the cover dates, the estimate, the assignee
+ * overflow). Re-pointing the variable on the row fixes every one of them by
+ * inheritance, including the tenth that gets added next month. `@theme inline`
+ * is what makes it work: `text-muted-foreground` compiles to
+ * `color: var(--muted-foreground)`, so an override on the `<tr>` reaches all of
+ * them. Chasing the call sites instead would fix today's nine and silently miss
+ * the next one.
+ */
+const TONE_ROW: Record<Tone, string> = {
+  qa: "bg-stage-qa-subtle hover:bg-stage-qa-border/60 has-aria-expanded:bg-stage-qa-border/60",
+  qaDeep:
+    "bg-stage-qa-deep-subtle hover:bg-stage-qa-deep-border/60 has-aria-expanded:bg-stage-qa-deep-border/60",
+  client:
+    "bg-stage-client-subtle hover:bg-stage-client-border/60 has-aria-expanded:bg-stage-client-border/60",
+  lapsed:
+    "bg-stage-lapsed-subtle hover:bg-stage-lapsed-border/60 has-aria-expanded:bg-stage-lapsed-border/60",
+  neutral: "bg-muted hover:bg-border-strong/60 has-aria-expanded:bg-border-strong/60",
+  brand: "bg-accent hover:bg-accent-border/60 has-aria-expanded:bg-accent-border/60",
+  info: "bg-info-subtle hover:bg-info-border/60 has-aria-expanded:bg-info-border/60",
+  success: "bg-success-subtle hover:bg-success-border/60 has-aria-expanded:bg-success-border/60",
+  warning: "bg-warning-subtle hover:bg-warning-border/60 has-aria-expanded:bg-warning-border/60",
+  danger:
+    "bg-destructive-subtle hover:bg-destructive-border/60 has-aria-expanded:bg-destructive-border/60",
+};
+
+export function taskStatusRow(status: VizservePmsTaskStatus): string {
+  return cn(
+    TONE_ROW[TASK_STATUS_TONES[status] ?? "neutral"],
+    "[--muted-foreground:var(--foreground-muted)]",
+  );
+}
+
 export function TaskStatusBadge({
   status,
   icon = false,
+  solid = false,
   className,
 }: {
   status: VizservePmsTaskStatus;
   /** Swap the dot for the stage's glyph. Board column headings; not table cells. */
   icon?: boolean;
+  /**
+   * Solid fill in the stage's colour. For the chip that HEADS a group or a
+   * board column — never for one sitting on a row, which would spend the solid
+   * fill that `TaskCategoryBadge` relies on. See `TONE_SOLID`.
+   */
+  solid?: boolean;
   className?: string;
 }) {
   return (
@@ -352,6 +647,7 @@ export function TaskStatusBadge({
       tone={TASK_STATUS_TONES[status] ?? "neutral"}
       label={TASK_STATUS_LABELS[status] ?? status}
       icon={icon ? TASK_STATUS_ICONS[status] : undefined}
+      solid={solid}
       className={className}
     />
   );
@@ -394,14 +690,22 @@ export function TaskStatusGlyph({
     <span
       title={label}
       className={cn(
-        "inline-flex size-5 shrink-0 items-center justify-center rounded-full border",
+        // 24px, up from 20. The glyph is the only thing on a row that says where
+        // the task is, and at 20px with a 12px icon there was not enough of it
+        // for a colour to land — it also now clears the 24px target floor (§5.8)
+        // should it ever gain a click.
+        "inline-flex size-6 shrink-0 items-center justify-center rounded-full border",
         // The same tone map every other status in the app reads from, so a row
         // glyph and its column heading cannot drift into disagreeing about what
-        // colour "For QA" is.
+        // colour "For QA" is. Supplies the subtle fill and the solid icon.
         TONE[tone],
+        // ⚠️ AFTER `TONE`, AND THE ORDER IS THE POINT. Both set a border colour,
+        // `cn` is tailwind-merge, and last wins — so this replaces the tone's
+        // `-border` hairline rather than fighting it.
+        taskStatusRing(status),
         className,
       )}>
-      <Icon className="size-3" aria-hidden />
+      <Icon className="size-3.5" aria-hidden />
       <span className="sr-only">{label}</span>
     </span>
   );
@@ -586,9 +890,16 @@ const TASK_CATEGORY_TONES: Record<TaskCategory, Tone> = {
  * because "does finishing this need somebody outside the company" changes what
  * the row means rather than decorating it.
  *
- * Solid `primary` is used by nothing else in the list or the board, so it
- * cannot be confused with a status or a priority. The label still says "Client"
- * — the fill is the second carrier, never the only one.
+ * Solid `primary` is used by nothing else ON A ROW, so it cannot be confused
+ * with a status or a priority. The label still says "Client" — the fill is the
+ * second carrier, never the only one.
+ *
+ * ⚠️ P11-15 NARROWED THAT SENTENCE FROM "in the list or the board" TO "on a
+ * row", and the boundary is now the thing holding it up. Group and board-column
+ * HEADINGS draw their status chip solid (`TONE_SOLID`). No category chip is
+ * ever rendered in a heading, so a row still carries exactly one solid fill and
+ * it still means client work — but only for as long as `solid` stays out of
+ * the row cells.
  */
 const CLIENT_FILL = "border-primary bg-primary text-primary-foreground";
 

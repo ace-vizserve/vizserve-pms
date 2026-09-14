@@ -200,18 +200,162 @@ Two colours were **changed from the design canvas because they failed here** —
 
 Status chips do not rely on their fill for the 3:1 boundary rule: each carries a hairline border, a leading dot, and its label, so state survives greyscale and print.
 
-### Status as a SURFACE — the board columns and the list's stage groups
+### Status as a SURFACE — the board columns
 
 Added 18 Aug 2026 with the grouped task views. `taskStatusSurface()` in `components/status-badge.tsx` washes a container in the status' own tone; the tone→colour mapping stays in that file, which is the only place a status becomes a colour.
+
+It backed the list's stage-group headings too until 14 Sep 2026, when they moved to the stronger pair below. This one is now the board column alone.
 
 The wash carries **two alphas**, and the dark one is a measurement, not a taste call. The dark `-subtle` fills sit at almost exactly `--card`'s luminance, so a 45% wash in dark put a card at **1.00–1.04:1** against the column holding it — the two collapsed into one field. At 20% the column reads as a *hue* rather than as a lightness step and card contrast returns to **1.04–1.06:1**, level with the plain `bg-muted` column it replaced (**1.08:1**) and with `--card` on `--background` everywhere else in the app (**1.07:1**).
 
 | Pair | Light | Dark | Needs | Verdict | Where |
 |---|---|---|---|---|---|
-| `--muted-foreground` on the tone wash | **4.55–4.82:1** | **5.9–6.2:1** | 4.5:1 | pass | the count beside a column or group heading |
+| `--muted-foreground` on the tone wash | **4.55–4.82:1** | **5.9–6.2:1** | 4.5:1 | pass | the count beside a column heading |
 | `--card` on the tone wash | 1.09–1.11:1 | 1.04–1.06:1 | — | n/a | a raised card; told apart by its border and `shadow-raised`, never by fill (§1.5) |
 | tone `-border` vs `--background` | **1.34–1.44:1** | **1.46–1.83:1** | — | firmer than `--border` (1.16 / 1.30) | the column edge |
 
 Wash alphas: `bg-<tone>-subtle/45 dark:bg-<tone>-subtle/20`; brand is `bg-accent/60 dark:bg-accent/30`; neutral stays the opaque `bg-muted`. Borders are full strength.
 
 **The wash is never the carrier.** Every column and every group is headed by a full status chip with its stage glyph, its label and its count — the tint only tells the eye where one container stops and the next begins, and the view is entirely usable in greyscale without it.
+
+### Status as a HEADING and a SPINE — the list's stage groups
+
+Added 14 Sep 2026. A board column and a list group heading are the same tone at two intensities, for one reason: **white cards sit on a column and nothing sits on a heading.** The thinning that keeps a card reading as raised (above) bought the heading nothing and cost it everything — 60% of `--accent` over a white card is `#F2F4FA`, so a stack of groups headed Open / Ongoing / Completed came out as three shades of white and only the chip said which was which.
+
+`taskStatusHeading()` takes the tone's `-subtle` at **full strength**; `taskStatusEdge()` supplies the colour of a **4px solid spine** down the left edge of the group panel. The tint is what you read once you are looking at the bar; the spine is what makes "where does Completed start" answerable while scrolling.
+
+| Pair | Light | Dark | Needs | Verdict | Where |
+|---|---|---|---|---|---|
+| `--foreground-muted` on the full `-subtle` fill | **5.52–5.70:1** | **5.97–6.62:1** | 4.5:1 | pass | the count beside a group heading |
+| `--foreground` on the full `-subtle` fill | **15.72–16.23:1** | **13.13–14.55:1** | 4.5:1 | pass | any label placed on the bar |
+| `--muted-foreground` on the full `-subtle` fill | 4.41–4.46:1 | 5.16–5.72:1 | 4.5:1 | **fail (light)** | why the count moved to `--foreground-muted` |
+| tone solid spine vs `--card` | **5.21–6.54:1** | **5.55–7.87:1** | 3.0:1 | pass | the coloured spine |
+| `--foreground-faint` spine vs `--card` | **3.44:1** | **3.82:1** | 3.0:1 | pass | the neutral spine — Open and Completed (no response) |
+| full `-subtle` fill vs `--card` | 1.11–1.15:1 | 1.03–1.14:1 | — | n/a | the heading bar against the panel below it |
+
+The neutral spine is `--foreground-faint`, **not** a semantic solid and **not** `--border`. Open is the quiet stage and should read quieter than the coloured ones, and `--foreground-faint` is exactly the token that exists so the tertiary grey is reachable for decoration while staying unreachable for text.
+
+**Neither is the carrier.** Greyscale the screen and the six spines collapse to two or three lightnesses — the labelled, glyphed chip beside each one is what survives that, and it always renders.
+
+### Status as a ROW GLYPH — the disc before a task title
+
+Added 14 Sep 2026, same pass. `TaskStatusGlyph` is the only thing on a task row that says where the task is; a subtask keeps its own status while sitting in its parent's group, so the group heading above it cannot answer for it.
+
+**It already had its colour and still read as grey mush.** The icon sits on the tone's `-subtle` fill at 4.57–5.74:1, which is legible — but it was a 12px icon inside a 20px disc whose outline was the tone's `-border` hairline at **1.43–1.81:1 against the card**. At that size the outline is most of the object, so every disc read as a faint smudge whatever its status. The ring now takes the tone's **solid**, and the disc went 20px → 24px with a 14px icon.
+
+| Pair | Light | Dark | Needs | Verdict | Where |
+|---|---|---|---|---|---|
+| tone solid icon on its `-subtle` fill | **4.57–5.74:1** | **5.40–7.25:1** | 4.5:1 | pass | the glyph, unchanged |
+| tone solid ring vs `--card` | **4.57–5.74:1** | **5.40–7.25:1** | 3.0:1 | pass | the new ring |
+| tone `-border` ring vs `--card` | 1.43–1.81:1 | 1.37–2.00:1 | 3.0:1 | **fail** | what it replaced |
+| `--foreground-faint` ring vs `--card` | **3.44:1** | **3.82:1** | 3.0:1 | pass | the neutral ring — Open, Completed (no response) |
+
+**The fill stays a tint; it is deliberately not a solid disc.** A solid brand fill is spoken for — `TaskCategoryBadge` uses it to say "this needs a client", and it is load-bearing precisely because nothing else in the list or the board wears one. A solid blue dot on every ongoing row would spend that distinction.
+
+The ring and the group spine come from **one map** (`TONE_EDGE`, holding `{ spine, ring }` per tone), because `border-l-success` and `border-success` are different Tailwind classes with no shared spelling and no dynamic form. Splitting them into two maps is how the other five tone maps in this repo drifted.
+
+Colour is never the carrier here either: the glyph renders `title` **and** an `sr-only` label, so the stage survives greyscale, a screenshot and a screen reader.
+
+### Status as a ROW — the whole task row washed
+
+Added 14 Sep 2026, third and final step of the same pass. The heading went from a 45% wash to a full fill and the glyph from a hairline ring to a solid one, and the report back was still "I see white" — correctly. A 24px disc and a 36px bar are a rounding error against a 56px row running the width of the screen. `taskStatusRow()` washes the row itself, so a group reads as a block of colour rather than a white table under a coloured bar.
+
+A **subtask takes its own status here, not its parent's.** It sits in the parent's group whatever stage it is at (P7-09), so the row wash is the only thing that can say so.
+
+| Pair | Light | Dark | Needs | Verdict | Where |
+|---|---|---|---|---|---|
+| `--foreground` on the row fill | **15.72–16.23:1** | **13.13–14.55:1** | 4.5:1 | pass | task titles |
+| `--foreground-muted` on the row fill | **5.52–5.70:1** | **5.97–6.62:1** | 4.5:1 | pass | every meta cell, after the re-point below |
+| `--muted-foreground` on the row fill | 4.41–4.55:1 | 5.16–5.72:1 | 4.5:1 | **fail (light)** | why the re-point exists |
+| `--foreground` on the hover ground | **12.86–14.57:1** | **10.13–12.56:1** | 4.5:1 | pass | hover and `has-aria-expanded` |
+| `--foreground-muted` on the hover ground | **4.52–5.12:1** | **4.61–5.71:1** | 4.5:1 | pass |  |
+| hover ground vs the row it lifts from | **1.10–1.26:1** | **1.16–1.36:1** | — | perceptible | the only step above the row that stays legal |
+
+Fills: row `bg-<tone>-subtle` (neutral `bg-muted`, brand `bg-accent`); hover and `has-aria-expanded` `bg-<tone>-border/60` (neutral `bg-border-strong/60`). Both restate the base `TableRow`'s grey `hover:bg-muted/50`, which would otherwise drop the hue on the one row the pointer is on.
+
+#### Measured and rejected: the tone `-border` as a heading fill
+
+The row and the heading now wear the **same** fill, and that is not an oversight. The obvious move was to push the heading one step darker onto the tone's `-border` token so it still out-ranked its rows. It was measured and fails three ways:
+
+| Pair | Light | Dark | Needs | Verdict |
+|---|---|---|---|---|
+| `--foreground-muted` on the `-border` fill | 3.50–4.42:1 | 3.39–4.97:1 | 4.5:1 | **fail** |
+| `--muted-foreground` on the `-border` fill | 2.79–3.53:1 | 2.92–4.29:1 | 4.5:1 | **fail** |
+| the heading's own chip vs that ground | 1.29–1.35:1 | 1.33–1.85:1 | — | **chip stops reading as raised** |
+
+Nothing between `-subtle` and `-border` exists in the token set, so the heading keeps the `-subtle` fill and is separated **structurally** instead: `taskStatusRule()` draws its bottom edge as a 2px line in the tone's solid, and it still carries the chip, the caps and the chevron the rows do not.
+
+#### The `--muted-foreground` re-point
+
+`taskStatusRow()` ends with `[--muted-foreground:var(--foreground-muted)]`. A task row carries `text-muted-foreground` in **nine places across five components** — the meta line, the subtask count, the list name, the cover dates, the estimate, the assignee overflow — and on these fills that token misses 4.5:1. Re-pointing the variable on the `<tr>` fixes all nine by inheritance, and the tenth that gets added later. `@theme inline` is what makes it work: `text-muted-foreground` compiles to `color: var(--muted-foreground)`, so an override on the row reaches every descendant. Chasing the call sites would fix today's nine and silently miss the next one.
+
+#### One known degradation
+
+The `/60` hover grounds ship as Tailwind's two-rule pair: a full-strength fallback, then the 60% inside `@supports (color: color-mix(...))`. On a browser without `color-mix` — pre-2023 — hover lands on the full `-border` and its meta text drops to the 3.50–4.42:1 measured above, on a transient state only. This is how **every** alpha fill in the app already behaves (`bg-accent/60`, `bg-muted/50`, `bg-success-subtle/45` all ship the same pair), so it is a property of the system rather than of this change.
+
+**Still never the carrier.** Greyscale the page and the washes collapse to near-identical lightnesses — 1.11–1.15:1 against the card is a hue, not a lightness step. What survives is the labelled chip in each heading and the `title`/`sr-only` glyph on each row.
+
+### The task stage palette — eight stages, eight colours (P11-14)
+
+Added 14 Sep 2026, closing the same pass. Once the whole row is washed in its stage's tone, **two stages that share a tone are two groups nobody can tell apart.** Five of the eight shared: FOR_QA and QA_IN_PROGRESS both took ONGOING's brand tint, FOR_CLIENT_APPROVAL took WAITING_FOR_INFO's amber, and COMPLETED_NO_RESPONSE took OPEN's grey.
+
+Four new families in `app/globals.css` fix that. They are **named for the stage, not the hue** — `--stage-qa`, `--stage-qa-deep`, `--stage-client`, `--stage-lapsed` — and they are **not semantic**: the six tones above mean something anywhere in the app, these mean a position in the task pipeline and nothing else. A leave request is never `client`; it has no client gate to be at. Same precedent as the `--event-*` families P7-46 added for the calendar.
+
+| Stage | Tone | Light solid / subtle / border | Dark solid / subtle / border |
+|---|---|---|---|
+| Open | `neutral` (slate) | `#556074` / `#F0F3F7` / `#B9C1CE` | `#9AA4B6` / `#1E232E` / `#454D5C` |
+| Ongoing | `brand` (indigo) | `#4359A5` / `#EDF0F8` / `#C6D0E9` | `#8098DE` / `#1E2537` / `#37405C` |
+| Waiting for info | `warning` (amber) | `#8A6206` / `#FBF2E0` / `#E8D6AC` | `#D8A94A` / `#2A2213` / `#463A1F` |
+| For QA | `qa` (light violet) | `#6D4BAF` / `#F2EDFC` / `#DCCFF2` | `#B9A3EA` / `#261E3A` / `#3D3352` |
+| QA in progress | `qaDeep` (deep violet) | `#4C3286` / `#E9E2F6` / `#CDBDE9` | `#9878D6` / `#18132D` / `#332A52` |
+| For client approval | `client` (orange) | `#A9520B` / `#FCEEE2` / `#F0CFAE` | `#E0904F` / `#2C2015` / `#4A3621` |
+| Completed | `success` (green) | `#1C7A52` / `#E8F3EE` / `#BFDCCE` | `#4CB483` / `#152720` / `#264334` |
+| Completed (no response) | `lapsed` (sage) | `#446F5C` / `#EEF4F1` / `#D3E2DA` | `#8AB89F` / `#17241F` / `#2B3F36` |
+
+Every pair measured across all eight, both themes — no exceptions, no near-misses:
+
+| Pair | Light | Dark | Needs | Verdict |
+|---|---|---|---|---|
+| solid on its own subtle (chip text, glyph icon) | **4.67–7.91:1** | **5.12–7.25:1** | 4.5:1 | pass |
+| `--foreground-muted` on the subtle (row meta) | **4.87–5.70:1** | **6.08–7.15:1** | 4.5:1 | pass |
+| `--foreground` on the subtle (task title) | **13.86–16.23:1** | **13.37–15.71:1** | 4.5:1 | pass |
+| solid on `--card` (spine, glyph ring) | **5.31–9.96:1** | **4.87–7.87:1** | 3.0:1 | pass |
+| `--foreground-muted` on the `-border/60` hover | **4.59–5.36:1** | **4.61–5.90:1** | 4.5:1 | pass |
+| hover ground vs the row it lifts from | **1.06–1.26:1** | **1.14–1.36:1** | — | perceptible |
+
+Two values were moved by measurement, not taste. The sage solid started at `#4E8A6B` and measured **3.66:1** on its own fill; it was darkened to `#446F5C` (**5.13:1**). The deep-violet border started at `#C9B8E6`, which put `--foreground-muted` on its hover ground at **4.47:1**; `#CDBDE9` brings it to 4.59:1 while keeping a 1.10:1 hover step.
+
+#### The limit, stated plainly
+
+**As row washes these are told apart by HUE, not by lightness.** Amber vs orange sit **1.02:1** apart, green vs sage **1.02:1**, slate vs indigo **1.02:1**. In greyscale they are the same colour. That is legal only because every stage also carries a labelled chip and its own lucide glyph — it would not be legal if the wash were the carrier, and any change that drops the chip or the glyph makes it illegal immediately.
+
+The solids, which the spine, ring and chip text wear, separate much better: light vs deep violet is **1.55:1**, and the rest carry distinct hue at similar lightness.
+
+#### One regression, accepted on request
+
+Completed vs Completed (no response) was **green vs grey** and is now **green vs sage** — 1.02:1 apart as washes, 1.08:1 as solids, where the old pair was unmissable. This is the split Phase 6 reports on. What keeps it readable is the pair `status-badge.tsx` already gives them: distinct labels and distinct glyphs (`CircleCheckBig` vs `CircleSlash`). **Both must stay** — dropping either leaves the two terminal states effectively identical.
+
+#### `toneButtonVariant` narrowed
+
+The four stage tones have no button variant and must never acquire one: a button says what pressing it *does*, and "light violet" is where a task *is*. `toneButtonVariant` now takes `ButtonTone` (the six semantic tones) rather than `Tone`. Every caller feeds it `transitionTone()`, which returns brand / success / info / warning, so nothing is lost.
+
+### The solid heading chip (P11-15)
+
+Added 14 Sep 2026. **A chip on a row is a note; a chip that heads a group is a title.** The reference UI draws the second as a solid block of the stage's colour, and after the heading fill, the spine, the glyph ring and the row wash had all been strengthened, that chip was the last thing on the screen still reading as pale.
+
+`TaskStatusBadge` takes `solid`, and only the group heading and the board column heading pass it.
+
+**Ink is `text-background`** — the page colour, which inverts with the theme. One class covers both, with no per-tone foreground to keep in step:
+
+| Pair | Light (`#F5F7FA` ink) | Dark (`#12151C` ink) | Needs | Verdict |
+|---|---|---|---|---|
+| ink on the solid chip, all 8 stages | **4.95–9.28:1** | **5.21–8.43:1** | 4.5:1 | pass |
+| solid chip vs the heading fill behind it | **4.67–7.91:1** | **5.12–7.25:1** | 3.0:1 | pass |
+
+`text-white` was the obvious choice and fails every dark solid, which are light colours by design.
+
+#### The boundary that keeps `TaskCategoryBadge` working
+
+§4.1's claim that solid `--primary` "is used by nothing else in the list or the board" is now narrower: **nothing else _on a row_.** `TaskCategoryBadge` spends a solid fill to say "this needs a client" and it only works while it is the only solid on the row.
+
+Headings are safe because **no category chip is ever rendered in one** — a heading names a stage, not a task. So a row still carries exactly one solid fill and it still means client work. That holds only for as long as `solid` stays out of the row cells; passing it to a chip inside a row spends the distinction immediately.

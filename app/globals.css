@@ -86,6 +86,33 @@
   --color-event-department: var(--event-department);
   --color-event-department-subtle: var(--event-department-subtle);
   --color-event-department-border: var(--event-department-border);
+
+  /*
+   * P11-14 — THE TASK PIPELINE'S OWN PALETTE.
+   *
+   * Four families the semantic set does not contain, for the four stages that
+   * had to share a colour with another stage. Before this, three statuses were
+   * all "brand" and two were both "neutral", so half the stage groups in the
+   * task list were indistinguishable from another group — the exact failure
+   * P7-46 added the event families to avoid on the calendar.
+   *
+   * They are a SEQUENCE, not a set of meanings: light violet hands over to deep
+   * violet (queued for QA, then being checked), and orange is the one gate that
+   * leaves the building. Naming them after the stage rather than the hue is
+   * what keeps `status-badge.tsx` the only place a status becomes a colour.
+   */
+  --color-stage-qa: var(--stage-qa);
+  --color-stage-qa-subtle: var(--stage-qa-subtle);
+  --color-stage-qa-border: var(--stage-qa-border);
+  --color-stage-qa-deep: var(--stage-qa-deep);
+  --color-stage-qa-deep-subtle: var(--stage-qa-deep-subtle);
+  --color-stage-qa-deep-border: var(--stage-qa-deep-border);
+  --color-stage-client: var(--stage-client);
+  --color-stage-client-subtle: var(--stage-client-subtle);
+  --color-stage-client-border: var(--stage-client-border);
+  --color-stage-lapsed: var(--stage-lapsed);
+  --color-stage-lapsed-subtle: var(--stage-lapsed-subtle);
+  --color-stage-lapsed-border: var(--stage-lapsed-border);
   --color-warning: var(--warning);
   --color-warning-subtle: var(--warning-subtle);
   --color-warning-border: var(--warning-border);
@@ -347,6 +374,31 @@
   --event-department: #8a5a12;
   --event-department-subtle: #fbf1e2;
   --event-department-border: #ecd6ae;
+
+  /*
+   * P11-14. The four stage families. Each solid is measured on its OWN subtle
+   * fill (chip text, 4.5:1) and on --card (the group spine and the row glyph's
+   * ring, 3:1); each subtle fill is measured against --foreground-muted, which
+   * is what a tinted task row re-points its meta text to.
+   *
+   * ⚠️ TOLD APART BY HUE, NOT BY LIGHTNESS. As row washes, amber vs orange and
+   * green vs sage sit 1.01–1.03:1 apart — they are the same lightness in
+   * different hues, and in greyscale they are the same colour. That is legal
+   * here only because every stage also carries a labelled chip and its own
+   * lucide glyph; it would not be legal if the wash were the carrier.
+   */
+  --stage-qa: #6d4baf;
+  --stage-qa-subtle: #f2edfc;
+  --stage-qa-border: #dccff2;
+  --stage-qa-deep: #4c3286;
+  --stage-qa-deep-subtle: #e9e2f6;
+  --stage-qa-deep-border: #cdbde9;
+  --stage-client: #a9520b;
+  --stage-client-subtle: #fceee2;
+  --stage-client-border: #f0cfae;
+  --stage-lapsed: #446f5c;
+  --stage-lapsed-subtle: #eef4f1;
+  --stage-lapsed-border: #d3e2da;
   --warning: #8a6206;
   --warning-subtle: #fbf2e0;
   --warning-border: #e8d6ac;
@@ -480,6 +532,20 @@
   --event-department: #d9a961;
   --event-department-subtle: #2a1f10;
   --event-department-border: #4a3819;
+
+  /* P11-14. The four stage families, lifted for a dark ground the same way. */
+  --stage-qa: #b9a3ea;
+  --stage-qa-subtle: #261e3a;
+  --stage-qa-border: #3d3352;
+  --stage-qa-deep: #9878d6;
+  --stage-qa-deep-subtle: #18132d;
+  --stage-qa-deep-border: #332a52;
+  --stage-client: #e0904f;
+  --stage-client-subtle: #2c2015;
+  --stage-client-border: #4a3621;
+  --stage-lapsed: #8ab89f;
+  --stage-lapsed-subtle: #17241f;
+  --stage-lapsed-border: #2b3f36;
   --warning: #d8a94a;
   --warning-subtle: #2a2213;
   --warning-border: #463a1f;
