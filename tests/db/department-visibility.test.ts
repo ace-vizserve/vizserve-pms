@@ -458,3 +458,172 @@ describe.skipIf(!run)("P7-17 — seeing is not editing", () => {
       .eq("task_id", departmentTaskId);
   });
 });
+
+// ---------------------------------------------------------------------------
+// P12-16 — what the peer clause asks about now
+// ---------------------------------------------------------------------------
+
+/**
+ * P12-16 — a shared list is shared.
+ *
+ * The peer clause tested `not is_personal` from P7-17 until 15 Sep 2026, and the
+ * four cases below are the whole of what changed. The pivot is the same one
+ * P11-08 made for the lead's clause: privacy is `vizserve_pms_lists.owner_id`,
+ * never the flag.
+ *
+ * ⚠️ THE FIXTURES ARE THE ASSERTION HERE. Both tasks are created by
+ * `vizserve_pms_create_personal_task`, so both carry `is_personal = true` and
+ * differ in ONE thing — the list they are filed in. If a future edit makes them
+ * differ in anything else, this file stops testing the clause it is named after.
+ */
+describe.skipIf(!run)("P12-16 — a shared list is shared", () => {
+  /** A VizBytes list nobody owns — the "User Support" shape. */
+  let sharedListId = "";
+  /** member1's own list — the P11-06 shape. */
+  let privateListId = "";
+  /** `is_personal`, filed in the shared list. The support ticket. */
+  let sharedListTaskId = "";
+  /** `is_personal`, filed in member1's own list. The private to-do. */
+  let privateListTaskId = "";
+
+  beforeAll(async () => {
+    if (!run) return;
+
+    const admin = adminClient();
+    const member1 = await signIn("member1VizBytes");
+
+    const { data: shared, error: sharedError } = await admin
+      .from("vizserve_pms_lists")
+      .insert({
+        department_id: DEPARTMENTS.VizBytes,
+        name: `P12-16 shared ${Math.random().toString(36).slice(2, 8)}`,
+      } as never)
+      .select("id")
+      .single();
+
+    if (sharedError) throw new Error(`fixture shared list: ${sharedError.message}`);
+    sharedListId = (shared as { id: string }).id;
+
+    // `owner_id` is what makes it personal. `department_id` is required even so
+    // and then overwritten by `vizserve_pms_lists_owner_guard`, which derives it
+    // from the owner — so it is sent already agreeing with the trigger.
+    const { data: privateList, error: privateError } = await admin
+      .from("vizserve_pms_lists")
+      .insert({
+        department_id: DEPARTMENTS.VizBytes,
+        name: `P12-16 private ${Math.random().toString(36).slice(2, 8)}`,
+        owner_id: member1.userId,
+      } as never)
+      .select("id")
+      .single();
+
+    if (privateError) throw new Error(`fixture private list: ${privateError.message}`);
+    privateListId = (privateList as { id: string }).id;
+
+    for (const [listId, label] of [
+      [sharedListId, "shared"],
+      [privateListId, "private"],
+    ] as const) {
+      const { data, error } = await member1.client.rpc("vizserve_pms_create_personal_task", {
+        p_title: `P12-16 ${label} ${Math.random().toString(36).slice(2, 8)}`,
+        p_description: "Recorded by its assignee, which is all is_personal means.",
+        p_due_date: null,
+        p_list_id: listId,
+      });
+
+      if (error) throw new Error(`fixture ${label} task: ${error.message}`);
+      if (label === "shared") sharedListTaskId = (data as { task_id: string }).task_id;
+      else privateListTaskId = (data as { task_id: string }).task_id;
+    }
+  });
+
+  afterAll(async () => {
+    if (!run) return;
+
+    const admin = adminClient();
+    const taskIds = [sharedListTaskId, privateListTaskId].filter(Boolean);
+
+    // Tasks first: a list with rows still pointing at it cannot go.
+    if (taskIds.length > 0) {
+      await admin.from("vizserve_pms_notifications").delete().in("entity_id", taskIds);
+      await admin.from("vizserve_pms_tasks").delete().in("id", taskIds);
+    }
+
+    const listIds = [sharedListId, privateListId].filter(Boolean);
+    if (listIds.length > 0) await admin.from("vizserve_pms_lists").delete().in("id", listIds);
+  });
+
+  it("shows a peer a colleague's is_personal task filed in a SHARED list", async () => {
+    /*
+     * THE BUG THIS MIGRATION WAS WRITTEN FOR, as a count. Four ONGOING tickets
+     * sat in "User Support" under VizBytes — printers, logins, file access — and
+     * the support team read zero of them, because every one had been typed by
+     * its own assignee and `quickAddTask` sets `is_personal` on exactly that.
+     */
+    const { client } = await signIn("member2VizBytes");
+
+    const { data, error } = await client
+      .from("vizserve_pms_tasks")
+      .select("id")
+      .eq("id", sharedListTaskId);
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(1);
+  });
+
+  it("still hides a colleague's task filed in their PERSONAL list", async () => {
+    /*
+     * THE HALF THAT MUST NOT MOVE, and the one a "simplify the policies" pass
+     * would take with it. P11-06 exists so somebody can say "this is mine
+     * alone"; if this case ever passes with a row, that sentence has stopped
+     * being true and the lead's clause is the only thing left saying it.
+     */
+    const { client } = await signIn("member2VizBytes");
+
+    const { data, error } = await client
+      .from("vizserve_pms_tasks")
+      .select("id")
+      .eq("id", privateListTaskId);
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(0);
+  });
+
+  it("leaves a LIST-LESS personal task invisible to a peer", async () => {
+    /*
+     * The asymmetry with the lead's clause, asserted so it is a decision rather
+     * than a gap somebody closes for symmetry later. Filing work into a shared
+     * list is the act that shares it; a task in no list has not been filed
+     * anywhere, so P7-17's original test still answers for it.
+     *
+     * `personalTaskId` is the P7-17 fixture — created with `p_list_id: null` —
+     * and the case above it in this file asserts the same thing from the other
+     * migration's side. Both are kept: they will diverge the day somebody
+     * mirrors the lead's clause here.
+     */
+    const { client } = await signIn("member2VizBytes");
+
+    const { data, error } = await client
+      .from("vizserve_pms_tasks")
+      .select("id")
+      .eq("id", personalTaskId);
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(0);
+  });
+
+  it("still shows both tasks to their owner", async () => {
+    // The first disjunct in the policy, and the reason no clause below it can
+    // lock somebody out of their own list. Asserted because this migration
+    // rewrote the clause immediately after it.
+    const { client } = await signIn("member1VizBytes");
+
+    const { data, error } = await client
+      .from("vizserve_pms_tasks")
+      .select("id")
+      .in("id", [sharedListTaskId, privateListTaskId]);
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(2);
+  });
+});
