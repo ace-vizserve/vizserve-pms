@@ -376,7 +376,11 @@ export default async function TasksPage({
               <FilterBarSkeleton fields={2} />
             </div>
           }>
-          <TaskFiltersSection listsPromise={listsPromise} groupsPromise={groupsPromise} />
+          <TaskFiltersSection
+            listId={params.list ?? null}
+            listsPromise={listsPromise}
+            groupsPromise={groupsPromise}
+          />
         </Suspense>
 
         {/* One menu for all eight group tables — see `TaskColumnsProvider`. */}
@@ -481,9 +485,11 @@ async function ListCrumb({
 
 /** The filter panel and the two reads that populate it. Nothing else. */
 async function TaskFiltersSection({
+  listId,
   listsPromise,
   groupsPromise,
 }: {
+  listId: string | null;
   listsPromise: Promise<ListsResult>;
   groupsPromise: Promise<GroupsResult>;
 }) {
@@ -505,6 +511,18 @@ async function TaskFiltersSection({
    * 8 Sep: "i want i can only see it under the personal lists".
    */
   const departmentLists = (lists ?? []).filter((list) => list.owner_id === null);
+
+  /*
+   * ⚠️ AND INSIDE A PERSONAL LIST, NEITHER THE LIST NOR THE FOLDER FILTER RENDERS.
+   *
+   * `?list=` then names a list the dropdown was just told to leave out, so Base
+   * UI had no label for the value and printed the raw uuid — over a menu of
+   * every department list, none of which the page was showing. The folder
+   * filter is no better: a personal list sits in no folder, so any choice there
+   * empties the page. Leaving goes through the rail, the same way coming in did.
+   */
+  const inPersonalList = (lists ?? []).some((list) => list.id === listId && list.owner_id !== null);
+  if (inPersonalList) return <TaskFilters lists={[]} groups={[]} />;
 
   return <TaskFilters lists={departmentLists} groups={groups ?? []} />;
 }
