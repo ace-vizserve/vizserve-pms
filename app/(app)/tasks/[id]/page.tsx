@@ -7,6 +7,7 @@ import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
 import { Chip } from "@/components/status-badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { RichText } from "@/components/ui/rich-text";
@@ -953,11 +954,29 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                   }))}
                 />
 
-                {/* Only when there IS a rest. A link that opens the same three
-                    entries in a panel is a control that does nothing. */}
+                {/*
+                  THE WAY TO THE REST OF THE CONVERSATION, AND IT IS A BUTTON.
+
+                  It was an `ACTION_LINK` — muted, small, indistinguishable from
+                  the "Add a subtask" text links on the other card. But those are
+                  optional extras beside content you can already see, and this is
+                  the opposite: three entries out of twenty-four, with the other
+                  twenty-one reachable ONLY here. A control that is the sole route
+                  to most of the content on a card cannot be the quietest thing on
+                  it.
+
+                  Full width under the thread, so it reads as the end of the list
+                  rather than as a footnote beside it — and `buttonVariants`
+                  rather than a hand-rolled copy of them, so it stays in step with
+                  every other outline button in the app (this module has no
+                  "use client", so a server component may call it).
+
+                  ⚠️ ONLY WHEN THERE IS A REST. A button that opens the same three
+                  entries in a panel is a control that does nothing.
+                */}
                 {(commentRows?.length ?? 0) + activity.length > ACTIVITY_PREVIEW ? (
                   <CommentSheet
-                    className={cn(ACTION_LINK, "mt-2")}
+                    className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-3 w-full")}
                     taskId={task.id}
                     taskTitle={task.title}
                     viewerId={context.userId}

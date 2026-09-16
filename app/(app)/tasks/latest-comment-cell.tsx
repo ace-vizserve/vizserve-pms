@@ -1,20 +1,12 @@
 "use client";
 
 import { MessageSquare } from "lucide-react";
-import { useState } from "react";
 
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
 import { richTextToPlainText } from "@/lib/rich-text";
-import { CommentThread, type TaskComment } from "./comment-thread";
+import { CommentSheet } from "./comment-sheet";
+import { type TaskComment } from "./comment-thread";
 
 /**
  * P7-08 / K5 — the latest comment, and the way into the thread.
@@ -51,17 +43,19 @@ export function LatestCommentCell({
   comments: TaskComment[];
   viewerId: string;
 }) {
-  const [open, setOpen] = useState(false);
   const latest = comments[comments.length - 1];
 
   return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger
-        className={cn(
+    <CommentSheet
+      taskId={taskId}
+      taskTitle={taskTitle}
+      comments={comments}
+      viewerId={viewerId}
+      className={cn(
           "w-full max-w-56 rounded-sm px-1.5 py-1 text-left text-xs",
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          latest ? "text-foreground" : "text-muted-foreground",
-        )}>
+        latest ? "text-foreground" : "text-muted-foreground",
+      )}>
         {latest ? (
           <>
             {/* Two lines, then it stops. The cell is a pointer into the thread,
@@ -89,58 +83,6 @@ export function LatestCommentCell({
             <span className="sr-only">on {taskTitle}</span>
           </span>
         )}
-      </SheetTrigger>
-
-      {/*
-        42rem rather than the primitive's 24rem: wide enough that a landscape
-        screenshot is legible in the thread instead of something you have to open
-        to read. Still a panel, not a page — the backdrop stays visible on the
-        left, so the way out is obvious.
-
-        ⚠️ IT REPEATS `data-[side=right]:` BECAUSE THE PRIMITIVE DOES. `SheetContent`
-        ships `data-[side=right]:sm:max-w-sm`, and a plain `sm:max-w-2xl` is a
-        DIFFERENT variant key — tailwind-merge sees no conflict, keeps both, and
-        the panel stays at 24rem while the class that was supposed to widen it
-        sits in the list doing nothing. Matching the variant exactly is what lets
-        the merge drop the one underneath. The same trap as `grade-*` vs `bg-*`
-        in §1.5 of the design system, from the other direction.
-      */}
-      <SheetContent className="w-full gap-0 p-0 sm:max-w-2xl data-[side=right]:sm:max-w-2xl">
-        <SheetHeader className="border-b">
-          <SheetTitle className="truncate text-sm">{taskTitle}</SheetTitle>
-          <SheetDescription className="text-2xs">
-            {comments.length === 0
-              ? "No comments yet"
-              : comments.length === 1
-                ? "1 comment"
-                : `${comments.length} comments`}
-          </SheetDescription>
-        </SheetHeader>
-        {/* `min-h-0 flex-1` IS THE HEIGHT THE THREAD INSIDE FILLS. The sheet is
-            a full-height flex column, this takes what is left under the header,
-            and `fillHeight` below hands it to the LIST — so a task with forty
-            comments scrolls inside the panel and one with two does not leave a
-            screenful of nothing under it.
-
-            ⚠️ THE SCROLL REGION IS THE LIST, NEVER THIS WRAPPER (P7-55). The
-            wrapper version put the COMPOSER inside the scroll region, so
-            replying to a long thread meant scrolling back down to find the box
-            you type into. */}
-        {/* The padding lives here rather than on the panel, so the thread's own
-            scroll region reaches the panel's edges and a long conversation does
-            not scroll inside an inset box. */}
-        {/* ⚠️ `flex flex-col`, NOT A PLAIN BLOCK. The thread inside fills this
-            with `flex-1`, and a flex child needs a flex parent to fill — as a
-            block it had nothing to stretch against, so it took its content
-            height and the list ran past the bottom of the panel, where this
-            `overflow-hidden` cut it off with no scrollbar. */}
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
-          {/* `fillHeight`, NOT `scrollList`. This panel is as tall as the
-              window; a 24rem cap left the thread stopping a third of the way
-              down with the composer floating above a screenful of nothing. */}
-          <CommentThread taskId={taskId} comments={comments} viewerId={viewerId} fillHeight />
-        </div>
-      </SheetContent>
-    </Sheet>
+    </CommentSheet>
   );
 }

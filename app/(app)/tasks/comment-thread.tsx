@@ -116,6 +116,7 @@ export function CommentThread({
   className,
   scrollList = false,
   fillHeight = false,
+  limit,
   events = [],
   newestFirst = true,
   composerFirst = false,
@@ -150,6 +151,20 @@ export function CommentThread({
    * that caller keeps `scrollList` and its fixed cap.
    */
   fillHeight?: boolean;
+  /**
+   * P12-19 — DRAW AT MOST THIS MANY ENTRIES, and let the caller offer the rest.
+   *
+   * ⚠️ IT BOUNDS THE CONTENT, NOT THE BOX, and that distinction is the whole
+   * point. A `max-height` scroll box hides a long thread from the reader while
+   * the layout above it still accounts for the full size — on `/tasks/[id]`
+   * that surplus came out as a page scrolling a thousand pixels into empty
+   * space, with nothing in it for any inspector to find. Three entries is three
+   * entries: there is no surplus, so there is nothing to leak.
+   *
+   * The full conversation lives in `CommentSheet`, which has a definite height
+   * to scroll inside. A page caps by count and links there.
+   */
+  limit?: number;
   /** QA returns, client replies, parked notes. See `TaskActivityEvent`. */
   events?: TaskActivityEvent[];
   /**
@@ -303,6 +318,10 @@ export function CommentThread({
     ...events.map((event) => ({ at: event.at, comment: null, event })),
   ].sort((a, b) => (newestFirst ? b.at.localeCompare(a.at) : a.at.localeCompare(b.at)));
 
+  // Sliced AFTER the sort, so a limited feed is the most RECENT few rather than
+  // whichever rows happened to be first out of the two arrays above.
+  const shown = typeof limit === "number" ? feed.slice(0, limit) : feed;
+
   /*
    * P7-67 — PASTE A SCREENSHOT INTO A COMMENT.
    *
@@ -418,7 +437,7 @@ export function CommentThread({
                 "max-h-[80svh] min-h-0 flex-1 overflow-y-auto pr-1"
               : scrollList && "min-h-0 max-h-96 overflow-y-auto pr-1",
           )}>
-          {feed.map((row) =>
+          {shown.map((row) =>
             row.event ? (
               <ActivityEntry key={`event-${row.event.id}`} event={row.event} />
             ) : (
