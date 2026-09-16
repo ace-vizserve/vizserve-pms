@@ -54,3 +54,15 @@ docs/emailjs/preview-*.html
 # artboards and canvas.json are the source; this is the output.
 design/*.html
 !design/*.dc.html
+
+# P7-67 — the ClickUp import's working files.
+#
+# `clickup-export.json` is extracted from the gitignored xlsx and carries the
+# same thing it does: comment text, staff email addresses, CDN links. It is
+# derived, so it is regenerated rather than kept.
+#
+# `rollback-*.json` is production state — the comment bodies as they were before
+# an import ran, and the ids it created. Precious while a run is in flight and
+# meaningless against any other database.
+clickup-export.json
+rollback-*.json
