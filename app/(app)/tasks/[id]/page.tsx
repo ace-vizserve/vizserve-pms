@@ -27,6 +27,7 @@ import {
 
 import { fetchJoinedTaskIdSet } from "@/lib/tasks-server";
 import { cn } from "@/lib/utils";
+import { requestToday } from "@/lib/dates-server";
 import { createClient } from "@/utils/supabase/server";
 import { CommentSheet } from "../comment-sheet";
 import { CommentThread, type TaskActivityEvent } from "../comment-thread";
@@ -448,7 +449,21 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
 
   const listName = (lists ?? []).find((list) => list.id === task.list_id)?.name ?? null;
 
-  const late = isTaskOverdue(task);
+  /*
+   * P12-20 — TODAY, READ ONCE AND AT REQUEST TIME.
+   *
+   * `isTaskOverdue` defaults its second argument to `todayInAppZone()`, so
+   * every call used to read the clock on its own — which Cache Components
+   * refuses during a prerender ("the unstable value `Date.now()`"), and the
+   * cost of that refusal was this route's prerendered SHELL, the thing Partial
+   * Prefetching fetches before the click.
+   *
+   * One value, passed down: the same day decides the task and every subtask
+   * below it, which a clock read per row does not guarantee at midnight.
+   */
+  const today = await requestToday();
+
+  const late = isTaskOverdue(task, today);
 
   /**
    * On the task, leading it, or IN ITS DEPARTMENT. The single test behind
@@ -875,6 +890,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               checklist={<Checklist taskId={id} items={checklistItems ?? []} />}
               subtasks={
                 <SubtaskList
+                  today={today}
                   subtasks={children}
                   nameOf={nameOf}
                   /* ⚠️ NOT GATED ON `canWork` (16 Sep 2026). Anybody who can SEE

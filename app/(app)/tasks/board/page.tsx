@@ -37,6 +37,7 @@ import {
 } from "@/lib/schemas/tasks";
 import { applyTaskScope, fetchJoinedTaskIdSet } from "@/lib/tasks-server";
 import { cn } from "@/lib/utils";
+import { requestToday } from "@/lib/dates-server";
 import { createClient } from "@/utils/supabase/server";
 
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
@@ -382,6 +383,19 @@ async function BoardColumns({
   /** `all` | `mine` | `qa`, already narrowed from `?view=` on the page. */
   scope: Scope;
 }) {
+  /*
+   * P12-20 — TODAY, AT REQUEST TIME, AND INSIDE THIS BOUNDARY.
+   *
+   * `isTaskOverdue` reads the clock when nothing passes it a date, and Cache
+   * Components refuses a clock read during a prerender — which cost this route
+   * the prerendered shell that Partial Prefetching fetches before the click.
+   *
+   * ⚠️ HERE AND NOT ON THE PAGE. `requestToday()` awaits `connection()`, so
+   * calling it above the Suspense boundary would make the whole board
+   * request-time and lose the shell again, from the other direction.
+   */
+  const today = await requestToday();
+
   const supabase = await createClient();
 
   let query = supabase
@@ -762,7 +776,7 @@ async function BoardColumns({
                    * in the Completed column, for good. `isTaskOverdue` carries
                    * the terminal check so it cannot be left out again.
                    */
-                  const late = isTaskOverdue(task);
+                  const late = isTaskOverdue(task, today);
                   const subtasks = subtaskCount.get(task.id) ?? 0;
                   const bars = progress.get(task.id);
                   const pic = task.assignee_id ? nameOf.get(task.assignee_id) : null;
@@ -943,7 +957,7 @@ async function BoardColumns({
                         // `childrenByParent`. It excludes terminal statuses
                         // today; a correctness rule should not depend on a
                         // filter three hundred lines away staying that way.
-                        const childLate = isTaskOverdue(child);
+                        const childLate = isTaskOverdue(child, today);
 
                         return (
                           /*

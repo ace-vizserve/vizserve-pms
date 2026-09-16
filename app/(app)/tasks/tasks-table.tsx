@@ -141,6 +141,8 @@ export type Viewer = {
 };
 
 export type TaskLookups = {
+  /** P12-20 — today, decided on the server. See `lib/dates-server.ts`. */
+  today: string;
   nameOf: Record<string, string>;
   listName: Record<string, string>;
   threads: Record<string, TaskComment[]>;
@@ -721,10 +723,10 @@ export function TaskGroupTable({
             // Overdue only matters on work that is still live. A completed task
             // delivered late is history, not an alarm — `isTaskOverdue` is
             // where that rule lives now.
-            emphasis={isTaskOverdue(task)}
+            emphasis={isTaskOverdue(task, lookups.today)}
           />
           {/* Never colour alone. */}
-          {isTaskOverdue(task) ? (
+          {isTaskOverdue(task, lookups.today) ? (
             <span className="ml-1 text-2xs text-destructive">overdue</span>
           ) : null}
         </>

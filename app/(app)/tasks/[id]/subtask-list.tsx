@@ -47,11 +47,14 @@ export type Subtask = {
  */
 export function SubtaskList({
   subtasks,
+  today,
   nameOf,
   canAdd,
   action,
 }: {
   subtasks: Subtask[];
+  /** P12-20 — today, from the page. See `lib/dates-server.ts`. */
+  today: string;
   nameOf: Map<string, string>;
   /**
    * Whether this reader may add one. Decides the empty-state copy — explain what
@@ -96,7 +99,7 @@ export function SubtaskList({
         ) : (
           <ul className="-my-1">
             {subtasks.map((subtask) => {
-              const late = isTaskOverdue(subtask);
+              const late = isTaskOverdue(subtask, today);
 
               return (
                 <li key={subtask.id} className="border-b py-1.5 last:border-0">

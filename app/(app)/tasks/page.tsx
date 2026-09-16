@@ -37,6 +37,7 @@ import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
 import { QueryError } from "@/components/query-error";
 import { FilterBarSkeleton, TaskStatusGroupSkeleton } from "@/components/skeletons";
+import { requestToday } from "@/lib/dates-server";
 import { createClient } from "@/utils/supabase/server";
 import type { TaskComment } from "./comment-thread";
 
@@ -1055,6 +1056,21 @@ async function TaskGroups({
   };
 
   const lookups = {
+    /*
+     * P12-20 — TODAY, FOR A CLIENT COMPONENT THAT CANNOT ASK FOR IT.
+     *
+     * `tasks-table.tsx` is `"use client"`, so it cannot await `connection()`
+     * — and `isTaskOverdue` reading the clock on its own is what Cache
+     * Components refuses during a prerender, at the cost of this route's
+     * prerendered shell.
+     *
+     * It travels in `lookups` because that is already the bag of server-decided
+     * values this table reads, and because a prop threaded through
+     * `TaskStatusGroups` to eight tables is the same value written in four more
+     * places. It also makes the server pass and the browser agree on the date,
+     * which two clock reads would not at midnight.
+     */
+    today: await requestToday(),
     nameOf: Object.fromEntries(nameOf),
     listName: Object.fromEntries(listName),
     threads: Object.fromEntries(threads),
