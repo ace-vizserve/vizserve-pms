@@ -10,7 +10,12 @@ import {
 } from "@/lib/auth/authorization";
 import { sweepCommentImages } from "@/lib/comment-images-server";
 import { HEAD_BYTES, readImageSize } from "@/lib/image-size";
-import { checklistItemSchema, checklistToggleSchema, copySchema } from "@/lib/schemas/tasks";
+import {
+  bulkEditSchema,
+  checklistItemSchema,
+  checklistToggleSchema,
+  copySchema,
+} from "@/lib/schemas/tasks";
 import { taskImageSrc } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
@@ -1206,11 +1211,133 @@ export async function uploadTaskOutput(
 }
 
 // ---------------------------------------------------------------------------
+// P7-70 — acting on a selection
+//
+// ⚠️ TWO ACTIONS, NOT ONE, AND THE SPLIT IS THE DATABASE'S. Assignee, dates and
+// priority are ordinary columns: one UPDATE covers the whole selection and RLS
+// decides it row by row. `status` is not a column anybody may write — it is
+// outside the UPDATE grant, and `vizserve_pms_transition_task` is the only way
+// a task moves. That function refuses illegal moves, the QA gate and a missing
+// resolution, per task, so a bulk move is N calls that can partly fail.
+//
+// Collapsing the two behind one "apply" would mean an action that is sometimes
+// atomic and sometimes not, reported the same way both times.
+// ---------------------------------------------------------------------------
+
+/**
+ * Set the same fields on every selected task.
+ *
+ * ⚠️ ONE STATEMENT, NOT A LOOP. These are ordinary column writes and RLS filters
+ * the `in` list for us — a row the caller may not edit is simply not returned,
+ * which is how the count of what changed comes back honest without asking about
+ * each row first.
+ */
+export async function bulkEditTasks(
+  taskIds: string[],
+  input: unknown,
+): Promise<ActionResult<{ changed: number; refused: number }>> {
+  await requireAuthContextOrThrow();
+
+  if (taskIds.length === 0) return { ok: false, error: "Nothing is selected." };
+
+  const parsed = bulkEditSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "Nothing to change." };
+  }
+
+  const patch = parsed.data;
+  const supabase = await createClient();
+
+  const { data, error } = await supabase
+    .from("vizserve_pms_tasks")
+    .update({
+      // Only the keys that arrived — "not sent" and "cleared" stay distinct, or
+      // a bulk edit of the due date would wipe the priority off forty rows.
+      ...(patch.assignee_id !== undefined ? { assignee_id: patch.assignee_id } : {}),
+      ...(patch.due_date !== undefined ? { due_date: patch.due_date || null } : {}),
+      ...(patch.start_date !== undefined ? { start_date: patch.start_date || null } : {}),
+      ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
+    })
+    .in("id", taskIds)
+    .select("id");
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  const changed = data?.length ?? 0;
+
+  refresh();
+  return { ok: true, data: { changed, refused: taskIds.length - changed } };
+}
+
+/**
+ * Move every selected task to one status.
+ *
+ * ⚠️ ONE CALL PER TASK, AND A REFUSAL IS THE NORMAL CASE RATHER THAN AN ERROR.
+ * `vizserve_pms_transition_task` enforces the legal-transition table, the QA
+ * gate and the resolution gate, so moving eight tasks to FOR_QA legitimately
+ * produces "five moved, three need a resolution first". Reporting that as a
+ * failure would be wrong, and reporting it as success would be worse.
+ *
+ * The reasons are collected and counted rather than listed one per toast: eight
+ * toasts saying the same sentence is not eight pieces of information.
+ */
+export async function bulkTransitionTasks(
+  taskIds: string[],
+  toStatus: unknown,
+): Promise<ActionResult<{ moved: number; refused: number; reasons: string[] }>> {
+  await requireAuthContextOrThrow();
+
+  if (taskIds.length === 0) return { ok: false, error: "Nothing is selected." };
+
+  const parsed = taskStatusSchema.safeParse(toStatus);
+  if (!parsed.success) return { ok: false, error: "That is not a status." };
+
+  const supabase = await createClient();
+
+  let moved = 0;
+  const reasons = new Map<string, number>();
+
+  for (const taskId of taskIds) {
+    const { error } = await supabase.rpc("vizserve_pms_transition_task", {
+      p_task_id: taskId,
+      p_to_status: parsed.data,
+      /* No comment on a bulk move. The single-task path asks for one where the
+         transition table demands it (a QA return), and those moves are exactly
+         the ones nobody should be making forty at a time without saying why. */
+      p_comment: null,
+    });
+
+    if (error) {
+      const reason = readableError(error);
+      reasons.set(reason, (reasons.get(reason) ?? 0) + 1);
+      continue;
+    }
+
+    moved += 1;
+  }
+
+  if (moved > 0) refresh();
+
+  return {
+    ok: true,
+    data: {
+      moved,
+      refused: taskIds.length - moved,
+      // Commonest first: with a mixed selection the leading reason is the one
+      // worth reading.
+      reasons: [...reasons.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .map(([reason, count]) => (count > 1 ? `${reason} (${count} tasks)` : reason)),
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // P7-69 — copying tasks
 // ---------------------------------------------------------------------------
 
 /**
- * Where these tasks can be copied TO.
+ * Where these tasks can be copied TO, and who they can be assigned to.
  *
  * ⚠️ IT ANSWERS THE DEPARTMENT QUESTION BEFORE THE DIALOG ASKS IT. A copy stays
  * inside its own department (see the migration), so a selection spanning two
@@ -1221,8 +1348,12 @@ export async function uploadTaskOutput(
  * The lists come back through the user's own client, so RLS has already removed
  * anything they cannot see.
  */
-export async function copyTargets(taskIds: string[]): Promise<
-  ActionResult<{ lists: { id: string; name: string }[]; spans: boolean }>
+export async function selectionTargets(taskIds: string[]): Promise<
+  ActionResult<{
+    lists: { id: string; name: string }[];
+    people: { id: string; full_name: string }[];
+    spans: boolean;
+  }>
 > {
   await requireAuthContextOrThrow();
 
@@ -1239,12 +1370,14 @@ export async function copyTargets(taskIds: string[]): Promise<
   if (!tasks || tasks.length === 0) return { ok: false, error: "Those tasks are not available." };
 
   const departments = new Set(tasks.map((task) => task.department_id));
-  if (departments.size > 1) return { ok: true, data: { lists: [], spans: true } };
+  if (departments.size > 1) return { ok: true, data: { lists: [], people: [], spans: true } };
+
+  const department = [...departments][0]!;
 
   const { data: lists } = await supabase
     .from("vizserve_pms_lists")
     .select("id, name")
-    .eq("department_id", [...departments][0]!)
+    .eq("department_id", department)
     /* P11-06 — a personal list is one person's own, invisible even to their
        lead. It is not a filing cabinet for the team's work, so the picker never
        offers one. `owner_id`, not a flag: null is an ordinary department list. */
@@ -1253,7 +1386,21 @@ export async function copyTargets(taskIds: string[]): Promise<
     .eq("is_active", true)
     .order("name");
 
-  return { ok: true, data: { lists: lists ?? [], spans: false } };
+  /*
+   * P7-70 — the same call answers "who can this be assigned to". One round trip
+   * for both because both dialogs open from the same bar and both need the
+   * department resolved first; and the rule is the same rule `quickAddTask`
+   * applies — work belongs to the department doing it, so offering anybody else
+   * is offering a door the server does not open.
+   */
+  const { data: people } = await supabase
+    .from("vizserve_pms_users")
+    .select("id, full_name")
+    .eq("primary_department_id", department)
+    .eq("is_active", true)
+    .order("full_name");
+
+  return { ok: true, data: { lists: lists ?? [], people: people ?? [], spans: false } };
 }
 
 /**

@@ -3,7 +3,7 @@
 import { useEffect, useState, useTransition } from "react";
 import { Check, ChevronsUpDown, Loader2 } from "lucide-react";
 
-import { copyTargets, copyTasks } from "./actions";
+import { copyTasks, selectionTargets } from "./actions";
 import { COPY_DEFAULTS, COPY_PARTS, type CopyPart } from "@/lib/schemas/tasks";
 
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -87,7 +87,7 @@ export function CopyTasksDialog({
     let live = true;
     setLists(null);
 
-    void copyTargets(taskIds).then((result) => {
+    void selectionTargets(taskIds).then((result) => {
       if (!live) return;
 
       if (!result.ok) {

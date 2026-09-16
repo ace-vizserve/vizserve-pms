@@ -1158,3 +1158,25 @@ export const copySchema = z.object({
   listId: z.uuid(),
   include: z.array(z.enum(COPY_PARTS)),
 });
+
+/**
+ * P7-70 — what the selection bar may set on several tasks at once.
+ *
+ * ⚠️ EVERY FIELD IS OPTIONAL AND "ABSENT" IS NOT "NULL". A bulk edit that sent
+ * every key would clear the three the person did not touch — the same trap
+ * `taskPatchSchema` documents, and worse here because it would do it to forty
+ * rows. The action spreads only what arrived.
+ *
+ * ⚠️ `status` IS NOT IN HERE, and cannot be. It is outside the column UPDATE
+ * grant: only `vizserve_pms_transition_task` moves a task, and it refuses
+ * illegal moves one at a time. Bulk status is a different action with a
+ * different shape — see `bulkTransition`.
+ */
+export const bulkEditSchema = z
+  .object({
+    assignee_id: z.uuid().nullable().optional(),
+    due_date: z.string().nullable().optional(),
+    start_date: z.string().nullable().optional(),
+    priority: taskPrioritySchema.nullable().optional(),
+  })
+  .refine((value) => Object.keys(value).length > 0, "Pick something to change.");
