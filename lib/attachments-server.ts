@@ -203,7 +203,8 @@ export async function uploadTaskAttachment(input: {
   taskId: string;
   file: File;
   uploadedBy: string;
-  kind?: "output" | "reference";
+  /** P7-67 adds `comment` — an image pasted into a task comment. */
+  kind?: "output" | "reference" | "comment";
 }): Promise<
   | { ok: true; attachment: { id: string; filename: string; mime_type: string; size_bytes: number } }
   | { ok: false; error: string }

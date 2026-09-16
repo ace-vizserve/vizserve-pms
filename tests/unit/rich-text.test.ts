@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 
-import { isRichTextEmpty, richTextLength, richTextToPlainText } from "@/lib/rich-text";
+import {
+  isRichTextEmpty,
+  isTaskImageSrc,
+  richTextLength,
+  richTextToPlainText,
+  taskImageIds,
+  taskImageSrc,
+} from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import { taskCommentSchema, taskPatchSchema } from "@/lib/schemas/tasks";
 
@@ -228,5 +235,210 @@ describe("the empty document cannot open the QA gate", () => {
 
   it("refuses a comment that is only an empty document", () => {
     expect(() => taskCommentSchema.parse({ body: "<p></p>" })).toThrow();
+  });
+});
+
+
+/**
+ * P7-67 — images in a comment.
+ *
+ * The tag is on the allowlist now, so the interesting question moved: it is no
+ * longer "is `img` allowed" but "is THIS `img` one of ours". Everything below
+ * is that question, asked in the ways somebody would ask it in anger.
+ */
+describe("sanitizeRichText — inline images", () => {
+  const id = "3f1c9a52-7b0e-4d61-9a2c-8e5d4b6f1a07";
+  const ours = `<img src="${taskImageSrc(id)}" alt="Screenshot.png">`;
+
+  it("keeps an image served by our own route", () => {
+    const out = sanitizeRichText(`<p>see this</p>${ours}`);
+    expect(out).toContain(taskImageSrc(id));
+    expect(out).toContain('alt="Screenshot.png"');
+  });
+
+  it("adds lazy loading, and keeps it — the attribute is allowed as well as set", () => {
+    // The trap this repo has hit once already on `rel`/`target`: sanitize-html
+    // filters attributes AFTER transforming, so an attribute the transform adds
+    // and the allowlist omits is silently discarded.
+    const out = sanitizeRichText(ours);
+    expect(out).toContain('loading="lazy"');
+    expect(out).toContain('decoding="async"');
+  });
+
+  it("drops a base64 data URI outright", () => {
+    // The whole reason P7-56 banned images. A `data:` image is megabytes of a
+    // text column, and it would arrive by paste without anybody choosing it.
+    const out = sanitizeRichText(
+      '<img src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUg==" alt="x">',
+    );
+    expect(out).not.toContain("data:");
+    expect(out).not.toContain("<img");
+  });
+
+  it("drops a hotlink to somebody else's server", () => {
+    const out = sanitizeRichText('<p>hi</p><img src="https://evil.example/pixel.png">');
+    expect(out).not.toContain("evil.example");
+    expect(out).not.toContain("<img");
+    // The prose around it survives — dropping the tag is not dropping the
+    // comment.
+    expect(out).toContain("hi");
+  });
+
+  it("drops a protocol-relative src, which starts with neither scheme nor slash-api", () => {
+    const out = sanitizeRichText('<img src="//evil.example/pixel.png">');
+    expect(out).not.toContain("evil.example");
+  });
+
+  it("drops a path that only looks like ours", () => {
+    for (const src of [
+      "/api/task-images/", // no id
+      "/api/task-images/not-a-uuid",
+      "/api/task-images/../../etc/passwd",
+      `/api/task-images/${id}/../../x`,
+      `https://evil.example/api/task-images/${id}`,
+      `/api/task-images/${id}?next=https://evil.example`,
+    ]) {
+      expect(isTaskImageSrc(src)).toBe(false);
+      expect(sanitizeRichText(`<img src="${src}">`)).not.toContain("<img");
+    }
+  });
+
+  it("keeps numeric width and height — they reserve the box before the bytes land", () => {
+    const out = sanitizeRichText(
+      `<img src="${taskImageSrc(id)}" width="2560" height="1440" data-orientation="landscape">`,
+    );
+    expect(out).toContain('width="2560"');
+    expect(out).toContain('height="1440"');
+    expect(out).toContain('data-orientation="landscape"');
+  });
+
+  it("drops a width that is not a plain number, and style outright", () => {
+    // The CSS caps bound the DISPLAYED size whatever these say, so this is not
+    // the thing standing between a comment and a broken column — but an
+    // attribute that is not a number is not a measurement, and `style` is how
+    // one comment escapes its own card.
+    for (const attribute of [
+      'width="100%"',
+      'width="expression(alert(1))"',
+      'width="-40"',
+      'width="1e6"',
+      'width="999999"',
+      'style="position:fixed;inset:0"',
+    ]) {
+      const out = sanitizeRichText(`<img src="${taskImageSrc(id)}" ${attribute}>`);
+      expect(out).toContain(taskImageSrc(id));
+      expect(out).not.toContain("=\"100%\"");
+      expect(out).not.toContain("expression");
+      expect(out).not.toContain("style");
+      expect(out).not.toContain("999999");
+    }
+  });
+
+  it("drops an orientation outside the closed set", () => {
+    // The stylesheet has a rule per value. An unknown one would match nothing
+    // and silently take the fallback cap, so it is removed rather than stored.
+    const out = sanitizeRichText(`<img src="${taskImageSrc(id)}" data-orientation="diagonal">`);
+    expect(out).not.toContain("diagonal");
+    expect(out).toContain(taskImageSrc(id));
+  });
+
+  it("does not let stored markup declare itself a button", () => {
+    // ⚠️ THE LIGHTBOX ADDS `role` AND `tabindex` IN `comment-body.tsx`, where
+    // the handler is. A body that arrives already carrying them would announce
+    // itself as a control on `<RichText>` too — a server component with nothing
+    // listening.
+    const out = sanitizeRichText(
+      `<img src="${taskImageSrc(id)}" role="button" tabindex="0" onclick="alert(1)">`,
+    );
+    expect(out).not.toContain("role");
+    expect(out).not.toContain("tabindex");
+    expect(out).not.toContain("onclick");
+  });
+
+  it("still neutralises onerror on an image it otherwise keeps", () => {
+    const out = sanitizeRichText(`<img src="${taskImageSrc(id)}" onerror="alert(1)">`);
+    expect(out).not.toContain("onerror");
+    expect(out).toContain(taskImageSrc(id));
+  });
+});
+
+describe("richTextToPlainText — images", () => {
+  const id = "3f1c9a52-7b0e-4d61-9a2c-8e5d4b6f1a07";
+
+  it("prints the alt text, so an emailed comment is not silently missing a picture", () => {
+    const flat = richTextToPlainText(
+      `<p>Like this:</p><img src="${taskImageSrc(id)}" alt="Screenshot.png">`,
+    );
+    expect(flat).toContain("Like this:");
+    expect(flat).toContain("[Screenshot.png]");
+  });
+
+  it("falls back to the word image when there is no alt", () => {
+    expect(richTextToPlainText(`<img src="${taskImageSrc(id)}">`)).toBe("[image]");
+  });
+
+  it("does not call a comment that is only a screenshot empty", () => {
+    // ⚠️ THE BUG THIS EXISTS TO PREVENT. Flattening to "" would make
+    // `isRichTextEmpty` true, the Comment button stay disabled, and a perfectly
+    // ordinary "here, look" impossible to post.
+    const body = `<img src="${taskImageSrc(id)}" alt="Screenshot.png">`;
+    expect(isRichTextEmpty(body)).toBe(false);
+    expect(richTextLength(body)).toBeGreaterThan(0);
+    expect(() => taskCommentSchema.parse({ body })).not.toThrow();
+  });
+});
+
+
+/**
+ * P7-67 — which files a body still needs.
+ *
+ * ⚠️ THIS FUNCTION DELETES THINGS. `sweepCommentImages` removes every image an
+ * edited comment no longer lists, so a reference this misses is a picture that
+ * disappears from a comment somebody can still see. It is the one place in the
+ * rich-text layer where being too strict destroys data rather than merely
+ * dropping a tag.
+ */
+describe("taskImageIds", () => {
+  const a = "3f1c9a52-7b0e-4d61-9a2c-8e5d4b6f1a07";
+  const b = "9b2d8e41-6c3f-4a52-8d1e-7f4c5a3b2e10";
+
+  it("finds every image in a body", () => {
+    const html = `<p>two</p><img src="${taskImageSrc(a)}"><img src="${taskImageSrc(b)}">`;
+    expect(taskImageIds(html).sort()).toEqual([a, b].sort());
+  });
+
+  it("counts the same picture twice as one file", () => {
+    const html = `<img src="${taskImageSrc(a)}"><img src="${taskImageSrc(a)}">`;
+    expect(taskImageIds(html)).toEqual([a]);
+  });
+
+  it("finds it however the attribute is written", () => {
+    // A body can be hand-edited, and a sanitiser run can change the quoting.
+    // Being generous HERE is safe: an id found is a file kept.
+    for (const html of [
+      `<img src='${taskImageSrc(a)}'>`,
+      `<img loading="lazy" src="${taskImageSrc(a)}" alt="x">`,
+      `<img src="${taskImageSrc(a).toUpperCase()}">`,
+    ]) {
+      expect(taskImageIds(html)).toEqual([a]);
+    }
+  });
+
+  it("is empty for a body with no pictures, and for nothing at all", () => {
+    expect(taskImageIds("<p>just words</p>")).toEqual([]);
+    expect(taskImageIds("")).toEqual([]);
+    expect(taskImageIds(null)).toEqual([]);
+  });
+
+  it("does not report a partial or malformed id", () => {
+    // Nothing here is a file to keep — and none of them is a file to delete
+    // either, because a body cannot reference one it never had.
+    expect(taskImageIds('<img src="/api/task-images/not-a-uuid">')).toEqual([]);
+    expect(taskImageIds(`<img src="/api/task-images/${a.slice(0, 30)}">`)).toEqual([]);
+  });
+
+  it("agrees with what taskImageSrc writes — the pair that must not drift", () => {
+    expect(taskImageIds(`<img src="${taskImageSrc(a)}">`)).toEqual([a]);
+    expect(isTaskImageSrc(taskImageSrc(a))).toBe(true);
   });
 });

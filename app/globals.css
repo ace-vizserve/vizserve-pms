@@ -942,6 +942,114 @@
   .rich-text strong {
     font-weight: 650;
   }
+
+  /* -------------------------------------------------------------------------
+     P7-67 — an image pasted into a comment.
+
+     ⚠️ THE CAP IS THE POINT. A screenshot off the monitors this team uses is
+     2,560px wide; a comment thread is a column inside a card. Uncapped, one
+     picture is the whole screen and the conversation around it is gone.
+
+     ⚠️ AND IT DEPENDS ON WHICH WAY ROUND THE PICTURE IS, which CSS cannot work
+     out for itself — there is no selector for an image's intrinsic aspect
+     ratio. `data-orientation` is measured from the bytes by the upload action
+     (`lib/image-size.ts`) and written onto the node; these three rules are the
+     only reason it exists.
+
+     `height: auto` with both a max-width and a max-height is what keeps the
+     aspect ratio: the browser's constraint-violation rules scale the other
+     dimension rather than squashing the picture, so `object-fit` never actually
+     has to do anything. It is set anyway, for the bodies written before any of
+     this and for anything hand-edited since.
+     ------------------------------------------------------------------------- */
+  .rich-text img {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    /* The fallback, for an image whose header could not be measured. Between
+       the two caps below, so an unmeasured picture is never the largest thing
+       in the thread. */
+    max-height: 22rem;
+    object-fit: contain;
+    object-position: left center;
+    margin-block: 0.5rem;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    background-color: var(--muted);
+  }
+
+  /* Wider than it is tall — the ordinary desktop screenshot. Full column width,
+     and the height follows from it; 20rem is only a floor against something
+     absurdly panoramic. */
+  .rich-text img[data-orientation="landscape"] {
+    max-height: 20rem;
+  }
+
+  /* Taller than it is wide — a phone screenshot, and the case that ruins a
+     thread. At full column width one of these is three scrolls of a single
+     picture. Capped on BOTH axes: the width cap is what actually bites, and
+     `min()` keeps it from overflowing a narrow column at 390px. */
+  .rich-text img[data-orientation="portrait"] {
+    max-width: min(100%, 17rem);
+    max-height: 26rem;
+  }
+
+  .rich-text img[data-orientation="square"] {
+    max-width: min(100%, 20rem);
+    max-height: 20rem;
+  }
+
+  /* A picture in a comment opens a lightbox; one in the editor does not — there
+     it is a node you select and delete. The cursor is scoped to the reading
+     surface so it never promises something the editor will not do. */
+  [data-slot="comment-body"] img {
+    cursor: zoom-in;
+  }
+
+  /* -------------------------------------------------------------------------
+     P7-67 — AND SMALLER INSIDE THE COMMENT SHEET, which is narrower than the
+     detail page it shares its component with.
+
+     The sheet is `sm:max-w-xl` — 36rem, less padding. The caps above are sized
+     for the detail page, where the thread has the width of a card; applied here
+     a tall screenshot still crowds out the conversation around it. This is a
+     trim rather than a thumbnail: an image stays legible in the thread, and the
+     lightbox is for reading the text inside one.
+
+     Scoped by `data-slot` rather than by a prop, so it applies to the editor in
+     the sheet's composer as well as to the comments above it — the same surface,
+     the same constraint. Every selector repeats the orientation attribute so it
+     outranks the block above on specificity rather than on source order.
+     ------------------------------------------------------------------------- */
+  [data-slot="sheet-content"] .rich-text img {
+    max-width: min(100%, 20rem);
+    max-height: 13rem;
+  }
+
+  [data-slot="sheet-content"] .rich-text img[data-orientation="landscape"] {
+    max-width: min(100%, 20rem);
+    max-height: 13rem;
+  }
+
+  /* Narrower still. A phone screenshot is the one that runs away with a column,
+     and a 36rem panel has less of one to give than the detail page. */
+  [data-slot="sheet-content"] .rich-text img[data-orientation="portrait"] {
+    max-width: min(100%, 11rem);
+    max-height: 17rem;
+  }
+
+  [data-slot="sheet-content"] .rich-text img[data-orientation="square"] {
+    max-width: min(100%, 13rem);
+    max-height: 13rem;
+  }
+
+  /* The editor's own copy, where an image can be SELECTED. ProseMirror sets
+     this class on the selected node, and without a visible ring there is no way
+     to tell that Backspace is about to remove the picture. */
+  .rich-text img.ProseMirror-selectednode {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
 }
 
 /* ---------------------------------------------------------------------------

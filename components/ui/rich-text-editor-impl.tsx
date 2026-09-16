@@ -1,18 +1,22 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { EditorContent, useEditor, type Editor } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
+import FileHandler from "@tiptap/extension-file-handler";
+import Image from "@tiptap/extension-image";
 import Link from "@tiptap/extension-link";
 import {
   Bold,
   Code,
   Heading3,
   Heading4,
+  ImagePlus,
   Italic,
   Link2,
   List,
   ListOrdered,
+  Loader2,
   Quote,
   Strikethrough,
 } from "lucide-react";
@@ -27,6 +31,7 @@ import {
 import { RICH_TEXT_CLASS } from "@/components/ui/rich-text";
 import { EDITOR_SHELL, RichTextEditorShell } from "@/components/ui/rich-text-editor-shell";
 import { cn } from "@/lib/utils";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * P7-56 — the editor behind the six long-prose columns.
@@ -36,15 +41,87 @@ import { cn } from "@/lib/utils";
  * a button that appears to work and silently undoes itself on reload — the
  * worst class of bug this feature can have, because the user watched it work.
  *
- * WHAT IS DELIBERATELY ABSENT: images (this app has a real attachment system
- * and inlining base64 into a text column would quietly duplicate it), tables
- * (unusable at the width these fields render), and `h1`/`h2` (the page owns
- * those — see `lib/rich-text.ts`).
+ * IMAGES ARE OPT-IN, PER FIELD (P7-67). Pass `onUploadImage` and the editor
+ * accepts a pasted or dropped picture; leave it off and the `img` node does not
+ * exist in that editor's schema at all, so there is nothing to paste into. Task
+ * comments pass it. The other five columns do not, and a resolution or a leave
+ * reason is not a place for a screenshot.
+ *
+ * ⚠️ AND THE UPLOAD IS THE CALLER'S, WHICH IS THE POINT. This component never
+ * learns what a task is. It hands over a `File` and writes whatever `src` comes
+ * back — so nothing base64 ever enters a body, which is the rule P7-56 wrote
+ * down when it banned images outright and the one that still holds.
+ *
+ * WHAT IS DELIBERATELY ABSENT: tables (unusable at the width these fields
+ * render), and `h1`/`h2` (the page owns those — see `lib/rich-text.ts`).
  *
  * The single biggest usability win here is not the toolbar, it is StarterKit's
  * INPUT RULES: typing `- `, `1. `, `## ` or `**bold**` formats as you go. Most
  * people will never press one of these buttons.
  */
+
+/**
+ * P7-67 — what an inline image carries, and why it is more than a `src`.
+ *
+ * The base `Image` node knows `src`, `alt` and `title`. A comment thread needs
+ * two more facts, both measured from the bytes by the upload action:
+ *
+ *   `width` / `height`  the browser derives an intrinsic aspect ratio from the
+ *                       pair and reserves the right box before the image
+ *                       arrives, so a thread does not jolt as it loads.
+ *   `orientation`       the cap that applies. CSS CANNOT DERIVE THIS — there is
+ *                       no selector for an image's intrinsic aspect ratio, at
+ *                       any level, so a portrait screenshot and a landscape one
+ *                       cannot be told apart in a stylesheet unless the
+ *                       orientation arrives as an attribute.
+ *
+ * ⚠️ IT RENDERS AS `data-orientation`, AND THE SANITISER'S ALLOWLIST NAMES THAT
+ * SPELLING. The node's own attribute is `orientation`; a Tiptap attribute
+ * cannot be called `data-orientation` without quoting it everywhere, so the
+ * mapping happens here, once. If you rename either half, rename both — the
+ * failure is silent, and it looks like every image losing its size cap.
+ *
+ * Module scope, not inside the component: an extension re-created per render
+ * re-creates the editor's schema with it.
+ */
+const CommentImage = Image.extend({
+  addAttributes() {
+    return {
+      ...this.parent?.(),
+
+      width: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("width"),
+        renderHTML: (attributes) => (attributes.width ? { width: attributes.width } : {}),
+      },
+
+      height: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("height"),
+        renderHTML: (attributes) => (attributes.height ? { height: attributes.height } : {}),
+      },
+
+      orientation: {
+        default: null,
+        parseHTML: (element) => element.getAttribute("data-orientation"),
+        renderHTML: (attributes) =>
+          attributes.orientation ? { "data-orientation": attributes.orientation } : {},
+      },
+    };
+  },
+});
+
+/**
+ * What `onUploadImage` hands back: where the bytes now live, and how big they
+ * are. Everything but `src` is optional — a header this app could not parse
+ * costs the image its size cap, never its place in the comment.
+ */
+export type UploadedImage = {
+  src: string;
+  width?: number | null;
+  height?: number | null;
+  orientation?: "landscape" | "portrait" | "square" | null;
+};
 
 export function RichTextEditor({
   value,
@@ -57,6 +134,7 @@ export function RichTextEditor({
   invalid = false,
   minHeight = "min-h-16",
   className,
+  onUploadImage,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -84,7 +162,90 @@ export function RichTextEditor({
   invalid?: boolean;
   minHeight?: string;
   className?: string;
+  /**
+   * P7-67 — turn one pasted, dropped or picked image into a `src`, or return
+   * null if it could not be stored.
+   *
+   * PRESENT OR ABSENT DECIDES THE SCHEMA, so it is read once, when the editor
+   * is created: a field cannot start accepting images half way through a
+   * session. The FUNCTION itself may change identity freely — it is held in a
+   * ref below, because an extension's handlers are bound at creation and would
+   * otherwise keep calling the first render's closure for the life of the box.
+   *
+   * ⚠️ REPORT YOUR OWN FAILURES. Returning null inserts nothing and says
+   * nothing; the caller holds the error string and knows which toast to raise.
+   */
+  onUploadImage?: (file: File) => Promise<UploadedImage | null>;
 }) {
+  /*
+   * Read once, deliberately — see the prop's own note. `useState` rather than a
+   * ref because the toolbar renders from it.
+   */
+  const [imagesEnabled] = useState(() => Boolean(onUploadImage));
+  const uploadRef = useRef(onUploadImage);
+  useEffect(() => {
+    uploadRef.current = onUploadImage;
+  }, [onUploadImage]);
+
+  /*
+   * How many uploads are in flight. Not per-image: there is no placeholder node
+   * to hang a spinner on, so an image appears when its bytes are stored and
+   * until then the toolbar button spins. A decoration-based placeholder is the
+   * nicer version of this and is a bigger change than the feature.
+   */
+  const [uploading, setUploading] = useState(0);
+
+  /*
+   * ⚠️ ONE PLACE THAT INSERTS AN IMAGE, and the paste handler, the drop handler
+   * and the toolbar button all come through it. They differ only in WHERE: a
+   * paste and a pick go to the caret, a drop goes to the position under the
+   * pointer.
+   *
+   * Sequential, not `Promise.all`: pasting five screenshots at once would
+   * otherwise open five uploads against a private bucket and insert them in
+   * whatever order they happened to finish, which is not the order they were
+   * pasted.
+   */
+  const insertImages = useCallback(async (instance: Editor, files: File[], pos?: number) => {
+    const upload = uploadRef.current;
+    if (!upload) return;
+
+    let at = pos;
+
+    for (const file of files) {
+      setUploading((count) => count + 1);
+      try {
+        const uploaded = await upload(file);
+        if (!uploaded) continue;
+
+        // The filename is the alt text: it is what the person who pasted it
+        // would have written, and `richTextToPlainText` prints it in an email.
+        const node = {
+          type: "image",
+          attrs: {
+            src: uploaded.src,
+            alt: file.name,
+            // Null rather than absent is fine — `renderHTML` drops a null, so
+            // an unmeasured image simply writes no `width`.
+            width: uploaded.width ?? null,
+            height: uploaded.height ?? null,
+            orientation: uploaded.orientation ?? null,
+          },
+        };
+
+        if (at === undefined) {
+          instance.chain().focus().insertContent(node).run();
+        } else {
+          instance.chain().focus().insertContentAt(at, node).run();
+          // Keeps a run of dropped files in the order they were dropped.
+          at += 1;
+        }
+      } finally {
+        setUploading((count) => count - 1);
+      }
+    }
+  }, []);
+
   const editor = useEditor({
     /*
      * ⚠️ WITHOUT THIS, EVERY PAGE WITH AN EDITOR HYDRATION-MISMATCHES. TipTap
@@ -119,6 +280,59 @@ export function RichTextEditor({
         protocols: ["http", "https", "mailto"],
         HTMLAttributes: { rel: "noopener noreferrer nofollow", target: "_blank" },
       }),
+      ...(imagesEnabled
+        ? [
+            /*
+             * ⚠️ `allowBase64: false` IS THE WHOLE GUARD ON THIS SIDE. With it
+             * on, a pasted screenshot that the browser also offers as HTML
+             * would parse straight into the document as a `data:` URI —
+             * megabytes of it, in a text column, which is precisely what P7-56
+             * refused. The sanitiser drops such an `img` on the way to the
+             * database, so the damage would be a picture that renders while you
+             * type and vanishes on reload: the worst class of bug this feature
+             * can have, because the user watched it work.
+             *
+             * `inline: false` — a block, like a paragraph. An image sitting
+             * inside a line of prose is not a layout anybody asked for here.
+             */
+            CommentImage.configure({ inline: false, allowBase64: false }),
+            /*
+             * ⚠️ `react-hooks/refs` IS SILENCED HERE, AND ONLY HERE.
+             *
+             * The rule's objection is that `insertImages` reads `uploadRef`
+             * and is handed to a function during render, which is the shape of
+             * reading a ref while rendering. It is not what happens: these two
+             * handlers are invoked by a paste and a drop, both long after this
+             * render committed, and the ref exists precisely because an
+             * extension binds its options ONCE when the editor is created — the
+             * alternative is a box that keeps calling the first render's upload
+             * closure for the rest of the session.
+             *
+             * The narrower fix would be re-creating the editor whenever
+             * `onUploadImage` changes identity, which throws away the caret and
+             * the draft on every parent re-render.
+             */
+            // eslint-disable-next-line react-hooks/refs
+            FileHandler.configure({
+              // The same four the upload action accepts. A fifth here would be
+              // a file that uploads and then reports an error from the server.
+              allowedMimeTypes: ["image/png", "image/jpeg", "image/gif", "image/webp"],
+              /*
+               * ⚠️ TRUE, OR EVERY SCREENSHOT ARRIVES TWICE. A paste from a
+               * screenshot tool carries the bitmap AND an HTML flavour holding
+               * an `<img>`; without this, this handler stores the bitmap while
+               * ProseMirror's own paste parsing inserts the HTML one beside it.
+               */
+              consumePasteEvent: true,
+              onPaste: (instance, files) => {
+                void insertImages(instance, files);
+              },
+              onDrop: (instance, files, pos) => {
+                void insertImages(instance, files, pos);
+              },
+            }),
+          ]
+        : []),
     ],
     content: value,
     editorProps: {
@@ -170,7 +384,12 @@ export function RichTextEditor({
       className={cn(EDITOR_SHELL, className)}
       aria-invalid={invalid || undefined}
       data-slot="rich-text-editor">
-      <Toolbar editor={editor} disabled={disabled} />
+      <Toolbar
+        editor={editor}
+        disabled={disabled}
+        onPickImages={imagesEnabled ? (files) => void insertImages(editor, files) : undefined}
+        uploading={uploading > 0}
+      />
       <EditorContent editor={editor} />
       {placeholder && editor.isEmpty ? (
         // A real placeholder needs TipTap's Placeholder extension and a CSS
@@ -186,7 +405,18 @@ export function RichTextEditor({
   );
 }
 
-function Toolbar({ editor, disabled }: { editor: Editor; disabled: boolean }) {
+function Toolbar({
+  editor,
+  disabled,
+  onPickImages,
+  uploading,
+}: {
+  editor: Editor;
+  disabled: boolean;
+  /** P7-67 — absent on every field that does not take images. */
+  onPickImages?: (files: File[]) => void;
+  uploading: boolean;
+}) {
   return (
     <div
       role="toolbar"
@@ -274,7 +504,69 @@ function Toolbar({ editor, disabled }: { editor: Editor; disabled: boolean }) {
       <Divider />
 
       <LinkButton editor={editor} disabled={disabled} />
+
+      {onPickImages ? (
+        <ImageButton onPick={onPickImages} disabled={disabled} uploading={uploading} />
+      ) : null}
     </div>
+  );
+}
+
+/**
+ * P7-67 — the way in for anyone who is not pasting.
+ *
+ * Paste and drag are how most people will add a picture and neither is
+ * discoverable, so the toolbar carries the third — and it is the only one that
+ * works from a phone, where there is no drag and the clipboard rarely holds a
+ * bitmap.
+ *
+ * A hidden `<input type="file">` behind a button rather than a styled input:
+ * the input cannot be made to look like the six controls beside it, and a
+ * `<label>` wrapped around one loses the toolbar's keyboard behaviour.
+ */
+function ImageButton({
+  onPick,
+  disabled,
+  uploading,
+}: {
+  onPick: (files: File[]) => void;
+  disabled: boolean;
+  uploading: boolean;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  return (
+    <>
+      <Button
+        type="button"
+        size="icon-sm"
+        variant="ghost"
+        aria-label={uploading ? "Adding image" : "Add image"}
+        title="Add image"
+        // The spinner is this control's only state, and it is announced rather
+        // than drawn alone (§5).
+        aria-busy={uploading || undefined}
+        disabled={disabled || uploading}
+        className="size-7"
+        onClick={() => inputRef.current?.click()}>
+        {uploading ? <Loader2 className="animate-spin" /> : <ImagePlus />}
+      </Button>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/png,image/jpeg,image/gif,image/webp"
+        multiple
+        className="hidden"
+        onChange={(event) => {
+          const files = Array.from(event.target.files ?? []);
+          // Cleared before the upload starts, so picking the same file twice in
+          // a row still fires a change event the second time.
+          event.target.value = "";
+          if (files.length > 0) onPick(files);
+        }}
+      />
+    </>
   );
 }
 
@@ -379,7 +671,7 @@ function LinkButton({ editor, disabled }: { editor: Editor; disabled: boolean })
         <div className="flex flex-col gap-2">
           <Input
             value={href}
-            autoFocus
+            ref={focusWithoutScroll}
             placeholder="example.com"
             aria-label="Link address"
             onChange={(event) => setHref(event.target.value)}

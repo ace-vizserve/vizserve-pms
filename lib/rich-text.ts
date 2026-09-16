@@ -26,9 +26,17 @@
  * itself in a screen reader's document outline. The editor offers exactly two
  * levels and maps them here.
  *
- * No `img`: this app has a real attachment system (task outputs, request
- * attachments) and an editor that inlined base64 images would quietly duplicate
- * it into a text column. No `table`: unusable at the width these fields render.
+ * `img` IS ALLOWED, AND ONLY EVER POINTING AT OUR OWN FILE ROUTE (P7-67). The
+ * earlier rule here said no images at all, on the grounds that this app has a
+ * real attachment system and an editor that inlined base64 would quietly
+ * duplicate it into a text column. That second half still stands and is now
+ * enforced rather than asserted: `sanitizeRichText` drops any `img` whose `src`
+ * is not `/api/task-images/<uuid>`, so a `data:` URI, a tracking pixel and a
+ * hotlink to somebody else's server are all removed — the bytes have to have
+ * gone through the uploader, which measured and sniffed them, and the row that
+ * describes them is an ordinary task attachment.
+ *
+ * No `table`: unusable at the width these fields render.
  */
 export const RICH_TEXT_TAGS = [
   "p",
@@ -44,7 +52,71 @@ export const RICH_TEXT_TAGS = [
   "h3",
   "h4",
   "a",
+  "img",
 ] as const;
+
+/**
+ * P7-67 — where an inline image's bytes are served from, and the only `src` the
+ * sanitiser will keep.
+ *
+ * ⚠️ A ROUTE, NOT A SIGNED URL, and the difference is the whole design. The
+ * bucket is private, so the bytes are only reachable through a signature that
+ * expires in a minute — and a comment body is stored for years. Writing a
+ * signed URL into the body would produce an image that renders once, for the
+ * person who pasted it, and is a broken icon by the time anybody replies.
+ *
+ * So the body carries a STABLE reference to the attachment row, and
+ * `app/api/task-images/[attachmentId]/route.ts` mints a fresh signature per
+ * viewer, after RLS has said that viewer may see the task. The authorisation
+ * happens at read time, which is the only time it can be honest.
+ */
+export const TASK_IMAGE_PATH = "/api/task-images/";
+
+/** The `src` to write into a comment body for an uploaded attachment. */
+export function taskImageSrc(attachmentId: string): string {
+  return `${TASK_IMAGE_PATH}${attachmentId}`;
+}
+
+/**
+ * Is this `src` one of ours?
+ *
+ * ⚠️ ANCHORED AT BOTH ENDS, AND A UUID RATHER THAN `.+`. This is the check that
+ * stands between a comment box and stored `<img src="data:text/html;…">`, so it
+ * describes exactly what it accepts instead of describing what it rejects. A
+ * protocol-relative `//evil.example/x` fails it because it does not start with
+ * the prefix; `/api/task-images/../../x` fails it because `..` is not a uuid.
+ */
+const TASK_IMAGE_SRC = /^\/api\/task-images\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isTaskImageSrc(src: string | null | undefined): boolean {
+  return typeof src === "string" && TASK_IMAGE_SRC.test(src);
+}
+
+/**
+ * Every task image a body references, by attachment id.
+ *
+ * ⚠️ THIS IS WHAT DECIDES WHETHER A STORED FILE IS STILL IN USE. An image
+ * removed from a comment leaves its row and its bytes behind — the comment is
+ * the only thing that ever referenced them — so `sweepCommentImages` reads the
+ * bodies, reads this, and deletes the difference. Loosen the pattern and it
+ * will "find" references that are not there and leave real orphans; tighten it
+ * past what `taskImageSrc` writes and it will delete images that ARE on screen.
+ * The two must describe the same string, which is why they live together.
+ *
+ * Deliberately reads the raw markup rather than parsing it: this runs on the
+ * server, on a column, with no DOM, and a body that somebody hand-edited badly
+ * enough to defeat a regex is not one to be deleting files on the strength of.
+ * Deduplicated — the same picture twice in one comment is one file.
+ */
+export function taskImageIds(html: string | null | undefined): string[] {
+  if (!html) return [];
+
+  const found = html.matchAll(
+    /\/api\/task-images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi,
+  );
+
+  return [...new Set([...found].map((match) => match[1]!.toLowerCase()))];
+}
 
 /**
  * Turn the escaped entities back into the characters somebody typed.
@@ -96,6 +168,19 @@ export function richTextToPlainText(html: string | null | undefined): string {
      */
     .replace(/<li[^>]*>/gi, "\n• ")
     .replace(/<br\s*\/?>/gi, "\n")
+    /*
+     * P7-67 — AN IMAGE LEAVES A WORD BEHIND. A comment that is one pasted
+     * screenshot and nothing else flattens to the empty string otherwise, and
+     * three things break at once on a body nobody would call empty:
+     * `isRichTextEmpty` below refuses to let it be posted at all, the list
+     * preview draws a blank cell, and the client email arrives with a silent
+     * gap where the picture was.
+     *
+     * The alt text when there is one, because "Screenshot 2026-09-16.png" is
+     * more use in an inbox than the bare word "image".
+     */
+    .replace(/<img[^>]*\balt="([^"]+)"[^>]*>/gi, "[$1]")
+    .replace(/<img[^>]*>/gi, "[image]")
     .replace(/<\/(p|div|h[1-6]|blockquote|ul|ol)>/gi, "\n")
     // Drop `script` and `style` WITH their bodies before the general strip
     // below, or an inert `<script>` would contribute its source as text.

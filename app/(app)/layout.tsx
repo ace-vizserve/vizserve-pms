@@ -7,6 +7,7 @@ import {
   DynamicBreadcrumb,
 } from "@/components/app-shell/dynamic-breadcrumb";
 import { RealtimeNotifications } from "@/components/realtime-refresh";
+import { TaskImageLightboxProvider } from "@/components/task-image-lightbox";
 import { ShiftReminder } from "@/components/shift-reminder";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Separator } from "@/components/ui/separator";
@@ -19,6 +20,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const context = await requireAuthContext();
   return (
     <TooltipProvider>
+      {/*
+        P7-67 — ONE LIGHTBOX FOR THE WHOLE AUTHENTICATED AREA, and it is mounted
+        this high on purpose. An image in a comment is clicked from inside an
+        overlay; a dialog rendered in that overlay is closed by its own opening,
+        because taking focus is what the overlay reads as a dismissal. The state
+        has to outlive the thing that was clicked. Full account in the component.
+      */}
+      <TaskImageLightboxProvider>
       <BreadcrumbLabelProvider>
         {/*
           P8-03 — the unread badge above stops being a number that was only true
@@ -112,6 +121,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </SidebarInset>
         </SidebarProvider>
       </BreadcrumbLabelProvider>
+      </TaskImageLightboxProvider>
     </TooltipProvider>
   );
 }

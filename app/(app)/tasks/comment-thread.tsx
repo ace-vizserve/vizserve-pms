@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { startTransition, useOptimistic, useState, useTransition } from "react";
+import { startTransition, useCallback, useOptimistic, useState, useTransition } from "react";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -9,12 +9,12 @@ import { isPlaceholder, placeholderId } from "./optimistic-move";
 
 import { Button } from "@/components/ui/button";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
-import { RICH_TEXT_CLASS } from "@/components/ui/rich-text";
+import { CommentBody } from "./comment-body";
 import { isRichTextEmpty } from "@/lib/rich-text";
 import { formatDateTime } from "@/lib/dates";
 import { cn } from "@/lib/utils";
 
-import { addTaskComment, deleteTaskComment, editTaskComment } from "./actions";
+import { addTaskComment, deleteTaskComment, editTaskComment, uploadCommentImage } from "./actions";
 import { Monogram, initials } from "./assignees";
 
 export type TaskComment = {
@@ -202,7 +202,28 @@ export function CommentThread({
       /* ⚠️ Before the ok-check, deliberately: a refused comment still needs the
          thread re-read, because the optimistic row has to be replaced by
          whatever the server actually holds. */
-      router.refresh();
+
+      /*
+       * ⚠️ WRAPPED AGAIN, AND THAT IS WHAT KEEPS THE SHEET OPEN.
+       *
+       * This is inside `startTransition(async () => …)` already — but only up to
+       * the first `await`. React does not carry the transition scope across it,
+       * so a `router.refresh()` down here is an ORDINARY urgent update: the
+       * `<Suspense>` around `<TaskGroups>` in `page.tsx` re-suspends, shows its
+       * skeleton, and unmounts the whole table — including the sheet somebody is
+       * reading, and the `open` state that was holding it there. The comment
+       * saved correctly and the panel vanished, which reads as the panel closing
+       * on save.
+       *
+       * Re-entering a transition keeps the CURRENT tree on screen while the new
+       * payload streams in behind it, which is the entire point of that
+       * boundary's "the skeleton yields to the list rather than being replaced
+       * by it" note. Anything that refreshes after an await on this page needs
+       * the same treatment.
+       */
+      startTransition(() => {
+        router.refresh();
+      });
 
       if (!result.ok) {
         // Put it back: a comment the server refused must not be lost to a toast
@@ -259,6 +280,42 @@ export function CommentThread({
     ...events.map((event) => ({ at: event.at, comment: null, event })),
   ].sort((a, b) => (newestFirst ? b.at.localeCompare(a.at) : a.at.localeCompare(b.at)));
 
+  /*
+   * P7-67 — PASTE A SCREENSHOT INTO A COMMENT.
+   *
+   * ⚠️ IT UPLOADS FIRST AND INSERTS AFTER, so what lands in the body is always
+   * a `/api/task-images/<id>` reference to bytes the server has measured. The
+   * editor never sees a `data:` URI at all — see `allowBase64: false` in
+   * `rich-text-editor-impl.tsx` for what would otherwise happen, and
+   * `lib/rich-text.ts` for why the stored `src` is a route rather than a signed
+   * URL.
+   *
+   * ⚠️ THE TOAST LIVES HERE, NOT IN THE EDITOR. Returning null is how the
+   * editor is told to insert nothing; it has no idea what a task is and no
+   * business phrasing this. A silent failure would look like a paste that did
+   * not register, so it is said out loud.
+   */
+  const uploadImage = useCallback(
+    async (file: File) => {
+      const formData = new FormData();
+      formData.set("task_id", taskId);
+      formData.set("file", file);
+
+      const result = await uploadCommentImage(formData);
+
+      if (!result.ok) {
+        toast.error(result.error);
+        return null;
+      }
+
+      // The measurements travel with the src: they become `width`, `height` and
+      // `data-orientation` on the node, which is what lets the stylesheet cap a
+      // portrait screenshot differently from a landscape one.
+      return result.data;
+    },
+    [taskId],
+  );
+
   const composer = (
     <div className="space-y-1.5">
       {/*
@@ -275,6 +332,7 @@ export function CommentThread({
         value={body}
         onChange={setBody}
         onSubmit={post}
+        onUploadImage={uploadImage}
         minHeight="min-h-16"
         placeholder="Write a comment…"
       />
@@ -353,6 +411,7 @@ export function CommentThread({
                       value={draft}
                       onChange={setDraft}
                       onSubmit={() => saveEdit(row.comment!.id)}
+                      onUploadImage={uploadImage}
                       minHeight="min-h-16"
                     />
                     <div className="flex gap-1.5">
@@ -382,10 +441,7 @@ export function CommentThread({
                       it there. The markup arriving here is trusted because of
                       where it came from, not because of anything done below.
                     */}
-                    <div
-                      className={cn("mt-1", RICH_TEXT_CLASS)}
-                      dangerouslySetInnerHTML={{ __html: row.comment!.body }}
-                    />
+                    <CommentBody className="mt-1" html={row.comment!.body} />
 
                     {/* ⚠️ NOT ON A ROW THAT DOES NOT EXIST YET. Its id is a
                         placeholder string, and `deleteTaskComment` is typed
@@ -490,7 +546,7 @@ function ActivityEntry({ event }: { event: TaskActivityEvent }) {
 
       {/* Sanitised alongside the comment bodies, in `page.tsx`. */}
       {event.said ? (
-        <div className={cn("mt-1", RICH_TEXT_CLASS)} dangerouslySetInnerHTML={{ __html: event.said }} />
+        <CommentBody className="mt-1" html={event.said} />
       ) : null}
 
       {/* An icon, never a typed arrow. A glyph in a text run inherits the font's

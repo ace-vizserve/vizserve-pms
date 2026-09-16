@@ -8,6 +8,9 @@ import {
   requireAuthContextOrThrow,
   requireDepartmentShape,
 } from "@/lib/auth/authorization";
+import { sweepCommentImages } from "@/lib/comment-images-server";
+import { HEAD_BYTES, readImageSize } from "@/lib/image-size";
+import { taskImageSrc } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
   removeStoredAttachments,
@@ -320,19 +323,49 @@ export async function editTaskComment(commentId: string, input: unknown): Promis
   }
 
   const supabase = await createClient();
+
+  /*
+   * P7-67 — READ THE OLD BODY FIRST, because after the update it is gone and
+   * with it the only record of which pictures this comment used to hold. Read
+   * through the user's own client, so a comment they cannot see returns nothing
+   * and the update below refuses it anyway.
+   */
+  const { data: before } = await supabase
+    .from("vizserve_pms_task_comments")
+    .select("body")
+    .eq("id", commentId)
+    .maybeSingle();
+
+  const body = sanitizeRichText(parsed.data.body);
+
   // `.select` because a policy-refused UPDATE is not an error — it is success
   // with zero rows, and without this an attempt to edit somebody else's comment
   // would report "Saved".
   const { data, error } = await supabase
     .from("vizserve_pms_task_comments")
-    .update({ body: sanitizeRichText(parsed.data.body) })
+    .update({ body })
     .eq("id", commentId)
     .select("task_id");
 
   if (error) return { ok: false, error: readableError(error) };
   if (!data || data.length === 0) return { ok: false, error: "That comment is not yours to edit." };
 
-  refresh(data[0]!.task_id);
+  const taskId = data[0]!.task_id;
+
+  /*
+   * ⚠️ AWAITED, AND AFTER THE UPDATE HAS SUCCEEDED. Before it, an edit that the
+   * policy refused would still have deleted the files. Awaited rather than
+   * fired and forgotten because a serverless function that returns does not
+   * promise to finish anything still running — the cleanup would be dropped on
+   * exactly the deployments where it matters.
+   *
+   * `sanitizeRichText` ran on both sides, so the two bodies are compared in the
+   * form they are stored in. Comparing a raw draft against a stored body would
+   * see markup differences that are not image differences.
+   */
+  await sweepCommentImages({ taskId, previousBody: before?.body, nextBody: body });
+
+  refresh(taskId);
   return { ok: true, data: undefined };
 }
 
@@ -340,18 +373,26 @@ export async function deleteTaskComment(commentId: string): Promise<ActionResult
   await requireAuthContextOrThrow();
 
   const supabase = await createClient();
+  // `body` as well as `task_id`: a DELETE returns the row it removed, which is
+  // the last chance to see which pictures went with it (P7-67).
   const { data, error } = await supabase
     .from("vizserve_pms_task_comments")
     .delete()
     .eq("id", commentId)
-    .select("task_id");
+    .select("task_id, body");
 
   if (error) return { ok: false, error: readableError(error) };
   if (!data || data.length === 0) {
     return { ok: false, error: "That comment is not yours to remove." };
   }
 
-  refresh(data[0]!.task_id);
+  const removed = data[0]!;
+
+  // No `nextBody` — the comment is gone, so every image it held is a candidate.
+  // Whether each one actually goes is decided against the REMAINING comments.
+  await sweepCommentImages({ taskId: removed.task_id, previousBody: removed.body });
+
+  refresh(removed.task_id);
   return { ok: true, data: undefined };
 }
 
@@ -1121,6 +1162,109 @@ export async function uploadTaskOutput(
   return {
     ok: true,
     data: { id: result.attachment.id, filename: result.attachment.filename },
+  };
+}
+
+/**
+ * P7-67 — an image pasted or dropped into a comment box.
+ *
+ * ⚠️ IT COMMITS ON PASTE, BEFORE THE COMMENT IS SENT, and that is not the
+ * two-step handshake P1-09 built for the public form. It does not need to be:
+ * the caller is authenticated, the task is known, and the `src` that ends up in
+ * the body is an attachment id this action minted — there is no gap for a
+ * fabricated path to live in. What it costs is an orphan when somebody pastes a
+ * screenshot and then closes the tab. Written down in the migration; a few
+ * hundred kilobytes is the right trade against a comment box that cannot show
+ * you the picture until you press Send.
+ *
+ * ⚠️ IMAGES ONLY, and a tighter list than `vizserve_pms_attachment_rules`
+ * carries. That table is the rule for FILES — a client may attach a .docx to a
+ * brief, a PIC may upload a PDF as an output. This is the rule for a thing that
+ * has to render inside a paragraph, so anything that would draw a broken icon
+ * is refused here rather than accepted and then not displayed. `image/svg+xml`
+ * is absent for the reason P1-09 gives at length: an SVG is a script container.
+ *
+ * SCOPE FIRST, THROUGH THE VIEWER'S OWN CLIENT, then the service-role uploader —
+ * the same order as `uploadTaskOutput` above, for the same reason. But NOT its
+ * `COMPLETED` refusal: a finished task can still be commented on (P7-08 puts no
+ * status in the comment policy), and a comment you can write but cannot
+ * illustrate is a worse rule than either.
+ */
+const COMMENT_IMAGE_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+export async function uploadCommentImage(
+  formData: FormData,
+): Promise<
+  ActionResult<{
+    id: string;
+    src: string;
+    /** Null when the header could not be read — see `lib/image-size.ts`. */
+    width: number | null;
+    height: number | null;
+    orientation: "landscape" | "portrait" | "square" | null;
+  }>
+> {
+  const context = await requireAuthContextOrThrow();
+
+  const taskId = formData.get("task_id");
+  const file = formData.get("file");
+
+  if (typeof taskId !== "string" || !(file instanceof File)) {
+    return { ok: false, error: "Nothing was uploaded." };
+  }
+
+  if (!COMMENT_IMAGE_TYPES.includes((file.type || "").toLowerCase())) {
+    return { ok: false, error: "Only PNG, JPEG, GIF and WebP images can go in a comment." };
+  }
+
+  const supabase = await createClient();
+
+  // Zero rows means out of scope OR nonexistent, and the caller learns the same
+  // thing either way.
+  const { data: task } = await supabase
+    .from("vizserve_pms_tasks")
+    .select("id")
+    .eq("id", taskId)
+    .maybeSingle();
+
+  if (!task) return { ok: false, error: "That task is not available." };
+
+  const result = await uploadTaskAttachment({
+    taskId,
+    file,
+    uploadedBy: context.userId,
+    kind: "comment",
+  });
+
+  if (!result.ok) return result;
+
+  /*
+   * ⚠️ MEASURED FROM THE BYTES, AFTER THE UPLOAD, AND NEVER FATAL.
+   *
+   * The dimensions decide how the picture is capped in a thread (§ `.rich-text
+   * img` in globals.css), so they are read here rather than asked of the
+   * browser — the one participant that can lie about them. A header this cannot
+   * parse returns nulls, the editor writes no orientation, and the image gets
+   * the fallback cap. A picture laid out slightly worse is not a reason to
+   * refuse an upload that already succeeded.
+   */
+  const head = new Uint8Array(await file.slice(0, HEAD_BYTES).arrayBuffer());
+  const measured = readImageSize(head);
+
+  /*
+   * No `revalidatePath`. Nothing on the page has changed yet — the row exists
+   * but nothing references it until the author presses Send, and refreshing the
+   * route here would throw away the draft they are still typing.
+   */
+  return {
+    ok: true,
+    data: {
+      id: result.attachment.id,
+      src: taskImageSrc(result.attachment.id),
+      width: measured?.width ?? null,
+      height: measured?.height ?? null,
+      orientation: measured?.orientation ?? null,
+    },
   };
 }
 

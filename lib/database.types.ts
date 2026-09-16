@@ -1351,7 +1351,8 @@ export type Database = {
           filename: string;
           mime_type: string;
           size_bytes: number;
-          kind: "output" | "reference";
+          // P7-67 adds `comment` — an image pasted into a task comment.
+          kind: "output" | "reference" | "comment";
           uploaded_by: string | null;
           created_at: string;
         };
@@ -1362,7 +1363,7 @@ export type Database = {
           filename: string;
           mime_type: string;
           size_bytes: number;
-          kind?: "output" | "reference";
+          kind?: "output" | "reference" | "comment";
           uploaded_by?: string | null;
         };
         Update: never;

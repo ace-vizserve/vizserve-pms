@@ -25,6 +25,12 @@ import { RichTextEditorShell } from "@/components/ui/rich-text-editor-shell";
  * the frame the real editor mounts — the alternative is rendering nothing and
  * having the whole field appear at once, which is a far larger movement.
  */
+/**
+ * Type-only, so it costs nothing at runtime and the lazy boundary is unchanged:
+ * a call site needs the upload shape without importing the implementation.
+ */
+export type { UploadedImage } from "@/components/ui/rich-text-editor-impl";
+
 export const RichTextEditor = dynamic(
   () => import("@/components/ui/rich-text-editor-impl").then((module) => module.RichTextEditor),
   {

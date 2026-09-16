@@ -3,11 +3,18 @@
 import { MessageSquare } from "lucide-react";
 import { useState } from "react";
 
-import { Popover, PopoverContent, PopoverHeader, PopoverTitle, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { cn } from "@/lib/utils";
 
-import { CommentThread, type TaskComment } from "./comment-thread";
 import { richTextToPlainText } from "@/lib/rich-text";
+import { CommentThread, type TaskComment } from "./comment-thread";
 
 /**
  * P7-08 / K5 — the latest comment, and the way into the thread.
@@ -20,6 +27,17 @@ import { richTextToPlainText } from "@/lib/rich-text";
  * The thread itself is `CommentThread`, the same component the task detail
  * renders inline. Two implementations of one list is how the two end up
  * disagreeing about whether an edited comment says so.
+ *
+ * ⚠️ A SHEET, NOT A POPOVER — changed 16 Sep 2026, and for the content rather
+ * than the taste. A popover is anchored to the cell that opened it, which caps
+ * it at the width that still fits beside a table row. That is right for a menu
+ * and wrong for a CONVERSATION: a thread with a pasted screenshot in it had to
+ * shrink the picture to a thumbnail to fit, and the composer ended up narrower
+ * than the comment it was replying to. A sheet is anchored to nothing, so it
+ * can simply be wide enough.
+ *
+ * It also stops this being the third popover on one row — status, priority,
+ * comments — which is what made the list read as a menu bar.
  */
 export function LatestCommentCell({
   taskId,
@@ -37,8 +55,8 @@ export function LatestCommentCell({
   const latest = comments[comments.length - 1];
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
+    <Sheet open={open} onOpenChange={setOpen}>
+      <SheetTrigger
         className={cn(
           "w-full max-w-56 rounded-sm px-1.5 py-1 text-left text-xs",
           "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
@@ -71,13 +89,33 @@ export function LatestCommentCell({
             <span className="sr-only">on {taskTitle}</span>
           </span>
         )}
-      </PopoverTrigger>
+      </SheetTrigger>
 
-      <PopoverContent align="end" className="w-96">
-        <PopoverHeader>
-          <PopoverTitle className="truncate text-sm">{taskTitle}</PopoverTitle>
-        </PopoverHeader>
+      {/*
+        42rem rather than the primitive's 24rem: wide enough that a landscape
+        screenshot is legible in the thread instead of something you have to open
+        to read. Still a panel, not a page — the backdrop stays visible on the
+        left, so the way out is obvious.
 
+        ⚠️ IT REPEATS `data-[side=right]:` BECAUSE THE PRIMITIVE DOES. `SheetContent`
+        ships `data-[side=right]:sm:max-w-sm`, and a plain `sm:max-w-2xl` is a
+        DIFFERENT variant key — tailwind-merge sees no conflict, keeps both, and
+        the panel stays at 24rem while the class that was supposed to widen it
+        sits in the list doing nothing. Matching the variant exactly is what lets
+        the merge drop the one underneath. The same trap as `grade-*` vs `bg-*`
+        in §1.5 of the design system, from the other direction.
+      */}
+      <SheetContent className="w-full gap-0 p-0 sm:max-w-2xl data-[side=right]:sm:max-w-2xl">
+        <SheetHeader className="border-b">
+          <SheetTitle className="truncate text-sm">{taskTitle}</SheetTitle>
+          <SheetDescription className="text-2xs">
+            {comments.length === 0
+              ? "No comments yet"
+              : comments.length === 1
+                ? "1 comment"
+                : `${comments.length} comments`}
+          </SheetDescription>
+        </SheetHeader>
         {/* Capped and scrollable: a task with forty comments must not produce a
             popover taller than the window.
 
@@ -85,8 +123,13 @@ export function LatestCommentCell({
             wrapper version put the COMPOSER inside the scroll region, so
             replying to a long thread meant scrolling back down to find the box
             you type into. */}
-        <CommentThread taskId={taskId} comments={comments} viewerId={viewerId} scrollList />
-      </PopoverContent>
-    </Popover>
+        {/* The padding lives here rather than on the panel, so the thread's own
+            scroll region reaches the panel's edges and a long conversation does
+            not scroll inside an inset box. */}
+        <div className="min-h-0 flex-1 overflow-hidden p-4">
+          <CommentThread taskId={taskId} comments={comments} viewerId={viewerId} scrollList />
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
