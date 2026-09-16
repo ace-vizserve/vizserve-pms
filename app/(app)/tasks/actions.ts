@@ -10,7 +10,7 @@ import {
 } from "@/lib/auth/authorization";
 import { sweepCommentImages } from "@/lib/comment-images-server";
 import { HEAD_BYTES, readImageSize } from "@/lib/image-size";
-import { checklistItemSchema, checklistToggleSchema } from "@/lib/schemas/tasks";
+import { checklistItemSchema, checklistToggleSchema, copySchema } from "@/lib/schemas/tasks";
 import { taskImageSrc } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
@@ -585,7 +585,46 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
 
   let departmentId: string | null = null;
 
-  if (forSomebodyElse) {
+  /*
+   * ⚠️ A SUBTASK INHERITS ITS PARENT'S LIST, AND WITHOUT THIS IT VANISHES.
+   *
+   * `list_id` defaults to null and the composer on the task page has no list
+   * picker — there is nothing to pick, the parent already decided. So a subtask
+   * added from `/tasks/[id]` was created with NO LIST, and both views that
+   * matter are list-filtered: `/tasks` redirects to the index unless `?list=`
+   * is set, and the board honours the same parameter. The subtask existed, the
+   * parent's page listed it, and it appeared on neither the list nor the board
+   * — which reads as the add having silently failed.
+   *
+   * The DEPARTMENT comes from the parent for the same reason and one stronger:
+   * `vizserve_pms_check_subtask_parent` refuses a child whose department
+   * differs, so deriving it from the assignee — who may sit in another
+   * department — turned a legal action into "A subtask belongs to the same
+   * department as the task above it" at the last step, after the task had
+   * already been created.
+   */
+  let inheritedListId = values.list_id;
+
+  if (values.parent_task_id) {
+    const { data: parent } = await supabase
+      .from("vizserve_pms_tasks")
+      .select("department_id, list_id")
+      .eq("id", values.parent_task_id)
+      .maybeSingle();
+
+    if (!parent) {
+      return { ok: false, error: "That task is no longer available to add a subtask to." };
+    }
+
+    departmentId = parent.department_id;
+    // The caller's own list wins only if they actually named one; the composer
+    // on the task page does not, which is the case this exists for.
+    inheritedListId = values.list_id ?? parent.list_id;
+  }
+
+  // ⚠️ `!departmentId`: a parent has already decided, and its answer outranks
+  // the assignee's own department — see the subtask note above.
+  if (forSomebodyElse && !departmentId) {
     // The DEPARTMENT COMES FROM THE PERSON. Read through the caller's own client
     // so RLS decides whether they can see that colleague at all — and
     // `vizserve_pms_create_task` re-checks the department against the caller's
@@ -615,7 +654,7 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
         p_due_date: values.due_date || null,
         // The list the composer was typed into. create_task refuses one outside
         // the task's own department, so this is a proposal, not an authority.
-        p_list_id: values.list_id,
+        p_list_id: inheritedListId,
         p_priority: values.priority,
       })
     : await supabase.rpc("vizserve_pms_create_personal_task", {
@@ -624,7 +663,7 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
         p_due_date: values.due_date || null,
         // create_personal_task RAISES on a list in another department, so a
         // stale one surfaces as a sentence rather than filing the task nowhere.
-        p_list_id: values.list_id,
+        p_list_id: inheritedListId,
         p_priority: values.priority,
       });
 
@@ -1164,6 +1203,109 @@ export async function uploadTaskOutput(
     ok: true,
     data: { id: result.attachment.id, filename: result.attachment.filename },
   };
+}
+
+// ---------------------------------------------------------------------------
+// P7-69 — copying tasks
+// ---------------------------------------------------------------------------
+
+/**
+ * Where these tasks can be copied TO.
+ *
+ * ⚠️ IT ANSWERS THE DEPARTMENT QUESTION BEFORE THE DIALOG ASKS IT. A copy stays
+ * inside its own department (see the migration), so a selection spanning two
+ * departments has no single set of targets — and that is a thing to say up
+ * front rather than a refusal to discover after picking a list. `spans` is that
+ * sentence.
+ *
+ * The lists come back through the user's own client, so RLS has already removed
+ * anything they cannot see.
+ */
+export async function copyTargets(taskIds: string[]): Promise<
+  ActionResult<{ lists: { id: string; name: string }[]; spans: boolean }>
+> {
+  await requireAuthContextOrThrow();
+
+  if (taskIds.length === 0) return { ok: false, error: "Nothing is selected." };
+
+  const supabase = await createClient();
+
+  const { data: tasks, error } = await supabase
+    .from("vizserve_pms_tasks")
+    .select("id, department_id")
+    .in("id", taskIds);
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!tasks || tasks.length === 0) return { ok: false, error: "Those tasks are not available." };
+
+  const departments = new Set(tasks.map((task) => task.department_id));
+  if (departments.size > 1) return { ok: true, data: { lists: [], spans: true } };
+
+  const { data: lists } = await supabase
+    .from("vizserve_pms_lists")
+    .select("id, name")
+    .eq("department_id", [...departments][0]!)
+    /* P11-06 — a personal list is one person's own, invisible even to their
+       lead. It is not a filing cabinet for the team's work, so the picker never
+       offers one. `owner_id`, not a flag: null is an ordinary department list. */
+    .is("owner_id", null)
+    /* An archived list is not a place to put new work. */
+    .eq("is_active", true)
+    .order("name");
+
+  return { ok: true, data: { lists: lists ?? [], spans: false } };
+}
+
+/**
+ * Copy every selected task into one list.
+ *
+ * ⚠️ ONE AT A TIME, AND A FAILURE DOES NOT STOP THE REST. Seven tasks is seven
+ * calls; the sixth being a client-backed task somebody may not copy must not
+ * lose the other six. The count that comes back is what actually happened, and
+ * the caller reports both halves — "5 copied, 2 could not be" is the truth and
+ * "Done" is not.
+ *
+ * Sequential rather than `Promise.all`: these are writes against one list, and
+ * a burst of seven that half-fails is harder to reason about than seven that
+ * fail in order.
+ */
+export async function copyTasks(
+  taskIds: string[],
+  input: unknown,
+): Promise<ActionResult<{ copied: number; failed: number; firstError: string | null }>> {
+  await requireAuthContextOrThrow();
+
+  const parsed = copySchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Check the copy options." };
+  if (taskIds.length === 0) return { ok: false, error: "Nothing is selected." };
+
+  const supabase = await createClient();
+
+  let copied = 0;
+  let failed = 0;
+  let firstError: string | null = null;
+
+  for (const taskId of taskIds) {
+    const { error } = await supabase.rpc("vizserve_pms_copy_task", {
+      p_task_id: taskId,
+      p_list_id: parsed.data.listId,
+      p_include: parsed.data.include,
+    });
+
+    if (error) {
+      failed += 1;
+      firstError = firstError ?? readableError(error);
+      continue;
+    }
+
+    copied += 1;
+  }
+
+  // One refresh at the end rather than one per task: the list is re-read once
+  // however many landed on it.
+  if (copied > 0) refresh();
+
+  return { ok: true, data: { copied, failed, firstError } };
 }
 
 // ---------------------------------------------------------------------------

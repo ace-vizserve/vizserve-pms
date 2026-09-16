@@ -8,7 +8,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { Trash2, X } from "lucide-react";
+import { Copy, Trash2, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -23,15 +23,20 @@ import {
 } from "@/components/ui/dialog";
 
 import { deleteTasks } from "./actions";
+import { CopyTasksDialog } from "./copy-tasks-dialog";
 
 /**
  * P7-19 — picking several tasks and acting on them at once.
  *
- * ClickUp's version of this bar carries nine actions. This one carries one,
- * deliberately: Delete is the thing that was missing, and the other eight
- * (status, assignees, dates, tags, move, convert to subtask, copy, duplicate)
- * either already exist inline on the row or are not features this app has. A bar
- * of mostly-disabled buttons teaches people to stop reading it.
+ * ClickUp's version carries nine actions. This one carried exactly one for a
+ * while — Delete, the thing that was missing — on the argument that the other
+ * eight either existed inline on the row or were not features this app had. A
+ * bar of mostly-disabled buttons teaches people to stop reading it.
+ *
+ * P7-69 adds the second, and it is the one that argument did not cover: COPY
+ * has no inline equivalent anywhere, because copying is not a property of one
+ * row. Duplicate is the same action with the target list left alone, so it is
+ * not a third button.
  *
  * ⚠️ ONLY DELETABLE ROWS GET A CHECKBOX. `canDelete()` on the page mirrors
  * `vizserve_pms_can_delete_task`, so a client-backed task or a colleague's work
@@ -158,6 +163,7 @@ function SelectionBar({
   onClear: () => void;
 }) {
   const [confirming, setConfirming] = useState(false);
+  const [copying, setCopying] = useState(false);
   const [pending, startDelete] = useTransition();
 
   const count = picked.size;
@@ -237,6 +243,21 @@ function SelectionBar({
             consequence is spelled out in the confirm dialog, which is where a
             destructive action is actually explained.
           */}
+          {/*
+            P7-69 — COPY SITS BEFORE DELETE, and the order is not alphabetical.
+            The destructive action goes last, furthest from the pointer arriving
+            at the bar, so the safe thing is the one under the cursor.
+          */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setCopying(true)}
+            className="text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground"
+          >
+            <Copy />
+            Copy
+          </Button>
+
           <Button
             variant="ghost"
             size="sm"
@@ -260,6 +281,13 @@ function SelectionBar({
           </Button>
         </div>
       </div>
+
+      <CopyTasksDialog
+        open={copying}
+        onOpenChange={setCopying}
+        taskIds={[...picked.keys()]}
+        onCopied={onClear}
+      />
 
       <Dialog open={confirming} onOpenChange={setConfirming}>
         <DialogContent className="sm:max-w-md">

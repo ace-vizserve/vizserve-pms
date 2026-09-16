@@ -298,34 +298,58 @@ export function TaskGroupTable({
    * select-all in the header has to mean "everything at this stage", not
    * "everything currently expanded".
    */
-  const deletableInGroup = group
+  /**
+   * P7-69 — WHO GETS A CHECKBOX, and it is no longer "whoever can delete".
+   *
+   * The bar carried one action, so the two questions were the same question and
+   * `canDelete` answered both. Now it carries Copy, whose audience is far wider:
+   * anyone who can open a task can copy it, the same rule that lets them edit it
+   * (P11-03). Gating the checkbox on deletion would hide Copy behind a
+   * permission it has nothing to do with — a client-backed task cannot be
+   * deleted by anybody and copies perfectly well.
+   *
+   * ⚠️ SO THE SELECTION IS WIDER THAN SOME OF ITS ACTIONS, and Delete now has to
+   * say so. It already does: `deleteTasks` decides each task on its own and
+   * reports refusals per task, which is exactly the shape this needs.
+   */
+  function canSelect(task: TaskRow) {
+    return (
+      roleAtLeast(viewer.role, "owner") ||
+      viewer.managedDepartmentIds.includes(task.department_id) ||
+      task.department_id === viewer.deptAdminOf ||
+      task.department_id === viewer.primaryDepartmentId ||
+      task.created_by === viewer.userId ||
+      (task.is_personal && task.assignee_id === viewer.userId)
+    );
+  }
+
+  const selectableInGroup = group
     .flatMap((task) => [task, ...(task.subRows ?? [])])
     /* A row the server has not created cannot be selected for deletion — its
        id is a placeholder string and the bulk delete is typed `uuid`. */
     .filter((task) => !isPlaceholder(task.id))
-    .filter(canDelete)
+    .filter(canSelect)
     .map((task) => ({ id: task.id, title: task.title }));
 
   const columns: Column<ListRow>[] = [
     {
       /*
-       * P7-19 — the selection column.
+       * P7-19 / P7-69 — the selection column.
        *
-       * A checkbox ONLY where the row can actually be deleted, on the same rule
-       * as the per-row trash: `canDelete` mirrors
-       * `vizserve_pms_can_delete_task`, so client-backed work and a colleague's
-       * tasks have nothing to tick. The cell is not merely disabled — a
-       * disabled checkbox on two thirds of the rows reads as the feature being
-       * broken rather than as the row being out of scope.
+       * A checkbox where the row can be ACTED ON — see `canSelect`. It used to
+       * mean "can be deleted", which was right while Delete was the only thing
+       * the bar could do. The cell is still absent rather than disabled on a row
+       * out of scope: a disabled checkbox on two thirds of the rows reads as the
+       * feature being broken rather than as the row not being yours.
        */
       key: "select",
-      /* Every deletable row in this group. Built from `group` rather than the
+      /* Every selectable row in this group. Built from `group` rather than the
          rendered rows so a collapsed parent's children still count — they are
          selected, merely not on screen. */
-      header: <TaskSelectAll rows={deletableInGroup} />,
+      header: <TaskSelectAll rows={selectableInGroup} />,
       className: "w-8 pr-0",
       cell: (task) =>
-        canDelete(task) ? (
+        canSelect(task) ? (
           <TaskSelectCheckbox taskId={task.id} title={task.title} />
         ) : null,
     },

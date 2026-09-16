@@ -2582,6 +2582,11 @@ export type Database = {
         Returns: number;
       };
       /** P7-67. Deletes the rows and hands back the objects to remove. */
+      /** P7-69. Copies a task into a list in its own department. */
+      vizserve_pms_copy_task: {
+        Args: { p_task_id: string; p_list_id: string | null; p_include?: string[] };
+        Returns: string;
+      };
       /** P7-68. Appends an item, computing its position server-side. */
       vizserve_pms_add_checklist_item: {
         Args: { p_task_id: string; p_label: string; p_group_label?: string | null };

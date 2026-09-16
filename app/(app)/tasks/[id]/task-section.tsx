@@ -142,9 +142,9 @@ export function TaskSection({
         </button>
       </h3>
 
-      {/* Hidden while collapsed: a section you have folded away should not keep
-          offering to add things to it. */}
-      {open ? action : null}
+      {/* ⚠️ THE ACTION IS NOT IN THE HEADER. It sits at the foot of the body
+          below — see there. This row is the title, the summary and the toggle,
+          and nothing that acts on the section's contents. */}
       </div>
 
       {/*
@@ -156,6 +156,14 @@ export function TaskSection({
       {open ? (
         <div id={`task-section-body-${id}`} className="mt-2 space-y-2">
           {children}
+
+          {/* ⚠️ INSIDE THE COLLAPSIBLE, UNDER WHAT IT ADDS TO — "Add a step" at
+              the foot of the steps, "Add a subtask" at the foot of the subtasks.
+              It spent a while in the header row beside the title, which put the
+              control further from the list it appends to than from the section
+              above it, and made a heading that is also a toggle carry a second
+              target. At the foot it reads as the next line of the list. */}
+          {action}
         </div>
       ) : null}
     </section>

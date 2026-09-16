@@ -1102,3 +1102,59 @@ export const checklistToggleSchema = z.object({
   id: z.uuid(),
   is_done: z.boolean(),
 });
+
+/**
+ * P7-69 — everything a copy may bring with it.
+ *
+ * ⚠️ HERE AND NOT IN `actions.ts`, AND THE REASON IS A HARD RULE RATHER THAN A
+ * PREFERENCE. That file is `"use server"`, and a `"use server"` module may
+ * export ONLY async functions — a plain `const` in it fails the whole route at
+ * compile time, taking every checkbox on `/tasks` with it. Types are fine
+ * (they are erased); values are not.
+ *
+ * ⚠️ AND THE STRINGS MUST MATCH WHAT `vizserve_pms_copy_task` READS. It takes a
+ * `text[]` and ignores what it does not recognise, so a typo here is not an
+ * error — it is an option that silently does nothing. That is the trade for a
+ * signature that never has to change; this list is the other half of it.
+ */
+export const COPY_PARTS = [
+  "description",
+  "priority",
+  "estimate",
+  "checklist",
+  "assignees",
+  "dates",
+  "subtasks",
+] as const;
+
+export type CopyPart = (typeof COPY_PARTS)[number];
+
+/**
+ * ⚠️ THE DEFAULTS ARE AN OPINION ABOUT WHY PEOPLE COPY. A copy is almost always
+ * "same procedure, next cycle" — the monthly audit, the weekly report — so what
+ * describes the WORK comes along and what describes THAT RUN OF IT does not.
+ * Assignees and dates belong to the cycle that produced them; a copy carrying
+ * last month's due date is a task that arrives overdue.
+ */
+export const COPY_DEFAULTS: CopyPart[] = ["description", "priority", "estimate", "checklist"];
+
+/**
+ * ⚠️ `listId` IS REQUIRED, THOUGH THE COLUMN IS NULLABLE. A task with no list is
+ * a real state — the composer makes them, and the copy function accepts null —
+ * but it is not a state anybody CHOOSES for a copy. Offering "No list" as a
+ * destination, preselected, meant a copy could quietly land nowhere and have to
+ * be hunted down afterwards. Somebody copying a task is moving work to a place;
+ * the place is the point.
+ */
+/**
+ * ⚠️ `listId` IS REQUIRED, THOUGH THE COLUMN IS NULLABLE. A task with no list is
+ * a real state — the composer makes them and `vizserve_pms_copy_task` accepts
+ * null — but it is not a state anybody CHOOSES for a copy. Offering "No list" as
+ * a destination, preselected, meant a copy could quietly land nowhere and have
+ * to be hunted down afterwards. Somebody copying a task is moving work to a
+ * place; the place is the point.
+ */
+export const copySchema = z.object({
+  listId: z.uuid(),
+  include: z.array(z.enum(COPY_PARTS)),
+});
