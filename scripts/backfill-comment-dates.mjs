@@ -84,6 +84,59 @@ function toTimestamptz(text) {
 }
 
 /**
+ * P7-67 — the fallback key, for text the export mangled.
+ *
+ * ⚠️ THE EXPORT CARRIES MOJIBAKE AND THE APP DOES NOT. Twelve task titles and
+ * fifty-six comments in the xlsx are UTF-8 that something read as cp1252 —
+ * `Hardware Issue â€“ Lenovo` for `Hardware Issue – Lenovo`. The app's own rows
+ * are clean (0 of 3,993 titles, 0 of 547 bodies), so this is damage on the way
+ * out of ClickUp, not damage we are storing.
+ *
+ * ⚠️ AND IT CANNOT BE REPAIRED BY ROUND-TRIPPING. `â€‘` is U+2011 read as
+ * cp1252, and the byte it needs back is 0x91, which cp1252 maps to a character
+ * that does not encode to 0x91 again. Reversing it produces a replacement
+ * character and a control code — worse than the mojibake, and still no match.
+ *
+ * So instead of repairing, this DISCARDS. Everything outside printable ASCII
+ * becomes one space, on both sides, so a curly apostrophe, an en dash and their
+ * mangled forms all collapse to the same key. Across the whole export it moves
+ * 15 rows from unmatched to matched with ZERO new ambiguity.
+ *
+ * ⚠️ USED ONLY AFTER AN EXACT MATCH FAILS, AND ONLY WHEN IT FINDS EXACTLY ONE.
+ * It is a lossier key by construction — two titles differing only in punctuation
+ * share it — so it is a fallback, never the primary, and a tie is still refused.
+ */
+const skeleton = (text) =>
+  (text || "").replace(/[^\x20-\x7E]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+
+/** Read a whole table; PostgREST caps a request at 1,000 rows. */
+async function readAll(table, columns) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from(table).select(columns).range(from, from + 999);
+    if (error) throw new Error(`${table}: ${error.message}`);
+    out.push(...data);
+    if (data.length < 1000) return out;
+  }
+}
+
+/**
+ * Every task, indexed by skeleton. Built once on first use — 3,993 rows is four
+ * requests, and doing it per task would be four per task.
+ */
+let skeletonIndex = null;
+async function tasksBySkeleton(title) {
+  if (!skeletonIndex) {
+    skeletonIndex = new Map();
+    for (const task of await readAll("vizserve_pms_tasks", "id, title")) {
+      const key = skeleton(task.title);
+      skeletonIndex.set(key, [...(skeletonIndex.get(key) ?? []), task]);
+    }
+  }
+  return skeletonIndex.get(skeleton(title)) ?? [];
+}
+
+/**
  * Compare the way a reader would, and put an already-imported image back to the
  * token it replaced so a second pass still recognises the comment.
  */
@@ -105,9 +158,16 @@ let ambiguous = 0;
 for (const row of rows) {
   if (row.comments.length === 0) continue;
 
-  const { data: task } = await db
-    .from("vizserve_pms_tasks").select("id").eq("title", row.title).maybeSingle();
-  if (!task) { skipped += row.comments.length; continue; }
+  const { data: exact } = await db
+    .from("vizserve_pms_tasks").select("id, title").eq("title", row.title);
+
+  let found = exact ?? [];
+  if (found.length === 0) found = await tasksBySkeleton(row.title);
+
+  // A title matching several tasks cannot be resolved from the export at all —
+  // the app stores no ClickUp id, by design (D21).
+  if (found.length !== 1) { skipped += row.comments.length; continue; }
+  const task = found[0];
 
   const { data: comments } = await db
     .from("vizserve_pms_task_comments")
@@ -118,7 +178,13 @@ for (const row of rows) {
 
   for (const exported of row.comments) {
     const key = norm(exported.text);
-    const matches = (comments ?? []).filter((c) => norm(c.body) === key && !taken.has(c.id));
+    let matches = (comments ?? []).filter((c) => norm(c.body) === key && !taken.has(c.id));
+
+    // Exact first; the skeleton only for text the export mangled.
+    if (matches.length === 0) {
+      const loose = skeleton(exported.text);
+      matches = (comments ?? []).filter((c) => skeleton(c.body) === loose && !taken.has(c.id));
+    }
 
     if (matches.length === 0) { skipped += 1; continue; }
     if (matches.length > 1) { ambiguous += 1; continue; }

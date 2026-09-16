@@ -129,6 +129,59 @@ if (ALL) {
   selected = [one];
 }
 
+/**
+ * P7-67 — the fallback key, for text the export mangled.
+ *
+ * ⚠️ THE EXPORT CARRIES MOJIBAKE AND THE APP DOES NOT. Twelve task titles and
+ * fifty-six comments in the xlsx are UTF-8 that something read as cp1252 —
+ * `Hardware Issue â€“ Lenovo` for `Hardware Issue – Lenovo`. The app's own rows
+ * are clean (0 of 3,993 titles, 0 of 547 bodies), so this is damage on the way
+ * out of ClickUp, not damage we are storing.
+ *
+ * ⚠️ AND IT CANNOT BE REPAIRED BY ROUND-TRIPPING. `â€‘` is U+2011 read as
+ * cp1252, and the byte it needs back is 0x91, which cp1252 maps to a character
+ * that does not encode to 0x91 again. Reversing it produces a replacement
+ * character and a control code — worse than the mojibake, and still no match.
+ *
+ * So instead of repairing, this DISCARDS. Everything outside printable ASCII
+ * becomes one space, on both sides, so a curly apostrophe, an en dash and their
+ * mangled forms all collapse to the same key. Across the whole export it moves
+ * 15 rows from unmatched to matched with ZERO new ambiguity.
+ *
+ * ⚠️ USED ONLY AFTER AN EXACT MATCH FAILS, AND ONLY WHEN IT FINDS EXACTLY ONE.
+ * It is a lossier key by construction — two titles differing only in punctuation
+ * share it — so it is a fallback, never the primary, and a tie is still refused.
+ */
+const skeleton = (text) =>
+  (text || "").replace(/[^\x20-\x7E]+/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
+
+/** Read a whole table; PostgREST caps a request at 1,000 rows. */
+async function readAll(table, columns) {
+  const out = [];
+  for (let from = 0; ; from += 1000) {
+    const { data, error } = await db.from(table).select(columns).range(from, from + 999);
+    if (error) throw new Error(`${table}: ${error.message}`);
+    out.push(...data);
+    if (data.length < 1000) return out;
+  }
+}
+
+/**
+ * Every task, indexed by skeleton. Built once on first use — 3,993 rows is four
+ * requests, and doing it per task would be four per task.
+ */
+let skeletonIndex = null;
+async function tasksBySkeleton(title) {
+  if (!skeletonIndex) {
+    skeletonIndex = new Map();
+    for (const task of await readAll("vizserve_pms_tasks", "id, title")) {
+      const key = skeleton(task.title);
+      skeletonIndex.set(key, [...(skeletonIndex.get(key) ?? []), task]);
+    }
+  }
+  return skeletonIndex.get(skeleton(title)) ?? [];
+}
+
 /** Compare the way a reader would: markup and whitespace are not the content. */
 const norm = (text) =>
   text.replace(/<[^>]*>/g, "").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().toLowerCase();
@@ -212,10 +265,16 @@ async function planFor(row) {
   const { data: candidates } = await db
     .from("vizserve_pms_tasks").select("id, title").eq("title", row.title);
 
-  if (!candidates || candidates.length === 0) return { skip: "no task with this title in the app" };
-  if (candidates.length > 1) return { skip: `${candidates.length} tasks share this title` };
+  let found = candidates ?? [];
 
-  const task = candidates[0];
+  // Exact first, always. The skeleton only gets a turn when the title as
+  // exported matches nothing — see its own note for why it is not the primary.
+  if (found.length === 0) found = await tasksBySkeleton(row.title);
+
+  if (found.length === 0) return { skip: "no task with this title in the app" };
+  if (found.length > 1) return { skip: `${found.length} tasks share this title` };
+
+  const task = found[0];
 
   const { data: comments } = await db
     .from("vizserve_pms_task_comments").select("id, body").eq("task_id", task.id);
@@ -246,7 +305,14 @@ async function planFor(row) {
   let cursor = 0;
 
   for (const exported of row.comments) {
-    const matches = (comments ?? []).filter((c) => norm(c.body) === norm(exported.text || ""));
+    let matches = (comments ?? []).filter((c) => norm(c.body) === norm(exported.text || ""));
+
+    // Same two-stage rule as the title: exact, then the lossier key, and only
+    // when it is unambiguous.
+    if (matches.length === 0) {
+      const key = skeleton(exported.text);
+      matches = (comments ?? []).filter((c) => skeleton(c.body) === key);
+    }
 
     // Refuse rather than guess. A comment matching none or several is the one
     // case where a wrong answer is worse than no answer.

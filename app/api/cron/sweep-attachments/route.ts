@@ -59,5 +59,49 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: true, removed: 0, orphaned: paths.length });
   }
 
-  return NextResponse.json({ ok: true, removed: paths.length });
+  const images = await sweepCommentImages(admin);
+
+  return NextResponse.json({ ok: true, removed: paths.length, commentImages: images });
+}
+
+/**
+ * P7-67 — the images pasted into a comment nobody sent.
+ *
+ * ⚠️ A SECOND SWEEP IN THE SAME ROUTE, NOT A SECOND CRON. Both collect uploads
+ * that outlived the intention behind them, both run daily, and both are two
+ * steps in the same order — rows first, then the objects the rows named. A
+ * separate schedule would be a second thing to notice had stopped running.
+ *
+ * ⚠️ IT IS NOT THE SAME AS `sweepCommentImages` IN `lib/comment-images-server.ts`,
+ * which handles an image REMOVED from a comment that was saved. That one is
+ * driven by the old body and is exact; this one is driven by age, because a
+ * draft nobody sent has no body to be driven by. Neither can do the other's job.
+ *
+ * A failure here must not fail the route: the pending sweep above has already
+ * succeeded by this point, and reporting the whole run as broken would hide
+ * that.
+ */
+async function sweepCommentImages(admin: ReturnType<typeof createAdminClient>): Promise<number> {
+  const { data: expired, error } = await admin.rpc("vizserve_pms_expire_comment_images", {
+    p_older_than: "24 hours",
+  });
+
+  if (error) {
+    console.error(`[attachments:sweep] comment images: ${error.message}`);
+    return 0;
+  }
+
+  const paths = (expired ?? []).map((row) => row.storage_path);
+  if (paths.length === 0) return 0;
+
+  const { error: removeError } = await admin.storage.from(ATTACHMENT_BUCKET).remove(paths);
+
+  if (removeError) {
+    console.error(
+      `[attachments:sweep] ${paths.length} comment images left behind: ${removeError.message}`,
+    );
+    return 0;
+  }
+
+  return paths.length;
 }

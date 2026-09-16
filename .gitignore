@@ -64,5 +64,5 @@ design/*.html
 # `rollback-*.json` is production state — the comment bodies as they were before
 # an import ran, and the ids it created. Precious while a run is in flight and
 # meaningless against any other database.
-clickup-export.json
+clickup-*.json
 rollback-*.json

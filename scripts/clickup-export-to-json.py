@@ -1,7 +1,7 @@
 """
 P7-67 — the ClickUp xlsx export, as JSON the import scripts can read.
 
-    python scripts/clickup-export-to-json.py <export.xlsx> <out.json> [--space VizBytes]
+    python scripts/clickup-export-to-json.py <export.xlsx> <out.json> [--space VizBytes] [--with-comments] [--all-tasks]
 
 ⚠️ PYTHON, IN A REPO THAT IS OTHERWISE JAVASCRIPT, and deliberately. Reading an
 xlsx means unzipping it and parsing SpreadsheetML; node has no zip reader in its
@@ -16,7 +16,8 @@ passed around would be spreading staff emails and time-tracking data for no
 reason.
 
 Column map, for anyone holding a different export: A task id · D title ·
-O attachments (JSON) · U space · Y comments (JSON).
+G/I/K created/due/start as epoch ms · O attachments (JSON) · U space ·
+Y comments (JSON).
 """
 
 import json
@@ -76,16 +77,28 @@ def main():
     if "--space" in sys.argv:
         space = sys.argv[sys.argv.index("--space") + 1]
 
+    # Keep a task that has comments but no files. Off by default, so the image
+    # import's file stays as small as it has always been.
+    keep_comments = "--with-comments" in sys.argv
+
+    # Keep every row, files or not, comments or not. The date backfill needs all
+    # 3,877 of them: a task with neither still has a creation date, and every
+    # one of those is currently wrong.
+    keep_all = "--all-tasks" in sys.argv
+
     out = []
     for row in read_rows(source):
         if space and (row.get("U") or "").strip() != space:
             continue
 
         attachments = parse_json_cell(row.get("O"))
+        comments = parse_json_cell(row.get("Y"))
 
-        # A task with no files has nothing for the image import to do. Comments
-        # without attachments are the date backfill's business, not this one.
-        if not attachments:
+        # A task with no files has nothing for the image import to do — but the
+        # date backfill wants every task that carries a COMMENT, files or not.
+        # VizAssists has 150 comments and not one attachment, and would vanish
+        # from this file entirely under the image import's rule.
+        if not keep_all and not attachments and not (keep_comments and comments):
             continue
 
         out.append(
@@ -95,7 +108,14 @@ def main():
                 "space": row.get("U"),
                 "list": row.get("S"),
                 "attachments": attachments,
-                "comments": parse_json_cell(row.get("Y")),
+                "comments": comments,
+                # Epoch MILLISECONDS, not the human-readable twins in H/J/L.
+                # A number needs no parsing and carries no timezone to be read
+                # wrong — the instant is exact and the calendar date it falls on
+                # is the reader's problem, which is the whole hazard here.
+                "created_ms": row.get("G") or None,
+                "due_ms": row.get("I") or None,
+                "start_ms": row.get("K") or None,
             }
         )
 
@@ -103,7 +123,8 @@ def main():
         json.dump(out, handle)
 
     files = sum(len(entry["attachments"]) for entry in out)
-    print(f"{len(out)} task(s) with {files} attachment(s) -> {destination}")
+    notes = sum(len(entry["comments"]) for entry in out)
+    print(f"{len(out)} task(s), {files} attachment(s), {notes} comment(s) -> {destination}")
     return 0
 
 

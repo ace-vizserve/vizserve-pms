@@ -2554,6 +2554,11 @@ export type Database = {
         Args: { p_request_id: string; p_form_id: string; p_attachments: Json };
         Returns: number;
       };
+      /** P7-67. Deletes the rows and hands back the objects to remove. */
+      vizserve_pms_expire_comment_images: {
+        Args: { p_older_than?: string };
+        Returns: { storage_path: string }[];
+      };
       vizserve_pms_expire_pending_attachments: {
         Args: { p_older_than?: string };
         Returns: { storage_path: string }[];

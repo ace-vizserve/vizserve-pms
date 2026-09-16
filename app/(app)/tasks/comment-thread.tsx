@@ -115,8 +115,9 @@ export function CommentThread({
   viewerId,
   className,
   scrollList = false,
+  fillHeight = false,
   events = [],
-  newestFirst = false,
+  newestFirst = true,
   composerFirst = false,
 }: {
   taskId: string;
@@ -135,12 +136,36 @@ export function CommentThread({
    * fixed that; one behaviour, two call sites.
    */
   scrollList?: boolean;
+  /**
+   * TAKE THE HEIGHT THE PARENT HAS, rather than a number.
+   *
+   * For the comment SHEET on a list row, which is as tall as the window. There,
+   * `scrollList`'s 24rem cap is not a cap at all — it is a hole: the thread
+   * stopped a third of the way down and the rest of a full-height panel was
+   * empty, with the composer floating in the middle of it.
+   *
+   * ⚠️ IT NEEDS A PARENT WITH A DEFINITE HEIGHT, which the sheet gives it
+   * (`min-h-0 flex-1` around this component). In a page column — the Activity
+   * card on the task screen — there is no such height to fill, which is why
+   * that caller keeps `scrollList` and its fixed cap.
+   */
+  fillHeight?: boolean;
   /** QA returns, client replies, parked notes. See `TaskActivityEvent`. */
   events?: TaskActivityEvent[];
   /**
    * Newest at the top. The detail page reads this way because what just happened
    * is what somebody opened the page to find; the popover keeps reading order,
    * because there it is a short conversation rather than a feed.
+   */
+  /**
+   * Newest at the top, which is the default as of 16 Sep 2026.
+   *
+   * It used to default to oldest-first, "which is reading order for a
+   * conversation" — true of a conversation you are reading from the beginning,
+   * and wrong for one you are checking back in on. These threads run to nine
+   * comments on a monthly audit; the thing you want is what somebody said last,
+   * and oldest-first put that furthest from the composer you are about to reply
+   * in. The detail page had already opted out of the old default on its own.
    */
   newestFirst?: boolean;
   /** The composer above the feed — it belongs at the end you are reading from. */
@@ -317,7 +342,10 @@ export function CommentThread({
   );
 
   const composer = (
-    <div className="space-y-1.5">
+    // `shrink-0` beside the filling list: the box you type into is the one
+    // thing in this column that must never give up height, and a flex item
+    // whose editor clips its own overflow can be squeezed to nothing.
+    <div className={cn("space-y-1.5", fillHeight && "shrink-0")}>
       {/*
         P7-56 — ENTER NO LONGER POSTS, AND IT CANNOT.
 
@@ -351,7 +379,18 @@ export function CommentThread({
   );
 
   return (
-    <div className={cn("flex flex-col gap-3", className)}>
+    /*
+      ⚠️ `flex-1`, NOT `h-full`. A percentage height only resolves against a
+      parent whose own height is definite, and "a flex item that happens to be
+      sized" is not reliably that — it measured as content height, the list grew
+      past the bottom of the sheet, and the panel's `overflow-hidden` cut it off
+      with no scrollbar to reach the rest. Filling a flex parent is the thing
+      that always works, so the caller supplies one.
+
+      `min-h-0` in the same breath: without it this column refuses to shrink
+      below its content, and then the list inside can never scroll either.
+    */
+    <div className={cn("flex flex-col gap-3", fillHeight && "min-h-0 flex-1", className)}>
       {composerFirst ? composer : null}
 
       {feed.length === 0 ? (
@@ -361,7 +400,26 @@ export function CommentThread({
             : "No comments yet. This is where the conversation about this task lives."}
         </p>
       ) : (
-        <ul className={cn("flex flex-col gap-2.5", scrollList && "max-h-96 overflow-y-auto pr-1")}>
+        <ul
+          className={cn(
+            "flex flex-col gap-2.5",
+            // The sheet's own height, taken rather than guessed at — the
+            // composer stays pinned under it either way, which is the whole
+            // point of capping the LIST and not the wrapper.
+            fillHeight
+              ? // `max-h` BESIDE `flex-1`, and it is not redundant. When the
+                // parent chain is what it should be — a flex column with a
+                // definite height, which the sheet gives it — the flex height
+                // resolves smaller and this ceiling never applies. When some
+                // ancestor loses its height (a wrapper that stops being a flex
+                // column, a panel that grows to fit), `flex-1` silently falls
+                // back to content height and the list runs past the bottom of
+                // the panel, where an `overflow-hidden` above cuts it off with
+                // no scrollbar to reach the rest. This makes that failure
+                // scroll instead of crop.
+                "max-h-[80svh] min-h-0 flex-1 overflow-y-auto pr-1"
+              : scrollList && "max-h-96 overflow-y-auto pr-1",
+          )}>
           {feed.map((row) =>
             row.event ? (
               <ActivityEntry key={`event-${row.event.id}`} event={row.event} />
