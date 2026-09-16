@@ -23,6 +23,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { TransitionCommentDialog, useTaskTransition } from "./transition";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * K3 — THE status control. One component, used everywhere a task's status is
@@ -306,7 +307,7 @@ export function TaskStatusSelect({
                   aria-hidden
                 />
                 <Input
-                  autoFocus
+                  ref={focusWithoutScroll}
                   value={query}
                   placeholder="Search stages"
                   aria-label="Search stages"

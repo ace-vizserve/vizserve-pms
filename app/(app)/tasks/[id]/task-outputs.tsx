@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatBytes } from "@/lib/attachments";
+import { focusWithoutScroll } from "@/lib/focus";
 
 import { outputLinkSchema } from "@/lib/schemas/tasks";
 
@@ -431,7 +432,7 @@ export function TaskOutputs({
                 <Input
                   id="output_link"
                   type="url"
-                  autoFocus
+                  ref={focusWithoutScroll}
                   placeholder="https://drive.google.com/…"
                   value={linkDraft}
                   disabled={pending}

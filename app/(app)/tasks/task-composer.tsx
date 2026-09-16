@@ -28,6 +28,7 @@ import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
 import { quickAddTask } from "./actions";
+import { focusWithoutScroll } from "@/lib/focus";
 
 /**
  * K3 — INLINE CREATION, as a whole row rather than a title box.
@@ -222,7 +223,7 @@ export function ComposerRow({
 
       <TableCell className="max-w-sm whitespace-normal">
         <Input
-          autoFocus
+          ref={focusWithoutScroll}
           value={draft.title}
           disabled={pending}
           placeholder={parentId ? "Subtask name" : "Task name"}
@@ -340,7 +341,7 @@ export function ComposerCard({
   return (
     <div className="flex flex-col gap-2 rounded-md border border-primary/40 bg-card grade-surface p-2.5 shadow-raised-lg">
       <Input
-        autoFocus
+        ref={focusWithoutScroll}
         value={draft.title}
         disabled={pending}
         placeholder={parentId ? "Subtask name" : "Task name"}
@@ -707,7 +708,7 @@ function EstimateInlineField({
           </Label>
           <Input
             id="composer-estimate"
-            autoFocus
+            ref={focusWithoutScroll}
             value={raw}
             placeholder="2h 30m"
             aria-invalid={error ? true : undefined}

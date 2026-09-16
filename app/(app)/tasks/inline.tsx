@@ -24,6 +24,7 @@ import {
 } from "@/lib/schemas/tasks";
 import { formatCellDuration, parseCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
+import { focusWithoutScroll } from "@/lib/focus";
 import { DeleteTaskDialog } from "./delete-task-dialog";
 
 import { updateTaskField } from "./actions";
@@ -214,7 +215,7 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
       <PopoverContent align="start" className="w-72 p-2">
         <div className="flex items-center gap-1.5">
           <Input
-            autoFocus
+            ref={focusWithoutScroll}
             value={draft}
             aria-label="Title"
             onChange={(event) => setDraft(event.target.value)}
@@ -488,7 +489,7 @@ export function InlineEstimate({ taskId, minutes }: { taskId: string; minutes: n
       <PopoverContent align="start" className="w-56 p-2">
         <div className="space-y-1.5">
           <Input
-            autoFocus
+            ref={focusWithoutScroll}
             value={raw}
             placeholder="2h 30m"
             aria-label="Estimate"
