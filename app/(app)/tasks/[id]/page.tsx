@@ -877,11 +877,23 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 <SubtaskList
                   subtasks={children}
                   nameOf={nameOf}
-                  canAdd={canWork && !isTerminal(task.status)}
+                  /* ⚠️ NOT GATED ON `canWork` (16 Sep 2026). Anybody who can SEE
+                     the task may break it into subtasks: the seat test was
+                     stopping colleagues from splitting up work they were already
+                     reading and about to help with, which is the opposite of
+                     what a subtask is for.
+
+                     The server still decides. `vizserve_pms_set_task_parent` and
+                     the tasks policies refuse a caller outside the task's
+                     department, so this offers the control and the database
+                     enforces the rule — the one case where that ordering is
+                     right, because the refusal is rare and the cost of hiding it
+                     is a colleague who cannot help. */
+                  canAdd={!isTerminal(task.status)}
                   /* In the section's own header now, beside its progress bar,
                      the way "Add output" has always been. See `SubtaskList`. */
                   action={
-                    canWork && !isTerminal(task.status) ? (
+                    !isTerminal(task.status) ? (
                       <AddSubtask
                         parentId={task.id}
                         assignable={departmentPeople}
