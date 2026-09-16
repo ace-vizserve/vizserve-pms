@@ -116,18 +116,29 @@ export function LatestCommentCell({
                 : `${comments.length} comments`}
           </SheetDescription>
         </SheetHeader>
-        {/* Capped and scrollable: a task with forty comments must not produce a
-            popover taller than the window.
+        {/* `min-h-0 flex-1` IS THE HEIGHT THE THREAD INSIDE FILLS. The sheet is
+            a full-height flex column, this takes what is left under the header,
+            and `fillHeight` below hands it to the LIST — so a task with forty
+            comments scrolls inside the panel and one with two does not leave a
+            screenful of nothing under it.
 
-            P7-55 moved the cap from a wrapper onto the thread's own list. The
+            ⚠️ THE SCROLL REGION IS THE LIST, NEVER THIS WRAPPER (P7-55). The
             wrapper version put the COMPOSER inside the scroll region, so
             replying to a long thread meant scrolling back down to find the box
             you type into. */}
         {/* The padding lives here rather than on the panel, so the thread's own
             scroll region reaches the panel's edges and a long conversation does
             not scroll inside an inset box. */}
-        <div className="min-h-0 flex-1 overflow-hidden p-4">
-          <CommentThread taskId={taskId} comments={comments} viewerId={viewerId} scrollList />
+        {/* ⚠️ `flex flex-col`, NOT A PLAIN BLOCK. The thread inside fills this
+            with `flex-1`, and a flex child needs a flex parent to fill — as a
+            block it had nothing to stretch against, so it took its content
+            height and the list ran past the bottom of the panel, where this
+            `overflow-hidden` cut it off with no scrollbar. */}
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-4">
+          {/* `fillHeight`, NOT `scrollList`. This panel is as tall as the
+              window; a 24rem cap left the thread stopping a third of the way
+              down with the composer floating above a screenful of nothing. */}
+          <CommentThread taskId={taskId} comments={comments} viewerId={viewerId} fillHeight />
         </div>
       </SheetContent>
     </Sheet>

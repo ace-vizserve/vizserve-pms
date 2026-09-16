@@ -7,22 +7,11 @@ import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
 import { Chip } from "@/components/status-badge";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
-import {
-  canAdminDepartment,
-  realtimeDepartmentFilter,
-  requireAuthContext,
-} from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
 import { RichText } from "@/components/ui/rich-text";
+import { canAdminDepartment, realtimeDepartmentFilter, requireAuthContext } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { richTextToPlainText } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
@@ -35,11 +24,11 @@ import {
   taskCategory,
 } from "@/lib/schemas/tasks";
 
-import { ACTION_LINK, TASK_DETAIL_GRID } from "./grid";
-import { createClient } from "@/utils/supabase/server";
 import { fetchJoinedTaskIdSet } from "@/lib/tasks-server";
+import { createClient } from "@/utils/supabase/server";
 import { CommentThread, type TaskActivityEvent } from "../comment-thread";
 import { AddSubtask } from "../inline";
+import { ACTION_LINK, TASK_DETAIL_GRID } from "./grid";
 
 import { RequestAttachmentList } from "./client-files";
 import { GateTrack } from "./lifecycle-rail";
@@ -58,6 +47,15 @@ export const metadata: Metadata = { title: "Task" };
  * one. The reviewer needs exactly what the PIC had — the original request's
  * fields, the resolution, the output — and building a second screen to show the
  * same things is how the two drift until QA is reviewing against a stale copy.
+ *
+ * ⚠️ THE DIALOG THIS WAS SPLIT FOR IS GONE (P12-18, withdrawn). It was
+ * extracted into a `TaskDetail` component so a dialog on the list could draw
+ * the same screen; three routing approaches later — an intercepting route, a
+ * parallel slot, a search parameter — the dialog was dropped and a task opens
+ * on its own page again, which is what it did before any of it.
+ *
+ * The one thing kept from that work is the back link below, which used to go
+ * to `/tasks` and landed in a redirect.
  */
 export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -150,6 +148,12 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       .from("vizserve_pms_task_attachments")
       .select("id, filename, mime_type, size_bytes, uploaded_by")
       .eq("task_id", id)
+      /* ⚠️ NOT `kind = 'comment'` (P7-67). A screenshot pasted into a comment is
+         a row on this table and is drawn inline in the thread; without this it
+         would ALSO appear in the Files panel, which is one picture presented
+         twice as two separate things. `neq` rather than `in` so a kind added
+         later shows up in the panel by default rather than disappearing. */
+      .neq("kind", "comment")
       .order("created_at"),
     // P7-08. Oldest first, which is reading order for a conversation.
     supabase
@@ -272,8 +276,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
    * panel exists precisely to say that somebody HAS.
    */
   const briefDiffers = Boolean(
-    brief?.description &&
-      richTextToPlainText(brief.description) !== richTextToPlainText(task.description ?? ""),
+    brief?.description && richTextToPlainText(brief.description) !== richTextToPlainText(task.description ?? ""),
   );
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
@@ -284,8 +287,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
    * comes back as NO ROW rather than a zero, which is why the fallback is here
    * and not in the query.
    */
-  const trackedMinutes =
-    ((trackedRows ?? []) as { task_id: string; minutes: number }[])[0]?.minutes ?? 0;
+  const trackedMinutes = ((trackedRows ?? []) as { task_id: string; minutes: number }[])[0]?.minutes ?? 0;
 
   const children = subtasks ?? [];
 
@@ -321,9 +323,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
    * with no user row, and attributing their decision to whoever happened to be
    * signed in would be a lie in the one record a dispute turns on.
    */
-  const clientNameAt = new Map(
-    (decisions ?? []).map((decision) => [decision.created_at, decision.approver_name]),
-  );
+  const clientNameAt = new Map((decisions ?? []).map((decision) => [decision.created_at, decision.approver_name]));
 
   const activity: TaskActivityEvent[] = (history ?? [])
     /*
@@ -337,8 +337,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     .map((entry) => {
       const returnedByClient = entry.from_status === "FOR_CLIENT_APPROVAL";
       const returnedByQa =
-        (entry.from_status === "FOR_QA" || entry.from_status === "QA_IN_PROGRESS") &&
-        entry.to_status === "ONGOING";
+        (entry.from_status === "FOR_QA" || entry.from_status === "QA_IN_PROGRESS") && entry.to_status === "ONGOING";
 
       const kind = returnedByClient ? "client" : returnedByQa ? "qa" : "note";
 
@@ -392,9 +391,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
      */
     isAssignee: task.assignee_id === context.userId || joinedTaskIdSet.has(task.id),
     isQa: task.qa_assignee_id === context.userId,
-    leadsDepartment:
-      roleAtLeast(context.role, "owner") ||
-      context.managedDepartmentIds.includes(task.department_id),
+    leadsDepartment: roleAtLeast(context.role, "owner") || context.managedDepartmentIds.includes(task.department_id),
     isAdmin: roleAtLeast(context.role, "owner"),
     /*
      * P11-05 — an active member of THIS task's department.
@@ -415,6 +412,10 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     administersDepartment: canAdminDepartment(context, task.department_id),
   };
 
+  /** Named once: the back link above and `TaskHeader` below both read it. */
+
+  const listName = (lists ?? []).find((list) => list.id === task.list_id)?.name ?? null;
+
   const late = isTaskOverdue(task);
 
   /**
@@ -427,8 +428,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
    * who could legally fix a wrong due date opened the task and found it
    * read-only. A permission nobody can reach is not a permission.
    */
-  const canWork =
-    viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment;
+  const canWork = viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment;
 
   /**
    * Who this work can be given to. The department's own people, which is the
@@ -457,20 +457,42 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
         colleague's board re-runs this render. It is a cheap RSC re-fetch,
         debounced, and the alternative was a second channel shape whose
         coverage gaps would have to be worked out per component.
+
+        ⚠️ AND NOT IN THE DIALOG (P12-18). The channel topic is
+        `p8-03:tasks:${filter}` and `use-realtime-refresh` requires it to be
+        unique per (table, filter) — the list or the board UNDERNEATH the dialog
+        has already subscribed to exactly this one, so mounting it again would
+        be two subscriptions on one topic. It costs nothing: the dialog renders
+        inside that page's tree, so the refresh the page performs re-runs this
+        component with it.
       */}
       <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
-
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={task.title} />
+      {/*
+          BACK TO THE LIST THIS TASK IS IN, not to `/tasks`.
 
+          ⚠️ `/tasks` ON ITS OWN IS NOT A PAGE. With no `?list=` and no
+          `?view=mine|qa` it redirects to `/tasks/lists` (see the guard at the
+          top of `../page.tsx`), so a bare "All tasks" link always landed
+          somewhere other than where the reader came from — and a link whose
+          destination redirects reads as a bug even when the redirect is
+          deliberate.
+
+          ⚠️ AND THE PARAMETER IS `?list=<id>`, WHICH IS EASY TO MISTYPE INTO
+          SOMETHING THAT STILL LOOKS RIGHT. `?=list<id>` parses cleanly, carries
+          no `list` at all, and lands in that same redirect.
+
+          A task with no list falls back to the index, which is the honest
+          destination when there is no list to go back to.
+      */}
       <Link
-        href="/tasks"
+        href={task.list_id ? `/tasks?list=${task.list_id}` : "/tasks/lists"}
         className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
         <ArrowLeft className="size-3.5" />
-        All tasks
+        {listName ?? "All lists"}
       </Link>
-
       {/*
         P7-57 — THE GATE STATE IS SHARED, and this is the reason for the wrapper.
 
@@ -498,7 +520,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           // task you can rename from the list but not from its own page is the
           // kind of difference nobody reports and everybody works around.
           canEdit={canWork}
-          listName={(lists ?? []).find((list) => list.id === task.list_id)?.name ?? null}
+          listName={listName}
           dueDate={task.due_date}
           late={late}
         />
@@ -531,12 +553,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
           <p className="rounded-sm border border-info/30 bg-info-subtle px-3 py-2 text-xs">
             {coverage.map((row) => (
               <span key={row.reliever_id}>
-                Covered by{" "}
-                <span className="font-medium">
-                  {nameOf.get(row.reliever_id) ?? "a colleague"}
-                </span>{" "}
-                until {formatDate(row.end_date)}, while{" "}
-                {nameOf.get(row.absent_user_id) ?? "the assignee"} is on leave.
+                Covered by <span className="font-medium">{nameOf.get(row.reliever_id) ?? "a colleague"}</span> until{" "}
+                {formatDate(row.end_date)}, while {nameOf.get(row.absent_user_id) ?? "the assignee"} is on leave.
               </span>
             ))}
           </p>
@@ -565,9 +583,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                     submittedAt: brief?.submitted_at ?? request?.submitted_at ?? null,
                     requesterName: request?.requester_name ?? null,
                     reviewedAt: request?.reviewed_at ?? null,
-                    reviewedByName: request?.reviewed_by
-                      ? (nameOf.get(request.reviewed_by) ?? null)
-                      : null,
+                    reviewedByName: request?.reviewed_by ? (nameOf.get(request.reviewed_by) ?? null) : null,
                   }
                 : null
             }
@@ -704,11 +720,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 a query that already ran.
               */
                 brief ? (
-                  <Collapsible
-                    defaultOpen={Boolean(
-                      briefDiffers,
-                    )}
-                    className="rounded-md border">
+                  <Collapsible defaultOpen={Boolean(briefDiffers)} className="rounded-md border">
                     <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left">
                       <div className="min-w-0 flex-1">
                         <p className="text-xs font-semibold text-foreground">From the request</p>
@@ -716,9 +728,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                           when they asked, and whether anything is attached. */}
                         <p className="mt-0.5 text-2xs text-muted-foreground">
                           {[
-                            brief.submitted_at
-                              ? `submitted ${formatDate(brief.submitted_at)}`
-                              : null,
+                            brief.submitted_at ? `submitted ${formatDate(brief.submitted_at)}` : null,
                             brief.attachments.length > 0
                               ? `${brief.attachments.length} ${brief.attachments.length === 1 ? "file" : "files"}`
                               : null,
@@ -785,9 +795,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                                 {field.label}
                                 {/* A historical answer must keep rendering with
                                   its label after the field is retired (D20/R5). */}
-                                {!field.is_active ? (
-                                  <span className="ml-1 text-2xs">(archived)</span>
-                                ) : null}
+                                {!field.is_active ? <span className="ml-1 text-2xs">(archived)</span> : null}
                               </dt>
                               <dd className="min-w-0 wrap-break-word">{rendered}</dd>
                             </div>
@@ -809,10 +817,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                               {brief.attachments.length === 1 ? "Attached file" : "Attached files"}
                             </dt>
                             <dd className="min-w-0">
-                              <RequestAttachmentList
-                                taskId={task.id}
-                                attachments={brief.attachments}
-                              />
+                              <RequestAttachmentList taskId={task.id} attachments={brief.attachments} />
                             </dd>
                           </div>
                         ) : null}
@@ -837,11 +842,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 />
               }
               subtasks={
-                <SubtaskList
-                  subtasks={children}
-                  nameOf={nameOf}
-                  canAdd={canWork && !isTerminal(task.status)}
-                />
+                <SubtaskList subtasks={children} nameOf={nameOf} canAdd={canWork && !isTerminal(task.status)} />
               }
               actions={
                 canWork && !isTerminal(task.status) ? (
@@ -870,9 +871,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
             <Card size="sm">
               <CardHeader>
                 <CardTitle>Activity</CardTitle>
-                <CardDescription className="text-xs">
-                  Comments, QA and client replies
-                </CardDescription>
+                <CardDescription className="text-xs">Comments, QA and client replies</CardDescription>
                 {/* The count in the header, so the rail is scannable without
                   reading the thread — and so an empty one says so before you
                   look for a composer. */}
@@ -948,10 +947,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                             {entry.from_status ? (
                               <>
                                 {TASK_STATUS_LABELS[entry.from_status]}
-                                <ArrowRight
-                                  className="size-3.5 shrink-0 text-foreground-faint"
-                                  aria-hidden
-                                />
+                                <ArrowRight className="size-3.5 shrink-0 text-foreground-faint" aria-hidden />
                                 {TASK_STATUS_LABELS[entry.to_status]}
                               </>
                             ) : (
@@ -974,9 +970,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                           A forced move's reason has nowhere else to be, and it is
                           the half of the record an audit turns on. */}
                         {entry.is_override && entry.comment ? (
-                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-muted-foreground">
-                            {entry.comment}
-                          </p>
+                          <p className="mt-0.5 whitespace-pre-wrap text-sm text-muted-foreground">{entry.comment}</p>
                         ) : null}
                       </li>
                     ))}

@@ -309,6 +309,7 @@ export default async function TasksPage({
       */}
       <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
 
+
       {/* Wraps the toolbar AND the groups: the menu lives in the filter row and
           the tables it controls are further down, so the provider has to span
           both.

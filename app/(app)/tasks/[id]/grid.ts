@@ -23,8 +23,7 @@
  * from blowing the track out past the viewport; `items-start` stops the short
  * column stretching to match the tall one.
  */
-export const TASK_DETAIL_GRID =
-  "grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,6fr)] lg:items-start";
+export const TASK_DETAIL_GRID = "grid gap-3 lg:grid-cols-[minmax(0,7fr)_minmax(0,6fr)] lg:items-start";
 
 /**
  * P7-56 — the task detail's ACTION LIST entry, at the foot of the surface.

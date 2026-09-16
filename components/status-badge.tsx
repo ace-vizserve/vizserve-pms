@@ -667,10 +667,16 @@ export function TaskStatusBadge({
  * subtask sits in its parent's group whatever its own status, so the heading
  * now describes the parent and not the row.
  *
- * NOT A CONTROL, and deliberately separate from `TaskStatusSelect`. This says
- * where the task is; that one moves it. Merging them would put a dead control on
- * every row that has nowhere to go — which is the trap the compact variant
- * already fell into by rendering nothing.
+ * NOT A CONTROL ITSELF, but since P12-18 it is what the list row's control is
+ * made of: `TaskStatusSelect variant="glyph"` renders this INSIDE its trigger,
+ * so the badge you read is the button you press and the row no longer carries a
+ * second, different icon at the other end of the cell for moving the task.
+ *
+ * ⚠️ THE OLD WARNING HERE STILL STANDS AND IS WHY THAT VARIANT EXISTS RATHER
+ * THAN A `onClick` ON THIS COMPONENT. "Merging them would put a dead control on
+ * every row that has nowhere to go" — so the decision about whether there IS a
+ * control belongs to the thing that knows the legal moves. With none, that
+ * variant renders this component bare, exactly as every other caller does.
  *
  * The label rides `title` AND an `sr-only` span: state is never carried by
  * colour alone (§5.5), and a tooltip is not readable by a screen reader.
@@ -678,9 +684,22 @@ export function TaskStatusBadge({
 export function TaskStatusGlyph({
   status,
   className,
+  decorative = false,
 }: {
   status: VizservePmsTaskStatus;
   className?: string;
+  /**
+   * Drop the `title` and the `sr-only` label, for a caller that already carries
+   * both — today that is `TaskStatusSelect variant="glyph"`, whose trigger is
+   * named "Status: For QA. Change it." and has a tooltip of its own. Without
+   * this the status is announced twice and two tooltips overlap on one 24px
+   * target.
+   *
+   * ⚠️ IT IS NOT A STYLE FLAG. Set it only where the accessible name is
+   * genuinely supplied by an ancestor, or the row goes back to conveying its
+   * state by colour and shape alone.
+   */
+  decorative?: boolean;
 }) {
   const tone = TASK_STATUS_TONES[status] ?? "neutral";
   const label = TASK_STATUS_LABELS[status] ?? status;
@@ -688,7 +707,7 @@ export function TaskStatusGlyph({
 
   return (
     <span
-      title={label}
+      title={decorative ? undefined : label}
       className={cn(
         // 24px, up from 20. The glyph is the only thing on a row that says where
         // the task is, and at 20px with a 12px icon there was not enough of it
@@ -706,7 +725,7 @@ export function TaskStatusGlyph({
         className,
       )}>
       <Icon className="size-3.5" aria-hidden />
-      <span className="sr-only">{label}</span>
+      {decorative ? null : <span className="sr-only">{label}</span>}
     </span>
   );
 }

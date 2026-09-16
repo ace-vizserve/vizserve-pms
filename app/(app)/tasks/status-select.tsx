@@ -3,7 +3,7 @@
 import { ArrowRightLeft, Check, ChevronDown, Search } from "lucide-react";
 import { useState } from "react";
 
-import { TaskStatusBadge } from "@/components/status-badge";
+import { TaskStatusBadge, TaskStatusGlyph } from "@/components/status-badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -118,13 +118,25 @@ export function TaskStatusSelect({
    *
    * `chip` states the status and opens the list, in a text run.
    *
-   * `compact` is a glyph with no label, for a LIST ROW or a BOARD CARD. There the
-   * group heading or the column already carries the status, and repeating it on
-   * every row would draw eight identical pills under a heading that says the
-   * same word — which is exactly why the list has no status column. The control
-   * still has to be reachable, so it becomes an action rather than a value.
+   * `compact` is a generic "move" arrow with no label, for a BOARD CARD, where
+   * the column already carries the status and repeating it on every card would
+   * draw eight identical pills under a heading that says the same word.
+   *
+   * `glyph` is the LIST ROW, and it is the status ITSELF made clickable —
+   * P12-18. The row already drew `TaskStatusGlyph` before the title, always
+   * visible, saying where the task is; the control to MOVE it was a second icon
+   * in the hover strip at the other end of the cell. Two icons for one fact,
+   * one of which appeared on hover. They are one thing now: the badge you read
+   * is the button you press.
+   *
+   * ⚠️ AND IT FALLS BACK TO THE PLAIN GLYPH WITH NOTHING TO OFFER, where
+   * `compact` renders nothing at all. The trap is in `TaskStatusGlyph`'s own
+   * docblock — "merging them would put a dead control on every row that has
+   * nowhere to go" — and the fallback is the answer to it: a finished task
+   * keeps the badge, and simply is not a button. What a reader must never lose
+   * is the STATUS; what they can lose is a control that was never going to open.
    */
-  variant?: "chip" | "compact" | "control";
+  variant?: "chip" | "compact" | "control" | "glyph";
   className?: string;
   /** The detail page has local state to reset; a row only needs the refresh. */
   onMoved?: () => void;
@@ -190,6 +202,21 @@ export function TaskStatusSelect({
     // detail page it is the only thing that does.
     if (variant === "compact") return null;
 
+    /*
+     * ⚠️ THE GLYPH STAYS, AS A GLYPH. It is the list row's only statement of
+     * where the task is — P7-09 nested subtasks under their parent, so the
+     * group heading above a row no longer describes that row — and a finished
+     * task is exactly the case where `transitions` is empty. Returning null
+     * here would blank the status on every completed row in the list.
+     */
+    if (variant === "glyph") {
+      return (
+        <span title={why}>
+          <TaskStatusGlyph status={status} className={className} />
+        </span>
+      );
+    }
+
     return (
       <span title={why}>
         <TaskStatusBadge status={status} className={className} />
@@ -213,7 +240,7 @@ export function TaskStatusSelect({
             left to protect. */}
         <PopoverTrigger
           title={
-            variant === "compact"
+            variant === "compact" || variant === "glyph"
               ? `Move — currently ${TASK_STATUS_LABELS[move.shownStatus]}`
               : undefined
           }
@@ -224,7 +251,23 @@ export function TaskStatusSelect({
                   "inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground",
                   "hover:bg-accent hover:text-foreground",
                 )
-              : variant === "control"
+              : variant === "glyph"
+                ? /*
+                   THE BADGE IS THE BUTTON, so this adds no box of its own — a
+                   24px circle inside a 24px square shell would be two borders
+                   on one control. What it adds is the affordance: a ring on
+                   hover, which reads on every tone because it is drawn OUTSIDE
+                   the circle rather than tinting it.
+
+                   `rounded-full` matches the glyph so the focus ring and the
+                   hover ring follow its edge; the glyph is already 24px, which
+                   is the target floor (§5.8).
+                */
+                  cn(
+                    "inline-flex shrink-0 cursor-pointer rounded-full",
+                    "hover:ring-2 hover:ring-ring/50 focus-visible:ring-offset-1",
+                  )
+                : variant === "control"
                 ? /*
                    THE PRIMARY BUTTON'S OWN CLASSES, not a hand-rolled copy of
                    them. It is the page's one action now (P7-60), so it is the
@@ -241,6 +284,14 @@ export function TaskStatusSelect({
           )}>
           {variant === "compact" ? (
             <ArrowRightLeft className="size-3.5" aria-hidden />
+          ) : variant === "glyph" ? (
+            /* `decorative`, because the trigger's own `aria-label` already says
+               the status and that it can be changed — the glyph's built-in
+               `title` and `sr-only` label would say it a second time, and a
+               tooltip fighting the trigger's tooltip is the visible half of
+               that. `move.shownStatus`, so the badge repaints the instant
+               somebody picks rather than a round trip later. */
+            <TaskStatusGlyph status={move.shownStatus} decorative />
           ) : variant === "control" ? (
             <>
               {/*
@@ -278,8 +329,8 @@ export function TaskStatusSelect({
           )}
         </PopoverTrigger>
 
-        <PopoverContent align={align} className="w-72">
-          <PopoverHeader className="gap-0.5">
+        <PopoverContent align={align} className="w-64">
+          <PopoverHeader className="gap-0 py-2">
             <PopoverTitle className="text-xs">Move this task</PopoverTitle>
             {/* Says WHY the list is the length it is. On client work a short
               list looks like a bug until you know a gate is holding it. */}
@@ -318,9 +369,9 @@ export function TaskStatusSelect({
             </div>
           ) : null}
 
-          <div className="max-h-80 overflow-y-auto py-1">
+          <div className="max-h-72 overflow-y-auto py-0.5">
             {matches.length === 0 ? (
-              <p className="px-3 py-3 text-2xs text-muted-foreground">No stage by that name.</p>
+              <p className="px-2 py-2 text-2xs text-muted-foreground">No stage by that name.</p>
             ) : null}
 
             {BANDS.map((label) => {
@@ -334,14 +385,22 @@ export function TaskStatusSelect({
 
               return (
                 <div key={label} className="py-0.5">
-                  <p className="px-3 py-1 text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
+                  <p className="px-2 py-0.5 text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
                     {label}
                   </p>
 
                   {showsCurrent ? (
-                    <div className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium">
+                    <div className="flex items-center gap-1.5 px-2 py-1 text-xs">
                       <Check className="size-3.5 shrink-0 text-primary" aria-hidden />
-                      {TASK_STATUS_LABELS[status]}
+                      {/* ⚠️ THE SAME BADGE THE ROW, THE CARD AND THE HEADER DRAW.
+                          This list was the one place a stage was plain text, so
+                          the thing you are picking looked like a different kind
+                          of object from the thing you get — and the tone is how
+                          people find a stage without reading. `TaskStatusBadge`
+                          carries its own label, so colour is never the only
+                          signal. `h-5` is the compact chip height the board
+                          cards and the list rows use. */}
+                      <TaskStatusBadge status={status} className="h-5 px-1.5" />
                       <span className="ml-auto text-2xs text-muted-foreground">now</span>
                     </div>
                   ) : null}
@@ -371,19 +430,30 @@ export function TaskStatusSelect({
                         type="submit"
                         disabled={blocked}
                         className={cn(
-                          "flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs",
+                          "flex w-full items-center gap-1.5 px-2 py-1 text-left text-xs",
                           "hover:bg-accent/60 focus-visible:bg-accent/60 focus-visible:outline-none",
                           "disabled:cursor-not-allowed disabled:opacity-60 disabled:hover:bg-transparent",
                         )}>
                         {/* Indented to sit under the tick rather than beside
                           it, so the current row reads as the odd one out. */}
                         <span className="size-3.5 shrink-0" aria-hidden />
-                        <span className="min-w-0 flex-1 truncate">
-                          {/* The transition's OWN wording where it has one —
-                            "Send for QA" says more than "For QA". Free
-                            movement has no wording of its own, and there
-                            `label` is already the status name. */}
-                          {transition.label}
+                        {/*
+                          ⚠️ THE BADGE IS THE DESTINATION; THE WORDING IS THE ACT.
+                          They are not the same sentence and the row needs both.
+                          "Send for QA" says more than "For QA" — it names what
+                          pressing this does — but the badge is what makes the
+                          stage recognisable at a glance and matches the chip the
+                          row, the card and the page header already draw.
+
+                          Where the transition has no wording of its own the
+                          label IS the status name, so printing both would say it
+                          twice; the badge alone carries it.
+                        */}
+                        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                          <TaskStatusBadge status={transition.to} className="h-5 shrink-0 px-1.5" />
+                          {transition.label === TASK_STATUS_LABELS[transition.to] ? null : (
+                            <span className="min-w-0 truncate">{transition.label}</span>
+                          )}
                         </span>
                         {blocked ? (
                           <span className="shrink-0 text-2xs text-muted-foreground">

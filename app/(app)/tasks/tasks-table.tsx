@@ -11,12 +11,7 @@ import {
   useColumnVisibility,
   type HideableColumn,
 } from "@/components/data-table-columns";
-import {
-  TaskCategoryBadge,
-  TaskStatusGlyph,
-  taskCategoryEdge,
-  taskStatusRow,
-} from "@/components/status-badge";
+import { TaskCategoryBadge, taskCategoryEdge, taskStatusRow } from "@/components/status-badge";
 import { roleAtLeast } from "@/lib/auth/roles";
 import type {
   VizservePmsTaskStatus,
@@ -460,12 +455,29 @@ export function TaskGroupTable({
 
               {/*
                 The stage, always visible and BEFORE the title — the shape the
-                reference uses. It is not the hover strip's status control: that
-                one moves the task and disappears when there is nowhere legal to
-                move to, which is exactly when a reader still needs to know where
-                the task is. See the note on `TaskStatusGlyph`.
+                reference uses.
+
+                P12-18 — ⚠️ AND IT IS NOW THE CONTROL AS WELL. It was a plain
+                `TaskStatusGlyph` here, with a SECOND icon — `TaskStatusSelect
+                variant="compact"`, a generic `ArrowRightLeft` — in the hover
+                strip at the far end of the cell. One fact, two icons, at
+                opposite ends of the row, and the one that could actually move
+                the task was the one you had to hover to find.
+
+                Clicking the badge opens the moves. Where there are none it
+                falls back to the bare glyph, so a finished row still says
+                "Completed" — see the variant's own note for why that fallback
+                is the whole reason it is a variant rather than a click handler
+                on the glyph.
               */}
-              <TaskStatusGlyph status={task.status} />
+              <TaskStatusSelect
+                variant="glyph"
+                taskId={task.id}
+                status={task.status}
+                viewer={seat(task)}
+                task={task}
+                resolutionMissing={!task.resolution?.trim()}
+              />
 
               {/* Hover-prefetched, not viewport-prefetched: a department's
                   list runs to hundreds of rows and the default would fetch a
@@ -507,24 +519,15 @@ export function TaskGroupTable({
                   everything marks nothing. */}
               <InlinePriority taskId={task.id} value={task.priority} />
 
+              {/* NO STATUS CONTROL IN THE STRIP ANY MORE (P12-18) — the badge
+                  before the title is it. */}
               <TaskRowActions
                 taskId={task.id}
                 title={task.title}
                 priority={task.priority}
                 assignable={assignable}
                 deletable={canDelete(task)}
-              >
-                {/* The glyph, not the chip: the group heading right above this
-                    row already says the status in words. */}
-                <TaskStatusSelect
-                  taskId={task.id}
-                  status={task.status}
-                  viewer={seat(task)}
-                  task={task}
-                  resolutionMissing={!task.resolution?.trim()}
-                  variant="compact"
-                />
-              </TaskRowActions>
+              />
             </span>
 
             <div className="mt-0.5 flex flex-wrap items-center gap-x-2 text-2xs text-muted-foreground">

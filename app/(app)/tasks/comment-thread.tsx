@@ -1,18 +1,18 @@
 "use client";
 
+import { toast } from "@/components/ui/toast";
+import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useOptimistic, useState, useTransition } from "react";
-import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
-import { toast } from "@/components/ui/toast";
 
 import { isPlaceholder, placeholderId } from "./optimistic-move";
 
 import { Button } from "@/components/ui/button";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
-import { CommentBody } from "./comment-body";
-import { isRichTextEmpty } from "@/lib/rich-text";
 import { formatDateTime } from "@/lib/dates";
+import { isRichTextEmpty } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
+import { CommentBody } from "./comment-body";
 
 import { addTaskComment, deleteTaskComment, editTaskComment, uploadCommentImage } from "./actions";
 import { Monogram, initials } from "./assignees";
@@ -203,8 +203,7 @@ export function CommentThread({
         id: placeholderId(state.length),
         body: text,
         authorId: viewerId,
-        authorName:
-          comments.find((row) => row.authorId === viewerId)?.authorName ?? "You",
+        authorName: comments.find((row) => row.authorId === viewerId)?.authorName ?? "You",
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       },
@@ -284,7 +283,6 @@ export function CommentThread({
         toast.error(result.error);
         return;
       }
-
     });
   }
 
@@ -418,7 +416,7 @@ export function CommentThread({
                 // no scrollbar to reach the rest. This makes that failure
                 // scroll instead of crop.
                 "max-h-[80svh] min-h-0 flex-1 overflow-y-auto pr-1"
-              : scrollList && "max-h-96 overflow-y-auto pr-1",
+              : scrollList && "min-h-0 max-h-96 overflow-y-auto pr-1",
           )}>
           {feed.map((row) =>
             row.event ? (
@@ -430,10 +428,7 @@ export function CommentThread({
                    comment will be accepted is fine; drawing it as though it
                    already has been is not — nobody should quote a comment in a
                    meeting that never landed. */
-                className={cn(
-                  "rounded-sm border bg-card px-3 py-2",
-                  isPlaceholder(row.comment!.id) && "opacity-60",
-                )}>
+                className={cn("rounded-sm border bg-card px-3 py-2", isPlaceholder(row.comment!.id) && "opacity-60")}>
                 {/*
                   P7-55 — the monogram is what makes a list of boxes read as a
                   thread. It sits ON the existing baseline row, so it costs no
@@ -556,8 +551,7 @@ export function CommentThread({
  */
 function ActivityEntry({ event }: { event: TaskActivityEvent }) {
   return (
-    <li
-      className={cn("rounded-sm border px-3 py-2", event.live ? LIVE[event.kind] : "bg-muted/40")}>
+    <li className={cn("rounded-sm border px-3 py-2", event.live ? LIVE[event.kind] : "bg-muted/40")}>
       {event.live ? (
         <p
           className={cn(
@@ -603,9 +597,7 @@ function ActivityEntry({ event }: { event: TaskActivityEvent }) {
       </div>
 
       {/* Sanitised alongside the comment bodies, in `page.tsx`. */}
-      {event.said ? (
-        <CommentBody className="mt-1" html={event.said} />
-      ) : null}
+      {event.said ? <CommentBody className="mt-1" html={event.said} /> : null}
 
       {/* An icon, never a typed arrow. A glyph in a text run inherits the font's
           metrics and sits off the baseline; `ArrowRight` is sized and aligned

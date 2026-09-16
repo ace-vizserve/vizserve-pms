@@ -54,13 +54,17 @@ export const metadata: Metadata = { title: "Board" };
  *
  * The list view is the requirement and this is the optional companion, so it is
  * built as a second READ of the same data rather than as a second system: same
- * RLS, same ordering, no drag-and-drop.
+ * RLS, same ordering.
  *
- * Dragging is deliberately absent. A card dragged between columns is a status
- * transition, and half of those need a comment or a resolution first (P3-06/07)
- * — so a drag would either pop a modal, which is worse than a button, or
- * silently fail against the state machine, which is worse still. Cards link to
- * the task, where the legal moves are shown with their names.
+ * ⚠️ THIS PARAGRAPH USED TO SAY "DRAGGING IS DELIBERATELY ABSENT", on the
+ * grounds that half of these transitions need a comment or a resolution first
+ * and a drag would either pop a modal or fail silently against the state
+ * machine. P7-20 answered it — a card is handed the moves `availableTransitions`
+ * says it may make, a column that cannot take it dims and refuses the drop, and
+ * a move that needs words opens the same dialog the menu opens. P12-18 then made
+ * the WHOLE CARD the drag surface rather than a grip in its corner, which is the
+ * first thing anybody tries. See `board-dnd.tsx` for how that survives a card
+ * covered in controls.
  *
  * THE TWO TERMINAL COLUMNS ARE OMITTED, and that is not an oversight. The board
  * shows live work; a column that accumulates every finished ticket since launch
@@ -98,7 +102,12 @@ function initials(name: string): string {
   );
 }
 
-type BoardSearchParams = { view?: string; kind?: string; list?: string; done?: string };
+type BoardSearchParams = {
+  view?: string;
+  kind?: string;
+  list?: string;
+  done?: string;
+};
 
 type Scope = "all" | "mine" | "qa";
 type Kind = "all" | "internal" | "client";
@@ -167,6 +176,7 @@ export default async function TaskBoardPage({ searchParams }: { searchParams: Pr
         have refused — the payload is thrown away unread.
       */}
       <RealtimeTasks filter={realtimeDepartmentFilter(context)} />
+
 
       {/* No <h1> — the breadcrumb is the page label. Now that a board can be a
           view of ONE list, the crumb has to name it, or two lists' boards are
@@ -792,9 +802,12 @@ async function BoardColumns({
                             // outside waiting without anybody reading a word.
                             taskCategoryEdge(taskCategory(task)),
                           )}>
-                          {/* `relative`, because the strip below leaves the flow
-                          on anything that can hover — see it for why. */}
-                          <div className="relative flex items-start gap-1.5">
+                          {/* ONE ROW, ONE JOB — the whole card width for the
+                          name. P12-18 took the action strip out of here: it is
+                          always visible now, and a permanently visible strip
+                          cannot float over the title the way a hover-revealed
+                          one could. It sits at the foot of the card instead. */}
+                          <div className="flex items-start gap-1.5">
                             {/* See the note in tasks-table: a board column is the
                             same problem, one card at a time. */}
                             <HoverPrefetchLink
@@ -808,47 +821,6 @@ async function BoardColumns({
                               {task.title}
                             </HoverPrefetchLink>
 
-                            {/*
-                          ⚠️ OUT OF THE FLOW ON A DEVICE THAT CAN HOVER, AND THE
-                          TITLE IS WHY.
-
-                          Five icon buttons is ~110px, held whether they are
-                          visible or not — on a ~196px card that left the title
-                          about 100px, and a title squeezed narrower than its own
-                          longest word gets that word BROKEN: "Phase 2
-                          Implementatio / n". Widening the card is not available
-                          (a board column is a fixed width) and shrinking the
-                          strip on hover would reflow the title under the cursor
-                          that arrived to use it.
-
-                          So it floats in the card's top corner instead, fading in
-                          over the title it briefly covers, and the title gets the
-                          whole card. `wrap-break-word` then has room to do what it
-                          says: break a word only when one genuinely cannot fit.
-
-                          Where there is NO hover it stays in the flow, because a
-                          strip that is always visible cannot sit on top of the
-                          text it is always visible over.
-                        */}
-                            <TaskRowActions
-                              className="hoverable:absolute hoverable:top-0 hoverable:right-0 hoverable:z-10 hoverable:rounded-md hoverable:border hoverable:bg-card hoverable:px-1 hoverable:shadow-raised"
-                              taskId={task.id}
-                              title={task.title}
-                              priority={task.priority as TaskPriority | null}
-                              assignable={assignable}
-                              deletable={canDelete(task)}>
-                              {/* The glyph, not the chip: this card sits IN the
-                              column whose heading is its status. */}
-                              <TaskStatusSelect
-                                taskId={task.id}
-                                status={task.status}
-                                viewer={seat(task)}
-                                task={task}
-                                resolutionMissing={isRichTextEmpty(task.resolution)}
-                                variant="compact"
-                                align="end"
-                              />
-                            </TaskRowActions>
                           </div>
 
                           <span className="flex flex-wrap items-center gap-1.5">
@@ -897,6 +869,47 @@ async function BoardColumns({
                             {task.output_link ? (
                               <Link2 className="size-3.5 text-foreground-faint" aria-label="Has an output link" />
                             ) : null}
+
+                            {/*
+                              P12-18 — THE CONTROLS, AFTER THE FACTS, AND IN THE
+                              FLOW.
+
+                              They used to float in the card's top corner, over
+                              the title, revealed on hover — because five icon
+                              buttons is ~110px held whether visible or not, and
+                              on a ~196px card in the title row that left the
+                              name about 100px and broke its longest word:
+                              "Phase 2 Implementatio / n".
+
+                              Always visible, floating stops being available:
+                              a strip that never fades cannot sit on top of the
+                              text it sits on top of. So it lands here, at the
+                              end of the line that already carries the badges,
+                              the avatars and the date — `ml-auto` puts it hard
+                              right, and on a narrow card it simply wraps onto a
+                              line of its own. The title keeps the full width it
+                              was given, which was the point of floating it in
+                              the first place.
+                            */}
+                            <TaskRowActions
+                              className="ml-auto"
+                              taskId={task.id}
+                              title={task.title}
+                              priority={task.priority as TaskPriority | null}
+                              assignable={assignable}
+                              deletable={canDelete(task)}>
+                              {/* The glyph, not the chip: this card sits IN the
+                              column whose heading is its status. */}
+                              <TaskStatusSelect
+                                taskId={task.id}
+                                status={task.status}
+                                viewer={seat(task)}
+                                task={task}
+                                resolutionMissing={isRichTextEmpty(task.resolution)}
+                                variant="compact"
+                                align="end"
+                              />
+                            </TaskRowActions>
                           </span>
 
                           {/* Its own line under a rule, as on the reference
@@ -960,25 +973,50 @@ async function BoardColumns({
                           <div
                             key={child.id}
                             className="group/task flex flex-col gap-1.5 rounded-md border bg-card px-2 py-1.5 shadow-raised">
-                            <div className="relative flex items-start gap-1.5">
+                            <div className="flex items-start gap-1.5">
                               <HoverPrefetchLink
                                 href={`/tasks/${child.id}`}
                                 // Same rule as the parent card above.
                                 className="min-w-0 flex-1 text-2xs leading-snug wrap-break-word hover:underline">
                                 {child.title}
                               </HoverPrefetchLink>
+                            </div>
 
-                              {/* The same hover strip the parent carries, so
-                                  a subtask can be renamed, re-flagged and
+                            {/* ⚠️ ALWAYS DRAWN NOW, where it used to appear only
+                                when the subtask had an owner, a date or a
+                                priority to show. The action strip is on this
+                                line since P12-18 — the parent card's note says
+                                why it left the title row — and a strip that
+                                renders only when the task happens to carry a
+                                date is a rename button that comes and goes. */}
+                            <span className="flex flex-wrap items-center gap-1.5">
+                              <TaskPriorityBadge
+                                priority={child.priority as TaskPriority | null}
+                                className="h-4.5 px-1"
+                              />
+                              {childPic ? <Avatar name={childPic} title={`PIC ${childPic}`} /> : null}
+                              {child.due_date ? (
+                                <span
+                                  className={cn(
+                                    "inline-flex items-center gap-1 rounded-sm border px-1 py-0.5 text-2xs tabular-nums",
+                                    childLate
+                                      ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
+                                      : "border-border bg-muted text-muted-foreground",
+                                  )}>
+                                  <CalendarDays className="size-3 shrink-0" aria-hidden />
+                                  {child.start_date
+                                    ? `${formatDate(child.start_date)} – ${formatDate(child.due_date)}`
+                                    : formatDate(child.due_date)}
+                                  {/* Never colour alone. */}
+                                  {childLate ? " · overdue" : null}
+                                </span>
+                              ) : null}
+
+                              {/* So a subtask can be renamed, re-flagged and
                                   deleted where it lives. Without it the only
-                                  way to rename one was to open it.
-
-                                  Floated in the corner for the reason spelled
-                                  out on the parent's: this card is narrower
-                                  still, so the strip in the flow left even less
-                                  for the title. */}
+                                  way to rename one was to open it. */}
                               <TaskRowActions
-                                className="hoverable:absolute hoverable:top-0 hoverable:right-0 hoverable:z-10 hoverable:rounded-md hoverable:border hoverable:bg-card hoverable:px-1 hoverable:shadow-raised"
+                                className="ml-auto"
                                 taskId={child.id}
                                 title={child.title}
                                 priority={child.priority as TaskPriority | null}
@@ -994,36 +1032,7 @@ async function BoardColumns({
                                   align="end"
                                 />
                               </TaskRowActions>
-                            </div>
-
-                            {/* Drawn only when there is something to say. A
-                                subtask with no owner, date or priority keeps
-                                the single line it had. */}
-                            {childPic || child.due_date || child.priority ? (
-                              <span className="flex flex-wrap items-center gap-1.5">
-                                <TaskPriorityBadge
-                                  priority={child.priority as TaskPriority | null}
-                                  className="h-4.5 px-1"
-                                />
-                                {childPic ? <Avatar name={childPic} title={`PIC ${childPic}`} /> : null}
-                                {child.due_date ? (
-                                  <span
-                                    className={cn(
-                                      "inline-flex items-center gap-1 rounded-sm border px-1 py-0.5 text-2xs tabular-nums",
-                                      childLate
-                                        ? "border-destructive-border bg-destructive-subtle font-semibold text-destructive"
-                                        : "border-border bg-muted text-muted-foreground",
-                                    )}>
-                                    <CalendarDays className="size-3 shrink-0" aria-hidden />
-                                    {child.start_date
-                                      ? `${formatDate(child.start_date)} – ${formatDate(child.due_date)}`
-                                      : formatDate(child.due_date)}
-                                    {/* Never colour alone. */}
-                                    {childLate ? " · overdue" : null}
-                                  </span>
-                                ) : null}
-                              </span>
-                            ) : null}
+                            </span>
                           </div>
                         );
                       })}

@@ -105,23 +105,28 @@ function usePatch(taskId: string) {
 }
 
 /**
- * The hover strip on a row or a card: rename, priority, add a subtask.
+ * The action strip on a row or a card: rename, priority, add a subtask.
  *
  * All three are shortcuts to things that already exist — the title grant, the
  * P7-11 priority column and `vizserve_pms_set_task_parent` — so there is no new
  * backend under any of them.
  *
- * `opacity` on hover AND focus-within, never hover alone: a keyboard user
- * tabbing into an invisible button is the accessibility failure this pattern
- * usually ships with.
+ * P12-18 — ⚠️ ALWAYS VISIBLE, and it used to be revealed on hover. The reveal
+ * was three rules deep by the end, because every one of them was patching the
+ * same hole: `opacity-0` with a `group-hover` reveal, then `focus-within` for
+ * the keyboard, then the whole pair wrapped in `any-hover: hover` because a
+ * tablet has no hover at all and the controls were permanently invisible there.
+ * Three rules to make one strip appear, and on a touch device the honest answer
+ * had already turned out to be "just show it".
  *
- * AND THE WHOLE REVEAL IS INSIDE `any-hover: hover`, which is the OTHER half of
- * that failure and the one this shipped with. A touch device has no hover, so
- * `opacity-0` with a `group-hover` reveal left these controls permanently
- * invisible on a tablet — the subtask `+`, the rename and the priority flag,
- * unreachable on every row. Wrapping the hide and the reveal in the same query
- * means a pointer that cannot hover never gets either, and the strip is simply
- * always visible there.
+ * So it is shown everywhere. What it costs is ~110px of every title cell, which
+ * the cell was already spending: the strip was `opacity-0`, never `hidden`, so
+ * it has always occupied that width — the layout does not move.
+ *
+ * ⚠️ AND THE BUTTONS KEEP `ICON_BUTTON`'s OWN COLOUR RATHER THAN BEING DIMMED
+ * AT REST. An `opacity-60` strip was the obvious way to make forty rows of
+ * icons quieter and it takes `text-muted-foreground` under the 3:1 a control
+ * needs. Quiet is the icon's job, not a filter's.
  */
 export function TaskRowActions({
   taskId,
@@ -161,16 +166,7 @@ export function TaskRowActions({
   children?: ReactNode;
 }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-0.5 transition-opacity",
-        "[@media(any-hover:hover)]:opacity-0",
-        "[@media(any-hover:hover)]:group-hover/task:opacity-100",
-        // Focus stays outside the query: a keyboard is a fine pointer's
-        // companion, but a tabbed-to control must appear on any device.
-        "focus-within:opacity-100",
-        className,
-      )}>
+    <span className={cn("inline-flex items-center gap-0.5", className)}>
       {children}
       <InlineTitle taskId={taskId} title={title} />
       <InlinePriority taskId={taskId} value={priority} iconOnly />
