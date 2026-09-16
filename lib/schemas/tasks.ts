@@ -1079,3 +1079,26 @@ export function parseTaskRequestBrief(value: unknown): TaskRequestBrief | null {
   const parsed = taskRequestBriefSchema.safeParse(value);
   return parsed.success ? parsed.data : null;
 }
+
+/**
+ * P7-68 — a checklist item.
+ *
+ * ⚠️ THE CAP MATCHES THE COLUMN'S CHECK CONSTRAINT, and both exist. 500 is well
+ * past a step in a procedure and well short of prose; an item needing a
+ * paragraph is a subtask. The database refuses it either way — the front end
+ * will be bypassed — and this is the copy of the rule that can say so politely.
+ */
+export const CHECKLIST_LABEL_MAX = 500;
+
+export const checklistItemSchema = z.object({
+  label: z
+    .string()
+    .trim()
+    .min(1, "Write the step first.")
+    .max(CHECKLIST_LABEL_MAX, `Keep a step under ${CHECKLIST_LABEL_MAX} characters.`),
+});
+
+export const checklistToggleSchema = z.object({
+  id: z.uuid(),
+  is_done: z.boolean(),
+});

@@ -1,4 +1,4 @@
-import { ArrowLeft, ArrowRight, ChevronRight } from "lucide-react";
+import { ArrowLeft, ArrowRight, ChevronRight, MessagesSquare } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
@@ -25,13 +25,16 @@ import {
 } from "@/lib/schemas/tasks";
 
 import { fetchJoinedTaskIdSet } from "@/lib/tasks-server";
+import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
+import { CommentSheet } from "../comment-sheet";
 import { CommentThread, type TaskActivityEvent } from "../comment-thread";
 import { AddSubtask } from "../inline";
 import { ACTION_LINK, TASK_DETAIL_GRID } from "./grid";
 
 import { RequestAttachmentList } from "./client-files";
 import { GateTrack } from "./lifecycle-rail";
+import { Checklist } from "./checklist";
 import { SubtaskList } from "./subtask-list";
 import { TaskGateProvider } from "./task-gate";
 import { TaskHeader } from "./task-header";
@@ -39,6 +42,16 @@ import { TaskOutputs } from "./task-outputs";
 import { TaskSurface } from "./task-surface";
 
 export const metadata: Metadata = { title: "Task" };
+
+/**
+ * How much of the conversation the task page draws before handing over to the
+ * sheet.
+ *
+ * Three, because the card is a SUMMARY: what was said last, and whether anybody
+ * is waiting on you. Reading a thread of forty is a different act, and it now
+ * happens somewhere built for it.
+ */
+const ACTIVITY_PREVIEW = 3;
 
 /**
  * P3-05 — task detail.
@@ -94,6 +107,10 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     { data: lists },
     { data: request },
     { data: outputs },
+    // P7-68. Sits here because its read sits here — the order of this list and
+    // the order of the Promise.all below are the same fact written twice, and
+    // an insertion in one without the other silently shifts every name after it.
+    { data: checklistItems },
     { data: commentRows },
     { data: subtasks },
     { data: trackedRows },
@@ -155,6 +172,14 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
          later shows up in the panel by default rather than disappearing. */
       .neq("kind", "comment")
       .order("created_at"),
+    /* P7-68 — the checklist, in `position` order, which IS the procedure's own
+       order. Never sorted by label or by done-ness: a procedure read out of
+       sequence is not the procedure. */
+    supabase
+      .from("vizserve_pms_task_checklist_items")
+      .select("id, label, is_done, group_label")
+      .eq("task_id", id)
+      .order("position"),
     // P7-08. Oldest first, which is reading order for a conversation.
     supabase
       .from("vizserve_pms_task_comments")
@@ -841,6 +866,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                   uploaderNames={nameOf}
                 />
               }
+              checklist={<Checklist taskId={id} items={checklistItems ?? []} />}
               subtasks={
                 <SubtaskList subtasks={children} nameOf={nameOf} canAdd={canWork && !isTerminal(task.status)} />
               }
@@ -899,7 +925,19 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                 an ordinary row once the task moves on.
               */}
                 <CommentThread
-                  scrollList
+                  /*
+                   * ⚠️ `limit`, NOT `scrollList`, AND THAT IS THE FIX FOR THE
+                   * PHANTOM SCROLL. This card used to draw the whole thread into
+                   * a 24rem scroll box: the reader saw 384px, the layout
+                   * accounted for two thousand, and the difference came out as a
+                   * page that scrolled into empty space — nothing to inspect,
+                   * because a box's surplus content is not an element.
+                   *
+                   * Three entries are three entries. The card is as tall as what
+                   * is in it, and the rest of the conversation is a click away in
+                   * a panel built to scroll — see `CommentSheet`.
+                   */
+                  limit={ACTIVITY_PREVIEW}
                   composerFirst
                   newestFirst
                   taskId={task.id}
@@ -914,6 +952,28 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
                     updatedAt: row.updated_at,
                   }))}
                 />
+
+                {/* Only when there IS a rest. A link that opens the same three
+                    entries in a panel is a control that does nothing. */}
+                {(commentRows?.length ?? 0) + activity.length > ACTIVITY_PREVIEW ? (
+                  <CommentSheet
+                    className={cn(ACTION_LINK, "mt-2")}
+                    taskId={task.id}
+                    taskTitle={task.title}
+                    viewerId={context.userId}
+                    events={activity}
+                    comments={(commentRows ?? []).map((row) => ({
+                      id: row.id,
+                      body: sanitizeRichText(row.body),
+                      authorId: row.author_id,
+                      authorName: nameOf.get(row.author_id) ?? "Someone no longer active",
+                      createdAt: row.created_at,
+                      updatedAt: row.updated_at,
+                    }))}>
+                    <MessagesSquare className="size-3.5" aria-hidden />
+                    Show all {(commentRows?.length ?? 0) + activity.length} entries
+                  </CommentSheet>
+                ) : null}
               </CardContent>
             </Card>
 

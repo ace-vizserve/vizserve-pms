@@ -10,6 +10,7 @@ import {
 } from "@/lib/auth/authorization";
 import { sweepCommentImages } from "@/lib/comment-images-server";
 import { HEAD_BYTES, readImageSize } from "@/lib/image-size";
+import { checklistItemSchema, checklistToggleSchema } from "@/lib/schemas/tasks";
 import { taskImageSrc } from "@/lib/rich-text";
 import { sanitizeRichText } from "@/lib/rich-text-server";
 import {
@@ -1163,6 +1164,133 @@ export async function uploadTaskOutput(
     ok: true,
     data: { id: result.attachment.id, filename: result.attachment.filename },
   };
+}
+
+// ---------------------------------------------------------------------------
+// P7-68 — checklists
+//
+// Four actions, and between them they are the whole feature: add a step, tick
+// it, rename it, remove it. No reorder yet — `position` steps by 10 so one can
+// be added later without renumbering, which is the cheap half of leaving that
+// door open.
+//
+// ⚠️ EVERY ONE OF THEM GOES THROUGH THE USER'S OWN CLIENT, so RLS decides. The
+// policies say "anyone who can open the task", which is the same audience that
+// can comment on it and log time against it (P11-03/P11-06). Nothing here
+// re-checks that in TypeScript: restating a policy is how the two drift, and the
+// policy is the one that cannot be bypassed.
+//
+// ⚠️ A REFUSED WRITE IS ZERO ROWS, NOT AN ERROR. Every one of these selects what
+// it changed and treats an empty result as a refusal — without that, ticking an
+// item on a task you cannot see reports "Saved".
+// ---------------------------------------------------------------------------
+
+export async function addChecklistItem(
+  taskId: string,
+  input: unknown,
+): Promise<ActionResult<{ id: string }>> {
+  await requireAuthContextOrThrow();
+
+  if (!z.uuid().safeParse(taskId).success) {
+    return { ok: false, error: "That task does not exist." };
+  }
+
+  const parsed = checklistItemSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Check the step.", fieldErrors: flattenIssues(parsed.error) };
+  }
+
+  const supabase = await createClient();
+
+  /*
+   * ⚠️ THROUGH THE RPC, NOT A DIRECT INSERT, and only for the position. Two
+   * people adding a step at the same moment would both read "the last is 30"
+   * and both write 40, and the order of a procedure becomes arbitrary. The
+   * function computes it inside the insert. It is `security invoker`, so the
+   * policies decide exactly as they would here.
+   */
+  const { data, error } = await supabase.rpc("vizserve_pms_add_checklist_item", {
+    p_task_id: taskId,
+    p_label: parsed.data.label,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!data) return { ok: false, error: "That task is not available." };
+
+  refresh(taskId);
+  return { ok: true, data: { id: data.id } };
+}
+
+export async function setChecklistItemDone(
+  taskId: string,
+  input: unknown,
+): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const parsed = checklistToggleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That step does not exist." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vizserve_pms_task_checklist_items")
+    .update({ is_done: parsed.data.is_done })
+    .eq("id", parsed.data.id)
+    .select("id");
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!data || data.length === 0) return { ok: false, error: "That step is not available." };
+
+  /*
+   * ⚠️ NO `refresh` ON A TICK. The box is optimistic in the browser and a tick
+   * changes nothing else on the page — re-rendering the route would throw away
+   * a step somebody is typing in the box below, to redraw a checkbox that has
+   * already moved. Adding and removing DO refresh: those change the list itself.
+   */
+  void taskId;
+  return { ok: true, data: undefined };
+}
+
+export async function renameChecklistItem(
+  taskId: string,
+  itemId: string,
+  input: unknown,
+): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const parsed = checklistItemSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Check the step.", fieldErrors: flattenIssues(parsed.error) };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vizserve_pms_task_checklist_items")
+    .update({ label: parsed.data.label })
+    .eq("id", itemId)
+    .select("id");
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!data || data.length === 0) return { ok: false, error: "That step is not available." };
+
+  refresh(taskId);
+  return { ok: true, data: undefined };
+}
+
+export async function removeChecklistItem(taskId: string, itemId: string): Promise<ActionResult> {
+  await requireAuthContextOrThrow();
+
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vizserve_pms_task_checklist_items")
+    .delete()
+    .eq("id", itemId)
+    .select("id");
+
+  if (error) return { ok: false, error: readableError(error) };
+  if (!data || data.length === 0) return { ok: false, error: "That step is not available." };
+
+  refresh(taskId);
+  return { ok: true, data: undefined };
 }
 
 /**

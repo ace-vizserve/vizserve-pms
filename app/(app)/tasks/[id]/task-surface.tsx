@@ -148,6 +148,7 @@ export function TaskSurface({
   brief,
   requestPanel,
   outputs,
+  checklist,
   subtasks,
   actions,
 }: {
@@ -254,6 +255,8 @@ export function TaskSurface({
   brief?: React.ReactNode;
   requestPanel?: React.ReactNode;
   outputs?: React.ReactNode;
+  /** P7-68 — the procedure. Above the subtasks; see where it renders. */
+  checklist?: React.ReactNode;
   subtasks?: React.ReactNode;
   actions?: React.ReactNode;
 }) {
@@ -729,6 +732,18 @@ export function TaskSurface({
           {/* to prefer.                                                      */}
           {/* ============================================================== */}
           {outputs}
+
+          {/* ============================================================== */}
+          {/* CHECKLIST — the procedure, ABOVE the subtasks and not among them. */}
+          {/*                                                                  */}
+          {/* ⚠️ THE ORDER IS THE ARGUMENT. A checklist is how you DO the task  */}
+          {/* — the same nineteen steps every month — and a subtask is a piece  */}
+          {/* of work somebody owns. Putting the procedure first reads as       */}
+          {/* "here is how", then "here is what is left"; the other way round    */}
+          {/* buries the steps under a list of rows that have their own         */}
+          {/* statuses and assignees and look far more important than they are. */}
+          {/* ============================================================== */}
+          {checklist}
 
           {/* ============================================================== */}
           {/* SUBTASKS — the pieces. Passed in by the page.                   */}

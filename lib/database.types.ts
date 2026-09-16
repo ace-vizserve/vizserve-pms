@@ -1343,6 +1343,33 @@ export type Database = {
        * authenticated and the upload IS the commit, so there is no gap for a
        * forged path to live in. The server still measures the real bytes.
        */
+      vizserve_pms_task_checklist_items: {
+        Row: {
+          id: string;
+          task_id: string;
+          group_label: string | null;
+          label: string;
+          is_done: boolean;
+          position: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          task_id: string;
+          group_label?: string | null;
+          label: string;
+          is_done?: boolean;
+          position: number;
+        };
+        Update: {
+          label?: string;
+          is_done?: boolean;
+          group_label?: string | null;
+          position?: number;
+        };
+        Relationships: [];
+      };
       vizserve_pms_task_attachments: {
         Row: {
           id: string;
@@ -2555,6 +2582,11 @@ export type Database = {
         Returns: number;
       };
       /** P7-67. Deletes the rows and hands back the objects to remove. */
+      /** P7-68. Appends an item, computing its position server-side. */
+      vizserve_pms_add_checklist_item: {
+        Args: { p_task_id: string; p_label: string; p_group_label?: string | null };
+        Returns: Database["public"]["Tables"]["vizserve_pms_task_checklist_items"]["Row"];
+      };
       vizserve_pms_expire_comment_images: {
         Args: { p_older_than?: string };
         Returns: { storage_path: string }[];

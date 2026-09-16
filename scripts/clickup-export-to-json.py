@@ -60,9 +60,9 @@ def read_rows(path):
 
 
 def parse_json_cell(raw):
-    """`[]`, empty and whitespace all mean 'none'; anything else must parse."""
+    """`[]`, `{}`, empty and whitespace all mean 'none'; anything else parses."""
     raw = (raw or "").strip()
-    if raw in ("", "[]"):
+    if raw in ("", "[]", "{}"):
         return []
     return json.loads(raw)
 
@@ -94,11 +94,16 @@ def main():
         attachments = parse_json_cell(row.get("O"))
         comments = parse_json_cell(row.get("Y"))
 
+        # ⚠️ A DICT, NOT A LIST — `{"IT Weekly Security Audit": ["step", ...]}`.
+        # Every other JSON column in this export is an array; this one is not,
+        # and code that assumes otherwise finds nothing and reports zero.
+        checklists = parse_json_cell(row.get("X")) or {}
+
         # A task with no files has nothing for the image import to do — but the
         # date backfill wants every task that carries a COMMENT, files or not.
         # VizAssists has 150 comments and not one attachment, and would vanish
         # from this file entirely under the image import's rule.
-        if not keep_all and not attachments and not (keep_comments and comments):
+        if not keep_all and not attachments and not checklists and not (keep_comments and comments):
             continue
 
         out.append(
@@ -109,6 +114,7 @@ def main():
                 "list": row.get("S"),
                 "attachments": attachments,
                 "comments": comments,
+                "checklists": checklists,
                 # Epoch MILLISECONDS, not the human-readable twins in H/J/L.
                 # A number needs no parsing and carries no timezone to be read
                 # wrong — the instant is exact and the calendar date it falls on
@@ -124,7 +130,8 @@ def main():
 
     files = sum(len(entry["attachments"]) for entry in out)
     notes = sum(len(entry["comments"]) for entry in out)
-    print(f"{len(out)} task(s), {files} attachment(s), {notes} comment(s) -> {destination}")
+    steps = sum(sum(len(v) for v in entry["checklists"].values()) for entry in out if entry["checklists"])
+    print(f"{len(out)} task(s), {files} attachment(s), {notes} comment(s), {steps} checklist step(s) -> {destination}")
     return 0
 
 
