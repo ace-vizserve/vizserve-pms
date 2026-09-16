@@ -37,7 +37,21 @@ import { cn } from "@/lib/utils";
  * matter of taste: a dialog mounted inside the comment overlay is unmounted by
  * its own opening.
  */
-export function CommentBody({ html, className }: { html: string; className?: string }) {
+export function CommentBody({
+  html,
+  className,
+  compact = false,
+}: {
+  html: string;
+  className?: string;
+  /**
+   * Images as a row of small square thumbnails instead of full-size pictures.
+   * For the task page's activity preview, where one comment with eight
+   * screenshots was the whole card. Every thumbnail still opens the lightbox,
+   * so nothing is hidden — only drawn smaller.
+   */
+  compact?: boolean;
+}) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const showImage = useTaskImageLightbox();
 
@@ -92,6 +106,7 @@ export function CommentBody({ html, className }: { html: string; className?: str
     <div
       ref={bodyRef}
       data-slot="comment-body"
+      data-compact={compact || undefined}
       className={cn(RICH_TEXT_CLASS, className)}
       onClick={(event) => {
         if (open(event.target)) event.preventDefault();

@@ -321,6 +321,9 @@ export function CommentThread({
   // Sliced AFTER the sort, so a limited feed is the most RECENT few rather than
   // whichever rows happened to be first out of the two arrays above.
   const shown = typeof limit === "number" ? feed.slice(0, limit) : feed;
+  // A limited feed is a preview, and a preview draws its images as thumbnails —
+  // the full-size pictures are one click away, in the sheet or the lightbox.
+  const compact = typeof limit === "number";
 
   /*
    * P7-67 — PASTE A SCREENSHOT INTO A COMMENT.
@@ -439,7 +442,7 @@ export function CommentThread({
           )}>
           {shown.map((row) =>
             row.event ? (
-              <ActivityEntry key={`event-${row.event.id}`} event={row.event} />
+              <ActivityEntry key={`event-${row.event.id}`} event={row.event} compact={compact} />
             ) : (
               <li
                 key={row.comment!.id}
@@ -513,7 +516,7 @@ export function CommentThread({
                       it there. The markup arriving here is trusted because of
                       where it came from, not because of anything done below.
                     */}
-                    <CommentBody className="mt-1" html={row.comment!.body} />
+                    <CommentBody className="mt-1" html={row.comment!.body} compact={compact} />
 
                     {/* ⚠️ NOT ON A ROW THAT DOES NOT EXIST YET. Its id is a
                         placeholder string, and `deleteTaskComment` is typed
@@ -568,7 +571,7 @@ export function CommentThread({
  * — needs changes" — and an alert icon, so it survives greyscale and a printed
  * page.
  */
-function ActivityEntry({ event }: { event: TaskActivityEvent }) {
+function ActivityEntry({ event, compact }: { event: TaskActivityEvent; compact: boolean }) {
   return (
     <li className={cn("rounded-sm border px-3 py-2", event.live ? LIVE[event.kind] : "bg-muted/40")}>
       {event.live ? (
@@ -616,7 +619,7 @@ function ActivityEntry({ event }: { event: TaskActivityEvent }) {
       </div>
 
       {/* Sanitised alongside the comment bodies, in `page.tsx`. */}
-      {event.said ? <CommentBody className="mt-1" html={event.said} /> : null}
+      {event.said ? <CommentBody className="mt-1" html={event.said} compact={compact} /> : null}
 
       {/* An icon, never a typed arrow. A glyph in a text run inherits the font's
           metrics and sits off the baseline; `ArrowRight` is sized and aligned

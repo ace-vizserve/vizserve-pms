@@ -1043,6 +1043,27 @@
     max-height: 13rem;
   }
 
+  /* A compact body — the task page's activity preview. Images become a wrapping
+     row of square thumbnails, so a comment with eight screenshots is two short
+     rows rather than the whole card. Clicking one still opens the lightbox.
+
+     `inline-block` works because the images are top-level siblings with no
+     whitespace between them (the editor stores them as block nodes). The
+     `[data-orientation]` selector is repeated so it outranks the per-orientation
+     caps above. */
+  .rich-text[data-compact] img,
+  .rich-text[data-compact] img[data-orientation] {
+    display: inline-block;
+    vertical-align: top;
+    width: 4.5rem;
+    height: 4.5rem;
+    max-width: none;
+    max-height: none;
+    object-fit: cover;
+    object-position: center;
+    margin: --spacing(1.5) --spacing(1.5) 0 0;
+  }
+
   /* The editor's own copy, where an image can be SELECTED. ProseMirror sets
      this class on the selected node, and without a visible ring there is no way
      to tell that Backspace is about to remove the picture. */
