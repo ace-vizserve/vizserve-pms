@@ -8,7 +8,7 @@ import {
   useTransition,
   type ReactNode,
 } from "react";
-import { Copy, Trash2, X } from "lucide-react";
+import { Copy, Pencil, Trash2, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import {
 } from "@/components/ui/dialog";
 
 import { deleteTasks } from "./actions";
+import { BulkEditDialog } from "./bulk-edit-dialog";
 import { CopyTasksDialog } from "./copy-tasks-dialog";
 
 /**
@@ -33,10 +34,14 @@ import { CopyTasksDialog } from "./copy-tasks-dialog";
  * eight either existed inline on the row or were not features this app had. A
  * bar of mostly-disabled buttons teaches people to stop reading it.
  *
- * P7-69 adds the second, and it is the one that argument did not cover: COPY
- * has no inline equivalent anywhere, because copying is not a property of one
- * row. Duplicate is the same action with the target list left alone, so it is
- * not a third button.
+ * P7-69 adds COPY, the one that argument did not cover: copying is not a
+ * property of one row, so there is no inline equivalent anywhere. Duplicate is
+ * the same action with the target list left alone, not a separate button.
+ *
+ * P7-70 adds EDIT — status, assignee, dates and priority. Those DO exist inline
+ * on the row, and the original argument was that this made them redundant here.
+ * It does not: the inline controls act on one task, and the whole point of a
+ * selection is the forty. Three buttons, each doing something the row cannot.
  *
  * ⚠️ ONLY DELETABLE ROWS GET A CHECKBOX. `canDelete()` on the page mirrors
  * `vizserve_pms_can_delete_task`, so a client-backed task or a colleague's work
@@ -164,6 +169,7 @@ function SelectionBar({
 }) {
   const [confirming, setConfirming] = useState(false);
   const [copying, setCopying] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [pending, startDelete] = useTransition();
 
   const count = picked.size;
@@ -244,10 +250,21 @@ function SelectionBar({
             destructive action is actually explained.
           */}
           {/*
-            P7-69 — COPY SITS BEFORE DELETE, and the order is not alphabetical.
-            The destructive action goes last, furthest from the pointer arriving
-            at the bar, so the safe thing is the one under the cursor.
+            P7-70 — EDIT FIRST, then Copy, then Delete. The order is neither
+            alphabetical nor arbitrary: it runs from the change you make most
+            often to the one you cannot undo, so the destructive action sits
+            furthest from where the pointer arrives at the bar.
           */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setEditing(true)}
+            className="text-primary-foreground hover:bg-primary-foreground/15 hover:text-primary-foreground"
+          >
+            <Pencil />
+            Edit
+          </Button>
+
           <Button
             variant="ghost"
             size="sm"
@@ -281,6 +298,13 @@ function SelectionBar({
           </Button>
         </div>
       </div>
+
+      <BulkEditDialog
+        open={editing}
+        onOpenChange={setEditing}
+        taskIds={[...picked.keys()]}
+        onDone={onClear}
+      />
 
       <CopyTasksDialog
         open={copying}

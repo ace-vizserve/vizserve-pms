@@ -66,8 +66,34 @@ export function CopyTasksDialog({
 }) {
   const [listId, setListId] = useState<string | null>(null);
   const [include, setInclude] = useState<CopyPart[]>(COPY_DEFAULTS);
-  const [lists, setLists] = useState<{ id: string; name: string }[] | null>(null);
-  const [spans, setSpans] = useState(false);
+  /*
+   * ⚠️ ONE PIECE OF STATE, TAGGED WITH WHAT IT IS FOR, and "still loading" is
+   * DERIVED from it rather than written.
+   *
+   * It was two — `lists` and `spans` — with the effect blanking `lists` on open
+   * so the panel showed its loading state again. That is a synchronous setState
+   * inside an effect, which React's lint rule refuses (cascading renders), and
+   * the same trap `task-image-lightbox.tsx` documents from the other side.
+   *
+   * Keying the answer to the SELECTION it was fetched for says the same thing
+   * without writing anything: a result for another selection is not this
+   * selection's result, so `lists` is null and the panel is loading. Reopening
+   * on the same selection now shows the previous lists while the refetch runs
+   * rather than blanking — which is better anyway, and the refetch below is
+   * unchanged, so a list created in another tab still arrives.
+   */
+  const [targets, setTargets] = useState<{
+    for: string;
+    lists: { id: string; name: string }[];
+    spans: boolean;
+  } | null>(null);
+
+  /** The selection, as one comparable value. */
+  const selection = taskIds.join(",");
+
+  const loaded = targets?.for === selection ? targets : null;
+  const lists = loaded?.lists ?? null;
+  const spans = loaded?.spans ?? false;
   const [picking, setPicking] = useState(false);
   const [pending, start] = useTransition();
 
@@ -85,7 +111,6 @@ export function CopyTasksDialog({
     if (!open) return;
 
     let live = true;
-    setLists(null);
 
     void selectionTargets(taskIds).then((result) => {
       if (!live) return;
@@ -96,14 +121,13 @@ export function CopyTasksDialog({
         return;
       }
 
-      setLists(result.data.lists);
-      setSpans(result.data.spans);
+      setTargets({ for: selection, lists: result.data.lists, spans: result.data.spans });
     });
 
     return () => {
       live = false;
     };
-  }, [open, taskIds, onOpenChange]);
+  }, [open, taskIds, selection, onOpenChange]);
 
   function toggle(part: CopyPart) {
     setInclude((current) =>

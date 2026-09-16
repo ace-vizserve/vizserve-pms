@@ -105,6 +105,18 @@ export function BoardDnd({ children }: { children: ReactNode }) {
   const [dragging, setDragging] = useState<{
     id: string;
     title: string;
+    /**
+     * P7-71 — THE CARD'S OWN CONTENT, so the thing under the pointer is the
+     * thing being moved.
+     *
+     * It arrives through dnd-kit's `data`, which is an arbitrary bag, because
+     * the alternative is this file knowing how a board card is built — a second
+     * copy of a layout that already exists twenty lines away in `board/page.tsx`
+     * and would drift the first time a field is added to it.
+     */
+    preview: ReactNode;
+    /** The classes the real card carries — its padding, radius and edge. */
+    look: string;
     /** The card's own footprint, measured at the moment it was picked up. */
     width: number;
     height: number;
@@ -132,7 +144,9 @@ export function BoardDnd({ children }: { children: ReactNode }) {
   );
 
   function onDragStart(event: DragStartEvent) {
-    const data = event.active.data.current as { allowed?: string[]; title?: string } | undefined;
+    const data = event.active.data.current as
+      | { allowed?: string[]; title?: string; preview?: ReactNode; look?: string }
+      | undefined;
 
     // dnd-kit measured the card to start the drag, so its rect is already here
     // — nothing below reads the DOM.
@@ -142,6 +156,8 @@ export function BoardDnd({ children }: { children: ReactNode }) {
     setDragging({
       id: String(event.active.id),
       title: data?.title ?? "",
+      preview: data?.preview ?? null,
+      look: data?.look ?? "",
       width: rect?.width ?? 240,
       height: rect?.height ?? 72,
     });
@@ -218,12 +234,43 @@ export function BoardDnd({ children }: { children: ReactNode }) {
       */}
       <DragOverlay dropAnimation={null}>
         {dragging ? (
+          /*
+           * P7-71 — THE THING UNDER THE POINTER IS THE CARD, NOT A LABEL.
+           *
+           * It used to be a dashed outline carrying the title and nothing else,
+           * on the argument that it said "this is where it would go" rather than
+           * "this has moved". That argument had the two halves the wrong way
+           * round: the dashed outline belongs at the ORIGIN, where the gap is,
+           * and the pointer should be holding the card. Dragging a title while
+           * the real card sat greyed out in the old column read as dragging a
+           * tooltip.
+           *
+           * So the overlay is the card, lifted: its own width, its own content,
+           * `shadow-overlay`, and a degree and a half of tilt. The tilt is the
+           * whole trick — it is what says "picked up" in a way a shadow alone
+           * does not at this size, and it is small enough not to read as a
+           * gimmick.
+           *
+           * `rotate-1` is motion in the sense §1.7 cares about, so
+           * `motion-reduce` drops it. The lift survives: the shadow and the ring
+           * carry the state without it.
+           */
           <div
-            style={{ width: dragging.width, height: dragging.height }}
-            className="pointer-events-none flex items-start rounded-md border-2 border-dashed border-primary/60 bg-card/95 p-2.5 pl-5 text-sm font-medium shadow-overlay">
-            {/* Three lines at most: a long title in a tall card would otherwise
-                fill the ghost and turn it back into a block of text. */}
-            <span className="line-clamp-3">{dragging.title}</span>
+            style={{ width: dragging.width }}
+            className={cn(
+              // The real card's own classes first, so the padding, the radius,
+              // the grade and the client-work edge all come across exactly.
+              dragging.look,
+              // Then the lift, overriding what it needs to: a dragged card is
+              // not hovering, and `shadow-raised` gives way to `shadow-overlay`.
+              "pointer-events-none origin-top-left border-primary/50 shadow-overlay transition-none",
+              "rotate-1 motion-reduce:rotate-0",
+            )}>
+            {dragging.preview ?? (
+              // Only if a card was registered without one — a title is still
+              // better than an empty box.
+              <p className="line-clamp-3 p-2.5 text-sm font-medium">{dragging.title}</p>
+            )}
           </div>
         ) : null}
       </DragOverlay>
@@ -295,7 +342,14 @@ export function BoardCard({
 }) {
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({
     id: taskId,
-    data: { allowed, status, title },
+    /* `preview` is the card's own children — see the overlay for why this file
+       does not rebuild the layout itself. */
+    /* `preview` is the card's own children and `look` its own classes — see
+       the overlay for why this file does not rebuild either. The classes matter
+       as much as the content: the padding, the radius, the grade and the
+       category edge all live there, and an overlay without them is the card's
+       contents poured into a bare box. */
+    data: { allowed, status, title, preview: children, look: className },
     disabled: allowed.length === 0,
   });
 
@@ -399,7 +453,19 @@ export function BoardCard({
         // truth over a control. A card with nowhere legal to go keeps the
         // default cursor, because it cannot be dragged at all.
         draggable && "cursor-grab active:cursor-grabbing",
-        isDragging && "opacity-40",
+        /*
+         * ⚠️ THE ORIGIN IS THE GAP NOW, not a faded copy. While the overlay
+         * holds the real card, leaving a 40%-opacity twin behind means two of
+         * the same card on screen and no sign of where it came from. A dashed
+         * well says "this is the hole it left", which is the half of the
+         * gesture the old arrangement had no way to show.
+         *
+         * `[&>*]:invisible` rather than emptying the subtree: the content still
+         * occupies its exact height, so no column reflows while dragging and
+         * nothing under the pointer shifts.
+         */
+        isDragging &&
+          "rounded-md border-2 border-dashed border-primary/40 bg-muted/40 shadow-none [&>*]:invisible",
       )}
     >
       {/*
