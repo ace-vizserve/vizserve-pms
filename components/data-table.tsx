@@ -183,6 +183,7 @@ export function DataTable<T>({
   toolbar,
   count,
   getSubRows,
+  defaultExpanded = true,
   columnVisibility,
   onColumnVisibilityChange,
 }: {
@@ -280,6 +281,15 @@ export function DataTable<T>({
    * somebody else's reading position.
    */
   getSubRows?: (row: T) => T[] | undefined;
+  /**
+   * Whether every parent starts open. Only meaningful with `getSubRows`.
+   *
+   * The default is open, because for a short list a hidden child is a child
+   * nobody discovers. A table whose parents routinely carry several children
+   * wants the opposite — see `/tasks`, where the subtasks of a dozen parents
+   * bury the parents themselves.
+   */
+  defaultExpanded?: boolean;
   columnVisibility?: VisibilityState;
   onColumnVisibilityChange?: (next: VisibilityState) => void;
 }) {
@@ -287,9 +297,12 @@ export function DataTable<T>({
   const pathname = usePathname();
   const params = useSearchParams();
 
-  /* Every parent open on first paint: a subtask hidden by default is a subtask
-     nobody discovers, and these lists are short. */
-  const [expanded, setExpanded] = useState<ExpandedState>(true);
+  /*
+   * `true` is TanStack's "every row expanded"; `{}` is "none of them". Read once
+   * as the initial value, so toggling a row afterwards is never overridden by
+   * this — and so a table cannot be forced open again by a re-render.
+   */
+  const [expanded, setExpanded] = useState<ExpandedState>(defaultExpanded ? true : {});
 
   const manual = urlSort;
 

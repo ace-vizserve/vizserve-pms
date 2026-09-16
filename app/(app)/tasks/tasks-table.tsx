@@ -825,6 +825,11 @@ export function TaskGroupTable({
       rows={group}
       getRowKey={(task) => task.id}
       getSubRows={(task) => task.subRows}
+      /* Closed on arrival. A parent with five children used to push the next
+         parent off the screen, so a list of twelve tasks read as a list of
+         three — the chevron and the progress bar both say there is something
+         under there, which is what makes collapsing safe here. */
+      defaultExpanded={false}
       columnVisibility={columnState?.visibility}
       onColumnVisibilityChange={columnState?.onVisibilityChange}
       /* The server orders the query BEFORE it is split into stages, so a header
