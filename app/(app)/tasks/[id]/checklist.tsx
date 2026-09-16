@@ -4,6 +4,7 @@ import { useOptimistic, useRef, useState, useTransition } from "react";
 import { Plus, Trash2, X } from "lucide-react";
 
 import { SubtaskProgress } from "../inline";
+import { TaskSection } from "./task-section";
 import {
   addChecklistItem,
   removeChecklistItem,
@@ -44,6 +45,15 @@ export type ChecklistItem = {
 
 export function Checklist({ taskId, items }: { taskId: string; items: ChecklistItem[] }) {
   /*
+   * ⚠️ THE STATE LIVES HERE, NOT IN `AddStep`, because the control and the box
+   * it opens are no longer next to each other. The button is in the section
+   * HEADER — beside the progress bar, where "Add output" and "Add a subtask"
+   * both are — and the input it opens belongs at the FOOT of the list, which is
+   * where the next step goes. One of them has to own the flag and neither can
+   * be the other's parent, so the section does.
+   */
+  const [adding, setAdding] = useState(false);
+  /*
    * ⚠️ KEYED OFF `items`, so the optimistic state is rebuilt whenever the server
    * sends a new list. Without that, an item added by somebody else — or by the
    * add box below, which does refresh — would be drawn from a stale array.
@@ -67,15 +77,22 @@ export function Checklist({ taskId, items }: { taskId: string; items: ChecklistI
   }
 
   return (
-    <section className="space-y-2" aria-labelledby="checklist-heading">
-      <div className="flex items-center gap-2">
-        <h3 id="checklist-heading" className="text-sm font-medium">
-          Checklist
-        </h3>
-        {/* The same bar the subtask list and the task row use, so "12/19" cannot
-            come to mean two different things in one product. */}
-        <SubtaskProgress done={done} total={shown.length} />
-      </div>
+    <TaskSection
+      id="checklist"
+      title="Checklist"
+      /* The same bar the subtask list and the task row use, so "12/19" cannot
+         come to mean two different things in one product. In the HEADER, so
+         collapsing the section still tells you how far through it you are. */
+      summary={<SubtaskProgress done={done} total={shown.length} />}
+      /* The same treatment as Output and Subtasks: a labelled outline button on
+         the heading line. A checklist whose only way in was a ghost link under
+         the last item was the same "not obvious" problem one section down. */
+      action={
+        <Button type="button" variant="outline" size="xs" onClick={() => setAdding(true)}>
+          <Plus />
+          Add a step
+        </Button>
+      }>
 
       {shown.length === 0 ? (
         <p className="text-xs text-muted-foreground">
@@ -101,8 +118,8 @@ export function Checklist({ taskId, items }: { taskId: string; items: ChecklistI
         </ul>
       )}
 
-      <AddStep taskId={taskId} />
-    </section>
+      {adding ? <AddStep taskId={taskId} onClose={() => setAdding(false)} /> : null}
+    </TaskSection>
   );
 }
 
@@ -241,10 +258,11 @@ function Row({
 /**
  * ⚠️ IT STAYS OPEN AFTER A SAVE. Somebody adding a procedure is adding six
  * steps, not one, and a box that closed itself after each would cost five extra
- * clicks. Escape closes it; so does leaving it empty.
+ * clicks and five trips back to the header. Escape closes it; so does leaving it
+ * empty. The button that opened it lives in the section header — see the note
+ * on `adding` above.
  */
-function AddStep({ taskId }: { taskId: string }) {
-  const [open, setOpen] = useState(false);
+function AddStep({ taskId, onClose }: { taskId: string; onClose: () => void }) {
   const [label, setLabel] = useState("");
   const [pending, start] = useTransition();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -252,7 +270,7 @@ function AddStep({ taskId }: { taskId: string }) {
   function submit() {
     const trimmed = label.trim();
     if (!trimmed) {
-      setOpen(false);
+      onClose();
       return;
     }
 
@@ -267,15 +285,6 @@ function AddStep({ taskId }: { taskId: string }) {
       setLabel("");
       inputRef.current?.focus({ preventScroll: true });
     });
-  }
-
-  if (!open) {
-    return (
-      <Button type="button" size="sm" variant="ghost" className="-ml-2" onClick={() => setOpen(true)}>
-        <Plus />
-        Add a step
-      </Button>
-    );
   }
 
   return (
@@ -297,7 +306,7 @@ function AddStep({ taskId }: { taskId: string }) {
           }
           if (event.key === "Escape") {
             setLabel("");
-            setOpen(false);
+            onClose();
           }
         }}
       />

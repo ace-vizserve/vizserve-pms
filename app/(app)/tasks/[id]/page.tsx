@@ -31,11 +31,12 @@ import { createClient } from "@/utils/supabase/server";
 import { CommentSheet } from "../comment-sheet";
 import { CommentThread, type TaskActivityEvent } from "../comment-thread";
 import { AddSubtask } from "../inline";
-import { ACTION_LINK, TASK_DETAIL_GRID } from "./grid";
+import { TASK_DETAIL_GRID } from "./grid";
 
 import { RequestAttachmentList } from "./client-files";
 import { GateTrack } from "./lifecycle-rail";
 import { Checklist } from "./checklist";
+import { TaskSection } from "./task-section";
 import { SubtaskList } from "./subtask-list";
 import { TaskGateProvider } from "./task-gate";
 import { TaskHeader } from "./task-header";
@@ -48,11 +49,16 @@ export const metadata: Metadata = { title: "Task" };
  * How much of the conversation the task page draws before handing over to the
  * sheet.
  *
- * Three, because the card is a SUMMARY: what was said last, and whether anybody
- * is waiting on you. Reading a thread of forty is a different act, and it now
- * happens somewhere built for it.
+ * TWO, AND IT WAS THREE. The number is not about how many entries read well —
+ * it is about how TALL they are. A comment here is a paragraph or it is five
+ * pasted screenshots, and the image caps in `globals.css` put each of those at
+ * 20–26rem: three image-heavy comments is a card taller than the window, which
+ * is the shape this whole change exists to avoid.
+ *
+ * The card is a SUMMARY — what was said last, and whether anybody is waiting on
+ * you. Reading the thread is a different act, and it happens in the sheet.
  */
-const ACTIVITY_PREVIEW = 3;
+const ACTIVITY_PREVIEW = 2;
 
 /**
  * P3-05 — task detail.
@@ -708,10 +714,9 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               viewer={viewer}
               brief={
                 task.description ? (
-                  <section className="space-y-2">
-                    <h3 className="text-xs font-semibold text-foreground">Brief</h3>
+                  <TaskSection id="brief" title="Brief">
                     <RichText html={task.description} />
-                  </section>
+                  </TaskSection>
                 ) : null
               }
               requestPanel={
@@ -869,17 +874,23 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               }
               checklist={<Checklist taskId={id} items={checklistItems ?? []} />}
               subtasks={
-                <SubtaskList subtasks={children} nameOf={nameOf} canAdd={canWork && !isTerminal(task.status)} />
-              }
-              actions={
-                canWork && !isTerminal(task.status) ? (
-                  <AddSubtask
-                    parentId={task.id}
-                    assignable={departmentPeople}
-                    label="Add a subtask"
-                    className={ACTION_LINK}
-                  />
-                ) : null
+                <SubtaskList
+                  subtasks={children}
+                  nameOf={nameOf}
+                  canAdd={canWork && !isTerminal(task.status)}
+                  /* In the section's own header now, beside its progress bar,
+                     the way "Add output" has always been. See `SubtaskList`. */
+                  action={
+                    canWork && !isTerminal(task.status) ? (
+                      <AddSubtask
+                        parentId={task.id}
+                        assignable={departmentPeople}
+                        label="Add a subtask"
+                        className={buttonVariants({ variant: "outline", size: "xs" })}
+                      />
+                    ) : null
+                  }
+                />
               }
             />
           </div>

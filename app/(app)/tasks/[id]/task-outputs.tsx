@@ -30,6 +30,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatBytes } from "@/lib/attachments";
+import { TaskSection } from "./task-section";
 import { focusWithoutScroll } from "@/lib/focus";
 
 import { outputLinkSchema } from "@/lib/schemas/tasks";
@@ -393,14 +394,8 @@ export function TaskOutputs({
 
   if (variant === "field") {
     return (
-      <div className="space-y-2">
+      <TaskSection id="output" title="Output" action={addOutput}>
         {fileInput}
-
-        {/* The heading and its one action on the same line. */}
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-xs font-semibold text-foreground">Output</h3>
-          {addOutput}
-        </div>
 
         {/* `-mx-2` so a row's hover fill bleeds to the section's edges rather
             than sitting inset from everything above it. */}
@@ -478,7 +473,7 @@ export function TaskOutputs({
             </div>
           </DialogContent>
         </Dialog>
-      </div>
+      </TaskSection>
     );
   }
 

@@ -11,6 +11,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { SubtaskProgress } from "../inline";
+import { TaskSection } from "./task-section";
 
 /**
  * P7-28 — the children, on the page you work on.
@@ -48,25 +49,42 @@ export function SubtaskList({
   subtasks,
   nameOf,
   canAdd,
+  action,
 }: {
   subtasks: Subtask[];
   nameOf: Map<string, string>;
   /**
-   * Only decides the EMPTY-STATE COPY now — whether to explain what a subtask
-   * is for, or simply say there are none. The control itself is the surface's.
+   * Whether this reader may add one. Decides the empty-state copy — explain what
+   * a subtask is for, or simply say there are none.
    */
   canAdd: boolean;
+  /**
+   * P7-68 — THE "ADD A SUBTASK" CONTROL, BACK IN THIS SECTION'S HEADER.
+   *
+   * P7-56 moved it to the surface's action list at the foot of the page, on the
+   * reasoning that every "do a thing to this task" should live in one treatment
+   * instead of three. Reported as not obvious, and it was not: the list of
+   * subtasks sat in the middle of the page and the only way to add one was a
+   * quiet link several hundred pixels below it, after the outputs and the gate.
+   *
+   * ⚠️ AND OUTPUT NEVER MOVED. `TaskOutputs` kept "Add output" on its own
+   * heading line the whole time, so the page was already making the opposite
+   * argument one section higher. This is the two agreeing again rather than a
+   * new idea — the foot of the page keeps the actions that act on the TASK
+   * (force a status, delete it), and a section's own control stays with it.
+   */
+  action?: React.ReactNode;
 }) {
   const done = subtasks.filter((subtask) => isTerminal(subtask.status)).length;
 
   return (
-    <section className="space-y-2">
-      <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold text-foreground">Subtasks</h3>
-        {/* Renders nothing at zero, by its own rule — a permanent 0/0 is the
-            same lie as a permanent zero on a dashboard tile. */}
-        <SubtaskProgress done={done} total={subtasks.length} />
-      </div>
+    <TaskSection
+      id="subtasks"
+      title="Subtasks"
+      /* Renders nothing at zero, by its own rule — a permanent 0/0 is the same
+         lie as a permanent zero on a dashboard tile. */
+      summary={<SubtaskProgress done={done} total={subtasks.length} />}
+      action={action}>
 
       <div>
         {subtasks.length === 0 ? (
@@ -122,6 +140,6 @@ export function SubtaskList({
           </ul>
         )}
       </div>
-    </section>
+    </TaskSection>
   );
 }

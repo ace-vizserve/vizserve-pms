@@ -38,6 +38,8 @@ import {
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
 
+import { TaskSection } from "./task-section";
+
 import { overrideTaskStatus, reassignTask } from "../actions";
 import { InlineDate, InlineEstimate, InlineList, InlinePriority } from "../inline";
 import { ACTION_LINK } from "./grid";
@@ -116,11 +118,6 @@ function Prop({
       <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-sm">{children}</dd>
     </div>
   );
-}
-
-/** A section heading on the pane. Quiet, but darker than the prose under it. */
-function Heading({ children }: { children: React.ReactNode }) {
-  return <h3 className="text-xs font-semibold text-foreground">{children}</h3>;
 }
 
 export function TaskSurface({
@@ -671,8 +668,7 @@ export function TaskSurface({
           {/* ============================================================== */}
           {/* RESOLUTION — what you did.                                      */}
           {/* ============================================================== */}
-          <section className="space-y-2">
-            <Heading>Resolution</Heading>
+          <TaskSection id="resolution" title="Resolution">
             <RichTextEditor
               ariaLabel="Resolution"
               value={resolution}
@@ -715,7 +711,7 @@ export function TaskSurface({
                 Required before QA. The reviewer reads it, and the client eventually sees it.
               </p>
             )}
-          </section>
+          </TaskSection>
 
           {/* ============================================================== */}
           {/* OUTPUT — where it is. THE LINK AND THE FILES ARE ONE LIST.      */}
