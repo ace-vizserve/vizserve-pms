@@ -23,6 +23,7 @@ import {
   type FormSettingsValues,
 } from "@/lib/schemas/forms";
 import { createForm, updateFormSettings } from "./actions";
+import { useUnpublishConfirm } from "./form-lifecycle";
 
 type Department = { id: string; name: string };
 type List = { id: string; name: string; department_id: string; form_id?: string | null };
@@ -71,6 +72,7 @@ export function ClientFormSettings({
   formId,
   initial,
   hasSubmissions = false,
+  isArchived = false,
 }: {
   departments: Department[];
   /** P2-06 — where approved requests from this form land. */
@@ -79,9 +81,12 @@ export function ClientFormSettings({
   formId?: string;
   initial?: Partial<FormSettingsInput>;
   hasSubmissions?: boolean;
+  /** P7-72. Its Published switch is locked until the form is restored. */
+  isArchived?: boolean;
 }) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
+  const { confirm, dialog } = useUnpublishConfirm(formId);
   const [formError, setFormError] = useState<string | null>(null);
 
   const {
@@ -236,6 +241,22 @@ export function ClientFormSettings({
       }
     };
 
+    /*
+     * P7-72 — UNPUBLISHING FROM HERE ASKS FIRST, THE SAME AS THE HEADER SWITCH.
+     * Two controls over one column; a confirmation on only one of them would
+     * make the other the quiet way round it.
+     */
+    if (formId && initial?.is_active && !values.is_active) {
+      void confirm(() =>
+        startTransition(async () => {
+          const result = await updateFormSettings(formId, values);
+          if (!result.ok) return showErrors(result.error, result.fieldErrors);
+          toast.success("Settings saved");
+        }),
+      );
+      return;
+    }
+
     startTransition(async () => {
       // Branched rather than ternary so the create path keeps its `{ id }`
       // payload instead of collapsing into the shared void result.
@@ -255,6 +276,7 @@ export function ClientFormSettings({
 
   return (
     <form onSubmit={onSubmit} className="p-6 bg-card rounded-xl grade-card border space-y-5" noValidate>
+      {dialog}
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="name">Name</Label>
@@ -458,15 +480,22 @@ export function ClientFormSettings({
           <div>
             <Label htmlFor="is_active">Published</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {isActive
-                ? "Live — anyone with the URL can submit, no login."
-                : "Draft — the public URL returns not found."}
+              {isArchived
+                ? "Archived — restore it from the forms list before publishing it again."
+                : isActive
+                  ? "Live — anyone with the URL can submit, no login."
+                  : "Draft — the public URL returns not found."}
             </p>
             {isActive && !departmentId ? (
               <p className="mt-1 text-xs text-warning">Choose a department first, or submissions have nowhere to go.</p>
             ) : null}
           </div>
-          <Switch id="is_active" checked={isActive} onCheckedChange={(checked) => setValue("is_active", checked)} />
+          <Switch
+            id="is_active"
+            disabled={isArchived}
+            checked={isActive}
+            onCheckedChange={(checked) => setValue("is_active", checked)}
+          />
         </div>
       </div>
 

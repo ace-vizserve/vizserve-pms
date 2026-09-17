@@ -656,6 +656,15 @@ export type Database = {
            * Phase 2.
            */
           schema: Json;
+          /**
+           * P7-72. Set and cleared ONLY by `vizserve_pms_archive_form` and
+           * `vizserve_pms_restore_form` — `vizserve_pms_forms_lifecycle_guard`
+           * refuses any other write, which is why it is absent from Insert and
+           * Update below.
+           */
+          archived_at: string | null;
+          /** P7-72. Stamped by the database on first publish. Null = still a draft. */
+          first_published_at: string | null;
           created_by: string | null;
           created_at: string;
           updated_at: string;
@@ -2586,6 +2595,30 @@ export type Database = {
       vizserve_pms_copy_task: {
         Args: { p_task_id: string; p_list_id: string | null; p_include?: string[] };
         Returns: string;
+      };
+      /** P7-72. Counts only. Raises unless the caller administers the form. */
+      vizserve_pms_form_workload: {
+        Args: { p_form_id: string };
+        Returns: Json;
+      };
+      /** P7-72. Refused while the form has pending requests or open tasks. */
+      vizserve_pms_archive_form: {
+        Args: { p_form_id: string };
+        Returns: undefined;
+      };
+      /** P7-72. Back to paused (or draft), never straight back to published. */
+      vizserve_pms_restore_form: {
+        Args: { p_form_id: string };
+        Returns: undefined;
+      };
+      /**
+       * P7-72. Returns the storage paths of the files that went with it, for
+       * the caller to remove from the bucket. `p_force` is owner-only and still
+       * refuses a form whose requests became tasks.
+       */
+      vizserve_pms_delete_form: {
+        Args: { p_form_id: string; p_force?: boolean };
+        Returns: string[];
       };
       /** P7-68. Appends an item, computing its position server-side. */
       vizserve_pms_add_checklist_item: {

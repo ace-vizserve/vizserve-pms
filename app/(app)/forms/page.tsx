@@ -6,6 +6,7 @@ import Link from "next/link";
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
 import { canAccessDepartment, requireDepartmentShape } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 import { administersForm } from "./administers";
 import { FormsTable, type FormRow } from "./forms-table";
@@ -37,7 +38,13 @@ export const metadata: Metadata = { title: "Forms" };
  *
  * No <h1>. The shell breadcrumb is the page label.
  */
-export default async function FormsPage() {
+export default async function FormsPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ archived?: string }>;
+}) {
+  // P7-72. Archived forms are out of the way by default, one click from view.
+  const showArchived = (await searchParams).archived === "1";
   // P8-01c. Was `requireRole("team_leader")`. A department admin builds their
   // own department's client forms, and may be a MEMBER by rank — the list below
   // is still narrowed per row by `administersForm`, which is what decides whose
@@ -61,7 +68,7 @@ export default async function FormsPage() {
       // `created_by` is not drawn anywhere — it is read so `administersForm` can
       // recognise an unrouted draft as its author's.
       .select(
-        "id, name, slug, purpose, is_public, is_active, reference_prefix, department_id, created_by, created_at, sla_minutes, requires_attachment",
+        "id, name, slug, purpose, is_public, is_active, archived_at, first_published_at, reference_prefix, department_id, created_by, created_at, sla_minutes, requires_attachment",
       )
       .order("created_at", { ascending: false }),
 
@@ -106,7 +113,8 @@ export default async function FormsPage() {
   /* Kept before the cast: `FormRow` is the table's shape and omits `created_by`,
      which the author carve-out below needs. */
   const administered = (forms ?? []).filter((form) => administersForm(context, form));
-  const rows = administered as FormRow[];
+  const archivedCount = administered.filter((form) => form.archived_at !== null).length;
+  const rows = administered.filter((form) => showArchived || form.archived_at === null) as FormRow[];
 
   /*
    * ⚠️ WHOSE SUBMISSIONS THIS VIEWER CAN ACTUALLY READ — see the column comment
@@ -137,7 +145,16 @@ export default async function FormsPage() {
 
   return (
     <PageShell>
-      <div className="flex items-center justify-end">
+      <div className="flex items-center justify-end gap-2">
+        {/* Only when there is something to show — a toggle onto an empty set
+            is a control that does nothing. */}
+        {archivedCount > 0 || showArchived ? (
+          <Link
+            href={showArchived ? "/forms" : "/forms?archived=1"}
+            className={buttonVariants({ size: "sm", variant: "ghost" })}>
+            {showArchived ? "Hide archived" : `Show archived (${archivedCount})`}
+          </Link>
+        ) : null}
         <Link href="/forms/new" className={buttonVariants({ size: "sm" })}>
           <Plus />
           New form
@@ -150,6 +167,7 @@ export default async function FormsPage() {
         submissionCounts={submissionCounts}
         submissionsReadable={submissionsReadable}
         lastSubmission={lastSubmission}
+        isOwner={roleAtLeast(context.role, "owner")}
       />
     </PageShell>
   );

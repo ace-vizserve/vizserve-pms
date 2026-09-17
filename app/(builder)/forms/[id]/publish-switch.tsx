@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { setFormPublished } from "@/app/(app)/forms/actions";
+import { useUnpublishConfirm } from "@/app/(app)/forms/form-lifecycle";
 
 import { useSaveStatus } from "./save-status";
 
@@ -43,13 +44,20 @@ export function PublishSwitch({
    * wrong thing about exactly the state they just changed.
    */
   isInternal,
+  isArchived,
+  hasBeenPublished,
 }: {
   formId: string;
   isActive: boolean;
   isInternal: boolean;
+  /** P7-72. An archived form cannot be published — restore it from /forms first. */
+  isArchived: boolean;
+  /** P7-72. Unpublished after going live reads "Paused", not "Draft". */
+  hasBeenPublished: boolean;
 }) {
   const router = useRouter();
   const { track } = useSaveStatus();
+  const { confirm, dialog } = useUnpublishConfirm(formId);
 
   const [checked, setChecked] = useState(isActive);
   const [error, setError] = useState<string | null>(null);
@@ -70,7 +78,22 @@ export function PublishSwitch({
     setChecked(isActive);
   }, [isActive]);
 
+  /*
+   * P7-72 — TAKING IT DOWN ASKS FIRST when anything has come in. Publishing
+   * never does: nothing is at stake in turning a form on.
+   */
   function toggle(next: boolean) {
+    if (next) return save(true);
+    // The switch moves at once and goes back if the person keeps it published,
+    // so the control never sits between two states while the counts load.
+    setChecked(false);
+    void confirm(
+      () => save(false),
+      () => setChecked(true),
+    );
+  }
+
+  function save(next: boolean) {
     /*
      * OPTIMISTIC, AND PUT BACK ON A REFUSAL. Publishing is a round trip through
      * a check constraint, and a switch that does not move until the server
@@ -104,8 +127,10 @@ export function PublishSwitch({
 
   return (
     <div className="flex shrink-0 items-center gap-2">
+      {dialog}
       <Switch
         id="form-published"
+        disabled={isArchived}
         checked={checked}
         onCheckedChange={toggle}
         aria-describedby={error === null ? undefined : "form-published-error"}
@@ -117,7 +142,7 @@ export function PublishSwitch({
           checked ? "text-success" : "text-muted-foreground",
         )}
       >
-        {checked ? "Published" : "Draft"}
+        {isArchived ? "Archived" : checked ? "Published" : hasBeenPublished ? "Paused" : "Draft"}
       </label>
 
       {/*

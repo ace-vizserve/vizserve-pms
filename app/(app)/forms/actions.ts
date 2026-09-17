@@ -16,6 +16,8 @@ import {
   type FormSchemaRejection,
 } from "@/lib/form-builder/schema";
 import { createClient } from "@/utils/supabase/server";
+import { createAdminClient } from "@/utils/supabase/admin";
+import { ATTACHMENT_BUCKET } from "@/lib/attachments-server";
 import {
   FORM_PURPOSE_LABELS,
   formCreateSchema,
@@ -1173,4 +1175,107 @@ function schemaRejectionMessage(reason: FormSchemaRejection): string {
     "This form could not be saved. Check that every field has a label and a key, " +
     "and that each choice field has at least one option."
   );
+}
+
+/**
+ * P7-72 — WHAT IS BEHIND A FORM, before somebody unpublishes, archives or
+ * deletes it.
+ *
+ * Counts only, from `vizserve_pms_form_workload` — the same function the
+ * archive and delete functions decide from, so the number in the dialog is the
+ * number the refusal was based on.
+ */
+export type FormWorkload = {
+  requests: number;
+  pending_requests: number;
+  responses: number;
+  tasks_from_requests: number;
+  open_tasks: number;
+  list_name: string | null;
+};
+
+export async function getFormWorkload(formId: string): Promise<ActionResult<FormWorkload>> {
+  const { supabase } = await assertCanEditForm(formId);
+
+  const { data, error } = await supabase.rpc("vizserve_pms_form_workload", { p_form_id: formId });
+  if (error) return { ok: false, error: error.message };
+
+  return { ok: true, data: data as unknown as FormWorkload };
+}
+
+/**
+ * Every screen a form's lifecycle shows on. The LAYOUT, because the tasks rail
+ * in the shell lists the form's inbox — archiving a form takes its list out of
+ * every page's sidebar, not just this one's.
+ */
+function revalidateFormLifecycle(formId: string): void {
+  revalidatePath("/forms");
+  revalidatePath(`/forms/${formId}`);
+  revalidatePath("/", "layout");
+}
+
+/**
+ * P7-72. The rules — refused while requests are pending or tasks are open —
+ * live in `vizserve_pms_archive_form`, and its refusal is already a sentence
+ * naming both counts, so it is passed through as written.
+ */
+export async function archiveForm(formId: string): Promise<ActionResult> {
+  const { supabase } = await assertCanEditForm(formId);
+
+  const { error } = await supabase.rpc("vizserve_pms_archive_form", { p_form_id: formId });
+  if (error) return { ok: false, error: error.message };
+
+  revalidateFormLifecycle(formId);
+  return { ok: true, data: undefined };
+}
+
+export async function restoreForm(formId: string): Promise<ActionResult> {
+  const { supabase } = await assertCanEditForm(formId);
+
+  const { error } = await supabase.rpc("vizserve_pms_restore_form", { p_form_id: formId });
+  if (error) return { ok: false, error: error.message };
+
+  revalidateFormLifecycle(formId);
+  return { ok: true, data: undefined };
+}
+
+/**
+ * P7-72 — DELETE, AND FORCE DELETE.
+ *
+ * ⚠️ EVERY CHECK IS IN `vizserve_pms_delete_form`, not here: a form whose
+ * requests became tasks is refused, open tasks in its list are refused, and a
+ * form with submissions needs `force` AND an owner. The function also writes the
+ * audit row, archives and detaches the inbox list, and returns the files.
+ *
+ * ⚠️ THE FILES ARE REMOVED AFTER THE DATABASE HAS COMMITTED, and only then.
+ * The attachment rows cascade; the objects in the bucket do not. Removing them
+ * first would leave a form whose delete was refused pointing at files that no
+ * longer exist. A failure here leaves orphaned objects — logged, and not
+ * reported as a failed delete, because the delete did happen.
+ */
+export async function deleteForm(formId: string, force: unknown): Promise<ActionResult> {
+  const { supabase } = await assertCanEditForm(formId);
+
+  const { data: paths, error } = await supabase.rpc("vizserve_pms_delete_form", {
+    p_form_id: formId,
+    p_force: force === true,
+  });
+  if (error) return { ok: false, error: error.message };
+
+  const files = (paths ?? []) as string[];
+  if (files.length > 0) {
+    const admin = createAdminClient();
+    // Storage's bulk remove is capped per call; 100 is well under it.
+    for (let start = 0; start < files.length; start += 100) {
+      const { error: removeError } = await admin.storage
+        .from(ATTACHMENT_BUCKET)
+        .remove(files.slice(start, start + 100));
+      if (removeError) {
+        console.error("[P7-72] form deleted, but its files were not all removed —", removeError);
+      }
+    }
+  }
+
+  revalidateFormLifecycle(formId);
+  return { ok: true, data: undefined };
 }

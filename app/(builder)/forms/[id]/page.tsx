@@ -146,7 +146,7 @@ export default async function EditFormPage({
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_quiz, is_public, is_active, audience_is_all_departments, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
+      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_quiz, is_public, is_active, archived_at, first_published_at, audience_is_all_departments, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -466,7 +466,13 @@ export default async function EditFormPage({
         }>
         {/* P7-66 — the pill that only REPORTED this is now the control that sets
             it. See `PublishSwitch`. */}
-        <PublishSwitch formId={form.id} isActive={form.is_active} isInternal={isInternal} />
+        <PublishSwitch
+          formId={form.id}
+          isActive={form.is_active}
+          isInternal={isInternal}
+          isArchived={form.archived_at !== null}
+          hasBeenPublished={form.first_published_at !== null}
+        />
         {/*
           P7-66 Phase 4b — THE LINK GOES WHERE THE FORM ACTUALLY LIVES.
 
@@ -597,6 +603,7 @@ export default async function EditFormPage({
                 departments={departments}
                 formId={form.id}
                 hasSubmissions={submissionCount > 0}
+                isArchived={form.archived_at !== null}
                 audience={{
                   is_all_departments: form.audience_is_all_departments,
                   department_ids: (audienceRows ?? []).map((row) => row.department_id),
@@ -631,6 +638,7 @@ export default async function EditFormPage({
                 lists={lists ?? []}
                 formId={form.id}
                 hasSubmissions={submissionCount > 0}
+                isArchived={form.archived_at !== null}
                 initial={{
                   name: form.name,
                   slug: form.slug,

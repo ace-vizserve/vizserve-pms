@@ -20,6 +20,7 @@ import {
   type FormSettingsValues,
 } from "@/lib/schemas/forms";
 import { updateFormSettings } from "./actions";
+import { useUnpublishConfirm } from "./form-lifecycle";
 
 type Department = { id: string; name: string };
 
@@ -62,6 +63,7 @@ export function InternalSettings({
   initial,
   audience,
   hasSubmissions = false,
+  isArchived = false,
 }: {
   departments: Department[];
   formId: string;
@@ -80,8 +82,11 @@ export function InternalSettings({
    */
   audience: FormAudience;
   hasSubmissions?: boolean;
+  /** P7-72. Its Published switch is locked until the form is restored. */
+  isArchived?: boolean;
 }) {
   const [pending, startTransition] = useTransition();
+  const { confirm, dialog } = useUnpublishConfirm(formId);
   const [formError, setFormError] = useState<string | null>(null);
 
   const {
@@ -227,15 +232,25 @@ export function InternalSettings({
       }
     };
 
-    startTransition(async () => {
-      const result = await updateFormSettings(formId, values);
-      if (!result.ok) return showErrors(result.error, result.fieldErrors);
-      toast.success("Settings saved");
-    });
+    /*
+     * P7-72 — UNPUBLISHING FROM HERE ASKS FIRST, THE SAME AS THE HEADER SWITCH.
+     * Two controls over one column; a confirmation on only one of them would
+     * make the other the quiet way round it.
+     */
+    const save = () =>
+      startTransition(async () => {
+        const result = await updateFormSettings(formId, values);
+        if (!result.ok) return showErrors(result.error, result.fieldErrors);
+        toast.success("Settings saved");
+      });
+
+    if (initial.is_active && !values.is_active) void confirm(save);
+    else save();
   });
 
   return (
     <form onSubmit={onSubmit} className="p-6 bg-card rounded-xl grade-card border space-y-5" noValidate>
+      {dialog}
       <div className="space-y-2">
         <Label htmlFor="name">Name</Label>
         <Input id="name" aria-invalid={Boolean(errors.name)} {...register("name")} />
@@ -505,9 +520,11 @@ export function InternalSettings({
                 a staff survey — /respond/<slug> refuses anybody without a
                 session, whatever this switch says. */}
             <p className="mt-0.5 text-xs text-muted-foreground">
-              {isActive
-                ? "Live — signed-in staff can fill it in. There is no public link."
-                : "Draft — nobody can fill it in yet."}
+              {isArchived
+                ? "Archived — restore it from the forms list before publishing it again."
+                : isActive
+                  ? "Live — signed-in staff can fill it in. There is no public link."
+                  : "Draft — nobody can fill it in yet."}
             </p>
             {isActive && !departmentId ? (
               <p className="mt-1 text-xs text-warning">
@@ -515,7 +532,12 @@ export function InternalSettings({
               </p>
             ) : null}
           </div>
-          <Switch id="is_active" checked={isActive} onCheckedChange={(checked) => setValue("is_active", checked)} />
+          <Switch
+            id="is_active"
+            disabled={isArchived}
+            checked={isActive}
+            onCheckedChange={(checked) => setValue("is_active", checked)}
+          />
         </div>
       </div>
 

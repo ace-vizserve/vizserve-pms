@@ -11,6 +11,8 @@ import { buttonVariants } from "@/components/ui/button";
 import { formatDate, formatDuration } from "@/lib/dates";
 import { FORM_PURPOSE_LABELS, type FormPurpose } from "@/lib/schemas/forms";
 
+import { FormRowActions } from "./form-lifecycle";
+
 /**
  * P7-64 — the columns, in a client component, because the table is one now.
  *
@@ -30,6 +32,10 @@ export type FormRow = {
   purpose: FormPurpose;
   is_public: boolean;
   is_active: boolean;
+  /** P7-72. */
+  archived_at: string | null;
+  /** P7-72. Null = never published, which is what makes an unpublished form a draft. */
+  first_published_at: string | null;
   reference_prefix: string;
   department_id: string | null;
   created_at: string;
@@ -43,6 +49,7 @@ export function FormsTable({
   submissionCounts,
   lastSubmission,
   submissionsReadable,
+  isOwner,
 }: {
   rows: FormRow[];
   departmentNames: Record<string, string>;
@@ -62,6 +69,8 @@ export function FormsTable({
    * and printing "None" would report a busy intake as an unused one.
    */
   submissionsReadable: Record<string, boolean>;
+  /** P7-72. Offered force delete; the database is what enforces it. */
+  isOwner: boolean;
 }) {
 
   const columns: Column<FormRow>[] = [
@@ -135,13 +144,15 @@ export function FormsTable({
     {
       key: "status",
       sortKey: "status",
-      // The state is the boolean `is_active`; there is no `status` field. Sorts
-      // on the chip's own words, so "Draft" and "Live" group the way they read.
-      sortValue: (form) => (form.is_active ? "Live" : "Draft"),
+      // There is no `status` field; it is read off three columns. Sorts on the
+      // chip's own words, so the states group the way they read.
+      sortValue: (form) => formStatus(form).label,
       header: "Status",
-      cell: (form) =>
+      cell: (form) => {
         /* Status is never colour alone — the label carries it. */
-        form.is_active ? <Chip tone="success" label="Live" /> : <Chip tone="neutral" label="Draft" />,
+        const status = formStatus(form);
+        return <Chip tone={status.tone} label={status.label} />;
+      },
     },
     {
       /*
@@ -239,6 +250,12 @@ export function FormsTable({
           <span className="text-xs text-muted-foreground">—</span>
         ),
     },
+    {
+      key: "actions",
+      header: <span className="sr-only">Actions</span>,
+      align: "end",
+      cell: (form) => <FormRowActions form={form} isOwner={isOwner} />,
+    },
   ];
 
   const { visibility, onVisibilityChange } = useColumnVisibility("forms", columns);
@@ -265,4 +282,18 @@ export function FormsTable({
       }
       />
   );
+}
+
+/**
+ * P7-72 — FOUR STATES FROM THREE COLUMNS.
+ *
+ * Unpublished used to read "Draft" whether or not the form had ever been live,
+ * so a form with forty requests behind it and one nobody had seen looked the
+ * same. `first_published_at` is what tells them apart.
+ */
+function formStatus(form: FormRow): { label: string; tone: "success" | "warning" | "neutral" } {
+  if (form.archived_at) return { label: "Archived", tone: "neutral" };
+  if (form.is_active) return { label: "Live", tone: "success" };
+  if (form.first_published_at) return { label: "Paused", tone: "warning" };
+  return { label: "Draft", tone: "neutral" };
 }
