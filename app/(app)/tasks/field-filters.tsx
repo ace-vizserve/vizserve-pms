@@ -46,7 +46,7 @@ export function FieldFilters({
 
   return (
     <div className="space-y-1.5">
-      <span className="block text-xs text-muted-foreground">Fields</span>
+      <span className="block text-xs text-muted-foreground">Custom fields</span>
       <Popover>
         <PopoverTrigger render={<Button variant="outline" size="sm" className="h-9" />}>
           <SlidersHorizontal />

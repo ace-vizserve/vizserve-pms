@@ -115,7 +115,7 @@ export function ListFieldsSheet({ listId, fields }: { listId: string; fields: Li
       }}>
       <SheetTrigger render={<Button variant="outline" size="sm" />}>
         <ListPlus />
-        Fields
+        Custom fields
       </SheetTrigger>
 
       <SheetContent className="w-full overflow-y-auto sm:max-w-md">
