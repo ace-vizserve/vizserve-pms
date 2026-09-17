@@ -1019,6 +1019,33 @@ export const taskGroupSchema = z.object({
 
 export type TaskGroupInput = z.infer<typeof taskGroupSchema>;
 
+/**
+ * P7-72 — a department's folders in the order they should be drawn.
+ *
+ * The WHOLE order, not a single move. The rail renders what it has, so sending
+ * every id and writing `sort_order` from its position cannot land two folders
+ * on the same number, which a "move X above Y" payload can when two people drag
+ * at once.
+ */
+export const taskGroupOrderSchema = z.object({
+  department_id: z.uuid(),
+  group_ids: z.array(z.uuid()).min(1).max(200),
+});
+
+export type TaskGroupOrderInput = z.infer<typeof taskGroupOrderSchema>;
+
+/**
+ * P7-72 — one sibling set of lists in order: a folder's, or (`group_id: null`)
+ * a department's folderless ones. Whole order, for the reason above.
+ */
+export const listOrderSchema = z.object({
+  department_id: z.uuid(),
+  group_id: z.uuid().nullable(),
+  list_ids: z.array(z.uuid()).min(1).max(500),
+});
+
+export type ListOrderInput = z.infer<typeof listOrderSchema>;
+
 // ---------------------------------------------------------------------------
 // P7-59 — the brief a client task came from, WITHOUT the client's identity.
 // ---------------------------------------------------------------------------

@@ -3,6 +3,7 @@ import {
   canAdminDepartment,
   canDoHr,
   canShapeAnyDepartment,
+  canShapeDepartment,
   type AuthContext,
 } from "@/lib/auth/authorization";
 import {
@@ -342,6 +343,10 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
         // heading on the day P7-18 landed.
         lists: own.filter((list) => list.group_id === null).map(toList),
         folders,
+        // P7-72 — per department, because a lead of VizBytes may drag VizBytes'
+        // folders and not VizMedia's, both of which an owner sees in one rail.
+        // `reorderTaskGroups` asks the same predicate.
+        canReorder: canShapeDepartment(context, department.id),
       };
     })
     // A department with nothing in it opens onto nothing. Dropped rather than

@@ -5,6 +5,7 @@ import { z } from "zod";
 
 import {
   canManageDepartmentTree,
+  canShapeDepartment,
   requireAuthContextOrThrow,
   requireDepartmentShape,
 } from "@/lib/auth/authorization";
@@ -35,6 +36,8 @@ import {
   overridePayloadSchema,
   personalListSchema,
   taskCommentSchema,
+  listOrderSchema,
+  taskGroupOrderSchema,
   taskGroupSchema,
   taskParentSchema,
   taskPatchSchema,
@@ -2199,6 +2202,123 @@ export async function saveTaskGroup(
 
   revalidatePath("/tasks/lists");
   return { ok: true, data: { id: data.id } };
+}
+
+/**
+ * P7-72 — rearrange a department's folders from the sidebar.
+ *
+ * ⚠️ `canShapeDepartment`, NOT `canManageDepartmentTree`, AND THE NARROWING IS
+ * DELIBERATE. P11-07 lets any member of a department create and rename folders,
+ * and the policy under this still admits them. But the ORDER of the rail is what
+ * the whole department looks at all day, and Amier asked for it to be the
+ * owner's, the leads' and the managers' to decide — so this is the lead-or-admin
+ * predicate, and the grip is only drawn for the same people.
+ *
+ * `sort_order` is written as position × 10 so a later hand edit on /tasks/lists
+ * can still slot a folder between two others without renumbering the lot.
+ *
+ * The reserved Client Requests folder is never sent — the rail pins it last
+ * regardless of `sort_order` (sidebar-panel.tsx) — and `department_id` on every
+ * update means an id from another department matches nothing rather than moving.
+ */
+export async function reorderTaskGroups(input: unknown): Promise<ActionResult<null>> {
+  const context = await requireAuthContextOrThrow();
+
+  const parsed = taskGroupOrderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "That order could not be read." };
+  }
+
+  const { department_id: departmentId, group_ids: groupIds } = parsed.data;
+
+  if (!canShapeDepartment(context, departmentId)) {
+    return { ok: false, error: "Only team leaders, managers and admins can rearrange folders." };
+  }
+
+  if (new Set(groupIds).size !== groupIds.length) {
+    return { ok: false, error: "That order lists a folder twice." };
+  }
+
+  const supabase = await createClient();
+
+  const results = await Promise.all(
+    groupIds.map((id, index) =>
+      supabase
+        .from("vizserve_pms_task_groups")
+        .update({ sort_order: (index + 1) * 10 })
+        .eq("id", id)
+        .eq("department_id", departmentId)
+        .eq("is_system", false)
+        .select("id"),
+    ),
+  );
+
+  const failed = results.find((result) => result.error);
+  if (failed?.error) return { ok: false, error: readableError(failed.error) };
+
+  // Zero rows is RLS or a stale id, and either way the rail the reader dragged
+  // is not the rail in the database. Say so rather than report a save.
+  if (results.some((result) => (result.data ?? []).length === 0)) {
+    return { ok: false, error: "The folders changed while you were dragging. Refresh and try again." };
+  }
+
+  // The rail is in the (app) layout, on every page — not under any one path.
+  revalidatePath("/", "layout");
+  return { ok: true, data: null };
+}
+
+/**
+ * P7-72 — rearrange the lists inside one folder, or a department's folderless
+ * lists, from the sidebar. Same gate, same numbering and same stale-order check
+ * as `reorderTaskGroups` above; see the notes there.
+ *
+ * `group_id` is MATCHED, never written. A drag reorders within a folder and
+ * cannot refile a list into another one — that stays on /tasks/lists, where the
+ * folder picker makes it a deliberate act. `owner_id is null` keeps a personal
+ * list out of it even if its id were sent.
+ */
+export async function reorderLists(input: unknown): Promise<ActionResult<null>> {
+  const context = await requireAuthContextOrThrow();
+
+  const parsed = listOrderSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "That order could not be read." };
+  }
+
+  const { department_id: departmentId, group_id: groupId, list_ids: listIds } = parsed.data;
+
+  if (!canShapeDepartment(context, departmentId)) {
+    return { ok: false, error: "Only team leaders, managers and admins can rearrange lists." };
+  }
+
+  if (new Set(listIds).size !== listIds.length) {
+    return { ok: false, error: "That order lists a list twice." };
+  }
+
+  const supabase = await createClient();
+
+  const results = await Promise.all(
+    listIds.map((id, index) => {
+      const query = supabase
+        .from("vizserve_pms_lists")
+        .update({ sort_order: (index + 1) * 10 })
+        .eq("id", id)
+        .eq("department_id", departmentId)
+        .is("owner_id", null);
+
+      return (groupId ? query.eq("group_id", groupId) : query.is("group_id", null)).select("id");
+    }),
+  );
+
+  const failed = results.find((result) => result.error);
+  if (failed?.error) return { ok: false, error: readableError(failed.error) };
+
+  if (results.some((result) => (result.data ?? []).length === 0)) {
+    return { ok: false, error: "The lists changed while you were dragging. Refresh and try again." };
+  }
+
+  revalidatePath("/", "layout");
+  return { ok: true, data: null };
 }
 
 // ---------------------------------------------------------------------------

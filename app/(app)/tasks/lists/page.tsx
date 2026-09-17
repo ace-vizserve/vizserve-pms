@@ -5,6 +5,7 @@ import { ArrowLeft } from "lucide-react";
 
 import {
   canManageAnyDepartmentTree,
+  canShapeDepartment,
   departmentTreeScope,
   ForbiddenError,
   requireAuthContext,
@@ -145,6 +146,12 @@ export default async function ListsPage() {
         groups={groups ?? []}
         departments={allowed}
         openCounts={Object.fromEntries(openByList)}
+        // P7-72 — the drag handles. Narrower than the page gate: members may
+        // open this screen and add lists (P11-07), but the ORDER is for owners,
+        // the department's leads and managers, and its department admins.
+        reorderableDepartmentIds={allowed
+          .filter((department) => canShapeDepartment(context, department.id))
+          .map((department) => department.id)}
       />
     </PageShell>
   );

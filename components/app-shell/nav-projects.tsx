@@ -24,7 +24,16 @@ import {
   SidebarMenuSubButton,
   SidebarMenuSubItem,
 } from "@/components/ui/sidebar";
+import { reorderLists, reorderTaskGroups } from "@/app/(app)/tasks/actions";
 import { cn } from "@/lib/utils";
+
+import {
+  SIDEBAR_GRIP,
+  TreeDndProvider,
+  useDragOrder,
+  useSortableTreeItem,
+  type SortableTreeItem,
+} from "./tree-dnd";
 
 /**
  * The project tree — Department → Folder → List, collapsing at every level.
@@ -96,6 +105,12 @@ export type ProjectSpace = {
   /** Folderless lists — ClickUp's term. Rendered above the folders. */
   lists: ProjectList[];
   folders: ProjectFolder[];
+  /**
+   * P7-72. Owners, the leads and managers of THIS department, and its
+   * department admins — `canShapeDepartment`, per space, because one rail can
+   * hold a department the reader leads beside one they only see.
+   */
+  canReorder: boolean;
 };
 
 export function NavProjects({
@@ -315,18 +330,13 @@ function SpaceNode({
       <CollapsibleContent>
         <SidebarMenuSub>
           {/* Folderless lists first — see the note in layout.tsx. */}
-          {space.lists.map((list) => (
-            <ListRow key={list.id} list={list} activeList={activeList} />
-          ))}
-
-          {space.folders.map((folder) => (
-            <FolderNode
-              key={folder.id}
-              folder={folder}
-              activeList={activeList}
-              canManageLists={canManageLists}
-            />
-          ))}
+          <ListRows
+            lists={space.lists}
+            activeList={activeList}
+            departmentId={space.canReorder ? space.departmentId : null}
+            groupId={null}
+          />
+          <SpaceFolders space={space} activeList={activeList} canManageLists={canManageLists} />
 
           {space.lists.length === 0 && space.folders.length === 0 ? (
             <SidebarMenuSubItem>
@@ -341,20 +351,149 @@ function SpaceNode({
   );
 }
 
+/**
+ * P7-72 — a department's folders, draggable for the people allowed to reorder.
+ *
+ * ⚠️ THE RESERVED FOLDER IS NOT IN THE SORTABLE SET. The loader pins Client
+ * Requests last whatever its `sort_order` says, so letting it be dragged would
+ * be a drop that snaps straight back. It renders after the sortable ones — and
+ * its LISTS are still sortable, since nothing pins those.
+ */
+function SpaceFolders({
+  space,
+  activeList,
+  canManageLists,
+}: {
+  space: ProjectSpace;
+  activeList: string | null;
+  canManageLists: boolean;
+}) {
+  const movable = space.folders.filter((folder) => !folder.isSystem);
+  const pinned = space.folders.filter((folder) => folder.isSystem);
+  const departmentId = space.canReorder ? space.departmentId : null;
+
+  const { order, ordered, onDrop } = useDragOrder(movable, (ids) =>
+    reorderTaskGroups({ department_id: space.departmentId, group_ids: ids }),
+  );
+
+  const node = (folder: ProjectFolder) => (
+    <FolderNode
+      key={folder.id}
+      folder={folder}
+      activeList={activeList}
+      canManageLists={canManageLists}
+      departmentId={departmentId}
+    />
+  );
+
+  if (!departmentId || movable.length < 2) return space.folders.map(node);
+
+  return (
+    <>
+      <TreeDndProvider itemIds={order} onDrop={onDrop}>
+        {ordered.map((folder) => (
+          <SortableFolderNode
+            key={folder.id}
+            folder={folder}
+            activeList={activeList}
+            canManageLists={canManageLists}
+            departmentId={departmentId}
+          />
+        ))}
+      </TreeDndProvider>
+      {pinned.map(node)}
+    </>
+  );
+}
+
+type FolderNodeProps = {
+  folder: ProjectFolder;
+  activeList: string | null;
+  canManageLists: boolean;
+  /** Set only when the reader may reorder this department. */
+  departmentId: string | null;
+};
+
+function SortableFolderNode(props: FolderNodeProps) {
+  const sortable = useSortableTreeItem(
+    props.folder.id,
+    props.folder.name,
+    // Left of the `+`. Revealed with the same hand-written group classes as the
+    // `+` — see the note on `SidebarMenuAction` below for why `showOnHover` is
+    // dead on a sub-item.
+    `${SIDEBAR_GRIP} top-0.5 right-6 group-focus-within/menu-sub-item:opacity-100 group-hover/menu-sub-item:opacity-100`,
+  );
+  return <FolderNode {...props} sortable={sortable} />;
+}
+
+/**
+ * P7-72 — a sibling set of lists: one folder's, or a department's folderless
+ * ones. Plain rows unless the reader may reorder and there is something to move.
+ */
+function ListRows({
+  lists,
+  activeList,
+  departmentId,
+  groupId,
+}: {
+  lists: ProjectList[];
+  activeList: string | null;
+  departmentId: string | null;
+  groupId: string | null;
+}) {
+  const { order, ordered, onDrop } = useDragOrder(lists, (ids) =>
+    reorderLists({ department_id: departmentId ?? "", group_id: groupId, list_ids: ids }),
+  );
+
+  if (!departmentId || lists.length < 2) {
+    return lists.map((list) => <ListRow key={list.id} list={list} activeList={activeList} />);
+  }
+
+  return (
+    <TreeDndProvider itemIds={order} onDrop={onDrop}>
+      {ordered.map((list) => (
+        <SortableListRow key={list.id} list={list} activeList={activeList} />
+      ))}
+    </TreeDndProvider>
+  );
+}
+
+function SortableListRow(props: { list: ProjectList; activeList: string | null }) {
+  const sortable = useSortableTreeItem(
+    props.list.id,
+    props.list.name,
+    // `group/list-row`, NOT `menu-sub-item`: a folder's `<li>` is also a
+    // `menu-sub-item` and contains these rows, so keying on it would light every
+    // list grip in a folder whenever its heading was hovered.
+    `${SIDEBAR_GRIP} top-1 right-1 group-focus-within/list-row:opacity-100 group-hover/list-row:opacity-100`,
+  );
+  return <ListRow {...props} sortable={sortable} />;
+}
+
 function FolderNode({
   folder,
   activeList,
   canManageLists,
-}: {
-  folder: ProjectFolder;
-  activeList: string | null;
-  canManageLists: boolean;
-}) {
+  departmentId,
+  sortable,
+}: FolderNodeProps & { sortable?: SortableTreeItem }) {
   const holds = folder.lists.some((list) => list.id === activeList);
   const [open, setOpen] = useHoldsActive(holds);
 
   return (
-    <Collapsible open={open} onOpenChange={setOpen} render={<SidebarMenuSubItem />}>
+    <Collapsible
+      open={open}
+      onOpenChange={setOpen}
+      render={
+        <SidebarMenuSubItem
+          ref={sortable?.ref}
+          style={sortable?.style}
+          // Lifted rather than dimmed while it moves, so the rows it slides over
+          // do not show through it.
+          className={cn(sortable?.isDragging && "z-10 rounded-md bg-sidebar shadow-sm")}
+        />
+      }
+    >
       <CollapsibleTrigger
         render={
           /*
@@ -372,7 +511,9 @@ function FolderNode({
            */
           <SidebarMenuSubButton
             render={<button type="button" />}
-            className="group/folder w-full pr-9 text-left"
+            // `pr-14` when there is a grip beside the `+` — two 20px controls,
+            // and the counts must never be drawn under either.
+            className={cn("group/folder w-full text-left", sortable ? "pr-14" : "pr-9")}
           >
             <ChevronRight
               aria-hidden
@@ -425,11 +566,16 @@ function FolderNode({
         </SidebarMenuAction>
       ) : null}
 
+      {sortable?.grip}
+
       <CollapsibleContent>
         <SidebarMenuSub>
-          {folder.lists.map((list) => (
-            <ListRow key={list.id} list={list} activeList={activeList} />
-          ))}
+          <ListRows
+            lists={folder.lists}
+            activeList={activeList}
+            departmentId={departmentId}
+            groupId={folder.id}
+          />
 
           {folder.lists.length === 0 ? (
             <SidebarMenuSubItem>
@@ -442,7 +588,15 @@ function FolderNode({
   );
 }
 
-function ListRow({ list, activeList }: { list: ProjectList; activeList: string | null }) {
+function ListRow({
+  list,
+  activeList,
+  sortable,
+}: {
+  list: ProjectList;
+  activeList: string | null;
+  sortable?: SortableTreeItem;
+}) {
   const pathname = usePathname();
 
   /*
@@ -459,7 +613,11 @@ function ListRow({ list, activeList }: { list: ProjectList; activeList: string |
   const base = pathname === "/tasks/board" ? "/tasks/board" : "/tasks";
 
   return (
-    <SidebarMenuSubItem>
+    <SidebarMenuSubItem
+      ref={sortable?.ref}
+      style={sortable?.style}
+      className={cn("group/list-row", sortable?.isDragging && "z-10 rounded-md bg-sidebar shadow-sm")}
+    >
       {/*
         ⚠️ `prefetch` — THE ONE PLACE IN THIS APP IT EARNS ITS REQUEST.
         A visible <Link> already prefetches its route's SHELL, but one shell is
@@ -477,6 +635,8 @@ function ListRow({ list, activeList }: { list: ProjectList; activeList: string |
       <SidebarMenuSubButton
         isActive={list.id === activeList}
         render={<Link href={`${base}?list=${list.id}`} prefetch />}
+        // Room for the grip, so it never sits on the counts.
+        className={cn(sortable && "pr-7")}
       >
         <ListChecks className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate">{list.name}</span>
@@ -484,6 +644,7 @@ function ListRow({ list, activeList }: { list: ProjectList; activeList: string |
         <FolderCounts pending={list.pendingRequests} open={list.openTasks} />
       </SidebarMenuSubButton>
 
+      {sortable?.grip}
     </SidebarMenuSubItem>
   );
 }

@@ -3,7 +3,7 @@
 import { toast } from "@/components/ui/toast";
 import { FolderPlus, Pencil, Plus } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useOptimistic, useState, useTransition } from "react";
+import { useMemo, useOptimistic, useState, useTransition, type ReactNode } from "react";
 
 import { Chip } from "@/components/status-badge";
 import { Badge } from "@/components/ui/badge";
@@ -22,7 +22,22 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 
-import { saveList, saveTaskGroup } from "../actions";
+import {
+  TreeDndProvider,
+  useDragOrder,
+  useSortableTreeItem,
+  type SortableTreeItem,
+} from "@/components/app-shell/tree-dnd";
+import { cn } from "@/lib/utils";
+
+import { reorderLists, reorderTaskGroups, saveList, saveTaskGroup } from "../actions";
+
+/**
+ * P7-72 — the grip on this screen: always visible and a full 24px target (WCAG
+ * 2.2 §2.5.8), unlike the rail's hover-revealed one. This is the screen people
+ * come to in order to arrange things, so the handle should not have to be found.
+ */
+const PAGE_GRIP = "size-6 hover:bg-muted hover:text-foreground focus-visible:ring-ring";
 
 type ListRow = {
   id: string;
@@ -62,11 +77,14 @@ export function ListManager({
   groups,
   departments,
   openCounts,
+  reorderableDepartmentIds,
 }: {
   lists: ListRow[];
   groups: GroupRow[];
   departments: Department[];
   openCounts: Record<string, number>;
+  /** P7-72. Departments whose folders and lists this reader may drag. */
+  reorderableDepartmentIds: string[];
 }) {
   /*
    * P11-05 — a renamed list carries its new name out of the dialog.
@@ -208,6 +226,7 @@ export function ListManager({
           {departments.map((department) => {
             const loose = listsByGroup.get(`${department.id}:none`) ?? [];
             const folders = groupsByDepartment.get(department.id) ?? [];
+            const reorderIn = reorderableDepartmentIds.includes(department.id) ? department.id : null;
 
             // A department with no folders and no loose lists has nothing to
             // show.
@@ -229,9 +248,20 @@ export function ListManager({
                 {/* Folderless lists first. After P7-18 every list that already
                     existed is one of these, so putting folders above would bury
                     the whole company's work under an empty heading. */}
-                {loose.length > 0 ? <ListRows lists={loose} openCounts={openCounts} onEdit={editList} /> : null}
+                {loose.length > 0 ? (
+                  <ListRows
+                    lists={loose}
+                    openCounts={openCounts}
+                    onEdit={editList}
+                    departmentId={reorderIn}
+                    groupId={null}
+                  />
+                ) : null}
 
-                {folders.map((folder) => {
+                <FolderCards
+                  folders={folders}
+                  departmentId={reorderIn}
+                  renderFolder={(folder, sortable) => {
                   const folderLists = listsByGroup.get(`${department.id}:${folder.id}`) ?? [];
 
                   // ⚠️ The reserved folder USED TO BE HIDDEN while empty, on
@@ -244,8 +274,16 @@ export function ListManager({
                   // state like any other folder.
 
                   return (
-                    <div key={folder.id} className="mt-4 bg-card grade-surface border p-4 rounded-lg">
+                    <div
+                      key={folder.id}
+                      ref={sortable?.ref}
+                      style={sortable?.style}
+                      className={cn(
+                        "mt-4 bg-card grade-surface border p-4 rounded-lg",
+                        sortable?.isDragging && "relative z-10 shadow-lg",
+                      )}>
                       <div className="mb-2 flex items-center gap-2">
+                        {sortable?.grip}
                         <h3 className="text-2xs font-semibold uppercase tracking-wider text-muted-foreground">
                           {folder.name}
                         </h3>
@@ -282,7 +320,13 @@ export function ListManager({
                       </div>
 
                       {folderLists.length > 0 ? (
-                        <ListRows lists={folderLists} openCounts={openCounts} onEdit={editList} />
+                        <ListRows
+                          lists={folderLists}
+                          openCounts={openCounts}
+                          onEdit={editList}
+                          departmentId={reorderIn}
+                          groupId={folder.id}
+                        />
                       ) : (
                         <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">
                           Empty. Put a list in it from the New list button.
@@ -290,7 +334,8 @@ export function ListManager({
                       )}
                     </div>
                   );
-                })}
+                }}
+                />
               </section>
             );
           })}
@@ -336,41 +381,144 @@ export function ListManager({
   );
 }
 
-/** One bordered block of list rows. Extracted because it renders three times. */
-function ListRows({
-  lists,
-  openCounts,
-  onEdit,
+/**
+ * P7-72 — a department's folder cards, draggable for the people allowed to.
+ *
+ * ⚠️ THE RESERVED FOLDER IS NOT IN THE SORTABLE SET. Client Requests is pinned
+ * last on this screen and in the rail whatever its `sort_order` says, so a drag
+ * would snap straight back. It renders after the sortable ones — its LISTS can
+ * still be dragged.
+ *
+ * `renderFolder` keeps the card's markup where it was, in `ListManager`, rather
+ * than threading every dialog opener down through another component.
+ */
+function FolderCards({
+  folders,
+  departmentId,
+  renderFolder,
 }: {
+  folders: GroupRow[];
+  /** Set only when the reader may reorder this department. */
+  departmentId: string | null;
+  renderFolder: (folder: GroupRow, sortable?: SortableTreeItem) => ReactNode;
+}) {
+  const movable = folders.filter((folder) => !folder.is_system);
+  const pinned = folders.filter((folder) => folder.is_system);
+
+  const { order, ordered, onDrop } = useDragOrder(movable, (ids) =>
+    reorderTaskGroups({ department_id: departmentId ?? "", group_ids: ids }),
+  );
+
+  if (!departmentId || movable.length < 2) {
+    return folders.map((folder) => renderFolder(folder));
+  }
+
+  return (
+    <>
+      <TreeDndProvider itemIds={order} onDrop={onDrop}>
+        {ordered.map((folder) => (
+          <SortableFolderCard key={folder.id} folder={folder} renderFolder={renderFolder} />
+        ))}
+      </TreeDndProvider>
+      {pinned.map((folder) => renderFolder(folder))}
+    </>
+  );
+}
+
+function SortableFolderCard({
+  folder,
+  renderFolder,
+}: {
+  folder: GroupRow;
+  renderFolder: (folder: GroupRow, sortable?: SortableTreeItem) => ReactNode;
+}) {
+  const sortable = useSortableTreeItem(folder.id, `folder ${folder.name}`, PAGE_GRIP);
+  return renderFolder(folder, sortable);
+}
+
+type ListRowsProps = {
   lists: ListRow[];
   openCounts: Record<string, number>;
   onEdit: (list: ListRow) => void;
-}) {
+  /** P7-72. Set only when the reader may reorder this department. */
+  departmentId: string | null;
+  /** The folder these lists sit in; null for the folderless ones. */
+  groupId: string | null;
+};
+
+/** One bordered block of list rows. Extracted because it renders three times. */
+function ListRows({ lists, openCounts, onEdit, departmentId, groupId }: ListRowsProps) {
+  const { order, ordered, onDrop } = useDragOrder(lists, (ids) =>
+    reorderLists({ department_id: departmentId ?? "", group_id: groupId, list_ids: ids }),
+  );
+
+  if (!departmentId || lists.length < 2) {
+    return (
+      <ul className="bg-card grade-raised overflow-hidden rounded-lg border">
+        {lists.map((list) => (
+          <ListItem key={list.id} list={list} openCounts={openCounts} onEdit={onEdit} />
+        ))}
+      </ul>
+    );
+  }
+
   return (
-    <ul className="bg-card grade-raised overflow-hidden rounded-lg border">
-      {lists.map((list) => (
-        <li key={list.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b p-3 last:border-0">
-          <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium">{list.name}</span>
-              {/* Never colour alone — the word carries the state. */}
-              {!list.is_active ? <Chip tone="neutral" label="Archived" /> : null}
-              {/* Provenance, not state — where this list came from does not
-                  change, so it is a `Badge` and carries no status dot. */}
-              {list.form_id ? <Badge variant="secondary">From a form</Badge> : null}
-            </div>
-            {list.description ? <p className="mt-0.5 text-xs text-muted-foreground">{list.description}</p> : null}
-          </div>
-
-          <span className="shrink-0 text-2xs text-muted-foreground">{openCounts[list.id] ?? 0} open</span>
-
-          <Button variant="ghost" size="sm" onClick={() => onEdit(list)}>
-            <Pencil />
-            <span className="sr-only">Edit {list.name}</span>
-          </Button>
-        </li>
-      ))}
+    // No `overflow-hidden` while sortable: it would clip the row being dragged
+    // the moment it left the block. The rounded corners are kept by the rows'
+    // own backgrounds being transparent.
+    <ul className="bg-card grade-raised rounded-lg border">
+      <TreeDndProvider itemIds={order} onDrop={onDrop}>
+        {ordered.map((list) => (
+          <SortableListItem key={list.id} list={list} openCounts={openCounts} onEdit={onEdit} />
+        ))}
+      </TreeDndProvider>
     </ul>
+  );
+}
+
+type ListItemProps = {
+  list: ListRow;
+  openCounts: Record<string, number>;
+  onEdit: (list: ListRow) => void;
+};
+
+function SortableListItem(props: ListItemProps) {
+  const sortable = useSortableTreeItem(props.list.id, props.list.name, PAGE_GRIP);
+  return <ListItem {...props} sortable={sortable} />;
+}
+
+function ListItem({ list, openCounts, onEdit, sortable }: ListItemProps & { sortable?: SortableTreeItem }) {
+  return (
+    <li
+      ref={sortable?.ref}
+      style={sortable?.style}
+      className={cn(
+        "flex flex-wrap items-center gap-x-3 gap-y-1 border-b p-3 last:border-0",
+        sortable && "pl-2",
+        // Lifted, with a solid fill, so the rows it passes over do not show
+        // through it.
+        sortable?.isDragging && "relative z-10 rounded-lg border bg-card shadow-lg",
+      )}>
+      {sortable?.grip}
+      <div className="min-w-0 flex-1">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">{list.name}</span>
+          {/* Never colour alone — the word carries the state. */}
+          {!list.is_active ? <Chip tone="neutral" label="Archived" /> : null}
+          {/* Provenance, not state — where this list came from does not
+              change, so it is a `Badge` and carries no status dot. */}
+          {list.form_id ? <Badge variant="secondary">From a form</Badge> : null}
+        </div>
+        {list.description ? <p className="mt-0.5 text-xs text-muted-foreground">{list.description}</p> : null}
+      </div>
+
+      <span className="shrink-0 text-2xs text-muted-foreground">{openCounts[list.id] ?? 0} open</span>
+
+      <Button variant="ghost" size="sm" onClick={() => onEdit(list)}>
+        <Pencil />
+        <span className="sr-only">Edit {list.name}</span>
+      </Button>
+    </li>
   );
 }
 
