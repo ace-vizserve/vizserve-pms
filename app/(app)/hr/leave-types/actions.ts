@@ -47,7 +47,8 @@ function revalidateLeaveTypeScreens(): void {
   revalidatePath("/");
 }
 
-const SELECT = "id, code, label, is_active, sort_order, applies_to_gender, calendar_visibility";
+const SELECT =
+  "id, code, label, is_active, sort_order, applies_to_gender, calendar_visibility, requires_reliever";
 
 export async function updateLeaveType(input: unknown): Promise<ActionResult> {
   const context = await requireHr();
@@ -80,6 +81,7 @@ export async function updateLeaveType(input: unknown): Promise<ActionResult> {
       is_active: values.is_active,
       applies_to_gender: values.applies_to_gender,
       calendar_visibility: values.calendar_visibility,
+      requires_reliever: values.requires_reliever,
     })
     .eq("id", values.id);
 
@@ -135,6 +137,7 @@ export async function createLeaveType(input: unknown): Promise<ActionResult<{ id
       is_active: values.is_active,
       applies_to_gender: values.applies_to_gender,
       calendar_visibility: values.calendar_visibility,
+      requires_reliever: values.requires_reliever,
     })
     .select("id")
     .single();
