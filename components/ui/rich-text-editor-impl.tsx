@@ -29,6 +29,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { RICH_TEXT_CLASS } from "@/components/ui/rich-text";
+import { useMentions, type MentionPerson } from "@/components/ui/rich-text-mention";
 import { EDITOR_SHELL, RichTextEditorShell } from "@/components/ui/rich-text-editor-shell";
 import { cn } from "@/lib/utils";
 import { focusWithoutScroll } from "@/lib/focus";
@@ -135,6 +136,7 @@ export function RichTextEditor({
   minHeight = "min-h-16",
   className,
   onUploadImage,
+  loadMentions,
 }: {
   value: string;
   onChange: (html: string) => void;
@@ -176,12 +178,31 @@ export function RichTextEditor({
    * nothing; the caller holds the error string and knows which toast to raise.
    */
   onUploadImage?: (file: File) => Promise<UploadedImage | null>;
+  /**
+   * P7-71 — who `@` may name here, fetched the first time somebody types one.
+   *
+   * PRESENT OR ABSENT DECIDES THE SCHEMA, exactly like `onUploadImage` above
+   * and for the same reason: the `mention` node only exists in an editor that
+   * was created with this, so a field without it has nothing for an `@` to
+   * become. Task comments pass it; the other rich-text columns do not, because
+   * a QA resolution or a leave reason is addressed to a process rather than to
+   * a person.
+   *
+   * ⚠️ WHAT IT RETURNS IS A SUGGESTION, NOT A PERMISSION. The database decides
+   * who may actually be mentioned and who is notified — see
+   * `vizserve_pms_task_mention_candidates`. This list only decides what the
+   * menu offers.
+   */
+  loadMentions?: () => Promise<MentionPerson[]>;
 }) {
   /*
    * Read once, deliberately — see the prop's own note. `useState` rather than a
    * ref because the toolbar renders from it.
    */
   const [imagesEnabled] = useState(() => Boolean(onUploadImage));
+
+  // P7-71. Read once for the same reason, and it says so itself.
+  const mentions = useMentions(loadMentions);
   const uploadRef = useRef(onUploadImage);
   useEffect(() => {
     uploadRef.current = onUploadImage;
@@ -333,6 +354,8 @@ export function RichTextEditor({
             }),
           ]
         : []),
+      // P7-71. Null unless `loadMentions` was given — see `useMentions`.
+      ...(mentions.extension ? [mentions.extension] : []),
     ],
     content: value,
     editorProps: {
@@ -342,6 +365,15 @@ export function RichTextEditor({
       },
       handleKeyDown: (_view, event) => {
         if (!onSubmit) return false;
+        /*
+         * P7-71 — ⚠️ THE MENTION MENU OWNS ENTER WHILE IT IS OPEN, MODIFIERS
+         * INCLUDED. Somebody half way through picking a name has not finished
+         * writing the comment, and Cmd+Enter is close enough to Enter that a
+         * slipped thumb would post it. The menu's own handler takes plain Enter
+         * (it runs as a plugin, after this); this is only about not stealing
+         * the modified one out from under it.
+         */
+        if (mentions.isOpen()) return false;
         if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
           event.preventDefault();
           onSubmit();
@@ -401,6 +433,11 @@ export function RichTextEditor({
           {placeholder}
         </p>
       ) : null}
+      {/* P7-71. Null unless an `@` is open. Rendered INSIDE the editor's own
+          box rather than portalled, so it inherits the stacking context of
+          whatever is holding the editor — a comment sheet, a popover on a list
+          row — instead of having to out-guess it with a z-index. */}
+      {mentions.overlay}
     </div>
   );
 }

@@ -2107,3 +2107,155 @@ questions. **Phase 6 reporting must not treat one as a proxy for the other.**
 - **No end-to-end tests exist anywhere in this app.** That is the layer that
   would have caught the hardcoded `p_list_id` before a demo. Playwright and
   Next's `instant()` helper are the shape; both need the scratch project.
+
+---
+
+## P7-71 — `@` mentions in a task comment (17 Sep 2026)
+
+**Two migrations, written and NOT YET APPLIED.** Everything else is code and is
+green: typecheck, lint at the pre-existing warning baseline, 1,664 unit tests,
+and a clean build.
+
+P7-08 shipped the comment thread on 18 Aug and wrote down what it deliberately
+was not: *"No threads, no replies, no reactions, no mentions."* `comment-thread.tsx`
+recorded why this one in particular was held back — a mention "needs a
+notification path and a scope question about who may be mentioned". Both are now
+answered. Replies and reactions are still deliberately absent.
+
+### The scope: who may be mentioned depends on who is mentioning
+
+Amier's rule, verbatim (17 Sep): *"if i am under vizbytes i can only mention my
+team member, but if i am manager and admin role i can mention everyone since i
+have access on each department"*.
+
+⚠️ **THAT SENTENCE IS THE REASON EVERY FUNCTION HERE CARRIES AN ACTOR.** It was
+first read as a rule about who is *mentionable* — managers being the exception
+that gets added to the list — and it is also a rule about who may *mention*.
+Both are now implemented. There are two ways onto the list:
+
+**A. In range of the task** — offered to everybody, whoever is typing:
+
+1. the PIC and the QA reviewer,
+2. anyone else on `vizserve_pms_task_assignees`,
+3. every active member of the task's department (P11-03 — the task belongs to
+   the department, not to its PIC),
+4. whoever manages that department: admins and owners always, plus any
+   team_leader-or-above with that department in `vizserve_pms_user_managed_departments`.
+
+**B. Within the actor's reach** — their own department, any department they
+manage, everybody if they are an admin or owner.
+
+⚠️ **CLAUSE B MIRRORS THE `vizserve_pms_users` SELECT POLICY AND GOES NO WIDER.**
+Its three general grants are own department (`p7_17`), managed departments, and
+everything for an admin. Mirroring means the picker discloses no name its user
+could not already look up, so the widening costs nothing in identity terms. It is
+deliberately narrower in one respect: the feature-specific widenings (HR scope
+`p7_54`, hand-overs `p9_08`, relievers `p11_11`) are not mirrored, because none
+of them is about being able to address somebody.
+
+⚠️ **THE PICKER IS AN `rpc` BECAUSE NEITHER HALF IS REACHABLE WITH A `select`.**
+A manager usually sits OUTSIDE the department they oversee, so an ordinary member
+cannot read their user row at all, and a member cannot enumerate another
+department to discover that an admin may address it either. A plain query from
+the comment box would have returned the department and dropped everything else.
+
+⚠️ **WHAT CLAUSE B COSTS: A MENTION CAN NOW REACH SOMEBODY WHO CANNOT OPEN THE
+TASK.** They get the inbox row — which carries the task title and the first 200
+characters of the comment — and the link 404s for them, because RLS on
+`vizserve_pms_tasks` is untouched by any of this. That is the accepted trade of
+the rule as stated: an admin who deliberately names somebody is taken at their
+word. **If a mention should GRANT access**, that is a mentions table plus a new
+clause on the task SELECT policy — the policy that caused the statement-timeout
+outage in `p12_04` — and it is its own decision, not a detail of this one.
+
+### Where it is enforced
+
+`vizserve_pms_task_mention_candidates(task, actor)` answers "who may *actor*
+mention here", **has no grants at all**, and is reachable only from two
+`SECURITY DEFINER` callers: the picker's wrapper, which passes `auth.uid()` after
+checking the caller can see the task, and the notify trigger, which passes
+`new.author_id`. One definition, two consumers, so the menu cannot offer a name
+the database would refuse to notify.
+
+⚠️ **THE ACTOR IS A PARAMETER RATHER THAN `auth.uid()` FOR TWO REASONS.** The
+trigger judges the reach of the comment's AUTHOR, so a member cannot widen their
+own by hand-editing a body; and a comment written by the service role — no
+session, so no `auth.uid()` — is still judged against the person whose name is on
+it rather than against nobody. The flip side is that the function must never be
+granted: pointed at somebody else it reports their reach, which is a way to
+enumerate rosters.
+
+⚠️ **THE WRAPPER'S TASK GUARD AND THE REACH ARE DIFFERENT QUESTIONS.** The guard
+asks "may you comment here at all" — an admin who cannot see a task gets no
+roster for it, whatever their reach. Collapsing the two would let a task id be
+used to enumerate people.
+
+The trigger **intersects the posted body against that set** before it notifies
+anybody. The picker is a convenience; this is the rule. A hand-written
+`data-mention-id` pointing at somebody in another department renders as a name in
+the comment and notifies nobody.
+
+### A mention is markup, not a join table
+
+It stores as `<span data-mention-id="<uuid>">@Amier Bautista</span>`. **The body
+is the only record that a mention happened**, so three spellings of that
+attribute are one decision: the editor writes it, `sanitizeRichText` is the only
+reason it survives, and `vizserve_pms_mentioned_ids` reads it back in SQL.
+Rename fewer than all three and mentions silently stop notifying — the failure
+that looks exactly like the feature working.
+
+⚠️ **`span` IS NOW ON `RICH_TEXT_TAGS`, AND IT IS THE ONLY TAG THERE WITH NO
+MEANING OF ITS OWN.** It carries `data-mention-id` and nothing else — no `class`,
+no `style`. A user-supplied class on markup this app hands to
+`dangerouslySetInnerHTML` is every utility in `globals.css` available to anybody
+who can type into a comment box, and `fixed inset-0` is a comment that covers the
+screen. A span whose id is not a uuid comes out of the sanitiser bare and reads
+as the plain text it is.
+
+### Notification
+
+One trigger, not two — the P7-08 function was replaced rather than joined.
+
+- A mention **suppresses the plain `commented`** for that person, so a named PIC
+  gets one inbox row about one comment rather than two.
+- It now fires on **UPDATE of the body as well as INSERT**, for mentions only:
+  "@Amier, ignore the above" typed thirty seconds after posting is the ordinary
+  way people use this. Only ids absent from the OLD body are notified. The
+  `commented` half stays insert-only — an edited comment is not a new comment.
+- `send_email = false`, matching `commented`. The people a mention reaches who
+  would not otherwise hear anything are department colleagues who get no
+  notification about the task at all today; for them the inbox row IS the new
+  signal. **It is a settings row, so one UPDATE flips it.**
+
+### What is proven, and what is not
+
+`tests/unit/mention-markup.test.ts` drives the real extension through the real
+hook and puts its output through the real sanitiser — because the pure-function
+tests cannot reach the gap where this feature fails. TipTap's stock mention node
+emits `data-type`, `data-id`, `data-label` and `data-mention-suggestion-char`,
+all four of which the sanitiser strips; a mention built that way renders while
+you type it and comes back as bare text on reload. The round trip is asserted
+separately, because a stored mention that reloads as plain text loses its id the
+first time somebody edits the comment and nobody ever sees an error.
+
+⚠️ **It is the first test in this repo to run under `jsdom`**, via a per-file
+`@vitest-environment` docblock — `vitest.config.ts` anticipated exactly this and
+asked that the other tests not pay for a DOM.
+
+**The SQL is unverified.** There is no Docker on this machine and no scratch
+project, so neither migration has been executed and `vizserve_pms_mentionable_for_task`
+has never returned a row. Applying them is `npm run db:push`.
+
+⚠️ **The enum value is in its own file for the fifth time** —
+`20260917090000_p7_71_mention_notification_type.sql` adds `'mentioned'` alone,
+because Postgres forbids using an enum value in the transaction that adds it and
+each migration here is one transaction.
+
+### What is owed
+
+- **Neither migration is applied, and nothing has been verified in a browser.**
+- A `mentioned` notification has never been raised, so the wording of its title
+  has not been read by anybody in an inbox.
+- The `@` menu has no test driving the keyboard — the markup contract is
+  covered, the interaction is not. That needs the end-to-end layer this app
+  still does not have.

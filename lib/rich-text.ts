@@ -53,7 +53,42 @@ export const RICH_TEXT_TAGS = [
   "h4",
   "a",
   "img",
+  /*
+   * P7-71 — `span` IS HERE FOR EXACTLY ONE THING: a mention.
+   *
+   * ⚠️ AND IT IS THE ONE TAG ON THIS LIST THAT CARRIES NO MEANING OF ITS OWN.
+   * Every other entry is a semantic element — strip it and the reader loses
+   * structure. A `span` is a hook, so admitting it admits whatever is hung on
+   * it: `sanitizeRichText` therefore allows a SINGLE attribute on it
+   * (`data-mention-id`, and only when it is a uuid) and no `class` or `style`
+   * at all. A span carrying anything else keeps its text and loses its tag,
+   * which is what a stripped tag does by default.
+   *
+   * The temptation, when the next feature wants a coloured word, will be to add
+   * `class` here. Don't: `class` on a user-supplied span is every utility in
+   * `globals.css` available to anybody who can type into a comment box, up to
+   * and including `fixed inset-0`.
+   */
+  "span",
 ] as const;
+
+/**
+ * P7-71 — WHERE A MENTION KEEPS ITS IDENTITY, and the reason it is an id rather
+ * than a name.
+ *
+ * A mention has to survive somebody being renamed, and it has to be readable by
+ * the database — `vizserve_pms_mentioned_ids` in
+ * `20260917090100_p7_71_task_comment_mentions.sql` reads this exact attribute
+ * back out of the stored body to decide who gets a notification. There is NO
+ * join table: the markup is the only record that a mention happened.
+ *
+ * ⚠️ THREE PLACES SPELL THIS STRING and they are one decision — the editor
+ * writes it (`rich-text-editor-impl.tsx`), the sanitiser is the only thing that
+ * lets it survive (`lib/rich-text-server.ts`), and the trigger reads it. Rename
+ * it in fewer than all three and mentions silently stop notifying anybody,
+ * which is the failure that looks exactly like the feature working.
+ */
+export const MENTION_ATTR = "data-mention-id";
 
 /**
  * P7-67 — where an inline image's bytes are served from, and the only `src` the
@@ -113,6 +148,35 @@ export function taskImageIds(html: string | null | undefined): string[] {
 
   const found = html.matchAll(
     /\/api\/task-images\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/gi,
+  );
+
+  return [...new Set([...found].map((match) => match[1]!.toLowerCase()))];
+}
+
+/**
+ * P7-71 — every user a body names, by id.
+ *
+ * ⚠️ BUILT LIKE `taskImageIds` ABOVE AND FOR THE SAME REASON — the markup is
+ * the only record. Deliberately reads the raw string rather than parsing it:
+ * the server has no DOM, and the one caller that matters is the `SECURITY
+ * DEFINER` trigger, which reads the same attribute with the same uuid shape in
+ * SQL. If the two ever disagree about what a mention looks like, the UI shows a
+ * mention and nobody is notified.
+ *
+ * ⚠️ THIS IS NOT AN AUTHORISATION CHECK AND MUST NEVER BE USED AS ONE. It
+ * reports who a body CLAIMS to name, which for a hand-written body is anybody
+ * at all. The database intersects this with
+ * `vizserve_pms_task_mention_candidates` before it notifies a soul; this
+ * function exists for counting and for tests.
+ *
+ * Deduplicated and lower-cased — naming the same person twice in one comment is
+ * one mention.
+ */
+export function mentionedUserIds(html: string | null | undefined): string[] {
+  if (!html) return [];
+
+  const found = html.matchAll(
+    /data-mention-id="([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})"/gi,
   );
 
   return [...new Set([...found].map((match) => match[1]!.toLowerCase()))];
