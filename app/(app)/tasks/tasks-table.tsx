@@ -345,6 +345,15 @@ export function TaskGroupTable({
     );
   }
 
+  /*
+   * Whether this group needs the leading slot at all (see THE LEADING SLOT
+   * below). A subtask row only exists under a parent in the same group, so a
+   * group with no parent has neither occupant — and 28px of nothing on every
+   * row. Per group, because each group is its own table: titles still share a
+   * left edge within the table they are read in.
+   */
+  const hasNesting = group.some((task) => (task.subRows?.length ?? 0) > 0);
+
   const selectableInGroup = group
     .flatMap((task) => [task, ...(task.subRows ?? [])])
     /* A row the server has not created cannot be selected for deletion — its
@@ -482,6 +491,7 @@ export function TaskGroupTable({
                 subtasks (one level, by trigger) — so they share the slot rather
                 than each reserving one and paying twice for the space.
               */}
+              {hasNesting ? (
               <span className="flex w-7 shrink-0 items-center">
                 {/* The elbow. Decoration only — the row's meaning is carried by
                     the indent and by the parent link in the meta line, so this is
@@ -529,6 +539,7 @@ export function TaskGroupTable({
                   </button>
                 ) : null}
               </span>
+              ) : null}
 
               {/*
                 The stage, always visible and BEFORE the title — the shape the
