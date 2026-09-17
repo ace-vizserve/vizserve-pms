@@ -28,7 +28,7 @@ import {
 } from "@/lib/schemas/tasks";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { fieldKey, readFieldValue, type ListField } from "@/lib/schemas/list-fields";
-import { CustomFieldDisplay } from "./custom-field-value";
+import { CustomFieldDisplay, CustomFieldEditor } from "./custom-field-value";
 import { cn } from "@/lib/utils";
 import { GroupComposer } from "./add-task";
 import { AssigneePicker } from "./assignees";
@@ -367,9 +367,21 @@ export function TaskGroupTable({
     hideable: true,
     header: field.name,
     className: "hidden lg:table-cell",
-    cell: (task) => (
-      <CustomFieldDisplay compact field={field} value={readFieldValue(field, task.custom_fields)} />
-    ),
+    /*
+     * EDITABLE IN PLACE, like priority and the dates beside it — shipped
+     * read-only at first, and a value you can see but not click reads as broken.
+     * Offered to the same seats the row's other controls use; the task UPDATE
+     * policy behind `vizserve_pms_set_task_field` is what actually decides.
+     */
+    cell: (task) => {
+      const value = readFieldValue(field, task.custom_fields);
+      const mine = seat(task);
+      return mine.isAssignee || mine.isQa || mine.leadsDepartment || mine.inDepartment ? (
+        <CustomFieldEditor compact taskId={task.id} field={field} value={value} />
+      ) : (
+        <CustomFieldDisplay compact field={field} value={value} />
+      );
+    },
   }));
 
   const columns: Column<ListRow>[] = [

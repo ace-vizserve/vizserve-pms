@@ -92,8 +92,10 @@ export function CustomFieldDisplay({
   }
 }
 
+// A floor on the size, because an EMPTY field used to be a single faint dash —
+// a few pixels wide, and read as "cannot click this".
 const TRIGGER = cn(
-  "-mx-1 min-w-0 max-w-full rounded-sm px-1 py-0.5 text-left",
+  "-mx-1 inline-flex min-h-6 min-w-12 max-w-full items-center rounded-sm px-1 py-0.5 text-left",
   "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
 );
 
@@ -106,10 +108,13 @@ export function CustomFieldEditor({
   taskId,
   field,
   value,
+  compact = false,
 }: {
   taskId: string;
   field: ListField;
   value: FieldValue | null;
+  /** The task list's cell: the value drawn on one line. The editor is the same. */
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [, startTransition] = useTransition();
@@ -149,7 +154,13 @@ export function CustomFieldEditor({
     );
   }
 
-  const display = <CustomFieldDisplay field={field} value={shown} />;
+  // Empty says what clicking does, rather than a dash that looks inert.
+  const display =
+    shown === null ? (
+      <span className="text-xs text-foreground-faint">Add</span>
+    ) : (
+      <CustomFieldDisplay field={field} value={shown} compact={compact} />
+    );
 
   if (field.field_type === "DROPDOWN" || field.field_type === "LABELS") {
     const multiple = field.field_type === "LABELS";
