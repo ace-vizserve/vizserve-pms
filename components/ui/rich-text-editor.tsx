@@ -30,6 +30,8 @@ import { RichTextEditorShell } from "@/components/ui/rich-text-editor-shell";
  * a call site needs the upload shape without importing the implementation.
  */
 export type { UploadedImage } from "@/components/ui/rich-text-editor-impl";
+/** P7-71 — same idea, for the `@` picker's list. */
+export type { MentionPerson } from "@/components/ui/rich-text-mention";
 
 export const RichTextEditor = dynamic(
   () => import("@/components/ui/rich-text-editor-impl").then((module) => module.RichTextEditor),

@@ -14,7 +14,13 @@ import { isRichTextEmpty } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
 import { CommentBody } from "./comment-body";
 
-import { addTaskComment, deleteTaskComment, editTaskComment, uploadCommentImage } from "./actions";
+import {
+  addTaskComment,
+  deleteTaskComment,
+  editTaskComment,
+  mentionableForTask,
+  uploadCommentImage,
+} from "./actions";
 import { Monogram, initials } from "./assignees";
 
 export type TaskComment = {
@@ -98,11 +104,16 @@ const NEEDS = {
  * of the same list is how the two end up disagreeing about whether an edited
  * comment says so. The popover passes no `events` and keeps the shape it had.
  *
- * FLAT AND IN TIME ORDER. Threaded replies, reactions and `@` mentions are all
- * in the reference this came from and none is built: replies need a
- * `parent_comment_id` and a depth rule, reactions need their own table, and
- * mentions need a notification path and a scope question about who may be
- * mentioned. Each is a slice; none is a detail of this one.
+ * FLAT AND IN TIME ORDER. Threaded replies and reactions are in the reference
+ * this came from and neither is built: replies need a `parent_comment_id` and a
+ * depth rule, reactions need their own table. Each is a slice; neither is a
+ * detail of this one.
+ *
+ * `@` MENTIONS WERE THE THIRD ITEM ON THAT LIST AND ARE NOW BUILT (P7-71). What
+ * this file contributes is `loadMentions` on both editors; the two things that
+ * held it back — a notification path, and a scope rule for who may be mentioned
+ * — are answered in `20260917090100_p7_71_task_comment_mentions.sql`, because
+ * both are questions only the database can answer honestly.
  *
  * Author-only edit and delete are enforced in the DATABASE — the UPDATE and
  * DELETE policies test `author_id = auth.uid()`. The controls below are hidden
@@ -361,6 +372,21 @@ export function CommentThread({
     [taskId],
   );
 
+  /**
+   * P7-71 — who `@` may name on this task.
+   *
+   * ⚠️ HANDED TO BOTH EDITORS BELOW, the composer and the edit box. Mentioning
+   * somebody in a correction — "@Amier, ignore the above" — is the same act as
+   * mentioning them in the first place, and the trigger notifies on an UPDATE
+   * that adds a name for exactly that reason. An edit box without this would be
+   * a `@` that types a literal at-sign, which reads as the feature breaking.
+   *
+   * The editor calls it once, on the first `@`, and caches the result. Fetching
+   * here on mount instead would put a round trip behind every comment box on a
+   * task list, most of which nobody types into.
+   */
+  const loadMentions = useCallback(() => mentionableForTask(taskId), [taskId]);
+
   const composer = (
     // `shrink-0` beside the filling list: the box you type into is the one
     // thing in this column that must never give up height, and a flex item
@@ -380,7 +406,7 @@ export function CommentThread({
         value={body}
         onChange={setBody}
         onSubmit={post}
-        onUploadImage={uploadImage}
+        onUploadImage={uploadImage}        loadMentions={loadMentions}
         minHeight="min-h-16"
         placeholder="Write a comment…"
       />
@@ -486,7 +512,7 @@ export function CommentThread({
                       value={draft}
                       onChange={setDraft}
                       onSubmit={() => saveEdit(row.comment!.id)}
-                      onUploadImage={uploadImage}
+                      onUploadImage={uploadImage}                      loadMentions={loadMentions}
                       minHeight="min-h-16"
                     />
                     <div className="flex gap-1.5">

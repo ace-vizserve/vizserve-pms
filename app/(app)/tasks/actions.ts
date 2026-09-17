@@ -283,6 +283,60 @@ export async function updateTaskField(taskId: string, input: unknown): Promise<A
 // ---------------------------------------------------------------------------
 
 /**
+ * P7-71 — the names `@` may offer on this task.
+ *
+ * ⚠️ WHO IS ON THE LIST DEPENDS ON WHO IS ASKING. Amier's rule: "if i am under
+ * vizbytes i can only mention my team member, but if i am manager and admin
+ * role i can mention everyone since i have access on each department". So a
+ * member reaches their own team, a lead reaches the departments they oversee,
+ * an admin reaches everybody — and on top of that, anybody in range of the TASK
+ * is always offered, because the PIC and the QA reviewer may sit outside your
+ * department and are the two people most likely to need naming.
+ *
+ * ⚠️ AN RPC RATHER THAN A QUERY, AND THAT IS THE WHOLE POINT. Neither half of
+ * that rule is reachable with a `select` from here. A manager usually sits
+ * OUTSIDE the department they oversee, so an ordinary member cannot read their
+ * user row at all — `users read own department` (p7_17) stops at their own
+ * department's roster — and a member cannot enumerate another department to
+ * find out that an admin may address it either. A plain query would quietly
+ * return the department and drop everything else.
+ *
+ * `vizserve_pms_mentionable_for_task` is `SECURITY DEFINER`, checks the caller
+ * can see the task before it answers, and then applies the caller's own reach.
+ * It is the SAME set the notify trigger intersects the posted body against —
+ * asked there about the comment's author — so the menu cannot offer a name the
+ * database would refuse to notify.
+ *
+ * ⚠️ CALLED FROM THE EDITOR, ON THE FIRST `@`, NOT ON PAGE LOAD. The comment
+ * sheet opens from a list row that has no people loaded and no way to get any
+ * without threading a roster through the table, the board and the sheet — three
+ * call sites that would each have to agree about scope. One lazy call keeps the
+ * answer in one place.
+ */
+export async function mentionableForTask(
+  taskId: string,
+): Promise<{ id: string; full_name: string }[]> {
+  await requireAuthContextOrThrow();
+
+  if (!z.uuid().safeParse(taskId).success) return [];
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("vizserve_pms_mentionable_for_task", {
+    p_task_id: taskId,
+  });
+
+  /*
+   * An empty list rather than a thrown error, on both paths. This feeds a menu
+   * that opens while somebody is typing: "No one to mention here" is a fine
+   * thing for it to say, and an exception out of a keystroke handler is not.
+   * A caller who cannot see the task gets the same answer as a task with nobody
+   * on it, which is also the correct answer.
+   */
+  if (error) return [];
+  return data ?? [];
+}
+
+/**
  * No authorization beyond "signed in", and that is correct: the INSERT policy
  * requires the author to be the caller AND to be on the task, so a comment on
  * work somebody cannot see is refused by the database rather than by a check

@@ -2245,6 +2245,26 @@ export type Database = {
        * SECURITY DEFINER: the caller is usually a member whose reach stops at
        * their own department, which is the whole reason it exists.
        */
+      /**
+       * P7-71. Who the `@` picker may offer on a task: anybody in range of the
+       * task, plus anybody within THE CALLER'S OWN REACH — their department, the
+       * departments they manage, everybody if they are an admin. Minus the
+       * caller, and empty unless the caller can see the task at all.
+       *
+       * ⚠️ THE COMPANION `vizserve_pms_task_mention_candidates` IS NOT HERE AND
+       * MUST NOT BE. It has no grants: it takes the actor as a parameter, so
+       * pointed at somebody else it reports THEIR reach. It is reachable only
+       * from this wrapper, which passes `auth.uid()`, and from the comment
+       * notify trigger, which passes the author. Adding it here would be inviting
+       * somebody to call it.
+       */
+      vizserve_pms_mentionable_for_task: {
+        Args: { p_task_id: string };
+        Returns: {
+          id: string;
+          full_name: string;
+        }[];
+      };
       vizserve_pms_reliever_candidates: {
         Args: Record<PropertyKey, never>;
         Returns: {

@@ -1,6 +1,17 @@
 import sanitizeHtml from "sanitize-html";
 
-import { isTaskImageSrc, RICH_TEXT_TAGS } from "@/lib/rich-text";
+import { isTaskImageSrc, MENTION_ATTR, RICH_TEXT_TAGS } from "@/lib/rich-text";
+
+/**
+ * P7-71 — the shape of a mention's id, and the only one the sanitiser keeps.
+ *
+ * ⚠️ ANCHORED AT BOTH ENDS, exactly like `TASK_IMAGE_SRC` next door and for the
+ * same reason: this is the value the notify trigger casts to `uuid`, so
+ * anything that is not one is not a mention. Validating it here rather than
+ * trusting it there means a hand-written body can hold nonsense and the worst
+ * that happens is a word loses its highlight.
+ */
+const MENTION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**
  * P7-56 — the sanitiser. Server only, and the split is deliberate.
@@ -50,6 +61,18 @@ export function sanitizeRichText(dirty: string | null | undefined): string {
        * carrying `position:fixed` is a comment that escapes its own card.
        */
       img: ["src", "alt", "loading", "decoding", "width", "height", "data-orientation"],
+      /*
+       * P7-71 — ONE ATTRIBUTE, AND NOTHING ELSE, EVER.
+       *
+       * `span` is the only tag on the allowlist with no meaning of its own (see
+       * `RICH_TEXT_TAGS`), so it is admitted for the single purpose of carrying
+       * a mention's user id. No `class`: a user-supplied class on an element
+       * this app renders with `dangerouslySetInnerHTML` is every utility in
+       * `globals.css` in the hands of anybody who can type into a comment box.
+       * No `style` either, for the shorter version of the same reason. The
+       * stylesheet selects on the data attribute instead.
+       */
+      span: [MENTION_ATTR],
     },
     // ⚠️ NO `javascript:`. sanitize-html's default list is wider than this app
     // needs, and a link is the one place a user-supplied string reaches an
@@ -99,6 +122,29 @@ export function sanitizeRichText(dirty: string | null | undefined): string {
           kept["data-orientation"] = attribs["data-orientation"]!;
         }
 
+        return { tagName, attribs: kept };
+      },
+
+      /*
+       * P7-71 — A SPAN IS A MENTION OR IT IS NOTHING.
+       *
+       * The allowlist above already limits the attribute to `data-mention-id`;
+       * this checks its VALUE, because the trigger downstream casts it to
+       * `uuid` and because a mention that is not a real id is not a mention.
+       *
+       * ⚠️ A FAILING SPAN KEEPS ITS TEXT AND LOSES ITS MEANING, rather than
+       * being removed. It cannot go through `exclusiveFilter` like the `img`
+       * guard does — that takes the element's CONTENTS with it, and a span's
+       * contents are the words somebody wrote. So a span with a bad id comes
+       * out bare: no attribute, so no stylesheet match, so it reads as the
+       * plain text it always was. Nothing is lost except the highlight, and
+       * nothing is notified, which is the correct outcome for an id the
+       * database was never going to recognise anyway.
+       */
+      span: (tagName, attribs) => {
+        const id = attribs[MENTION_ATTR];
+        const kept: sanitizeHtml.Attributes = {};
+        if (MENTION_ID.test(id ?? "")) kept[MENTION_ATTR] = id!;
         return { tagName, attribs: kept };
       },
     },

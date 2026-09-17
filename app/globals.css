@@ -944,6 +944,38 @@
   }
 
   /* -------------------------------------------------------------------------
+     P7-71 — a mention.
+
+     ⚠️ SELECTED ON THE DATA ATTRIBUTE, NEVER ON A CLASS, and that is a security
+     property rather than a style choice. `span` is on the sanitiser's allowlist
+     for this one purpose and it is allowed to carry `data-mention-id` and
+     nothing else — no `class`, because a user-supplied class on markup this app
+     renders with `dangerouslySetInnerHTML` would put every utility in this file
+     in the hands of anybody who can type into a comment box. A span whose id is
+     not a uuid comes out of the sanitiser bare, matches nothing here, and reads
+     as the plain text it is.
+
+     ⚠️ THE `@` IS PART OF THE TEXT, NOT A `::before`. It is stored in the body,
+     so it survives into an email and into every `line-clamp`ed preview —
+     `richTextToPlainText` reads the markup, and generated content is not in it.
+
+     Not colour alone (§5): the name carries its own `@`, which is what marks it
+     as a mention in a monochrome print and for anybody who cannot see the tint.
+     ------------------------------------------------------------------------- */
+  .rich-text [data-mention-id] {
+    color: var(--primary);
+    font-weight: 600;
+    /* A tint rather than a pill: a paragraph with four names in it should read
+       as a sentence, and four chips in a line do not. */
+    background-color: color-mix(in oklab, var(--primary) 12%, transparent);
+    border-radius: 0.25rem;
+    padding: 0.05em 0.25em;
+    /* A name is one thing. Breaking "@Amier Bautista" across two lines makes it
+       look like two people. */
+    white-space: nowrap;
+  }
+
+  /* -------------------------------------------------------------------------
      P7-67 — an image pasted into a comment.
 
      ⚠️ THE CAP IS THE POINT. A screenshot off the monitors this team uses is

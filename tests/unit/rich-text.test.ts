@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   isRichTextEmpty,
   isTaskImageSrc,
+  mentionedUserIds,
   richTextLength,
   richTextToPlainText,
   taskImageIds,
@@ -440,5 +441,119 @@ describe("taskImageIds", () => {
   it("agrees with what taskImageSrc writes — the pair that must not drift", () => {
     expect(taskImageIds(`<img src="${taskImageSrc(a)}">`)).toEqual([a]);
     expect(isTaskImageSrc(taskImageSrc(a))).toBe(true);
+  });
+});
+
+/**
+ * P7-71 — mentions.
+ *
+ * ⚠️ THE SPAN IS THE ONLY TAG ON THE ALLOWLIST WITH NO MEANING OF ITS OWN, so
+ * it is the one that has to be nailed down hardest: admitted for a single
+ * purpose, carrying a single attribute, with a value the notify trigger will be
+ * casting to `uuid`. Everything below is that contract.
+ */
+describe("sanitizeRichText — mentions", () => {
+  const who = "5c7e2f81-4a3b-4c9d-8e12-6f0a9b3d5e74";
+
+  it("keeps a mention, its id and its name", () => {
+    const out = sanitizeRichText(`<p>ping <span data-mention-id="${who}">@Amier</span></p>`);
+    expect(out).toContain(`data-mention-id="${who}"`);
+    expect(out).toContain("@Amier");
+  });
+
+  it("strips a span whose id is not a uuid, and keeps the words", () => {
+    // The text is what somebody wrote. Losing the tag costs a highlight; losing
+    // the text would lose the sentence.
+    const out = sanitizeRichText('<span data-mention-id="nobody">@Ghost</span>');
+    expect(out).not.toContain("data-mention-id");
+    expect(out).toContain("@Ghost");
+  });
+
+  it("drops class and style off a mention", () => {
+    /*
+     * ⚠️ THE REASON `span` IS RESTRICTED TO ONE ATTRIBUTE. A class on markup
+     * this app hands to `dangerouslySetInnerHTML` is every utility in
+     * `globals.css` available to anybody who can type into a comment box, and
+     * `fixed inset-0` is a comment that covers the screen.
+     */
+    const out = sanitizeRichText(
+      `<span class="fixed inset-0" style="position:fixed" data-mention-id="${who}">@Amier</span>`,
+    );
+    expect(out).not.toContain("class");
+    expect(out).not.toContain("style");
+    expect(out).toContain(`data-mention-id="${who}"`);
+  });
+
+  it("does not let a span smuggle an event handler", () => {
+    const out = sanitizeRichText(`<span onclick="alert(1)" data-mention-id="${who}">@Amier</span>`);
+    expect(out).not.toContain("onclick");
+    expect(out).not.toContain("alert");
+  });
+
+  it("survives a round trip unchanged — the editor writes what the sanitiser keeps", () => {
+    // The whole feature depends on this: markup that changes shape on the way
+    // to the database renders once and comes back as plain text.
+    const stored = sanitizeRichText(`<p><span data-mention-id="${who}">@Amier Bautista</span></p>`);
+    expect(sanitizeRichText(stored)).toBe(stored);
+  });
+});
+
+describe("richTextToPlainText — mentions", () => {
+  const who = "5c7e2f81-4a3b-4c9d-8e12-6f0a9b3d5e74";
+
+  it("flattens to the name, because the @ is in the text and not in CSS", () => {
+    // The email and every clamped list preview read this. A mention rendered
+    // with a `::before` would vanish from both.
+    expect(richTextToPlainText(`<p>ping <span data-mention-id="${who}">@Amier</span></p>`)).toBe(
+      "ping @Amier",
+    );
+  });
+
+  it("counts toward the cap as the name, not as the markup", () => {
+    expect(richTextLength(`<span data-mention-id="${who}">@Amier</span>`)).toBe(6);
+  });
+
+  it("makes a comment that is only a mention non-empty", () => {
+    expect(isRichTextEmpty(`<p><span data-mention-id="${who}">@Amier</span></p>`)).toBe(false);
+  });
+});
+
+describe("mentionedUserIds", () => {
+  const a = "5c7e2f81-4a3b-4c9d-8e12-6f0a9b3d5e74";
+  const b = "1d4b8c02-9e6f-4a71-b3c5-2e8d7f0a4b91";
+
+  it("finds every name in a body", () => {
+    const html = `<p><span data-mention-id="${a}">@A</span> <span data-mention-id="${b}">@B</span></p>`;
+    expect(mentionedUserIds(html).sort()).toEqual([a, b].sort());
+  });
+
+  it("counts the same person twice as one mention", () => {
+    const html = `<span data-mention-id="${a}">@A</span><span data-mention-id="${a}">@A</span>`;
+    expect(mentionedUserIds(html)).toEqual([a]);
+  });
+
+  it("is empty for a body with no mentions, and for nothing at all", () => {
+    expect(mentionedUserIds("<p>just words</p>")).toEqual([]);
+    expect(mentionedUserIds("<p>email me at a@b.com</p>")).toEqual([]);
+    expect(mentionedUserIds("")).toEqual([]);
+    expect(mentionedUserIds(null)).toEqual([]);
+  });
+
+  it("ignores a malformed id, exactly as the sanitiser and the trigger do", () => {
+    expect(mentionedUserIds('<span data-mention-id="nobody">@Ghost</span>')).toEqual([]);
+    expect(mentionedUserIds(`<span data-mention-id="${a.slice(0, 30)}">@Half</span>`)).toEqual([]);
+  });
+
+  it("reads back exactly what the sanitiser stored — the pair that must not drift", () => {
+    /*
+     * ⚠️ THIS IS THE ONE THAT MATTERS. There is no join table: the markup IS
+     * the record of a mention, so if the sanitiser's output and this reader ever
+     * disagree, the UI shows a mention and nobody is ever notified.
+     *
+     * The SQL twin (`vizserve_pms_mentioned_ids`) is written against the same
+     * attribute and the same uuid shape. That one cannot be proven here.
+     */
+    const stored = sanitizeRichText(`<p><span data-mention-id="${a}">@Amier Bautista</span></p>`);
+    expect(mentionedUserIds(stored)).toEqual([a]);
   });
 });
