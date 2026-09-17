@@ -27,6 +27,8 @@ import {
   type TaskStatus,
 } from "@/lib/schemas/tasks";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
+import { fieldKey, readFieldValue, type ListField } from "@/lib/schemas/list-fields";
+import { CustomFieldDisplay } from "./custom-field-value";
 import { cn } from "@/lib/utils";
 import { GroupComposer } from "./add-task";
 import { AssigneePicker } from "./assignees";
@@ -98,6 +100,11 @@ export type TaskRow = {
    * Never rendered here — it is a paragraph, and a row is not where it is read.
    */
   resolution: string | null;
+  /**
+   * P7-73. The list's custom field values. Optional because a row built on the
+   * client before the server answers (a placeholder) has none yet.
+   */
+  custom_fields?: unknown;
 };
 
 /**
@@ -143,6 +150,12 @@ export type Viewer = {
 export type TaskLookups = {
   /** P12-20 — today, decided on the server. See `lib/dates-server.ts`. */
   today: string;
+  /**
+   * P7-73. The active custom fields of the list being viewed, in the field
+   * manager's order. Empty unless `?list=` is set — fields belong to a list, so
+   * "All lists" has no columns to draw for them.
+   */
+  customFields: ListField[];
   nameOf: Record<string, string>;
   listName: Record<string, string>;
   threads: Record<string, TaskComment[]>;
@@ -203,13 +216,20 @@ export function TaskColumnsProvider({ children }: { children: React.ReactNode })
 }
 
 /** The control itself, for the toolbar row above the groups. */
-export function TaskColumnsMenu() {
+export function TaskColumnsMenu({ customFields = [] }: { customFields?: ListField[] }) {
   const state = useContext(TaskColumnsContext);
   if (!state) return null;
 
+  /* P7-73 — the list's own fields join the static menu. Their keys are the
+     columns' keys, so hiding one here hides it in all eight group tables. */
+  const columns: HideableColumn[] = [
+    ...TASK_MENU_COLUMNS,
+    ...customFields.map((field) => ({ key: fieldKey(field.id), header: field.name, hideable: true })),
+  ];
+
   return (
     <DataTableColumns
-      columns={TASK_MENU_COLUMNS}
+      columns={columns}
       visibility={state.visibility}
       onVisibilityChange={state.onVisibilityChange}
     />
@@ -332,6 +352,25 @@ export function TaskGroupTable({
     .filter((task) => !isPlaceholder(task.id))
     .filter(canSelect)
     .map((task) => ({ id: task.id, title: task.title }));
+
+  /*
+   * P7-73 — one column per custom field of the list on screen.
+   *
+   * Sorted on the SERVER like every other column (`urlSort`): the key is
+   * `cf:<fieldId>`, and `page.tsx` sorts the whole result by the field's own
+   * rule — a dropdown by its option order, not the alphabet — before the rows
+   * are split into stages. Hideable, under the same key, in the Columns menu.
+   */
+  const customColumns: Column<ListRow>[] = lookups.customFields.map((field) => ({
+    key: fieldKey(field.id),
+    sortKey: fieldKey(field.id),
+    hideable: true,
+    header: field.name,
+    className: "hidden lg:table-cell",
+    cell: (task) => (
+      <CustomFieldDisplay compact field={field} value={readFieldValue(field, task.custom_fields)} />
+    ),
+  }));
 
   const columns: Column<ListRow>[] = [
     {
@@ -810,6 +849,8 @@ export function TaskGroupTable({
         );
       },
     },
+    // Before the comment, which stays last — see its own note.
+    ...customColumns,
     {
       key: "comment",
       hideable: true,

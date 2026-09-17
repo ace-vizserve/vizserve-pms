@@ -14,6 +14,9 @@ import {
 } from "@/components/ui/select";
 import { TASK_STATUS_OPTIONS } from "@/components/status-badge";
 import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/schemas/tasks";
+import { FIELD_KEY_PREFIX, fieldKey, type ListField } from "@/lib/schemas/list-fields";
+
+import { FieldFilters } from "./field-filters";
 
 const ALL = "__all__";
 
@@ -31,9 +34,12 @@ const ALL = "__all__";
 export function TaskFilters({
   lists,
   groups,
+  customFields = [],
 }: {
   lists: { id: string; name: string; group_id: string | null }[];
   groups: { id: string; name: string }[];
+  /** P7-73. The selected list's active custom fields; empty without a list. */
+  customFields?: ListField[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -55,6 +61,22 @@ export function TaskFilters({
      */
     if (key === "group") next.delete("list");
     if (key === "list") next.delete("group");
+
+    /*
+     * P7-73 — A CUSTOM FIELD FILTER OR SORT BELONGS TO ONE LIST. Changing the
+     * list (or the folder, which clears it) leaves every `cf:` key naming a field
+     * the new list does not have — ignored by the page, but still in a URL
+     * somebody bookmarks. Dropped here so the URL says what is applied.
+     */
+    if (key === "group" || key === "list") {
+      for (const name of [...next.keys()]) {
+        if (name.startsWith(FIELD_KEY_PREFIX)) next.delete(name);
+      }
+      if (next.get("sort")?.startsWith(FIELD_KEY_PREFIX)) {
+        next.delete("sort");
+        next.delete("dir");
+      }
+    }
 
     router.push(`/tasks?${next.toString()}`);
   }
@@ -86,9 +108,9 @@ export function TaskFilters({
     router.push(`/tasks?${next.toString()}`);
   }
 
-  const hasFilters = ["status", "view", "list", "group", "priority", "sort"].some((key) =>
-    params.get(key),
-  );
+  const hasFilters =
+    ["status", "view", "list", "group", "priority", "sort"].some((key) => params.get(key)) ||
+    [...params.keys()].some((key) => key.startsWith(FIELD_KEY_PREFIX));
 
   /*
    * J — the priority filter, and the sort that stops the column being decoration.
@@ -113,6 +135,9 @@ export function TaskFilters({
   const sortItems: Record<string, string> = {
     due: "Due date",
     priority: "Priority",
+    // P7-73. Without these the trigger would print `cf:<uuid>` after a header
+    // click on a custom column — the raw-value trap in the note below.
+    ...Object.fromEntries(customFields.map((field) => [fieldKey(field.id), field.name])),
   };
 
   // Base UI renders the RAW VALUE in <SelectValue> unless the root is handed an
@@ -257,9 +282,16 @@ export function TaskFilters({
           <SelectContent>
             <SelectItem value="due">Due date</SelectItem>
             <SelectItem value="priority">Priority</SelectItem>
+            {customFields.map((field) => (
+              <SelectItem key={field.id} value={fieldKey(field.id)}>
+                {field.name}
+              </SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
+
+      <FieldFilters fields={customFields} params={params as unknown as URLSearchParams} setParam={setParam} />
 
       {hasFilters ? (
         <Button variant="ghost" size="sm" onClick={() => router.push("/tasks")}>

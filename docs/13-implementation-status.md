@@ -2259,3 +2259,56 @@ each migration here is one transaction.
 - The `@` menu has no test driving the keyboard — the markup contract is
   covered, the interaction is not. That needs the end-to-end layer this app
   still does not have.
+
+## P7-73 — Custom fields on a list (17 Sep 2026)
+
+**One migration, written and NOT YET APPLIED** —
+`20260917120000_p7_73_list_custom_fields.sql`. Everything else is code and is
+green: typecheck, lint at the pre-existing warning baseline, and 1,683 unit
+tests.
+
+ClickUp's custom fields, as a feature reference (D21). A list carries fields of
+seven types — Dropdown, Text, Date, Text area, Number, Labels, Checkbox. Adding
+one is two steps: pick the type, then name it and configure what the type needs
+(options with a colour for Dropdown and Labels, decimal places for Number).
+
+### Decided with Ace
+
+- **A field belongs to one list.** Not a department, not a folder.
+- **Any member of the list's department manages its fields** — the P11-07 rule
+  for lists themselves. A personal list's owner manages theirs.
+- **Every field is optional.** "Required" was discussed and left out: it raises a
+  question for every way a task can enter a list (approval, move, copy,
+  subtask). Adding it later is a flag on the field and a check at create.
+- **Sort follows the field, not the alphabet.** A dropdown sorts in the order its
+  options were set; labels by the task's highest-ranked option; a checkbox with
+  checked first. Empty values sort last in both directions.
+- **Out of scope:** date fields on a calendar, the board, and copying values with
+  a copied task.
+
+### Where things live
+
+| What | Where |
+|---|---|
+| Definitions | `vizserve_pms_list_fields` — archived via `is_active`, never deleted |
+| Values | `vizserve_pms_tasks.custom_fields` jsonb, keyed by field id. **Not** `field_values`, which is the client's form snapshot |
+| Writing a value | `vizserve_pms_set_task_field` — one key atomically, SECURITY INVOKER, so the P11-03 update policy decides. Audited by the existing task audit trigger |
+| Rules | `vizserve_pms_list_fields_guard` (options well-formed, archived not removed, type fixed once used, no moving lists) and `vizserve_pms_tasks_custom_fields_guard` (value fits the type, field active and on the task's list) |
+| Contract | `lib/schemas/list-fields.ts` — schemas, `compareFieldValues`, `parseFieldFilter` / `matchesFieldFilter` |
+| Manager | `app/(app)/tasks/list-fields-sheet.tsx` — the Fields button on `/tasks?list=` |
+| Task page | `app/(app)/tasks/custom-field-value.tsx`, rendered by `task-surface.tsx` |
+| Task list | columns in `tasks-table.tsx`; sort and filter applied in `page.tsx`; `field-filters.tsx` |
+
+⚠️ **Sort and filter run on the fetched rows, not in SQL.** The `/tasks` query is
+not paginated, so this is the same answer — and a better sort, because
+`order by custom_fields->>id` compares text ("10" before "9"). If the list is ever
+paginated, this has to move into the database in the same change.
+
+A task moved to another list keeps the old list's values. They are not shown
+there, and they come back if it moves back.
+
+### What is owed
+
+- **The migration is not applied, and nothing has been verified in a browser.**
+- The SQL has never executed: there is no Docker on this machine and no scratch
+  project.

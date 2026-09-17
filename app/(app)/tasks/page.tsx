@@ -32,6 +32,16 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { applyTaskScope, QA_STAGES } from "@/lib/tasks-server";
+import { loadListFields } from "@/lib/list-fields-server";
+import {
+  compareFieldValues,
+  fieldIdFromKey,
+  fieldKey,
+  matchesFieldFilter,
+  parseFieldFilter,
+  readFieldValue,
+} from "@/lib/schemas/list-fields";
+import { ListFieldsSheet } from "./list-fields-sheet";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
@@ -98,6 +108,11 @@ type TasksSearchParams = {
   priority?: string;
   sort?: string;
   dir?: string;
+  /**
+   * P7-73 — a custom field's filter, `cf:<fieldId>`. Open-ended because the
+   * keys are field ids; only a field of the list on screen is ever read.
+   */
+  [customField: `cf:${string}`]: string | undefined;
 };
 
 type View = "all" | "mine" | "qa";
@@ -383,9 +398,18 @@ export default async function TasksPage({
           />
         </Suspense>
 
-        {/* One menu for all eight group tables — see `TaskColumnsProvider`. */}
-        <div className="ml-auto">
-          <TaskColumnsMenu />
+        {/* One menu for all eight group tables — see `TaskColumnsProvider`.
+            P7-73: with a list selected, its custom fields join the menu, and the
+            list's field manager sits beside it. Behind its own boundary so the
+            static menu is live before the fields are read. */}
+        <div className="ml-auto flex items-center gap-2">
+          {params.list ? (
+            <Suspense fallback={<TaskColumnsMenu />}>
+              <ListFieldControls listId={params.list} />
+            </Suspense>
+          ) : (
+            <TaskColumnsMenu />
+          )}
         </div>
       </div>
 
@@ -522,9 +546,14 @@ async function TaskFiltersSection({
    * empties the page. Leaving goes through the rail, the same way coming in did.
    */
   const inPersonalList = (lists ?? []).some((list) => list.id === listId && list.owner_id !== null);
-  if (inPersonalList) return <TaskFilters lists={[]} groups={[]} />;
 
-  return <TaskFilters lists={departmentLists} groups={groups ?? []} />;
+  // P7-73. A list's fields filter the list, personal or not. `cache()`d — the
+  // task groups read the same list's fields in this request.
+  const { fields: customFields } = listId ? await loadListFields(listId) : { fields: [] };
+
+  if (inPersonalList) return <TaskFilters lists={[]} groups={[]} customFields={customFields} />;
+
+  return <TaskFilters lists={departmentLists} groups={groups ?? []} customFields={customFields} />;
 }
 
 /** The Gate 1 queue, waiting on `loadPendingRequests` and nothing else. */
@@ -594,7 +623,7 @@ async function TaskGroups({
    * reading it first would make the slow query wait on the fast one.
    */
   const TASK_COLUMNS =
-    "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution";
+    "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields";
 
   let query = supabase
     .from("vizserve_pms_tasks")
@@ -678,6 +707,8 @@ async function TaskGroups({
     { data: people },
     { data: lists },
     pendingRequests,
+    // P7-73. Appended. Fields belong to a list, so there are none without one.
+    { fields: customFields },
   ] = await Promise.all([
     query,
     supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
@@ -687,6 +718,7 @@ async function TaskGroups({
        the page has to wait. */
     listsPromise,
     pendingRequestsPromise,
+    params.list ? loadListFields(params.list) : Promise.resolve({ fields: [], error: null }),
   ]);
 
   /*
@@ -703,7 +735,50 @@ async function TaskGroups({
    * alternative — two literal branches — means maintaining the fifteen-column
    * list twice, which drifts the first time somebody adds a column to one.
    */
-  const rows = (tasks ?? []) as unknown as TaskRow[];
+  const fetchedRows = (tasks ?? []) as unknown as TaskRow[];
+
+  /*
+   * P7-73 — CUSTOM FIELDS FILTER AND SORT HERE, AFTER THE READ, and that is
+   * correct rather than lazy.
+   *
+   * This query is not paginated: the page holds every task in scope, which is
+   * what `urlSort` on the table already relies on. So narrowing and ordering the
+   * fetched rows is the same answer SQL would give — and a better one for the
+   * sort, because `order by custom_fields->>id` compares TEXT: "10" before "9",
+   * and a dropdown alphabetically instead of in the order its options were set.
+   *
+   * Before the ids are taken, so the comment, subtask and hours queries below
+   * are scoped to the tasks that survived the filter. A field id in the URL that
+   * is not one of this list's fields is ignored, never trusted.
+   */
+  const fieldFilters = customFields.flatMap((field) => {
+    const filter = parseFieldFilter(field, params[fieldKey(field.id) as `cf:${string}`]);
+    return filter ? [{ field, filter }] : [];
+  });
+
+  const sortField = customFields.find((field) => field.id === fieldIdFromKey(params.sort));
+
+  const filteredRows = fieldFilters.length
+    ? fetchedRows.filter((task) =>
+        fieldFilters.every(({ field, filter }) =>
+          matchesFieldFilter(field, filter, readFieldValue(field, task.custom_fields)),
+        ),
+      )
+    : fetchedRows;
+
+  // `sort` is stable, so tasks with equal values keep the default order the
+  // query returned them in.
+  const rows = sortField
+    ? [...filteredRows].sort((a, b) =>
+        compareFieldValues(
+          sortField,
+          readFieldValue(sortField, a.custom_fields),
+          readFieldValue(sortField, b.custom_fields),
+          params.dir === "desc" ? "desc" : "asc",
+        ),
+      )
+    : filteredRows;
+
   const taskIds = rows.map((task) => task.id);
 
   /*
@@ -891,6 +966,7 @@ async function TaskGroups({
 
   const isFiltered =
     Boolean(params.status || params.list || params.group || priorityFilter) ||
+    fieldFilters.length > 0 ||
     view !== "all" ||
     kind !== "all";
 
@@ -1089,6 +1165,7 @@ async function TaskGroups({
      * which two clock reads would not at midnight.
      */
     today: await requestToday(),
+    customFields,
     nameOf: Object.fromEntries(nameOf),
     listName: Object.fromEntries(listName),
     threads: Object.fromEntries(threads),
@@ -1178,5 +1255,27 @@ async function TaskGroups({
       lookups={lookups}
       assignable={assignable}
     />
+  );
+}
+
+/**
+ * P7-73 — the Columns menu with the list's fields in it, and the field manager.
+ *
+ * `loadListFields` is `cache()`d, so the task groups reading the same list's
+ * fields in this request share the one query.
+ */
+async function ListFieldControls({ listId }: { listId: string }) {
+  const supabase = await createClient();
+
+  const [{ fields }, { data: canManage }] = await Promise.all([
+    loadListFields(listId, true),
+    supabase.rpc("vizserve_pms_can_manage_list", { p_list_id: listId }),
+  ]);
+
+  return (
+    <>
+      <TaskColumnsMenu customFields={fields.filter((field) => field.is_active)} />
+      {canManage ? <ListFieldsSheet listId={listId} fields={fields} /> : null}
+    </>
   );
 }

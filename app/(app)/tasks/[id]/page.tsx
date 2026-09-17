@@ -26,6 +26,7 @@ import {
 } from "@/lib/schemas/tasks";
 
 import { fetchJoinedTaskIdSet } from "@/lib/tasks-server";
+import { loadListFields } from "@/lib/list-fields-server";
 import { cn } from "@/lib/utils";
 import { requestToday } from "@/lib/dates-server";
 import { createClient } from "@/utils/supabase/server";
@@ -88,7 +89,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const { data: task } = await supabase
     .from("vizserve_pms_tasks")
     .select(
-      "id, title, description, status, resolution, output_link, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, field_values, created_by, created_at",
+      "id, title, description, status, resolution, output_link, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, field_values, custom_fields, created_by, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -126,6 +127,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     { data: briefRow },
     { data: coverageRows },
     joinedTaskIdSet,
+    // P7-73. Last, per the warning above: appended, never inserted.
+    { fields: customFields },
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_task_status_history")
@@ -294,6 +297,7 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
      * user, so it belongs up here with everything else that does.
      */
     fetchJoinedTaskIdSet(context.userId),
+    task.list_id ? loadListFields(task.list_id) : Promise.resolve({ fields: [], error: null }),
   ]);
 
   // Null for internal work, for a caller with no seat, and for a task that does
@@ -674,6 +678,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
               priority={task.priority}
               listId={task.list_id}
               lists={lists ?? []}
+              customFields={customFields}
+              customValues={task.custom_fields}
               assigneeId={task.assignee_id}
               qaAssigneeId={task.qa_assignee_id}
               picName={task.assignee_id ? (nameOf.get(task.assignee_id) ?? null) : null}

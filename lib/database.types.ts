@@ -92,6 +92,16 @@ export type VizservePmsEventCategory = "COMPANY" | "MANAGEMENT" | "DEPARTMENT";
  */
 export type VizservePmsFormPurpose = "CLIENT_REQUEST" | "INTERNAL";
 
+/** P7-73. The seven custom field types a list can carry. */
+export type VizservePmsListFieldType =
+  | "TEXT"
+  | "TEXTAREA"
+  | "NUMBER"
+  | "DATE"
+  | "DROPDOWN"
+  | "LABELS"
+  | "CHECKBOX";
+
 /**
  * P7-38 added the last two. NO_TIME_* means there is no punch to read;
  * *_CORRECTION means there is one and it is wrong. Same payload, same DTR
@@ -1115,6 +1125,14 @@ export type Database = {
           /** P7-15. Minutes somebody expects it to take. Null = nobody estimated. */
           estimate_minutes: number | null;
           field_values: Json;
+          /**
+           * P7-73. The team's own custom field values, keyed by
+           * `vizserve_pms_list_fields.id`. NOT `field_values`, which is the
+           * client's form snapshot. Written one key at a time through
+           * `vizserve_pms_set_task_field` — never as a whole object, which would
+           * lose a colleague's concurrent edit to another field.
+           */
+          custom_fields: Json;
           resolution: string | null;
           output_link: string | null;
           created_by: string | null;
@@ -1171,6 +1189,55 @@ export type Database = {
             foreignKeyName: "vizserve_pms_tasks_department_id_fkey";
             columns: ["department_id"];
             referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      /** P7-73. A custom field on one list. Archived, never deleted. */
+      vizserve_pms_list_fields: {
+        Row: {
+          id: string;
+          list_id: string;
+          name: string;
+          field_type: VizservePmsListFieldType;
+          /** Dropdown/Labels only. Array order IS the option order, and sorts by it. */
+          options: Json;
+          /** Number only, 0–4. */
+          decimals: number | null;
+          sort_order: number;
+          is_active: boolean;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          list_id: string;
+          name: string;
+          field_type: VizservePmsListFieldType;
+          options?: Json;
+          decimals?: number | null;
+          sort_order?: number;
+          is_active?: boolean;
+          created_by?: string | null;
+        };
+        /**
+         * `list_id` is absent: `vizserve_pms_list_fields_guard` refuses a move.
+         * `field_type` is present but refused once any task holds a value.
+         */
+        Update: Partial<{
+          name: string;
+          field_type: VizservePmsListFieldType;
+          options: Json;
+          decimals: number | null;
+          sort_order: number;
+          is_active: boolean;
+        }>;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_list_fields_list_id_fkey";
+            columns: ["list_id"];
+            referencedRelation: "vizserve_pms_lists";
             referencedColumns: ["id"];
           },
         ];
@@ -2996,6 +3063,16 @@ export type Database = {
         Args: { p_token: string; p_rating: number; p_comment?: string | null };
         Returns: Json;
       };
+      /** P7-73. May the caller manage this list's custom fields. */
+      vizserve_pms_can_manage_list: {
+        Args: { p_list_id: string };
+        Returns: boolean;
+      };
+      /** P7-73. Sets or clears ONE custom field value. Empty values clear. */
+      vizserve_pms_set_task_field: {
+        Args: { p_task_id: string; p_field_id: string; p_value: Json };
+        Returns: undefined;
+      };
     };
     Enums: {
       vizserve_pms_user_role: VizservePmsUserRole;
@@ -3013,6 +3090,7 @@ export type Database = {
       vizserve_pms_gender: VizservePmsGender;
       vizserve_pms_event_category: VizservePmsEventCategory;
       vizserve_pms_form_purpose: VizservePmsFormPurpose;
+      vizserve_pms_list_field_type: VizservePmsListFieldType;
     };
     CompositeTypes: Record<never, never>;
   };

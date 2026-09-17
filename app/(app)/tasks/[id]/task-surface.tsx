@@ -37,6 +37,9 @@ import {
 } from "@/lib/schemas/tasks";
 import { formatCellDuration } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
+import type { Json } from "@/lib/database.types";
+import { readFieldValue, type ListField } from "@/lib/schemas/list-fields";
+import { CustomFieldDisplay, CustomFieldEditor } from "../custom-field-value";
 
 import { TaskSection } from "./task-section";
 
@@ -132,6 +135,8 @@ export function TaskSurface({
   priority,
   listId,
   lists,
+  customFields,
+  customValues,
   assigneeId,
   qaAssigneeId,
   picName,
@@ -182,6 +187,10 @@ export function TaskSurface({
   priority: TaskPriority | null;
   listId: string | null;
   lists: { id: string; name: string }[];
+  /** P7-73. The active custom fields of this task's list, in the manager's order. */
+  customFields: ListField[];
+  /** P7-73. `tasks.custom_fields`, read per field with `readFieldValue`. */
+  customValues: Json;
   assigneeId: string | null;
   qaAssigneeId: string | null;
   picName: string | null;
@@ -646,6 +655,20 @@ export function TaskSurface({
                 )}
               </Prop>
             ) : null}
+
+            {/* P7-73 — the list's own fields, after the list that owns them. */}
+            {customFields.map((field) => {
+              const value = readFieldValue(field, customValues);
+              return (
+                <Prop key={field.id} label={field.name}>
+                  {canEdit ? (
+                    <CustomFieldEditor taskId={taskId} field={field} value={value} />
+                  ) : (
+                    <CustomFieldDisplay field={field} value={value} />
+                  )}
+                </Prop>
+              );
+            })}
           </dl>
         </CardContent>
       </Card>
