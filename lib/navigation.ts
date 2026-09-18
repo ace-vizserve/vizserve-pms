@@ -222,6 +222,12 @@ export const NAV_ITEMS: NavItem[] = [
     label: "Approvals",
     href: "/approvals",
     minRole: "member",
+    children: [
+      { label: "Requests", href: "/approvals" },
+      // The caller's own balances. Before this they were only visible inside
+      // the filing dialog or in the downloaded PDF.
+      { label: "My leave", href: "/approvals/leave" },
+    ],
     enabled: true,
     icon: "check",
   },
@@ -231,6 +237,8 @@ export const NAV_ITEMS: NavItem[] = [
     minRole: "member",
     children: [
       { label: "My week", href: "/timesheet" },
+      // Every week this person has handed in and what happened to it.
+      { label: "My submissions", href: "/timesheet/history" },
       // P6-05 / slice E1. Team leaders and up: this is where submitted weeks are
       // approved, and where the submit notification's `link_path` points
       // (`20260818110000_p7_05_timesheet_weeks.sql:339`). A member has nobody to

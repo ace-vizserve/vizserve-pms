@@ -73,6 +73,9 @@ const SEGMENT_LABELS: Record<string, string> = {
   approvals: "Approvals",
   inbox: "Inbox",
   timesheet: "Timesheet",
+  // /timesheet/history and /approvals/leave — both first-person pages.
+  history: "My submissions",
+  leave: "My leave",
   admin: "Admin",
   users: "Users",
   holidays: "Holidays",
