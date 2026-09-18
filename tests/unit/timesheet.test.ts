@@ -22,6 +22,7 @@ import {
   withStart,
   draftToEntry,
   isWeekLocked,
+  lastEncodableDay,
   punchComparison,
   timesheetEntrySchema,
   timesheetEntryUpdateSchema,
@@ -584,6 +585,36 @@ describe("isWeekLocked", () => {
     expect(isWeekLocked("RETURNED")).toBe(false);
     // No row at all is the draft state.
     expect(isWeekLocked(null)).toBe(false);
+  });
+});
+
+describe("lastEncodableDay — P7-76, the rest of this week is writable", () => {
+  it("returns the Sunday of the week the day belongs to", () => {
+    // A Wednesday, its own week's Sunday four days later.
+    expect(lastEncodableDay("2026-09-16")).toBe("2026-09-20");
+    // Monday, the first day of the same week.
+    expect(lastEncodableDay("2026-09-14")).toBe("2026-09-20");
+  });
+
+  it("returns the day itself on a Sunday", () => {
+    // The week ends today, so nothing ahead is encodable — the state the old
+    // "today only" rule had every day of the week.
+    expect(lastEncodableDay("2026-09-20")).toBe("2026-09-20");
+    // And the next day opens a whole new week, rather than one more day.
+    expect(lastEncodableDay("2026-09-21")).toBe("2026-09-27");
+  });
+
+  it("never returns a day before the one it was given", () => {
+    // The grid compares `day > encodableThrough`; a bound in the past would
+    // close cells that have already happened, which is the loud failure.
+    for (const day of ["2026-09-14", "2026-09-15", "2026-09-18", "2026-09-20", "2026-12-31", "2027-01-01"]) {
+      expect(lastEncodableDay(day) >= day).toBe(true);
+    }
+  });
+
+  it("crosses a year boundary with the ISO week, not the calendar", () => {
+    // 31 Dec 2026 is a Thursday; its week runs into January.
+    expect(lastEncodableDay("2026-12-31")).toBe("2027-01-03");
   });
 });
 

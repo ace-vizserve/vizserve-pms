@@ -2376,3 +2376,49 @@ refused was visible to everyone while it stood, and then disappears.
   pinned the function to its four pre-P7-42 columns, which nobody noticed
   because the db suite skips itself without `SUPABASE_TEST_URL`.
 - **Not verified in a browser, and the SQL has never executed.**
+
+## P7-76 — The rest of this week can be encoded in advance (18 Sep 2026)
+
+**One migration, written and NOT YET APPLIED** —
+`20260918100000_p7_76_the_rest_of_this_week_can_be_encoded.sql`.
+
+⚠️ **THIS RELAXES P6-01's DATE RULE.** Both write policies on
+`vizserve_pms_timesheet_entries` carried
+`work_date <= (now() at time zone 'Asia/Manila')::date`, so the end of the week
+on screen could not be typed into at all. Amier, 18 Sep: the hours are known
+before the day arrives — a Saturday shoot agreed on Thursday had nowhere to go
+until Saturday.
+
+**The new bound is Sunday of the CURRENT week, in Manila — not "no bound".** So
+the week you may encode is always a week you may submit; a fixed number of days
+ahead would have produced a fillable-but-unsubmittable day every Thursday.
+
+- `vizserve_pms_timesheet_encodable_through()` is the one definition of the
+  bound, called from both policies. It was written out inline twice before,
+  which is how an INSERT and an UPDATE rule drift apart.
+- **Submitting is unchanged.** `vizserve_pms_submit_timesheet_week` still
+  refuses a week later than the current one — "That week has not happened yet."
+  You encode ahead inside this week; you hand the week in when it is the week.
+- The submitted-week lock, `vizserve_pms_may_log_time` and the DELETE policy are
+  all untouched.
+- `lastEncodableDay(today)` in `lib/schemas/timesheet.ts` is the TypeScript half,
+  and the grid derives the bound from **`today`, never from the week on screen**
+  — `/timesheet?week=` can point anywhere, and next week's cells stay closed
+  however they are reached.
+- `TimeCell`'s `future` prop is now `tooFarAhead`. A cell dated tomorrow IS in
+  the future and is now perfectly writable; leaving the old name would invite
+  somebody to "fix" it back.
+- "Change date" on the entry menu offers the whole week now, for the same reason
+  — it is an UPDATE, and the WITH CHECK moved with the INSERT's.
+- **The accepted cost:** an unsubmitted week's figures can describe hours nobody
+  has worked yet, and `/timesheet/team` shows them with no marker saying which
+  is which. Tolerable because an unsubmitted week is a draft and nothing
+  downstream reads it as fact. The dashboard's "this week" strip counts them too.
+- `tests/db/timesheet.test.ts` swapped "refuses a future work_date" for the pair
+  that now states the rule: a later day in the same week is accepted, next
+  Monday is refused. `tomorrow` was no longer a test of anything — it would have
+  passed six days a week and failed on Sunday.
+- **Not verified in a browser, and the SQL has never executed.** The db suite
+  skips itself on this machine, so the two assertions above are unproven here;
+  `npm run verify` is green on the unit suite and `lastEncodableDay` is covered
+  in `tests/unit/timesheet.test.ts`.

@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { formatAppTime, STANDARD_DAY_MINUTES } from "@/lib/dates";
+import { addDays, formatAppTime, startOfWeek, STANDARD_DAY_MINUTES } from "@/lib/dates";
 import { taskStatusSchema } from "@/lib/schemas/tasks";
 
 /**
@@ -541,6 +541,38 @@ export const TIMESHEET_WEEK_LABELS: Record<TimesheetWeekStatus, string> = {
 /** Submitted and approved weeks are read-only; a returned one is editable again. */
 export function isWeekLocked(status: TimesheetWeekStatus | null): boolean {
   return status === "SUBMITTED" || status === "APPROVED";
+}
+
+/**
+ * P7-76 — the last day an entry may be dated: Sunday of the CURRENT week.
+ *
+ * The TypeScript half of `vizserve_pms_timesheet_encodable_through()`
+ * (`20260918100000_p7_76_the_rest_of_this_week_can_be_encoded.sql`). The
+ * database is the authority, as everywhere else in this file; this exists so
+ * the grid can stop OFFERING a cell the policy would refuse, rather than
+ * letting every keystroke travel to the server to be rejected — and a refused
+ * UPDATE comes back as success with zero rows, so the number would simply
+ * spring back with no explanation.
+ *
+ * ⚠️ IT IS THE CURRENT WEEK, NOT THE WEEK ON SCREEN. `/timesheet?week=` can be
+ * pointed at any Monday, and next week's cells stay closed however they are
+ * reached. Passing that week's Monday in here instead would open them, which is
+ * the one mistake this signature is shaped to prevent: it takes TODAY.
+ *
+ * `today` is the server's — `todayInAppZone()` — because the viewer's own clock
+ * is not the business's, the same reason the grid is handed `today` rather than
+ * calling `new Date()`.
+ *
+ * Note what this is NOT: the bound on SUBMITTING. A week later than the current
+ * one is still refused by `vizserve_pms_submit_timesheet_week`. The two rules
+ * agree today only because this one stops at the end of this week.
+ */
+export function lastEncodableDay(today: string): string {
+  // The `!`s are safe together: `startOfWeek` returns null only for a date it
+  // cannot parse, and `addDays` only for the same — so a valid `today` cannot
+  // produce a null here, and an invalid one would already have broken the grid
+  // it was handed to.
+  return addDays(startOfWeek(today)!, 6)!;
 }
 
 /**

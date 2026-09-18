@@ -55,6 +55,7 @@ import {
   daySummary,
   draftToEntry,
   formatCellDuration,
+  lastEncodableDay,
   overtimeGranted,
   parseCellDuration,
   spanFrom,
@@ -259,6 +260,19 @@ export function WeekGrid({
   const logged = new Set(rows.map((row) => row.taskId));
 
   const extraTaskIds = extraTasks.map((task) => task.id);
+
+  /*
+   * P7-76 — how far ahead this grid may be typed into: Sunday of the CURRENT
+   * week, which is what the INSERT and UPDATE policies now allow.
+   *
+   * ⚠️ DERIVED FROM `today`, NEVER FROM `monday`. `monday` is the week on
+   * screen and `/timesheet?week=` can point it anywhere; deriving the bound
+   * from it would open every cell of every future week — each one refused by
+   * the policy on arrival, which is the failure this whole prop exists to
+   * avoid. On a past week `today` puts the bound after every cell, which is
+   * right: a past week is fully encodable until it is submitted.
+   */
+  const encodableThrough = lastEncodableDay(today);
 
   /*
    * ⚠️ NO `byId` REFRESH AGAINST `tasks` ANY MORE, and its absence is the point.
@@ -756,7 +770,7 @@ export function WeekGrid({
                         onOptimisticTotal={(minutes) =>
                           setPendingMinutes({ taskId: row.taskId, day, minutes })
                         }
-                        future={day > today}
+                        tooFarAhead={day > encodableThrough}
                         locked={locked}
                         onEmptied={() => keepRow(row)}
                       />
@@ -800,7 +814,7 @@ export function WeekGrid({
                           taskTitle={row.title}
                           day={day}
                           days={days}
-                          today={today}
+                          encodableThrough={encodableThrough}
                           tasks={pickable}
                           locked={locked}
                         />
@@ -985,7 +999,7 @@ function EntryRow({
   taskTitle,
   day,
   days,
-  today,
+  encodableThrough,
   tasks,
   locked,
 }: {
@@ -994,7 +1008,8 @@ function EntryRow({
   taskTitle: string;
   day: string;
   days: string[];
-  today: string;
+  /** P7-76 — the last day "Change date" may offer. See `lastEncodableDay`. */
+  encodableThrough: string;
   /** What "move to task" may offer — the same list the picker uses, which is
       the same list RLS will accept a write against. */
   tasks: PickableTask[];
@@ -1147,7 +1162,7 @@ function EntryRow({
             taskTitle={taskTitle}
             day={day}
             days={days}
-            today={today}
+            encodableThrough={encodableThrough}
             tasks={tasks}
             pending={pending}
           />
@@ -1165,9 +1180,12 @@ function EntryRow({
  *   Change date    `work_date` is a column and the week is right there, so the
  *                  days are listed rather than hidden behind a date picker —
  *                  moving an hour off Tuesday almost always means moving it to
- *                  a day already on screen. A FUTURE day is not offered: the
- *                  INSERT policy refuses one in Manila time, and a menu item
- *                  that only ever produces an error is a bug with a label.
+ *                  a day already on screen. Days past `encodableThrough` are
+ *                  not offered — the UPDATE policy refuses them, and a menu
+ *                  item that only ever produces an error is a bug with a label.
+ *                  P7-76 moved that bound from "today" to the end of this week,
+ *                  so on the current week the whole row is now offered and the
+ *                  filter only bites on a week ahead of this one.
  *
  *   Move to task   `task_id` is a column, and the list is the same `pickable`
  *                  the row picker uses — which is the list RLS will accept, so
@@ -1190,7 +1208,7 @@ function EntryMenu({
   taskTitle,
   day,
   days,
-  today,
+  encodableThrough,
   tasks,
   pending,
 }: {
@@ -1199,7 +1217,7 @@ function EntryMenu({
   taskTitle: string;
   day: string;
   days: string[];
-  today: string;
+  encodableThrough: string;
   tasks: PickableTask[];
   pending: boolean;
 }) {
@@ -1253,7 +1271,7 @@ function EntryMenu({
           </DropdownMenuSubTrigger>
           <DropdownMenuSubContent>
             {days
-              .filter((option) => option <= today)
+              .filter((option) => option <= encodableThrough)
               .map((option) => (
                 <DropdownMenuItem key={option} disabled={option === day} onClick={() => move({ work_date: option })}>
                   {formatWeekday(option)} {formatDate(option)}
@@ -1320,7 +1338,7 @@ function TimeCell({
   entries,
   total,
   onOptimisticTotal,
-  future,
+  tooFarAhead,
   locked,
   onEmptied,
 }: {
@@ -1336,7 +1354,13 @@ function TimeCell({
   total: number;
   /** Paints the parsed minutes everywhere at once. Call it inside a transition. */
   onOptimisticTotal: (minutes: number) => void;
-  future: boolean;
+  /**
+   * P7-76 — dated after Sunday of the current week, which is as far ahead as
+   * the write policies reach. Named for the bound rather than for the tense: a
+   * cell dated tomorrow is in the future and is perfectly writable, and calling
+   * the flag `future` is what would make the next reader "fix" that.
+   */
+  tooFarAhead: boolean;
   locked: boolean;
   onEmptied: () => void;
 }) {
@@ -1371,11 +1395,12 @@ function TimeCell({
   const split = entries.length > 1;
 
   // Three reasons a cell cannot be typed into, and they are not the same reason:
-  // the day has not happened, the cell holds entries the grid cannot choose
-  // between, or the whole week has been handed in. Only the third is new; all
-  // three end in the same place, which is why they are one flag here and three
-  // different explanations everywhere else.
-  const readOnly = future || split || locked;
+  // the day is past the end of this week (P7-76 — it used to be "the day has
+  // not happened"), the cell holds entries the grid cannot choose between, or
+  // the whole week has been handed in. All three end in the same place, which
+  // is why they are one flag here and three different explanations everywhere
+  // else.
+  const readOnly = tooFarAhead || split || locked;
 
   // `draft === null` means "show the server". Everything written here goes back
   // to null on commit, so a value the server rejected or reinterpreted never
@@ -1567,7 +1592,7 @@ function TimeCell({
   }, [saved]);
 
   return (
-    <td className={cn("group/cell relative border-l p-0", future && "bg-muted/30", pending && "opacity-60")}>
+    <td className={cn("group/cell relative border-l p-0", tooFarAhead && "bg-muted/30", pending && "opacity-60")}>
       {/*
         H — the cell says it saved, on itself.
 
@@ -1626,16 +1651,17 @@ function TimeCell({
         <DurationSuggestion anchor={inputRef} value={draft ?? ""} onAccept={() => inputRef.current?.blur()} />
       )}
 
-      {/* A day that has not happened cannot be logged — the INSERT policy says
-          so in Manila time, and offering the control anyway just produces an
-          error people read as a bug.
+      {/* A day past the end of this week cannot be logged — the INSERT policy
+          says so in Manila time (P7-76), and offering the control anyway just
+          produces an error people read as a bug. Days inside this week DO open,
+          including ones that have not happened yet: that is the whole of P7-76.
 
           A LOCKED week still opens, because the notes are the reason to open it
           and reading a handed-in week is the whole point of handing it in. It
           opens read-only — `CellDetail` is a full editor otherwise, and leaving
           it editable here would make the lock a matter of which control you
           happened to reach for. */}
-      {future ? null : (
+      {tooFarAhead ? null : (
         <CellDetail
           open={open}
           onOpenChange={setOpen}

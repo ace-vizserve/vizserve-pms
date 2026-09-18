@@ -51,8 +51,8 @@ export type { ActionResult };
 function readableError(error: { message?: string; code?: string } | null): string {
   if (error?.code === "42501") {
     return (
-      "You can only log time against a task you are on, for a day that has happened, " +
-      "in a week you have not submitted yet."
+      "You can only log time against a task you are on, for a day no later than the " +
+      "end of this week, in a week you have not submitted yet."
     );
   }
 

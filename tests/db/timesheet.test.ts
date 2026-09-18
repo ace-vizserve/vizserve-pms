@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { addDays, todayInAppZone } from "@/lib/dates";
+import { lastEncodableDay } from "@/lib/schemas/timesheet";
 
 import {
   DEPARTMENTS,
@@ -17,7 +18,8 @@ import {
  * The unit suite covers the schema and the week maths. Everything here needs a
  * real database and a real session, because every assertion is about something
  * a CLIENT must not be able to do: log against somebody else's task, log to
- * tomorrow, write a row under another person's name, or put 30 hours in a day.
+ * next week (P7-76 — this week is now fair game), write a row under another
+ * person's name, or put 30 hours in a day.
  *
  * Run through the publishable key with a signed-in user, never the service key.
  * The service role bypasses policies, so a suite that used it would pass while
@@ -55,7 +57,9 @@ if (dbTestsEnabled && !migrationApplied) {
 const run = dbTestsEnabled && migrationApplied;
 
 const today = todayInAppZone();
-const tomorrow = addDays(today, 1)!;
+/** P7-76 — the last day an entry may carry, and the first day it may not. */
+const endOfThisWeek = lastEncodableDay(today);
+const nextMonday = addDays(endOfThisWeek, 1)!;
 
 const createdTasks: string[] = [];
 const touchedUsers = new Set<string>();
@@ -289,13 +293,35 @@ describe.skipIf(!run)("P6-01 — writes are first person only", () => {
 // ---------------------------------------------------------------------------
 
 describe.skipIf(!run)("P6-01 — dates and daily totals", () => {
-  it("refuses a future work_date", async () => {
+  /*
+   * P7-76 — the bound moved from "today" to the end of THIS week, so the pair
+   * below is the whole rule. `tomorrow` is no longer a test of anything: six
+   * days out of seven it is now allowed, and on the seventh (a Sunday) it is
+   * not — a test that passes or fails by weekday is worse than none.
+   */
+  it("accepts a later day in the same week", async () => {
     const { client } = await signIn("member1VizBytes");
 
     const { error } = await client.from("vizserve_pms_timesheet_entries").insert({
       user_id: picId,
       task_id: ownTaskId,
-      work_date: tomorrow,
+      // Sunday of this week. Equal to `today` when the suite runs on a Sunday,
+      // which is still the right assertion — it is the last encodable day.
+      work_date: endOfThisWeek,
+      minutes: 60,
+    });
+
+    expect(error).toBeNull();
+    await clearEntries(picId);
+  });
+
+  it("refuses a work_date in next week", async () => {
+    const { client } = await signIn("member1VizBytes");
+
+    const { error } = await client.from("vizserve_pms_timesheet_entries").insert({
+      user_id: picId,
+      task_id: ownTaskId,
+      work_date: nextMonday,
       minutes: 60,
     });
 
