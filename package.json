@@ -23,7 +23,8 @@
     "db:push": "npx --yes supabase@latest db push",
     "db:diff": "npx --yes supabase@latest db diff",
     "db:types": "npx --yes supabase@latest gen types typescript --local > lib/database.types.ts",
-    "smoke:approval-link": "node scripts/approval-link.mjs"
+    "smoke:approval-link": "node scripts/approval-link.mjs",
+    "prepare": "node scripts/install-hooks.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

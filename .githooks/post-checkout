@@ -1,0 +1,11 @@
+#!/bin/sh
+# Vercel deploys a push to main only if the commit's author is a member of the
+# Vercel team, and only ace.vizserve and vercel.hfse are. Commits on main are
+# authored as the shared vercel.hfse identity so anyone's push deploys; every
+# other branch goes back to the committer's own global email.
+if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]; then
+  git config --local user.email "vercel.hfse@gmail.com"
+else
+  git config --local --unset user.email 2>/dev/null
+fi
+exit 0
