@@ -429,7 +429,14 @@ export function BalancesGrid({
         // P7-45. A type restricted by gender is not merely hidden from this
         // person's picker — the database REFUSES a request filed against it —
         // so an allocation here would be days they can never spend.
-        if (!leaveTypeApplies(type.applies_to_gender, person.gender)) {
+        //
+        // UNLESS ONE IS ALREADY SAVED — typically from before the person's
+        // gender was recorded. Hiding it behind a dash would leave HR no way to
+        // see or zero it, while My leave keeps showing it to the person.
+        if (
+          !leaveTypeApplies(type.applies_to_gender, person.gender) &&
+          !Number(allocations[key] ?? 0)
+        ) {
           return (
             <span
               className="text-xs text-foreground-faint"

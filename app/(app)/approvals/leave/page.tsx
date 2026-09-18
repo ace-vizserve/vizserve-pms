@@ -69,12 +69,13 @@ export default async function MyLeavePage({
 
   /*
    * A type that does not apply to this person (Paternity for a woman, say) is
-   * hidden — UNLESS something is allocated or used against it, in which case it
-   * is a real figure and hiding it would hide a mistake somebody should see.
+   * hidden — UNLESS leave was actually taken against it, which is a fact.
+   * An ALLOCATION alone does not keep it: that is days they can never spend,
+   * almost always given before their gender was recorded, and it is HR's to
+   * zero on /hr/balances, not this person's to be shown.
    */
   const balances = (balancesResult.data ?? []).filter(
     (row) =>
-      Number(row.days_allocated) > 0 ||
       Number(row.days_used) > 0 ||
       leaveTypeApplies(types.get(row.leave_type_id)?.applies_to_gender, context.gender),
   );
