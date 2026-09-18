@@ -2447,6 +2447,13 @@ export type Database = {
        * row filed before P7-12 had no type at all, and a LABEL_HIDDEN type is
        * withholding one. Both read "On leave". A HIDDEN type does not appear in
        * this result at all unless the caller is its own requester.
+       *
+       * P7-75 added `status` and widened the rows to PENDING_REVIEW as well as
+       * APPROVED — kept in step with
+       * `20260918090000_p7_75_pending_leave_on_the_calendar.sql`. ⚠️ EVERY
+       * CALLER NOW HAS TO DECIDE: "on leave" and "asked to be on leave" are
+       * different claims, and only `status` separates them. The visibility rules
+       * are unchanged and apply at both statuses.
        */
       vizserve_pms_leave_calendar: {
         Args: { p_from: string; p_to: string };
@@ -2458,6 +2465,8 @@ export type Database = {
           start_half: VizservePmsDayHalf | null;
           end_half: VizservePmsDayHalf | null;
           type_label: string | null;
+          /** P7-75. Only ever `APPROVED` or `PENDING_REVIEW`. */
+          status: VizservePmsInternalRequestStatus;
         }[];
       };
       /**

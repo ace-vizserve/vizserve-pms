@@ -1139,11 +1139,21 @@ describe.skipIf(!leaveTypesApplied)("P7-12 — leave types", () => {
     expect(written ?? []).toHaveLength(0);
   });
 
-  it("does not leak the type through the leave calendar", async () => {
-    // P7-10 withholds the reason because a reason is medical or personal. Four
-    // of the eight types are disclosures in their own right — Sick, Maternity,
-    // Solo Parent and Special Leave for Women. The calendar returns four
-    // columns and this is the test that keeps it at four.
+  it("does not leak the reason through the leave calendar", async () => {
+    /*
+     * P7-10 withholds the reason because a reason is medical or personal.
+     *
+     * ⚠️ THIS USED TO ASSERT THE TYPE WAS WITHHELD TOO, and pinned the function
+     * to four columns. P7-42 changed the rule rather than broke it: the type is
+     * returned, but only where `calendar_visibility` allows it — HIDDEN
+     * withholds the whole row from everybody but its requester, LABEL_HIDDEN
+     * blanks the label — so `type_label` being present is not a leak, and this
+     * file had simply not been updated (the suite skips itself without
+     * `SUPABASE_TEST_URL`). P7-75 adds `status`.
+     *
+     * The column list stays as the test: what must never appear is `reason`,
+     * `id` or `department_id`.
+     */
     const { client } = await signIn("member1VizBytes");
 
     const { data } = await client.rpc("vizserve_pms_leave_calendar", {
@@ -1152,7 +1162,16 @@ describe.skipIf(!leaveTypesApplied)("P7-12 — leave types", () => {
     });
 
     for (const row of (data ?? []) as Record<string, unknown>[]) {
-      expect(Object.keys(row).sort()).toEqual(["end_date", "full_name", "start_date", "user_id"]);
+      expect(Object.keys(row).sort()).toEqual([
+        "end_date",
+        "end_half",
+        "full_name",
+        "start_date",
+        "start_half",
+        "status",
+        "type_label",
+        "user_id",
+      ]);
     }
   });
 });

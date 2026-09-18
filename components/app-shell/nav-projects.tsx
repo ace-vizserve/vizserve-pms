@@ -106,7 +106,7 @@ export type ProjectSpace = {
   lists: ProjectList[];
   folders: ProjectFolder[];
   /**
-   * P7-72. Owners, the leads and managers of THIS department, and its
+   * P7-74. Owners, the leads and managers of THIS department, and its
    * department admins — `canShapeDepartment`, per space, because one rail can
    * hold a department the reader leads beside one they only see.
    */
@@ -352,7 +352,7 @@ function SpaceNode({
 }
 
 /**
- * P7-72 — a department's folders, draggable for the people allowed to reorder.
+ * P7-74 — a department's folders, draggable for the people allowed to reorder.
  *
  * ⚠️ THE RESERVED FOLDER IS NOT IN THE SORTABLE SET. The loader pins Client
  * Requests last whatever its `sort_order` says, so letting it be dragged would
@@ -427,7 +427,7 @@ function SortableFolderNode(props: FolderNodeProps) {
 }
 
 /**
- * P7-72 — a sibling set of lists: one folder's, or a department's folderless
+ * P7-74 — a sibling set of lists: one folder's, or a department's folderless
  * ones. Plain rows unless the reader may reorder and there is something to move.
  */
 function ListRows({

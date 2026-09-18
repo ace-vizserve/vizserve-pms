@@ -446,16 +446,22 @@ describe.skipIf(!run)("P7-16 — downstream", () => {
     });
   });
 
-  it("does NOT reach the leave calendar, which paints whole days on purpose", async () => {
+  it("reaches the leave calendar, which learns the halves since P7-42", async () => {
     /*
-     * ASSERTING AN ABSENCE, and deliberately.
+     * ⚠️ THIS CASE USED TO ASSERT THE OPPOSITE, and it had been wrong for three
+     * weeks. It read "does NOT reach the leave calendar, which paints whole days
+     * on purpose" and pinned the function to four columns, on P7-16's reasoning
+     * that rendering a half day would make a scheduling claim ("available until
+     * midday") nothing else in the app supports.
      *
-     * The migration is explicit that `vizserve_pms_leave_calendar` does not
-     * learn the halves: a calendar that rendered them would be making a
-     * scheduling claim ("available until midday") that nothing else in this app
-     * supports. That is the sort of decision somebody reverses six months later
-     * by adding two columns to the function because it looks like an oversight.
-     * This test is the note that says it was not.
+     * P7-42 reversed that on 25 Aug — the halves and the type moved into the
+     * function to feed the hover card — and this file was not updated, which
+     * nobody noticed because `tests/db/*` skips itself without
+     * `SUPABASE_TEST_URL`. The note it was guarding is gone; what is worth
+     * keeping is the column list, so a future widening of a SECURITY DEFINER
+     * function is a deliberate edit here rather than a silent disclosure.
+     *
+     * P7-75 adds the eighth column, `status`.
      */
     const { client } = await signIn("member1VizBytes");
     const id = await submitLeave(client, {
@@ -482,10 +488,68 @@ describe.skipIf(!run)("P7-16 — downstream", () => {
     const mine = rows.filter((row) => row.start_date === "2026-12-21");
     expect(mine.length).toBeGreaterThan(0);
 
-    // A half day is still a day on which somebody is partly away, so the row is
-    // there — with four columns and no half among them.
+    // Eight columns, and NO `reason`, `id` or `department_id` among them — that
+    // is the disclosure this list exists to hold the line on.
     for (const row of mine) {
-      expect(Object.keys(row).sort()).toEqual(["end_date", "full_name", "start_date", "user_id"]);
+      expect(Object.keys(row).sort()).toEqual([
+        "end_date",
+        "end_half",
+        "full_name",
+        "start_date",
+        "start_half",
+        "status",
+        "type_label",
+        "user_id",
+      ]);
+      expect(row.start_half).toBe("MORNING");
+      expect(row.end_half).toBe("MORNING");
     }
+  });
+
+  /**
+   * P7-75 — a request nobody has decided is on everybody's calendar.
+   *
+   * The pair of cases that matter: an UNDECIDED request reaches a colleague, and
+   * a REFUSED one does not. The first is the reversal Amier asked for on 18 Sep;
+   * the second is the boundary that keeps the calendar a list of absences rather
+   * than a log of everything anyone ever asked for.
+   */
+  it("shows a colleague's undecided leave, and drops it again if it is refused", async () => {
+    const mine = await signIn("member1VizBytes");
+    const id = await submitLeave(mine.client, {
+      p_start_date: "2026-12-28",
+      p_end_date: "2026-12-28",
+    });
+
+    // A DIFFERENT PERSON, and not their lead: the whole claim is that an
+    // ordinary colleague sees this, through the SECURITY DEFINER function
+    // rather than through the request's own policy, which would refuse them.
+    const colleague = await signIn("member2VizBytes");
+
+    const read = async () => {
+      const { data, error } = await colleague.client.rpc("vizserve_pms_leave_calendar", {
+        p_from: "2026-12-01",
+        p_to: "2026-12-31",
+      });
+      expect(error).toBeNull();
+
+      return ((data ?? []) as Array<Record<string, unknown>>).filter(
+        (row) => row.user_id === mine.userId && row.start_date === "2026-12-28",
+      );
+    };
+
+    const pending = await read();
+    expect(pending.length).toBe(1);
+    expect(pending[0]!.status).toBe("PENDING_REVIEW");
+    // Still no reason, at either status.
+    expect(pending[0]).not.toHaveProperty("reason");
+
+    const tl = await signIn("tlVizBytes");
+    await tl.client.rpc("vizserve_pms_decide_internal_request", {
+      p_id: id,
+      p_decision: "rejected",
+    });
+
+    expect(await read()).toEqual([]);
   });
 });

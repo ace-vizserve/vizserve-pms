@@ -153,47 +153,45 @@ function CalendarFallback() {
  */
 async function loadHomeSpans({
   supabase,
-  context,
   gridFrom,
   gridTo,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
-  context: Awaited<ReturnType<typeof requireAuthContext>>;
+  // ⚠️ NO `context`. It was here to read the caller's own id and name for the
+  // second query P7-75 deleted; the function now returns everybody's rows,
+  // including the caller's, with the names already on them.
   gridFrom: string;
   gridTo: string;
 }) {
-  const [approvedLeave, myPendingLeave] = await Promise.all([
-    /*
-     * P7-10 — everyone's approved leave, through the SECURITY DEFINER function.
-     *
-     * NOT a select on `vizserve_pms_internal_requests`: that table's policy
-     * scopes rows to the requester and to leads of the department, so a member
-     * reading it directly would see a calendar containing only themselves. The
-     * function returns name and dates and withholds the reason, which is the
-     * one thing RLS cannot express — a policy grants a row, not a column.
-     *
-     * A month either side, so a span that starts in July and ends in August
-     * still paints its August days.
-     */
-    supabase.rpc("vizserve_pms_leave_calendar", { p_from: gridFrom, p_to: gridTo }),
-
-    // Your OWN pending leave, through the ordinary policy. Nobody else's
-    // pending appears anywhere: a request that has not been decided is not yet
-    // a fact, and broadcasting it tells the company you asked for time off
-    // before your own lead has seen it.
-    //
-    // P7-42 — the halves and the type come too, and NO MASKING APPLIES. These
-    // are your own rows, reaching you through the ordinary policy rather than
-    // through the calendar function, so the rule that hides a confidential type
-    // from your colleagues has nothing to say about showing it to you. The
-    // embedded select mirrors the one already proven in app/(app)/dtr/page.tsx.
-    supabase
-      .from("vizserve_pms_internal_requests")
-      .select("id, start_date, end_date, start_half, end_half, vizserve_pms_leave_types(label)")
-      .eq("requester_id", context.userId)
-      .eq("request_type", "LEAVE")
-      .eq("status", "PENDING_REVIEW"),
-  ]);
+  /*
+   * P7-10 — everyone's leave, through the SECURITY DEFINER function.
+   *
+   * NOT a select on `vizserve_pms_internal_requests`: that table's policy
+   * scopes rows to the requester and to leads of the department, so a member
+   * reading it directly would see a calendar containing only themselves. The
+   * function returns name and dates and withholds the reason, which is the
+   * one thing RLS cannot express — a policy grants a row, not a column.
+   *
+   * A month either side, so a span that starts in July and ends in August
+   * still paints its August days.
+   *
+   * ⚠️ P7-75 — ONE QUERY, WHERE THERE USED TO BE TWO. This ran a second select
+   * for YOUR OWN pending leave, because the function returned approved rows
+   * only and pending was deliberately private ("a request that has not been
+   * decided is not yet a fact"). Amier overruled that on 18 Sep: a requested day
+   * is exactly what the rest of the team needs to see while they are still
+   * booking work into it. The function now returns both and says which is which,
+   * so the second query is not merely redundant — keeping it would double every
+   * one of your own pending rows on your own calendar.
+   *
+   * The masking rules did not move and still live in SQL: a HIDDEN type reaches
+   * nobody but its requester at either status, and your own rows come back
+   * unmasked because the function keys that off `auth.uid()`.
+   */
+  const leave = await supabase.rpc("vizserve_pms_leave_calendar", {
+    p_from: gridFrom,
+    p_to: gridTo,
+  });
 
   // ----------------------------------------------------------------- leave
   //
@@ -201,41 +199,31 @@ async function loadHomeSpans({
   // and must not try to — leave filed before P7-12 had no type, and a
   // LABEL_HIDDEN type is withholding one. Both read "On leave" downstream. A
   // HIDDEN type never appears in `approvedLeave` at all unless it is yours.
-  const spans: LeaveSpan[] = [
-    ...(
-      (approvedLeave.data ?? []) as {
-        user_id: string;
-        full_name: string;
-        start_date: string;
-        end_date: string;
-        start_half: DayHalf | null;
-        end_half: DayHalf | null;
-        type_label: string | null;
-      }[]
-    ).map((row) => ({
-      userId: row.user_id,
-      name: row.full_name,
-      start: row.start_date,
-      end: row.end_date,
-      startHalf: row.start_half,
-      endHalf: row.end_half,
-      typeLabel: row.type_label,
-    })),
-    ...(myPendingLeave.data ?? [])
-      .filter((row) => row.start_date && row.end_date)
-      .map((row) => ({
-        userId: context.userId,
-        name: context.fullName,
-        start: row.start_date!,
-        end: row.end_date!,
-        startHalf: row.start_half,
-        endHalf: row.end_half,
-        // An object, not an array: `leave_type_id` is a single FK, and PostgREST
-        // embeds a to-one relationship as one row.
-        typeLabel: row.vizserve_pms_leave_types?.label ?? null,
-        pending: true,
-      })),
-  ];
+  const spans: LeaveSpan[] = (
+    (leave.data ?? []) as {
+      user_id: string;
+      full_name: string;
+      start_date: string;
+      end_date: string;
+      start_half: DayHalf | null;
+      end_half: DayHalf | null;
+      type_label: string | null;
+      status: "APPROVED" | "PENDING_REVIEW";
+    }[]
+  ).map((row) => ({
+    userId: row.user_id,
+    name: row.full_name,
+    start: row.start_date,
+    end: row.end_date,
+    startHalf: row.start_half,
+    endHalf: row.end_half,
+    typeLabel: row.type_label,
+    // P7-75. The one thing the cell, the hover card and the legend all key off.
+    // Absent rather than `false` on an approved row, because `pending` is
+    // optional on `LeaveSpan` and every reader already treats undefined as "not
+    // pending" — writing both would be two ways to say the same thing.
+    ...(row.status === "PENDING_REVIEW" ? { pending: true } : {}),
+  }));
 
   return spans;
 }
@@ -707,7 +695,7 @@ export default async function DashboardPage({
   // boundaries ask for it.
   const myTasksPromise = countMyOpenTasks(context.userId);
 
-  const spansPromise = loadHomeSpans({ supabase, context, gridFrom, gridTo });
+  const spansPromise = loadHomeSpans({ supabase, gridFrom, gridTo });
 
   /*
     "New task" IS NOT IN THIS LIST ANY MORE, and that is the point of the

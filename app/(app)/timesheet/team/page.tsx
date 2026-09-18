@@ -418,7 +418,21 @@ export default async function TeamWeekPage({
     user_id: string;
     start_date: string;
     end_date: string;
+    status: "APPROVED" | "PENDING_REVIEW";
   }[]) {
+    /*
+     * ⚠️ APPROVED ONLY, AND THIS FILTER IS THE WHOLE REASON P7-75 IS SAFE HERE.
+     *
+     * The function returned approved rows and nothing else until 18 Sep; it now
+     * returns requested ones too, so the calendar can show the team what has
+     * been asked for. This grid reads the same function for a different
+     * question: it marks a week "on leave" so a lead does NOT chase somebody for
+     * a timesheet they were never going to file. A request nobody has decided
+     * excuses nothing — and worse, it would excuse it in advance of the decision
+     * that might refuse it.
+     */
+    if (span.status !== "APPROVED") continue;
+
     const taken = leave.get(span.user_id) ?? new Set<string>();
     for (const day of days) {
       if (day >= span.start_date && day <= span.end_date) taken.add(day);

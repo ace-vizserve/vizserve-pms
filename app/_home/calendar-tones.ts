@@ -93,7 +93,10 @@ const LEAVE_AND_HOLIDAY_TONES: Record<"approved" | "pending" | "holiday" | "toda
   },
   pending: {
     kind: "pending",
-    label: "Your pending leave",
+    // P7-75. Was "Your pending leave", which was accurate while the calendar
+    // carried nobody else's. It now carries everybody's, and a legend still
+    // saying "Your" would read as a filter that is not there.
+    label: "Requested leave",
     swatch: "bg-warning border-warning",
     surface: "border-warning/45 border-l-4 border-l-warning bg-warning-subtle",
     text: "text-warning",

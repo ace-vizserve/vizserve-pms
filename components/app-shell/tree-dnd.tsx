@@ -24,7 +24,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { cn } from "@/lib/utils";
 
 /**
- * P7-72 — THE ONLY FILE THAT IMPORTS `@dnd-kit` FOR THE PROJECT TREE, in the
+ * P7-74 — THE ONLY FILE THAT IMPORTS `@dnd-kit` FOR THE PROJECT TREE, in the
  * rail (`nav-projects.tsx`) and on /tasks/lists (`list-manager.tsx`).
  *
  * The same containment `board-dnd.tsx` and `timesheet/row-dnd.tsx` keep for
@@ -140,7 +140,7 @@ export const SIDEBAR_GRIP =
   "absolute size-5 opacity-0 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:opacity-100 focus-visible:ring-sidebar-ring";
 
 /**
- * P7-72 — one sibling set's order, as the reader last dragged it. Shared by the
+ * P7-74 — one sibling set's order, as the reader last dragged it. Shared by the
  * rail and /tasks/lists, so a drag in either place saves the same way.
  *
  * OPTIMISTIC, because rows that jump back for the length of a round trip and

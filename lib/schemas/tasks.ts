@@ -1020,7 +1020,7 @@ export const taskGroupSchema = z.object({
 export type TaskGroupInput = z.infer<typeof taskGroupSchema>;
 
 /**
- * P7-72 — a department's folders in the order they should be drawn.
+ * P7-74 — a department's folders in the order they should be drawn.
  *
  * The WHOLE order, not a single move. The rail renders what it has, so sending
  * every id and writing `sort_order` from its position cannot land two folders
@@ -1035,7 +1035,7 @@ export const taskGroupOrderSchema = z.object({
 export type TaskGroupOrderInput = z.infer<typeof taskGroupOrderSchema>;
 
 /**
- * P7-72 — one sibling set of lists in order: a folder's, or (`group_id: null`)
+ * P7-74 — one sibling set of lists in order: a folder's, or (`group_id: null`)
  * a department's folderless ones. Whole order, for the reason above.
  */
 export const listOrderSchema = z.object({

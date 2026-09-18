@@ -33,7 +33,7 @@ import { cn } from "@/lib/utils";
 import { reorderLists, reorderTaskGroups, saveList, saveTaskGroup } from "../actions";
 
 /**
- * P7-72 — the grip on this screen: always visible and a full 24px target (WCAG
+ * P7-74 — the grip on this screen: always visible and a full 24px target (WCAG
  * 2.2 §2.5.8), unlike the rail's hover-revealed one. This is the screen people
  * come to in order to arrange things, so the handle should not have to be found.
  */
@@ -83,7 +83,7 @@ export function ListManager({
   groups: GroupRow[];
   departments: Department[];
   openCounts: Record<string, number>;
-  /** P7-72. Departments whose folders and lists this reader may drag. */
+  /** P7-74. Departments whose folders and lists this reader may drag. */
   reorderableDepartmentIds: string[];
 }) {
   /*
@@ -382,7 +382,7 @@ export function ListManager({
 }
 
 /**
- * P7-72 — a department's folder cards, draggable for the people allowed to.
+ * P7-74 — a department's folder cards, draggable for the people allowed to.
  *
  * ⚠️ THE RESERVED FOLDER IS NOT IN THE SORTABLE SET. Client Requests is pinned
  * last on this screen and in the rail whatever its `sort_order` says, so a drag
@@ -440,7 +440,7 @@ type ListRowsProps = {
   lists: ListRow[];
   openCounts: Record<string, number>;
   onEdit: (list: ListRow) => void;
-  /** P7-72. Set only when the reader may reorder this department. */
+  /** P7-74. Set only when the reader may reorder this department. */
   departmentId: string | null;
   /** The folder these lists sit in; null for the folderless ones. */
   groupId: string | null;

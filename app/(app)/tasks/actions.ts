@@ -2205,7 +2205,7 @@ export async function saveTaskGroup(
 }
 
 /**
- * P7-72 — rearrange a department's folders from the sidebar.
+ * P7-74 — rearrange a department's folders from the sidebar.
  *
  * ⚠️ `canShapeDepartment`, NOT `canManageDepartmentTree`, AND THE NARROWING IS
  * DELIBERATE. P11-07 lets any member of a department create and rename folders,
@@ -2268,7 +2268,7 @@ export async function reorderTaskGroups(input: unknown): Promise<ActionResult<nu
 }
 
 /**
- * P7-72 — rearrange the lists inside one folder, or a department's folderless
+ * P7-74 — rearrange the lists inside one folder, or a department's folderless
  * lists, from the sidebar. Same gate, same numbering and same stale-order check
  * as `reorderTaskGroups` above; see the notes there.
  *

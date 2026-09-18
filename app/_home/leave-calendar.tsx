@@ -36,15 +36,23 @@ import type { LeaveSpan } from "./leave-entry";
  * would see only themselves. The function projects name and dates and withholds
  * the reason, which RLS cannot do because a policy grants a row, not a column.
  *
- * TWO KINDS OF ENTRY, and the difference is a privacy rule rather than a
- * display one:
+ * TWO KINDS OF ENTRY, and the difference is now a display one rather than a
+ * privacy rule. Both come from the same function, which says which is which:
  *
- *   approved   everyone's, from the function
- *   pending    YOURS ONLY, read through the ordinary policy by the page
+ *   approved   decided. Somebody WILL be away.
+ *   pending    filed, nobody has answered yet. Somebody has ASKED to be away.
  *
- * A pending request is not yet a fact. Broadcasting it would tell the whole
- * company that someone has asked for time off before their own Team Leader has
- * seen it, which is how people learn to stop filing requests in the system.
+ * ⚠️ P7-75 REVERSED THE RULE THIS COMMENT USED TO STATE. Pending was yours
+ * only, on the reasoning that "a pending request is not yet a fact, and
+ * broadcasting it would tell the whole company that someone has asked for time
+ * off before their own Team Leader has seen it". Amier overruled it on 18 Sep:
+ * the team books work into days that a colleague has already asked for, and the
+ * calendar could not warn them for exactly the window in which it mattered.
+ *
+ * So the cost is accepted, not forgotten: a request that is later refused was
+ * visible to everyone while it stood. The words carry the difference —
+ * "awaiting review" in the hover card, "Requested leave" in the legend — because
+ * the amber tint is never allowed to be the only thing saying so.
  *
  * P7-35 — AND HOLIDAYS, which are a third kind of entry rather than a third kind
  * of absence. Leave is a fact about a person; a holiday is a fact about the day,
@@ -271,7 +279,13 @@ export function LeaveCalendar({
         {/* P7-35c. The legend renders the grid as its children rather than
             beside it, which is what keeps 42 cells on the server while the
             filter state lives in the browser — see `calendar-legend.tsx`. */}
-        <CalendarLegend items={legendItems} footnote="Hover a name for details · some leave is private">
+        {/* P7-75 — "not yet decided" is said here as well as in every hover
+            card, because the legend is the one place a reader learns what the
+            underlined amber names mean without hovering one. */}
+        <CalendarLegend
+          items={legendItems}
+          footnote="Hover a name for details · underlined names are requests nobody has decided yet · some leave is private"
+        >
           {/* `minmax(3.5rem,auto)`, NOT `auto-rows-fr`.
 
               `auto-rows-fr` expands to `minmax(0,1fr)`, and the zero is the whole

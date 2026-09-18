@@ -146,7 +146,7 @@ export default async function ListsPage() {
         groups={groups ?? []}
         departments={allowed}
         openCounts={Object.fromEntries(openByList)}
-        // P7-72 — the drag handles. Narrower than the page gate: members may
+        // P7-74 — the drag handles. Narrower than the page gate: members may
         // open this screen and add lists (P11-07), but the ORDER is for owners,
         // the department's leads and managers, and its department admins.
         reorderableDepartmentIds={allowed

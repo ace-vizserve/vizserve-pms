@@ -2312,3 +2312,67 @@ there, and they come back if it moves back.
 - **The migration is not applied, and nothing has been verified in a browser.**
 - The SQL has never executed: there is no Docker on this machine and no scratch
   project.
+
+## P7-74 — Dragging the project tree into order (17 Sep 2026)
+
+**No migration.** Folders and lists already carried `sort_order`, and the write
+policies already admitted the people who may now drag: `p8_01c` (department
+admins) and `p11_07` (any member of the department). This is the layer above
+them, and the order it writes is what both the rail and `/tasks/lists` read.
+
+⚠️ **The grip is narrower than the policy under it.** `canShapeDepartment` —
+owner, a lead or manager of *that* department, or its department admin — which
+is NOT `canManageDepartmentTree`, the P11-07 predicate that also admits a plain
+member. A list is a shelf anyone may add (P11-07); the ORDER the whole
+department reads all day is not. **A member can therefore still reorder through
+the API, and only the screen refuses them.** Closing that means narrowing the
+UPDATE policies to `sort_order`, which column-level grants cannot express in a
+policy — so it would be a trigger. Not done; not pretended otherwise.
+
+| What | Where |
+|---|---|
+| Actions | `reorderTaskGroups`, `reorderLists` in `app/(app)/tasks/actions.ts` — whole order, `sort_order = position × 10`, every update matched on `department_id` (and `group_id`, `owner_id is null` for lists) |
+| Contract | `taskGroupOrderSchema`, `listOrderSchema` in `lib/schemas/tasks.ts` |
+| Drag | `components/app-shell/tree-dnd.tsx` — the only `@dnd-kit` import for the tree, one provider per sibling set, `useDragOrder` shared by both screens |
+| Rail | `components/app-shell/nav-projects.tsx`, flag from `app/(app)/sidebar-panel.tsx` |
+| Manage screen | `app/(app)/tasks/lists/list-manager.tsx`, flag from its `page.tsx` |
+
+- **Client Requests is never draggable** — both screens pin it last whatever
+  `sort_order` says, so a drag would snap back. Its lists ARE draggable.
+- **A drag never refiles.** A list moves within its folder only; the folder
+  picker in the edit dialog is still the only way to move it between folders.
+- **Not verified in a browser.**
+
+## P7-75 — Requested leave appears on the calendar (18 Sep 2026)
+
+**One migration, written and NOT YET APPLIED** —
+`20260918090000_p7_75_pending_leave_on_the_calendar.sql`.
+
+⚠️ **THIS REVERSES P7-10's PRIVACY RULE.** `vizserve_pms_leave_calendar` returned
+`status = 'APPROVED'` only, because "a PENDING request is not yet a fact" and
+broadcasting one tells the company you asked for time off before your own lead
+answered. Amier, 18 Sep: show it anyway, so the team can see who has asked to be
+away. The argument that wins is planning — a request filed a week ahead was
+invisible for exactly the days people were booking work into.
+
+**The accepted cost, stated so nobody rediscovers it:** a request that is later
+refused was visible to everyone while it stood, and then disappears.
+
+- The function now returns `APPROVED` and `PENDING_REVIEW` rows and an eighth
+  column, `status`. `REJECTED` and `WITHDRAWN` stay off it.
+- **The P7-42 visibility levels are untouched and apply at both statuses.** A
+  HIDDEN type (VAWC, Special Leave for Women — RA 9262 §44, RA 9710) still
+  reaches nobody but its requester; LABEL_HIDDEN still masks the label.
+- `app/page.tsx` dropped its second query (your own pending leave, read through
+  the ordinary policy). Keeping it would have doubled your own rows.
+- ⚠️ **`/timesheet/team` filters to APPROVED itself.** It reads the same function
+  to excuse a missing week, and an undecided request excuses nothing.
+- **"Out today" on the home page is still approved-only** — it asserts who IS
+  away, not who asked. Deliberate; revisit if it reads as a contradiction of the
+  calendar beside it.
+- The cell marks a pending name with a **dashed underline** as well as the amber
+  tint, and the legend reads "Requested leave": state is never colour alone.
+- Two stale `tests/db` assertions were corrected on the way through — both still
+  pinned the function to its four pre-P7-42 columns, which nobody noticed
+  because the db suite skips itself without `SUPABASE_TEST_URL`.
+- **Not verified in a browser, and the SQL has never executed.**

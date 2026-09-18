@@ -177,7 +177,17 @@ export function LeaveTooltip({
   );
 }
 
-/** A name in a day cell. The tint says approved or pending; the label says who. */
+/**
+ * A name in a day cell.
+ *
+ * ⚠️ THE DASHED UNDERLINE IS NOT DECORATION. A pending row used to be the
+ * reader's own only, so the amber tint was a reminder about a request they had
+ * filed themselves. P7-75 put everybody's on the calendar, where the tint is now
+ * the difference between "Rina is off on Friday" and "Rina has asked for
+ * Friday" — and this app never lets colour carry a state on its own. The
+ * underline says "not settled" without spending any of the ~90px a cell has for
+ * a name; the hover card and the screen-reader summary both say it in words.
+ */
 export function LeaveEntry({ span, day }: { span: LeaveSpan; day: string }) {
   return (
     <LeaveTooltip
@@ -185,7 +195,9 @@ export function LeaveEntry({ span, day }: { span: LeaveSpan; day: string }) {
       day={day}
       className={cn(
         "block w-full truncate text-2xs font-medium",
-        span.pending ? "text-warning" : "text-info",
+        span.pending
+          ? "text-warning underline decoration-dashed decoration-from-font underline-offset-2"
+          : "text-info",
       )}
     >
       <span aria-hidden>{shortName(span.name)}</span>
