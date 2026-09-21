@@ -1,29 +1,10 @@
 #!/bin/sh
-# Vercel blocks a deploy from a PRIVATE repo when the commit's AUTHOR does not
-# resolve to a Vercel account. It is a billing check, not an access check —
-# GitHub collaborator rights let you push and do nothing for the deploy, which
-# is why the failure reads "Vercel Account: Not linked" rather than a
-# permissions error.
-#
-# Vercel matches by GitHub LOGIN, never by email address. The one Vercel
-# account here signs in through GitHub as `ace-vizserve`, so that is the only
-# login a deploy will accept, and `ace.vizserve@gmail.com` is the email GitHub
-# attributes to it.
-#
-# ⚠️ IT CHECKS THE AUTHOR, NOT THE PUSHER, and that is the whole trick: main
-# commits are stamped with the one identity Vercel knows, so anyone's push
-# deploys. Kurt is not a Vercel member and does not need to be. Every other
-# branch falls back to the committer's own global email.
-#
-# ⚠️ THE PREVIOUS VALUE HERE WAS `vercel.hfse@gmail.com`, AND IT SILENTLY DID
-# NOT WORK. That address is the Vercel account's email, but GitHub attributes
-# it to the account `vizserve-git`, which no Vercel account is connected to —
-# so every deploy from main was refused. It went unnoticed because the sibling
-# repo hfse-sis is PUBLIC, where Vercel waives the check entirely and reports
-# the same "not linked" notice without blocking. Making a repo public is not a
-# fix for this; it is the absence of the check.
+# Vercel deploys a push to main only if the commit's author is a member of the
+# Vercel team, and only ace.vizserve and vercel.hfse are. Commits on main are
+# authored as the shared vercel.hfse identity so anyone's push deploys; every
+# other branch goes back to the committer's own global email.
 if [ "$(git rev-parse --abbrev-ref HEAD)" = "main" ]; then
-  git config --local user.email "ace.vizserve@gmail.com"
+  git config --local user.email "vercel.hfse@gmail.com"
 else
   git config --local --unset user.email 2>/dev/null
 fi
