@@ -1,7 +1,6 @@
 import "server-only";
 
 import { absoluteUrl, escapeHtml } from "./config";
-import type { EmailStep } from "./request-details";
 
 /**
  * P0-11 / P8-14 — the shared email shell.
@@ -80,8 +79,6 @@ const INK_META = "#656F82";
 
 /** `--brand` / `--primary`. White on it at 6.54:1 — the only safe pairing. */
 const PRIMARY = "#4359A5";
-/** `--gradient-chip`. The wash that gives a chip its lit top edge. */
-const GRADE_CHIP = "linear-gradient(180deg,rgba(255,255,255,.65),rgba(255,255,255,0))";
 /** `--gradient-primary`. What a primary button is actually filled with. */
 const GRADE_PRIMARY = "linear-gradient(180deg,#5169b4 0%,#3b4f94 100%)";
 
@@ -196,18 +193,12 @@ export type EmailBody = {
   /** Label/value rows, e.g. "Target date — 5 Aug 2026". Escaped for you. */
   facts?: { label: string; value: string }[];
   /**
-   * The progress rail -- fixed stops in pipeline order, one of them live.
-   *
-   * ⚠️ THE EMAIL COUNTERPART OF `components/stage-track.tsx`, and it follows
-   * that component rather than inventing a second visual language for the same
-   * idea: four marker states, a connector filled only where the work has
-   * actually passed, and one line of meta under each label.
-   *
-   * Shape AND colour carry the state -- a tick, a filled dot, a hollow ring, an
-   * exclamation -- so the rail survives greyscale, a printout, and a client
-   * whose mail app strips background colours.
+   * A quiet line under the detail card. The reference number lives here rather
+   * than as a row in the table: it is a "keep this" not a "read this", and a
+   * full-width labelled row spends the reader's attention on the one value they
+   * do not need in order to act.
    */
-  timeline?: EmailStep[];
+  factsNote?: string;
   /** Quoted block — a decision reason, a QA comment. Escaped for you. */
   quote?: { label: string; text: string };
   button?: EmailButton;
@@ -237,123 +228,45 @@ function renderHtml(body: EmailBody): string {
       })()
     : "";
 
-  const facts = (body.facts ?? [])
+  /*
+   * The detail block, drawn as the app draws one: a `Card` with a title, and a
+   * `<dl>` of `Row`s inside it -- a 9rem label column in `text-xs
+   * text-muted-foreground`, the value in `text-sm`, a hairline under every row
+   * but the last (`border-b ... last:border-0`).
+   *
+   * It used to be a bare two-column table with no frame and no heading, which
+   * is a database printout rather than a card. Ten unframed rows of
+   * label-then-value is exactly what that looks like.
+   */
+  const factRows = (body.facts ?? [])
     .map(
-      (fact) => `
-                  <tr>
-                    <td style="padding:9px 0;border-top:1px solid ${BORDER};color:${INK_META};font-size:13px;line-height:1.5;width:38%;vertical-align:top;">${escapeHtml(fact.label)}</td>
-                    <td style="padding:9px 0;border-top:1px solid ${BORDER};color:${INK};font-size:14px;line-height:1.5;font-weight:600;vertical-align:top;">${escapeHtml(fact.value)}</td>
-                  </tr>`,
+      (fact, index, all) => `
+                      <tr>
+                        <td style="padding:10px 14px 10px 16px;${index === all.length - 1 ? "" : `border-bottom:1px solid ${BORDER};`}color:${INK_META};font-size:13px;line-height:1.45;width:144px;vertical-align:top;">${escapeHtml(fact.label)}</td>
+                        <td style="padding:10px 16px 10px 0;${index === all.length - 1 ? "" : `border-bottom:1px solid ${BORDER};`}color:${INK};font-size:14px;line-height:1.45;font-weight:500;vertical-align:top;">${escapeHtml(fact.value)}</td>
+                      </tr>`,
     )
     .join("");
 
-  /*
-   * The rail, drawn marker-for-marker against `components/stage-track.tsx`.
-   * The differences from that component are forced by the medium and are listed
-   * here so the next person can tell a constraint from a liberty:
-   *
-   *   - lucide draws its markers as <svg>; Gmail and Outlook strip SVG, so each
-   *     one is rebuilt out of a bordered box. `Check` becomes an entity, and
-   *     `CircleDot` becomes a ring with a dot inside it, which is what the glyph
-   *     is. Sizes, weights and colours are the component's.
-   *   - NO CONNECTOR. The component hides it below `sm` (`hidden sm:block`) and
-   *     an email is always below `sm`. An earlier cut here invented a vertical
-   *     one, which is a line that exists in no version of the real thing.
-   *   - no `sr-only` state word. Hidden text is a spam signal in an inbox, and
-   *     the text/plain part already spells every state out.
-   *
-   * The pending LABEL is `--muted-foreground`, never `--foreground-faint`: the
-   * faint token is 3.44:1 and non-text-only. Its ring is a shape, so it may
-   * wear it.
-   */
-  const MARKER: Record<
-    NonNullable<EmailBody["timeline"]>[number]["state"],
-    { box: string; glyph: string }
-  > = {
-    // A RAISED green chip with a white tick, not an outline: a passed gate has
-    // to read as green from across the page.
-    done: {
-      box: `background:#1C7A52;background-image:${GRADE_CHIP};border:1px solid #1C7A52;color:#ffffff;box-shadow:${ELEV_CONTROL};`,
-      glyph: `<span style="font-size:9px;line-height:16px;">&#10003;</span>`,
-    },
-    // `CircleDot` -- a ring with a filled centre, in the brand colour. No fill
-    // behind it, exactly as the component leaves it unfilled.
-    current: {
-      box: `border:2px solid ${PRIMARY};`,
-      glyph: `<span style="display:inline-block;width:6px;height:6px;margin-top:3px;background:${PRIMARY};border-radius:50%;"></span>`,
-    },
-    // `CircleAlert`, in the warning solid.
-    attention: {
-      box: "border:2px solid #8A6206;color:#8A6206;",
-      glyph: `<span style="font-size:10px;font-weight:700;line-height:12px;">!</span>`,
-    },
-    // `Circle` -- hollow, in the faint token. A ring is a shape, not text.
-    pending: { box: "border:2px solid #818B9C;", glyph: "" },
-  };
-
-  /*
-   * HORIZONTAL, with the connectors, which is the form the component actually
-   * renders -- `sm:flex-row` and `hidden sm:block` on the rail between stops.
-   * The email was 640px and I had been drawing its MOBILE fallback: a stack
-   * with no connectors. It is 760px now precisely so this fits.
-   *
-   * One cell per stop, one narrow cell per connector, all in a single row.
-   * `mt-[9px]` in the component puts the connector on the marker's centre line;
-   * 9px is that same offset.
-   *
-   * It restacks under 600px, which is what the component does at the same
-   * breakpoint -- and there the connectors go, for the same reason they are
-   * `hidden` there.
-   */
-  const timeline = (body.timeline ?? []).length
-    ? (() => {
-        const steps = body.timeline ?? [];
-        const cells = steps
-          .map((step, index) => {
-            const mark = MARKER[step.state];
-            const faded = step.state === "pending";
-            const passed = step.state === "done" || steps[index - 1]?.state === "done";
-            // Filled only where the work has actually passed, as the component
-            // has it: a fully drawn rail claims a route not yet travelled.
-            const connector =
-              index === 0
-                ? ""
-                : `
-                    <td class="vz-join" width="18" style="width:18px;padding:9px 4px 0;vertical-align:top;">
-                      <div style="height:2px;background:${passed ? "#1C7A52" : BORDER};border-radius:2px;"></div>
-                    </td>`;
-            return `${connector}
-                    <td class="vz-stop" valign="top" style="padding:0;vertical-align:top;">
-                      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
-                        <tr>
-                          <td width="16" style="width:16px;padding:2px 0 0;vertical-align:top;">
-                            <div style="width:16px;height:16px;border-radius:50%;text-align:center;${mark.box}">${mark.glyph}</div>
-                          </td>
-                          <td style="padding:0 0 0 10px;vertical-align:top;">
-                            <div style="color:${faded ? INK_META : INK};font-size:13px;line-height:1.25;font-weight:${faded ? "500" : "600"};">${escapeHtml(step.label)}</div>
-                            ${step.meta ? `<div style="margin-top:2px;color:${INK_META};font-size:12px;line-height:1.35;">${escapeHtml(step.meta)}</div>` : ""}
-                          </td>
-                        </tr>
-                      </table>
-                    </td>`;
-          })
-          .join("");
-
-        return `
-                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 0;">
+  const facts = factRows
+    ? `
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                       style="margin:22px 0 0;background:${CARD};border:1px solid ${BORDER};border-radius:10px;">
                   <tr>
-                    <td style="padding:0 0 10px;color:${INK_META};font-size:12px;line-height:1.4;font-weight:600;letter-spacing:.04em;text-transform:uppercase;">Where it has got to</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid ${BORDER};color:${INK};font-size:13px;font-weight:700;letter-spacing:-.01em;">Your request</td>
                   </tr>
                   <tr>
                     <td style="padding:0;">
-                      <table class="vz-rail" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
-                        <tr>${cells}
-                        </tr>
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${factRows}
                       </table>
                     </td>
                   </tr>
-                </table>`;
-      })()
+                </table>${
+                  body.factsNote
+                    ? `
+                <div style="margin:8px 2px 0;color:${INK_META};font-size:12px;line-height:1.45;">${escapeHtml(body.factsNote)}</div>`
+                    : ""
+                }`
     : "";
 
   // FLAT, and that is a rule rather than a preference: a fill and a border, no
@@ -371,18 +284,26 @@ function renderHtml(body: EmailBody): string {
                 </table>`
     : "";
 
-  // The fill is on the CELL and the padding on the anchor: Word drops padding
-  // from an inline anchor, which turns the one thing the email exists for into
-  // a line of blue text. `background` carries the flat colour for the clients
-  // that ignore `background-image`, so the gradient is a refinement, never the
-  // thing the button depends on.
+  /*
+   * CENTRED AND BIG. It was left-aligned at the app's 40px control height,
+   * which is right for a button among other controls on a page and wrong for
+   * the single thing an email exists to get clicked. `align="center"` is an
+   * ATTRIBUTE as well as a margin because Word ignores `margin:auto` on a
+   * table.
+   *
+   * The fill is on the CELL and the padding on the anchor: Word drops padding
+   * from an inline anchor, which turns the one thing the email exists for into
+   * a line of blue text. `background` carries the flat colour for clients that
+   * ignore `background-image`, so the gradient is a refinement, never load-
+   * bearing.
+   */
   const button = body.button
     ? `
-                <table class="vz-btn" role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;">
+                <table class="vz-btn" role="presentation" align="center" cellpadding="0" cellspacing="0" border="0" style="margin:28px auto 0;">
                   <tr>
-                    <td style="background:${PRIMARY};background-image:${GRADE_PRIMARY};border-radius:8px;box-shadow:${ELEV_CONTROL};">
+                    <td align="center" style="background:${PRIMARY};background-image:${GRADE_PRIMARY};border-radius:10px;box-shadow:${ELEV_CONTROL};">
                       <a href="${absoluteUrl(body.button.path)}"
-                         style="display:inline-block;padding:0 22px;height:40px;color:#ffffff;font-family:${FONT};font-size:15px;font-weight:600;line-height:40px;letter-spacing:-.01em;text-decoration:none;">${escapeHtml(body.button.label)}</a>
+                         style="display:inline-block;padding:0 36px;height:52px;color:#ffffff;font-family:${FONT};font-size:17px;font-weight:700;line-height:52px;letter-spacing:-.01em;text-decoration:none;white-space:nowrap;">${escapeHtml(body.button.label)}</a>
                     </td>
                   </tr>
                 </table>`
@@ -411,10 +332,8 @@ function renderHtml(body: EmailBody): string {
       /* The header links drop below the lockup rather than crowding it. */
       .vz-nav { display: block !important; width: 100% !important; text-align: left !important; padding-top: 10px !important; }
       .vz-nav a { padding-left: 0 !important; padding-right: 16px !important; }
-      /* The rail restacks, and the connectors go with it -- the component
-         hides them at this breakpoint too. */
-      .vz-rail .vz-stop { display: block !important; width: 100% !important; padding-bottom: 10px !important; }
-      .vz-rail .vz-join { display: none !important; }
+      /* Two offices side by side need 640px; they stack on a phone. */
+      .vz-office { display: block !important; width: 100% !important; text-align: left !important; padding: 10px 0 0 !important; }
     }
   </style>
 </head>
@@ -437,21 +356,21 @@ function renderHtml(body: EmailBody): string {
              Outlook and Gmail block remote images by default, and an identity
              that vanishes with the images is what makes a client read an
              approval request as phishing. -->
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:760px;width:100%;margin:0 0 18px;font-family:${FONT};">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;margin:0 0 18px;font-family:${FONT};">
           <tr>
-            <td style="width:36px;vertical-align:middle;">
+            <td style="width:52px;vertical-align:middle;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0">
                 <tr>
-                  <td align="center" style="width:36px;height:36px;background:${PRIMARY};background-image:${GRADE_PRIMARY};border-radius:8px;box-shadow:${ELEV_CONTROL};">
-                    <img src="${absoluteUrl(LOGO)}" alt="" width="22" height="20"
-                         style="display:block;width:22px;height:auto;border:0;outline:none;">
+                  <td align="center" style="width:52px;height:52px;background:${PRIMARY};background-image:${GRADE_PRIMARY};border-radius:12px;box-shadow:${ELEV_CONTROL};">
+                    <img src="${absoluteUrl(LOGO)}" alt="VizServe" width="32" height="29"
+                         style="display:block;width:32px;height:auto;border:0;outline:none;">
                   </td>
                 </tr>
               </table>
             </td>
-            <td style="padding-left:12px;vertical-align:middle;">
-              <div style="color:${INK};font-size:15px;font-weight:700;line-height:1.25;letter-spacing:-.01em;">VizServe</div>
-              <div style="color:${INK_META};font-size:12px;line-height:1.35;">Team Portal</div>
+            <td style="padding-left:14px;vertical-align:middle;">
+              <div style="color:${INK};font-size:19px;font-weight:700;line-height:1.2;letter-spacing:-.02em;">VizServe</div>
+              <div style="color:${INK_META};font-size:13px;line-height:1.35;">Team Portal</div>
             </td>
             <!-- The link row, opposite the mark. It collapses under the lockup
                  on a narrow screen rather than squeezing both onto one line. -->
@@ -459,9 +378,9 @@ function renderHtml(body: EmailBody): string {
               ${CONTACT.headerLinks
                 .map(
                   (link) =>
-                    `<a href="${link.url}" style="color:${INK_MUTED};text-decoration:none;font-weight:600;padding-left:14px;">${escapeHtml(link.label)}</a>`,
+                    `<a href="${link.url}" style="color:${INK_MUTED};text-decoration:none;font-weight:600;">${escapeHtml(link.label)}</a>`,
                 )
-                .join("")}
+                .join(`<span style="color:${BORDER};padding:0 10px;">&#124;</span>`)}
             </td>
           </tr>
         </table>
@@ -469,7 +388,7 @@ function renderHtml(body: EmailBody): string {
         <!-- The panel. A Card: rounded-lg, a hairline border, the surface grade
              over a white fill, and shadow-raised-lg beneath. White ON grey. -->
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-               style="max-width:760px;background:${CARD};background-image:${GRADE_SURFACE};border:1px solid ${BORDER};border-radius:10px;box-shadow:${ELEV_PANEL};font-family:${FONT};">
+               style="max-width:640px;background:${CARD};background-image:${GRADE_SURFACE};border:1px solid ${BORDER};border-radius:10px;box-shadow:${ELEV_PANEL};font-family:${FONT};">
           <tr>
             <td class="vz-panel" style="padding:32px;">
               <h1 style="margin:0 0 12px;color:${INK};font-size:24px;line-height:1.25;font-weight:700;letter-spacing:-.015em;">${escapeHtml(body.heading)}</h1>
@@ -479,53 +398,62 @@ function renderHtml(body: EmailBody): string {
                     `<p style="margin:0 0 14px;color:${INK_MUTED};font-size:16px;line-height:1.55;letter-spacing:-.005em;">${escapeHtml(p)}</p>`,
                 )
                 .join("")}
-              ${
-                facts
-                  ? `
-              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;border-bottom:1px solid ${BORDER};">${facts}
-              </table>`
-                  : ""
-              }${timeline}${quote}
+              ${facts}${quote}
               ${button}
-              ${body.footnote ? `<p style="margin:20px 0 0;color:${INK_META};font-size:13px;line-height:1.5;">${escapeHtml(body.footnote)}</p>` : ""}
+              ${body.footnote ? `<p style="margin:16px 0 0;color:${INK_META};font-size:13px;line-height:1.5;${body.button ? "text-align:center;" : ""}">${escapeHtml(body.footnote)}</p>` : ""}
             </td>
           </tr>
         </table>
 
         <!-- Outside the panel, on the ground. It is about the system, not about
              the message, and the card is the message. -->
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:760px;font-family:${FONT};">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;font-family:${FONT};">
           <tr>
-            <td style="padding:20px 4px 0;color:${INK_META};font-size:12px;line-height:1.55;">
-              Sent by VizServe Team Portal. Everything here is also in your inbox in the app.
+            <td style="padding:0;">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
+                     style="margin:18px 0 0;background:${CARD};background-image:${GRADE_SURFACE};border:1px solid ${BORDER};border-radius:12px;">
+                <tr>
+                  <td class="vz-gutter" style="padding:22px 24px 18px;">
+                    <div style="color:${INK};font-size:15px;font-weight:700;letter-spacing:-.015em;">Get in touch</div>
+                    <div style="margin-top:4px;color:${INK_META};font-size:12px;line-height:1.5;">${escapeHtml(CONTACT.hours)}</div>
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0 0;">
+                      <tr>
+                        ${CONTACT.offices
+                          .map(
+                            (office) => `<td class="vz-office" width="50%" style="width:50%;padding:0 12px 0 0;vertical-align:top;">
+                          <div style="color:${INK};font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;">${escapeHtml(office.label)}</div>
+                          <div style="margin-top:4px;color:${INK_META};font-size:12px;line-height:1.5;">${escapeHtml(office.lines)}</div>
+                        </td>`,
+                          )
+                          .join("")}
+                      </tr>
+                    </table>
+
+                    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:16px 0 0;border-top:1px solid ${BORDER};">
+                      <tr>
+                        <td class="vz-office" style="padding:14px 0 0;vertical-align:middle;">
+                          <a href="tel:${CONTACT.phone.replace(/[^+0-9]/g, "")}" style="color:${PRIMARY};font-size:13px;font-weight:600;text-decoration:none;">${escapeHtml(CONTACT.phone)}</a>
+                          <span style="color:${BORDER};padding:0 8px;">&#124;</span>
+                          <a href="mailto:${CONTACT.email}" style="color:${PRIMARY};font-size:13px;font-weight:600;text-decoration:none;">${escapeHtml(CONTACT.email)}</a>
+                        </td>
+                        <td class="vz-office" align="right" style="padding:14px 0 0;vertical-align:middle;">
+                          ${CONTACT.social
+                            .map(
+                              (link) =>
+                                `<a href="${link.url}" style="color:${INK_MUTED};font-size:13px;font-weight:600;text-decoration:none;">${escapeHtml(link.label)}</a>`,
+                            )
+                            .join(`<span style="color:${BORDER};padding:0 8px;">&#124;</span>`)}
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
             </td>
           </tr>
           <tr>
-            <td style="padding:16px 4px 0;border-top:1px solid ${BORDER};">
-              <div style="margin:14px 0 8px;color:${INK};font-size:13px;font-weight:700;letter-spacing:-.01em;">Get in touch</div>
-              ${CONTACT.offices
-                .map(
-                  (office) => `<p style="margin:0 0 6px;color:${INK_META};font-size:12px;line-height:1.55;">
-                <span style="color:${INK_MUTED};font-weight:600;">${escapeHtml(office.label)}</span> &middot; ${escapeHtml(office.lines)}
-              </p>`,
-                )
-                .join("")}
-              <p style="margin:10px 0 0;color:${INK_META};font-size:12px;line-height:1.55;">${escapeHtml(CONTACT.hours)}</p>
-              <p style="margin:2px 0 0;color:${INK_META};font-size:12px;line-height:1.55;">
-                <a href="tel:${CONTACT.phone.replace(/[^+0-9]/g, "")}" style="color:${PRIMARY};text-decoration:none;">${escapeHtml(CONTACT.phone)}</a>
-                &nbsp;&middot;&nbsp;
-                <a href="mailto:${CONTACT.email}" style="color:${PRIMARY};text-decoration:none;">${escapeHtml(CONTACT.email)}</a>
-              </p>
-              <p style="margin:12px 0 0;font-size:12px;line-height:1.55;">
-                ${CONTACT.social
-                  .map(
-                    (link) =>
-                      `<a href="${link.url}" style="color:${PRIMARY};text-decoration:none;font-weight:600;">${escapeHtml(link.label)}</a>`,
-                  )
-                  .join(`<span style="color:${INK_META};">&nbsp;&middot;&nbsp;</span>`)}
-              </p>
-              <p style="margin:14px 0 0;color:${INK_META};font-size:11px;line-height:1.55;">${escapeHtml(CONTACT.copyright)}</p>
-            </td>
+            <td align="center" style="padding:14px 4px 0;color:${INK_META};font-size:11px;line-height:1.55;">${escapeHtml(CONTACT.copyright)}</td>
           </tr>
         </table>
 
@@ -556,24 +484,7 @@ function renderText(body: EmailBody): string {
     lines.push(`${fact.label}: ${fact.value}`);
   }
   if (body.facts?.length) lines.push("");
-
-  if (body.timeline?.length) {
-    lines.push("Where it has got to");
-    for (const step of body.timeline) {
-      // The state spelled out, because the text part has no marker to read it
-      // off -- the same reason every status chip carries its label.
-      const mark =
-        step.state === "done"
-          ? "[done]"
-          : step.state === "current"
-            ? "[now] "
-            : step.state === "attention"
-              ? "[!]   "
-              : "[  ]  ";
-      lines.push(`  ${mark} ${step.label}${step.meta ? ` - ${step.meta}` : ""}`);
-    }
-    lines.push("");
-  }
+  if (body.factsNote) lines.push(body.factsNote, "");
 
   if (body.quote) {
     lines.push(`${body.quote.label}:`, ...body.quote.text.split("\n").map((l) => `  ${l}`), "");

@@ -42,25 +42,14 @@ const SAMPLES: Record<string, EmailBody> = {
       'We have finished "Quarterly newsletter layout" and it is ready for you to look at.',
       "If it is fine as it is, one click approves it. If something needs changing, tell us on the same page and it comes straight back to the team.",
     ],
+    // What THIS reader has to act on, and nothing else. The sender picks its
+    // own fields for the same reason -- see `detailRows` in client-emails.ts.
     facts: [
       { label: "Request", value: "Quarterly newsletter layout" },
-      { label: "Service", value: "Design Request" },
-      { label: "Organisation", value: "HFSE" },
-      { label: "Submitted", value: "28 Jul 2026, 09:14" },
-      { label: "Date you asked for", value: "1 Aug 2026" },
-      { label: "Agreed delivery", value: "5 Aug 2026" },
-      { label: "Looked after by", value: "Creative · Ryza Santos" },
+      { label: "Where to look", value: "3 files on the approval page" },
       { label: "Please respond by", value: "7 Aug 2026" },
-      { label: "Your reference number", value: "COL-2026-0142" },
     ],
-    timeline: [
-      { label: "Received", state: "done", meta: "28 Jul 2026, 09:14" },
-      { label: "Approved", state: "done", meta: "28 Jul 2026, 14:02" },
-      { label: "Work under way", state: "done", meta: "29 Jul 2026, 08:30" },
-      { label: "Checked by us", state: "done" },
-      { label: "Your approval", state: "current" },
-      { label: "Completed", state: "pending" },
-    ],
+    factsNote: "Reference COL-2026-0142",
     quote: {
       label: "What we did",
       text: "Reworked the masthead to the new palette and rebuilt the two-column spread so it holds at A4.\nSwapped the cover photograph for the one you sent on Tuesday.",
@@ -117,22 +106,10 @@ const SAMPLES: Record<string, EmailBody> = {
       "Hi Maria,",
       '"Quarterly newsletter layout" is complete. If you have a moment, tell us how it went.',
     ],
-    facts: [
-      { label: "Request", value: "Quarterly newsletter layout" },
-      { label: "Service", value: "Design Request" },
-      { label: "Looked after by", value: "Creative · Ryza Santos" },
-      { label: "Your reference number", value: "COL-2026-0142" },
-    ],
-    timeline: [
-      { label: "Received", state: "done", meta: "28 Jul 2026, 09:14" },
-      { label: "Approved", state: "done", meta: "28 Jul 2026, 14:02" },
-      { label: "Work under way", state: "done", meta: "29 Jul 2026, 08:30" },
-      { label: "Checked by us", state: "done" },
-      { label: "Your approval", state: "current" },
-      { label: "Completed", state: "pending" },
-    ],
-    button: { label: "Leave feedback", path: "/feedback/sample-token" },
-    footnote: "One rating and an optional comment. Nothing else.",
+    facts: [{ label: "Request", value: "Quarterly newsletter layout" }],
+    factsNote: "Reference COL-2026-0142",
+    button: { label: "Tell us how we did", path: "/feedback/sample-token" },
+    footnote: "One rating, and a comment if you feel like it. About ten seconds.",
   },
 };
 

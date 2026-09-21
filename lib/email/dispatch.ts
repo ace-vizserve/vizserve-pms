@@ -113,6 +113,24 @@ const PRESENTATION: Record<
   // Also email-off (P7-08 seeds send_email = false). Discussion on a shared task
   // is not an interruption, and a mailbox copy of every comment is the fastest
   // way to teach people to filter this system into a folder they never open.
+  /*
+   * P8-18 — THE ONE KIND OF COMMENT THAT IS WORTH AN EMAIL.
+   *
+   * `commented` below is deliberately inbox-only: a mailbox copy of every
+   * remark on a shared task is the fastest way to teach people to filter this
+   * system into a folder they never open. A MENTION is the opposite case and
+   * the distinction is the whole argument — somebody typed your name because
+   * they are waiting on you specifically, which is the same test docs/12 §3
+   * applies to an assignment or a QA hand-off.
+   *
+   * `notifications@`, not `approvals@`: nothing is being decided.
+   */
+  mentioned: {
+    subject: (title) => `You were mentioned — ${title}`,
+    action: "Open the task",
+    sender: "notifications",
+    status: { label: "You were mentioned", tone: "brand" },
+  },
   commented: {
     subject: (title) => title,
     action: "Open the task",
@@ -181,6 +199,23 @@ export async function dispatchPendingEmails(limit = 50): Promise<DispatchSummary
     }
 
     const presentation = PRESENTATION[notification.type];
+
+    /*
+     * ⚠️ A TYPE NOBODY MAPPED. Unreachable while the union in
+     * `lib/database.types.ts` is complete and this map is a Record over it —
+     * but that union is GENERATED, `npm run db:types` needs Docker, and
+     * `mentioned` sat in the database for four days without reaching it. The
+     * next enum value will do the same.
+     *
+     * Skipped rather than sent blank, and the claim is left unwritten so the
+     * email is still owed once somebody maps it.
+     */
+    if (!presentation) {
+      console.error(`[email:dispatch] no presentation for type "${notification.type}"`);
+      summary.skipped += 1;
+      continue;
+    }
+
     const firstName = recipient.full_name.trim().split(/\s+/)[0] || "there";
 
     const body: EmailBody = {

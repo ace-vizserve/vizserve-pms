@@ -143,6 +143,76 @@ earlier cut asked the 1-5 question in the email itself, as five links carrying
 `?rating=N`; it worked, but a question answered in two places is two places to
 keep in step, and the page already had both halves.
 
+**There is no progress rail.** One was built to mirror
+`components/stage-track.tsx` and then removed: that component is a route with
+fixed stops, drawn horizontally, and every honest email version of it was either
+a cramped six-across row at a width an inbox should not be, or its mobile
+fallback pretending to be the real thing. The detail rows say where a request is
+without it, and the status chip says it in one word.
+
+## Colours
+
+The demo's tokens, swapped for the app's own from `app/globals.css`. No email
+client can read a CSS custom property, so the values are **resolved to literals
+in `layout.ts` and nowhere else** — a hex at a call site is how a palette drifts
+one email at a time.
+
+| Barebone | Token | Value | Contrast |
+|---|---|---|---|
+| `bg-2` `#F3F4F6` | `--background` | `#F5F7FA` | the ground the panel sits on |
+| `bg` | `--card` | `#FFFFFF` | the card |
+| `fg` `#14171E` | `--foreground` | `#0F1626` | headings |
+| `fg-2` `#43454B` | `--foreground-muted` | `#556074` | 6.25:1 on white |
+| `fg-3` `#7B7D81` | `--muted-foreground` | `#656F82` | 5.06:1 on white |
+| `stroke` | `--border` | `#E3E7EE` | hairlines |
+| — | `--muted` | `#F0F3F7` | flat blocks (the quote) |
+| — | `--gradient-surface` | `#ffffff → #fafcfd` | the panel's grade |
+| — | `--gradient-primary` | `#5169b4 → #3b4f94` | the button's fill |
+| `brand` `#614500`, button `bg-fg` | `--brand` | `#4359A5` | white on it, 6.54:1 |
+| Inter | `--font-sans` | Figtree, system stack behind it | |
+
+`#5BC0DE` appears in no text role. It is 2.09:1 against white in **both**
+directions — surface only, and there is no surface here that needs it.
+
+The face is named but will not load in Gmail or Outlook, which is the expected
+outcome rather than a failure: the type **scale** does the work, not the face.
+
+## Dark mode
+
+The email **opts out** (`color-scheme: light`). The app has a real dark theme and
+an email cannot use it, so it does not pretend to: Gmail and Outlook recolour an
+unlabelled message by guessing, and a guessed palette puts grey text on a grey
+panel more often than it gets it right. The status chip is where that does the
+most damage — an inverted fill with un-inverted text is how a status becomes
+unreadable in the one message that exists to convey it.
+
+## Header, footer and the rail
+
+**Header** -- the lockup on the left, a link row on the right, following
+react-email's header reference. The links are `Website` and `Contact` only:
+that reference carries About / Company / Blog, which is a marketing site's nav,
+and most of this app is behind a login a client does not have. On a phone the
+row drops below the lockup instead of crowding it.
+
+**Footer** -- "Get in touch", both offices, hours, phone, email, Facebook and
+LinkedIn, then the copyright line. Single column rather than the reference's
+two: two offices at full length do not share 640px, and a column that has to
+stack on a phone stacks only in the clients that honour a media query.
+
+Social links are **text, not icons**. Outlook and Gmail block remote images by
+default, so an icon row is a row of empty boxes on first open -- and unlike the
+lockup, which has the wordmark beside it, a failed icon leaves nothing at all.
+
+**There is no unsubscribe link and there must not be one.** Everything here is
+transactional, and an unsubscribe on the Gate 3 email invites the one client
+Phase 4 depends on to switch it off.
+
+**The feedback email is a redirect, not a form.** One button to
+`/feedback/{token}`, where the rating and the optional comment both live. An
+earlier cut asked the 1-5 question in the email itself, as five links carrying
+`?rating=N`; it worked, but a question answered in two places is two places to
+keep in step, and the page already had both halves.
+
 **The rail** mirrors `components/stage-track.tsx` -- fixed stops in pipeline
 order with one of them live, four marker states (green tick, brand dot, hollow
 ring, amber `!`), and a connector filled only where the work has passed. It is a

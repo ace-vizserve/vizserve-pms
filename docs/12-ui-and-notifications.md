@@ -85,10 +85,11 @@ The reasoning is not aesthetic. Phase 4's entire value rests on a client opening
 | Task assigned to you | PIC | Starts someone's work; missing it stalls the ticket |
 | You are QA on a task now at `FOR_QA` | QA assignee | Same reason |
 | Client decided (approved / rejected / auto-completed) | PIC, QA, TL | Closes the loop, and rejection means work resumes |
+| **You were @mentioned in a comment** (P8-18) | The person named | Somebody typed your name because they are waiting on *you*. `commented` stays inbox-only — that is discussion among everyone already on the task, and a mailbox copy of every remark is how this system gets filtered into a folder nobody opens |
 
 ### In-app only — everything else
 
-Status transitions, comments, `WAITING_FOR_INFO` toggles, edits at approval time, list changes. All of it lands in the inbox and the dashboard card, none of it sends mail.
+Status transitions, comments (but **not** mentions — see above), `WAITING_FOR_INFO` toggles, edits at approval time, list changes. All of it lands in the inbox and the dashboard card, none of it sends mail.
 
 ### Neither — the clock reminders (P8-12)
 

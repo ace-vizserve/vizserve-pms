@@ -47,43 +47,39 @@ import { sendEmail, type SendOutcome } from "./send";
  */
 
 /**
- * The rows every client-facing email shares, in one order, from one shape.
+ * The detail rows, and EACH EMAIL PICKS ITS OWN.
  *
- * A NULL OMITS ITS ROW. Not "-", not "Not specified": a labelled row with
- * nothing beside it is the EmailJS failure this codebase already paid for, and
- * a client cannot tell "we do not know" from "the template is broken".
+ * ⚠️ IT USED TO EMIT ALL OF THEM, EVERYWHERE, which made a reminder -- an email
+ * whose entire content is "it closes on Friday" -- a ten-row table the reader
+ * has to mine for the two lines that matter. Every row that does not help
+ * somebody act is a row making the ones that do harder to find.
  *
- * The order is the order a person asks the questions in -- what service, for
- * whom, when did it arrive, when did I want it, when will I get it, who has it.
- * The email's own rows (a deadline, where to look) come after these, because
- * they are about THIS message rather than about the request.
+ * So the caller names its fields. The rule for choosing them is what the READER
+ * has to do next: a reminder needs the job and the deadline; an approval needs
+ * the job, where to look and by when; an acknowledgement needs proof we got the
+ * right thing. Nothing needs all seven.
+ *
+ * A null still omits its row, so a named field that has no value costs nothing.
  */
-/**
- * ⚠️ THE REFERENCE NUMBER IS THE LAST ROW OF EVERY BLOCK, NOT THE FIRST.
- *
- * It used to lead -- the row and the subject line both -- and "COL-2026-0142"
- * as the first thing a client reads is a filing cabinet introducing itself.
- * They do not have our reference; they have a newsletter they asked us to lay
- * out. So the title leads and the code trails, in the subject and in the table.
- *
- * It does NOT get removed. It is the only handle a client has on the request:
- * support asks for it, every later email repeats it, and a reply quoting it can
- * be found. Demoted, not deleted -- and the acknowledgement still says what it
- * is for.
- */
-function detailRows(details?: RequestDetails | null): { label: string; value: string }[] {
-  if (!details) return [];
+type DetailField = keyof Omit<RequestDetails, "description">;
 
-  const rows: { label: string; value: string }[] = [];
-  if (details.formName) rows.push({ label: "Service", value: details.formName });
-  if (details.requesterOrg) rows.push({ label: "Organisation", value: details.requesterOrg });
-  if (details.submittedAt) rows.push({ label: "Submitted", value: details.submittedAt });
-  if (details.targetDate) rows.push({ label: "Date you asked for", value: details.targetDate });
-  if (details.approvedTargetDate) {
-    rows.push({ label: "Agreed delivery", value: details.approvedTargetDate });
-  }
-  if (details.handledBy) rows.push({ label: "Looked after by", value: details.handledBy });
-  return rows;
+const DETAIL_LABELS: Record<DetailField, string> = {
+  formName: "Service",
+  requesterOrg: "Organisation",
+  submittedAt: "Submitted",
+  targetDate: "Date you asked for",
+  approvedTargetDate: "Agreed delivery",
+  handledBy: "Looked after by",
+};
+
+function detailRows(
+  details: RequestDetails | null | undefined,
+  fields: DetailField[],
+): { label: string; value: string }[] {
+  if (!details) return [];
+  return fields
+    .map((field) => ({ label: DETAIL_LABELS[field], value: details[field] }))
+    .filter((row): row is { label: string; value: string } => Boolean(row.value));
 }
 
 /**
@@ -154,10 +150,9 @@ export function sendRequestSubmittedEmail(input: {
       ],
       facts: [
         { label: "Request", value: input.title },
-        ...detailRows(input.details),
-        { label: "Your reference number", value: input.referenceNo },
+        ...detailRows(input.details, ["formName", "submittedAt"]),
       ],
-      timeline: input.details?.timeline,
+      factsNote: `Reference ${input.referenceNo}`,
       quote: briefQuote(input.details),
       /*
        * P7-51 — THE LINK THAT REPLACES THE "NO LINK" NOTE ABOVE.
@@ -236,13 +231,12 @@ export function sendRequestApprovedEmail(input: {
       facts: [
         { label: "Request", value: input.title },
         ...(input.details
-          ? detailRows(input.details)
+          ? detailRows(input.details, ["approvedTargetDate", "handledBy"])
           : dated
             ? [{ label: "Agreed delivery", value: input.approvedTargetDate! }]
             : []),
-        { label: "Your reference number", value: input.referenceNo },
       ],
-      timeline: input.details?.timeline,
+      factsNote: `Reference ${input.referenceNo}`,
       quote: briefQuote(input.details),
       footnote: "You will hear from us again when there is something for you to review.",
     },
@@ -284,12 +278,8 @@ export function sendRequestReturnedEmail(input: DecisionEmailInput): Promise<Sen
         `Thanks for sending through "${input.title}". Before we can start, there is something we need from you — the details are below.`,
         "Nothing is lost. Send it back with that added and it goes straight into the queue.",
       ],
-      facts: [
-        { label: "Request", value: input.title },
-        ...detailRows(input.details),
-        { label: "Your reference number", value: input.referenceNo },
-      ],
-      timeline: input.details?.timeline,
+      facts: [{ label: "Request", value: input.title }],
+      factsNote: `Reference ${input.referenceNo}`,
       quote: { label: "What we need", text: input.reason },
       button: input.formPath ? { label: "Submit the updated request", path: input.formPath } : undefined,
       footnote: "Quote the reference number if you reply to this email.",
@@ -317,12 +307,8 @@ export function sendRequestRejectedEmail(input: DecisionEmailInput): Promise<Sen
         `We have reviewed "${input.title}" and we are not able to proceed with it. The reason is below.`,
         "If circumstances change, or if you think this was the wrong call, reply to this email and we will look again.",
       ],
-      facts: [
-        { label: "Request", value: input.title },
-        ...detailRows(input.details),
-        { label: "Your reference number", value: input.referenceNo },
-      ],
-      timeline: input.details?.timeline,
+      facts: [{ label: "Request", value: input.title }],
+      factsNote: `Reference ${input.referenceNo}`,
       quote: { label: "Reason", text: input.reason },
       footnote: "This request is closed. A new submission would start a new reference number.",
     },
@@ -392,12 +378,10 @@ export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<Send
       ],
       facts: [
         { label: "Request", value: input.title },
-        ...detailRows(input.details),
-        { label: "Please respond by", value: input.deadline },
         ...(outputs.length > 0 ? [{ label: "Where to look", value: outputs.join(" · ") }] : []),
-        { label: "Your reference number", value: input.referenceNo },
+        { label: "Please respond by", value: input.deadline },
       ],
-      timeline: input.details?.timeline,
+      factsNote: `Reference ${input.referenceNo}`,
       /*
        * ⚠️ FLATTENED. `layout.ts` runs every interpolation through `escapeHtml`,
        * so a resolution written with a bullet list would arrive in the client's
@@ -450,11 +434,9 @@ export function sendApprovalReminderEmail(
       ],
       facts: [
         { label: "Request", value: input.title },
-        ...detailRows(input.details),
         { label: "Closes on", value: input.deadline },
-        { label: "Your reference number", value: input.referenceNo },
       ],
-      timeline: input.details?.timeline,
+      factsNote: `Reference ${input.referenceNo}`,
       button: { label: "Review and approve", path: `/approve/${input.token}` },
       footnote: `If we do not hear from you by ${input.deadline}, this request will be closed as completed without a response.`,
     },
@@ -504,14 +486,15 @@ export function sendFeedbackRequestEmail(input: {
           ? `"${input.title}" was closed as completed after the approval window passed. If that was not what you expected, please say so below — it is the fastest way to reach us.`
           : `"${input.title}" is complete. If you have a moment, tell us how it went.`,
       ],
-      facts: [
-        { label: "Request", value: input.title },
-        ...detailRows(input.details),
-        { label: "Your reference number", value: input.referenceNo },
-      ],
-      timeline: input.details?.timeline,
-      button: { label: "Leave feedback", path: `/feedback/${input.token}` },
-      footnote: "One rating and an optional comment. Nothing else.",
+      facts: [{ label: "Request", value: input.title }],
+      factsNote: `Reference ${input.referenceNo}`,
+      /*
+       * The one email whose ENTIRE purpose is the click. Everything above it is
+       * context; if this button is missed the email did nothing, so it gets the
+       * plainest possible promise of what happens next and what it costs.
+       */
+      button: { label: "Tell us how we did", path: `/feedback/${input.token}` },
+      footnote: "One rating, and a comment if you feel like it. About ten seconds.",
     },
   });
 }

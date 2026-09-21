@@ -1,6 +1,5 @@
 import "server-only";
 
-import type { Step } from "@/components/stage-track";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -40,28 +39,7 @@ export type RequestDetails = {
   description: string | null;
   /** "Creative" or "Creative · Ryza Santos". Only exists after Gate 1. */
   handledBy: string | null;
-  /** The progress rail. Empty rather than null when there is nothing to show. */
-  timeline: EmailStep[];
 };
-
-/**
- * One stop on the rail -- `Step`, THE TYPE THE APP'S OWN COMPONENT DEFINES.
- *
- * ⚠️ THE TYPE IS SHARED; THE RENDERING CANNOT BE. `components/stage-track.tsx`
- * is a React component built out of lucide icons and Tailwind class names, and
- * an email has neither a React runtime nor a stylesheet: run it through
- * `renderToStaticMarkup` and you get `class="text-primary"` referring to nothing
- * and `<svg>` markers that Gmail and Outlook strip. So the email redraws the
- * same rail in table HTML with inline styles.
- *
- * What IS shared is this contract. A new state, a renamed one, or a change to
- * what `meta` carries happens once, in the component, and the compiler brings
- * the email along -- which is the half of the duplication that actually rots.
- *
- * `import type` is erased at build time, so nothing of React or lucide reaches
- * this `server-only` module.
- */
-export type EmailStep = Step;
 
 /**
  * Loads the detail block for one request. Never throws.
@@ -85,7 +63,7 @@ export async function loadRequestDetails(requestId: string): Promise<RequestDeta
     const { data: request } = await admin
       .from("vizserve_pms_requests")
       .select(
-        "form_id, requester_org, description, target_date, approved_target_date, submitted_at, status, reviewed_at",
+        "form_id, requester_org, description, target_date, approved_target_date, submitted_at",
       )
       .eq("id", requestId)
       .maybeSingle();
@@ -100,7 +78,7 @@ export async function loadRequestDetails(requestId: string): Promise<RequestDeta
         .maybeSingle(),
       admin
         .from("vizserve_pms_tasks")
-        .select("status, created_at, department_id, assignee_id")
+        .select("department_id, assignee_id")
         .eq("request_id", requestId)
         .order("created_at", { ascending: true })
         .limit(1)
@@ -141,121 +119,11 @@ export async function loadRequestDetails(requestId: string): Promise<RequestDeta
           ? `${department.name} · ${assignee.full_name}`
           : department.name
         : null,
-      timeline: buildRail(request, task),
     };
   } catch (error) {
     console.error(`[email] request details unavailable for ${requestId} —`, error);
     return null;
   }
-}
-
-/**
- * The client's route through the three gates.
- *
- * ⚠️ A RETURNED OR REJECTED REQUEST STOPS HERE, with no greyed-out stops after
- * it. `stage-track.tsx` warns about exactly this: a pending Gate 3 drawn on
- * work that will never reach one "reports closed work as unfinished, for ever".
- * A client whose request was declined should not be shown three stages they
- * will never see.
- */
-function buildRail(
-  request: {
-    status: string;
-    submitted_at: string | null;
-    reviewed_at: string | null;
-  },
-  task: { status: string; created_at: string | null } | null,
-): EmailStep[] {
-  const received: EmailStep = {
-    label: "Received",
-    state: "done",
-    meta: request.submitted_at ? formatDate(request.submitted_at.slice(0, 10)) : null,
-  };
-
-  // Date only, matching `metaDate` in `components/stage-track.tsx`. A full
-  // timestamp under a horizontal stop wraps to three lines and pushes the whole
-  // rail out of shape.
-  const reviewedAt = request.reviewed_at
-    ? formatDate(request.reviewed_at.slice(0, 10))
-    : null;
-
-  if (request.status === "RETURNED" || request.status === "REJECTED") {
-    return [
-      received,
-      {
-        label: request.status === "RETURNED" ? "Back with you" : "Not taken on",
-        state: "attention",
-        meta: reviewedAt,
-      },
-    ];
-  }
-
-  if (!task) {
-    return [
-      received,
-      { label: "With the team for review", state: "current", meta: null },
-      { label: "Work under way", state: "pending" },
-      { label: "Checked by us", state: "pending" },
-      { label: "Your approval", state: "pending" },
-      { label: "Completed", state: "pending" },
-    ];
-  }
-
-  /*
-   * Which stop is LIVE. `QA_PASSED` deliberately sits on "Checked by us" rather
-   * than on "Your approval": the work has passed review but nothing has been
-   * sent, and a client told it is with them for approval when no email exists
-   * yet will go looking for one.
-   */
-  const LIVE: Record<string, number> = {
-    OPEN: 2,
-    IN_PROGRESS: 2,
-    WAITING_FOR_INFO: 2,
-    FOR_QA: 3,
-    QA_PASSED: 3,
-    FOR_CLIENT_APPROVAL: 4,
-    COMPLETED: 5,
-    COMPLETED_NO_RESPONSE: 5,
-  };
-
-  const live = LIVE[task.status] ?? 2;
-  const finished = task.status === "COMPLETED" || task.status === "COMPLETED_NO_RESPONSE";
-
-  const labels = [
-    "Received",
-    "Approved",
-    "Work under way",
-    "Checked by us",
-    "Your approval",
-    task.status === "COMPLETED_NO_RESPONSE" ? "Closed without a response" : "Completed",
-  ];
-
-  const meta: (string | null)[] = [
-    received.meta ?? null,
-    reviewedAt,
-    task.created_at ? formatDate(task.created_at.slice(0, 10)) : null,
-    null,
-    null,
-    null,
-  ];
-
-  return labels.map((label, index) => ({
-    label,
-    meta: meta[index],
-    state:
-      index < live
-        ? "done"
-        : index > live
-          ? "pending"
-          : // The one exception to "live means current": waiting on the client
-            // is not progress, and the rail should say so rather than implying
-            // the team is working while the ball is in their court.
-            task.status === "WAITING_FOR_INFO"
-            ? "attention"
-            : finished
-              ? "done"
-              : "current",
-  }));
 }
 
 export async function loadRequestDetailsForTask(taskId: string): Promise<RequestDetails | null> {

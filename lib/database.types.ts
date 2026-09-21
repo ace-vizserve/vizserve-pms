@@ -25,7 +25,14 @@ export type VizservePmsNotificationType =
   | "qa_requested"
   | "client_decision"
   | "commented"
-  | "internal_decision";
+  | "internal_decision"
+  // Added by 20260917090100 (P7-71) and missing from this file ever since:
+  // `npm run db:types` needs Docker and has not been run on this machine. Hand
+  // -added because `PRESENTATION` in lib/email/dispatch.ts is a Record over this
+  // union, so a value the union does not know about is a value nothing forces
+  // anybody to map -- and an unmapped type that is later switched on sends a
+  // blank email, or throws inside the outbox drain.
+  | "mentioned";
 
 export type VizservePmsFieldType =
   | "text"

@@ -16,6 +16,7 @@ export const NOTIFICATION_TYPES = [
   "client_decision",
   "internal_decision",
   "commented",
+  "mentioned",
   "status_changed",
 ] as const;
 
@@ -31,6 +32,10 @@ export const NOTIFICATION_TYPE_LABELS: Record<VizservePmsNotificationType, strin
   client_decision: "Client decision",
   internal_decision: "Your requests",
   commented: "Comments",
+  // Its own filter rather than a kind of "Comments": the whole reason a mention
+  // exists as a separate type is that it is addressed to the reader, and the
+  // list this sits beside is things that happened TO them.
+  mentioned: "Mentions",
   status_changed: "Status changes",
 };
 

@@ -18,7 +18,7 @@ import { sendEmail } from "@/lib/email/send";
  *
  *   EMAIL_SEND_ALL_RECIPIENT=you@yourdomain.com npm run test -- tests/email/send-all.test.ts
  *
- * ⚠️ IT SENDS ELEVEN REAL MESSAGES. Opt-in by design, and it must never run as a
+ * ⚠️ IT SENDS TWELVE REAL MESSAGES. Opt-in by design, and it must never run as a
  * side effect of `npm run verify` on somebody's laptop.
  *
  * ⚠️ IT TOUCHES NO DATABASE, and that is deliberate rather than incidental. The
@@ -51,9 +51,6 @@ if (!recipient) {
  * A stand-in for what `loadRequestDetails` returns. Hand-built rather than read
  * from the database, because this harness must not touch the live project — and
  * because a preview wants every row filled, which a real request rarely is.
- *
- * The rail is deliberately mid-journey: it shows three of the four marker states
- * at once, which is the thing worth checking in a real mail client.
  */
 const DETAILS: RequestDetails = {
   formName: "Design Request",
@@ -64,14 +61,6 @@ const DETAILS: RequestDetails = {
   description:
     "Eight pages, same grid as the last issue. The cover photograph should be the one from the Tuesday shoot, and the masthead needs to move to the new palette.",
   handledBy: "Creative · Ryza Santos",
-  timeline: [
-    { label: "Received", state: "done", meta: "28 Jul 2026, 09:14" },
-    { label: "Approved", state: "done", meta: "28 Jul 2026, 14:02" },
-    { label: "Work under way", state: "done", meta: "29 Jul 2026, 08:30" },
-    { label: "Checked by us", state: "done" },
-    { label: "Your approval", state: "current" },
-    { label: "Completed", state: "pending" },
-  ],
 };
 
 const WHO = {
@@ -144,12 +133,12 @@ describe.skipIf(!recipient)("every email, to one address", () => {
   });
 
   /**
-   * The three notification types that carry a chip.
+   * The four notification types that carry a chip.
    *
    * Shaped exactly as `dispatchPendingEmails` shapes them: the heading is the
    * notification's own title — which since migration `20260921090000` is the job
-   * followed by its reference — one line of body, and a button. No detail block
-   * and no rail, because a notification row carries neither.
+   * followed by its reference — one line of body, and a button. No detail
+   * block, because a notification row carries none of one.
    */
   it("sends the internal notifications", async () => {
     const internal = [
@@ -165,6 +154,13 @@ describe.skipIf(!recipient)("every email, to one address", () => {
         subject: `Assigned to you — ${WHO.title}`,
         status: { label: "Assigned to you", tone: "brand" as const },
         body: "You are the PIC. It is open and the clock is running.",
+        action: "Open the task",
+      },
+      {
+        sender: "notifications" as const,
+        subject: `You were mentioned — ${WHO.title}`,
+        status: { label: "You were mentioned", tone: "brand" as const },
+        body: "Ryza Santos: @Ace can you check the masthead before this goes to QA?",
         action: "Open the task",
       },
       {
@@ -193,6 +189,6 @@ describe.skipIf(!recipient)("every email, to one address", () => {
       expect(outcome.status, JSON.stringify(outcome)).toBe("sent");
     }
 
-    console.info(`\n  ✓ Eleven emails sent to ${to}. They must be in the INBOX, not spam.\n`);
+    console.info(`\n  ✓ Twelve emails sent to ${to}. They must be in the INBOX, not spam.\n`);
   });
 });
