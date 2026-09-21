@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
-import { LayoutGrid, LayoutList } from "lucide-react";
+import { ChartGantt, LayoutGrid, LayoutList } from "lucide-react";
 
 import { segmentedItem, segmentedTrack } from "@/components/ui/segmented";
 import { cn } from "@/lib/utils";
@@ -50,6 +50,20 @@ const VIEWS = [
     // list became the only way in.
     carries: ["view", "kind", "list"],
   },
+  {
+    key: "gantt",
+    href: "/tasks/gantt",
+    label: "Gantt",
+    icon: ChartGantt,
+    // The same three the board can honour, and mostly for the same reasons.
+    // `status` is left behind again, though the board's argument only half
+    // applies: a timeline is not ORGANISED by status, it is organised by date,
+    // so a carried status filter would quietly empty stretches of the axis with
+    // nothing on the page offering to clear it. A hidden filter is worse here
+    // than on the board, because a gap in a timeline reads as "nothing is
+    // scheduled" rather than as "something is not being shown".
+    carries: ["view", "kind", "list"],
+  },
 ] as const;
 
 const SCOPES = [
@@ -92,7 +106,7 @@ const KINDS = [
 const TRACK = segmentedTrack;
 const SEGMENT = cn(segmentedItem, "px-2.5 py-1");
 
-export function TaskToolbar({ view }: { view: "list" | "board" }) {
+export function TaskToolbar({ view }: { view: "list" | "board" | "gantt" }) {
   const pathname = usePathname();
   const params = useSearchParams();
 

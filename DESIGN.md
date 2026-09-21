@@ -359,3 +359,62 @@ Added 14 Sep 2026. **A chip on a row is a note; a chip that heads a group is a t
 §4.1's claim that solid `--primary` "is used by nothing else in the list or the board" is now narrower: **nothing else _on a row_.** `TaskCategoryBadge` spends a solid fill to say "this needs a client" and it only works while it is the only solid on the row.
 
 Headings are safe because **no category chip is ever rendered in one** — a heading names a stage, not a task. So a row still carries exactly one solid fill and it still means client work. That holds only for as long as `solid` stays out of the row cells; passing it to a chip inside a row spends the distinction immediately.
+
+### The Gantt bar palette — a pale fill, a stage-coloured edge
+
+Added 21 Sep 2026 with the timeline view, and **replaced the same day**. The first
+attempt pushed the eight stage hues to full saturation and used white as the
+label. It was wrong twice over: a Gantt is mostly bar, so a wall of saturated
+slabs is the whole screen, and the fill never reached the page anyway — see the
+note below.
+
+What shipped instead: a **pale fill**, with the stage's existing `--stage-*`
+solid doing double duty as the **1px edge and the label**. A bar and its chip
+therefore cannot disagree about a hue, because they read the same token.
+
+| Stage | Light fill | Dark fill | Edge + label (light / dark) | Label on fill (light / dark) |
+|---|---|---|---|---|
+| Open | `#DCE3ED` | `#2C3646` | `#556074` / `#9AA4B6` | **4.91** / **4.85:1** |
+| Ongoing | `#C9DAF7` | `#1F3056` | `#4359A5` / `#8098DE` | **4.63** / **4.62:1** |
+| Waiting for info | `#FBEAC2` | `#453515` | `#8A6206` / `#D8A94A` | **4.61** / **5.47:1** |
+| For QA | `#E3D5F9` | `#342A52` | `#6D4BAF` / `#B9A3EA` | **4.63** / **5.93:1** |
+| QA in progress | `#D3C2F2` | `#241A41` | `#4C3286` / `#9878D6` | **6.06** / **4.61:1** |
+| For client approval | `#FDEBD9` | `#4A2E16` | `#A9520B` / `#E0904F` | **4.63** / **4.88:1** |
+| Completed | `#DFF4E9` | `#153D2C` | `#1C7A52` / `#4CB483` | **4.62** / **4.70:1** |
+| Completed (no response) | `#D9EBE0` | `#1E3A2E` | `#446F5C` / `#8AB89F` | **4.60** / **5.55:1** |
+
+| Pair | Light | Dark | Needs | Verdict |
+|---|---|---|---|---|
+| label on its fill | **4.60–6.06:1** | **4.61–5.93:1** | 4.5:1 | pass |
+| edge on `--background` (the bar's boundary) | **4.95–9.28:1** | **5.21–8.43:1** | 3.0:1 | pass |
+| fill on `--background` | **1.07–1.53:1** | **1.13–1.54:1** | — | **not a boundary** |
+
+#### The edge is not decoration
+
+Every fill sits between **1.07:1 and 1.54:1** against the page — invisible as an
+edge in either theme. **The 1px border is the only thing that makes a bar an
+object**, which is why it is measured as a UI boundary and why removing it
+leaves a shape with no outline. This is the inverse of the status chip, where
+the fill carries and the hairline finishes.
+
+#### Why the fill could not be seen at all, the first time
+
+The bars rendered **white with a coloured edge** no matter what `backgroundColor`
+was set. Kibo draws each bar with this repo's `<Card>`, and `Card` carries
+`grade-surface` — `background-image: linear-gradient(180deg,#ffffff,#fafcfd)`.
+A `background-image` paints **over** `background-color`, and that gradient is
+opaque, so the fill was covered every time while `borderColor` came through.
+
+The fix is a plain `div` in place of `Card` (a local modification recorded in
+the banner at the top of `components/kibo-ui/gantt/index.tsx`). Worth
+generalising: **`grade-*` utilities make an element untintable by colour alone.**
+Anything that needs a caller-supplied fill must not wear one.
+
+#### The same limit as the row washes, and the same licence
+
+Told apart by **hue, not lightness** — in greyscale the pale fills are one
+colour. Legal only because the timeline **groups its rows under a spelled-out
+stage heading** (`GanttSidebarGroup`, named from `TASK_STATUS_LABELS`), so the
+bar never carries the state by itself. Flattening those groups into one
+ungrouped run makes the palette illegal immediately — the same condition the
+chip and the glyph impose on the row washes.
