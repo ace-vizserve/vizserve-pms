@@ -35,6 +35,7 @@ import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { applyTaskScope, QA_STAGES } from "@/lib/tasks-server";
 import { loadListFields } from "@/lib/list-fields-server";
 import { loadCollaborators } from "@/lib/departments-server";
+import { assignableInList } from "@/lib/assignable";
 import {
   compareFieldValues,
   fieldIdFromKey,
@@ -1103,20 +1104,16 @@ async function TaskGroups({
   /**
    * Who the composer may assign to.
    *
-   * P7-14's rule, mirrored: a member may create work for somebody in their OWN
-   * department, and a lead may do it in any department they lead. Themselves
-   * excluded, because "Myself" is the composer's default rather than a row in
-   * the list — picking yourself calls `create_personal_task` and produces a
-   * different KIND of task, so the two must not look like the same choice.
+   * ⚠️ THE RULE MOVED TO `lib/assignable.ts` (P13-02) AND THE SCOPE SET THAT
+   * USED TO BE BUILT HERE WENT WITH IT. It is a pure function with cases now,
+   * because this filter has been got wrong twice — see the header there. The
+   * short version: the LIST decides, and only a listless view falls back to the
+   * caller's own scope.
    *
-   * The server re-derives the department from whoever is picked and
-   * `vizserve_pms_create_task` refuses one outside the caller's scope, so this
-   * list is a convenience. Offering somebody unassignable would only produce an
-   * error message after the fact.
+   * Still a convenience and never a gate. The server re-derives the department
+   * from whoever is picked, so offering somebody unassignable produces an error
+   * message rather than an unauthorized task.
    */
-  const assignableScope = new Set(
-    [context.primaryDepartmentId, ...context.managedDepartmentIds].filter((id): id is string => Boolean(id)),
-  );
 
   /*
    * ⚠️ P13-01 — IS THE COMPOSER STANDING IN THE COLLABORATION SPACE?
@@ -1145,18 +1142,46 @@ async function TaskGroups({
    * Self excluded in both branches for the same reason it always was — "Myself"
    * is the composer's default and picking it calls a different function.
    */
-  const assignable = inSharedList
-    ? collaborators.filter((person) => person.id !== context.userId)
-    : (people ?? [])
-        .filter(
-          (person) =>
-            person.is_active &&
-            person.id !== context.userId &&
-            person.primary_department_id !== null &&
-            (roleAtLeast(context.role, "owner") ||
-              assignableScope.has(person.primary_department_id)),
-        )
-        .map((person) => ({ id: person.id, full_name: person.full_name }));
+  /*
+   * ⚠️ THE LIST YOU ARE STANDING IN DECIDES, AND THAT IS A BUG FIX — P13-02.
+   *
+   * Amier, 21 Sep: "i can only search all member UNDER THE COMPANY WIDE. IF I AM
+   * VIZBYTES AND IT WAS UNDER VIZBYTES I CANT SEARCH ALL, ONLY THE MEMBER OF
+   * THAT DEPARTMENT".
+   *
+   * The rule below used to be the CALLER's scope alone — an owner passed
+   * `roleAtLeast("owner")` and was offered every active person in the company,
+   * in every list, and a lead of two departments was offered both teams'
+   * people in either team's list. That predates the collaboration space and it
+   * was already wrong, not merely untidy: `quickAddTask` derives the department
+   * from the ASSIGNEE, so picking a VizMedia name while standing in a VizBytes
+   * list builds a VizMedia task filed into a VizBytes list, and
+   * `vizserve_pms_create_task` refuses the pair — "That list belongs to another
+   * department." The picker was offering a guaranteed error message.
+   *
+   * So when there IS a list, its department is the answer, for everybody
+   * including an owner. The caller's own scope still decides which lists they
+   * can be standing in, which is the part RLS was always doing.
+   *
+   * ⚠️ THE FALLBACK IS NOT DEAD CODE. `?view=mine` and `?view=qa` carry no
+   * list, and neither does a bare visit — there is no list department to scope
+   * to, so those keep the caller-scope rule they have always had.
+   */
+  const assignable = assignableInList({
+    people: (people ?? []).map((person) => ({
+      id: person.id,
+      full_name: person.full_name,
+      primary_department_id: person.primary_department_id,
+      is_active: person.is_active,
+    })),
+    collaborators,
+    listDepartmentId: currentListDepartment,
+    sharedDepartmentIds: context.sharedDepartmentIds,
+    role: context.role,
+    managedDepartmentIds: context.managedDepartmentIds,
+    primaryDepartmentId: context.primaryDepartmentId,
+    selfId: context.userId,
+  });
 
   /**
    * People by department, for the assignee picker.
@@ -1194,8 +1219,30 @@ async function TaskGroups({
    * person active" in a shared space, so this offers exactly what the server
    * accepts — and, outside one, offers nothing it would refuse.
    */
-  for (const sharedId of context.sharedDepartmentIds) {
-    byDepartment.set(sharedId, collaborators);
+  /*
+   * ⚠️ ONLY WHEN SHARED WORK IS ACTUALLY ON THIS SCREEN — P13-02.
+   *
+   * This used to run unconditionally, which was not a permission hole (the
+   * entry is keyed by the shared department, and a VizBytes row looks itself up
+   * under VizBytes) but DID put the whole company's roster into the serialized
+   * props of a VizBytes list page. Amier's rule is that the company roster
+   * belongs to the company-wide space, so it should not be travelling with a
+   * department's board at all.
+   *
+   * ⚠️ NOT GATED ON `inSharedList` ALONE. `?view=mine` and `?view=qa` carry no
+   * list and can absolutely show a collaboration task beside a VizBytes one —
+   * gating on the list filter would leave those rows with an empty picker. The
+   * rows are already in hand, so the honest question is asked directly: is any
+   * task on this screen in a shared department.
+   */
+  const showsSharedWork =
+    inSharedList ||
+    rows.some((row) => context.sharedDepartmentIds.includes(row.department_id));
+
+  if (showsSharedWork) {
+    for (const sharedId of context.sharedDepartmentIds) {
+      byDepartment.set(sharedId, collaborators);
+    }
   }
 
   /*

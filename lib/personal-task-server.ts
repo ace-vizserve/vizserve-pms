@@ -3,7 +3,6 @@ import "server-only";
 import { cache } from "react";
 
 import { createClient } from "@/utils/supabase/server";
-import { loadCollaborators } from "@/lib/departments-server";
 
 /**
  * What the "new personal task" dialog needs to open.
@@ -13,19 +12,29 @@ import { loadCollaborators } from "@/lib/departments-server";
  * Three queries each, byte for byte, in two route groups — so "who may I assign
  * to" had two homes and any change to it had to find both.
  *
- * ⚠️ THE DEPARTMENT IS READ HERE, ON THE SERVER, from the caller's own row, and
- * never sent up as something the browser picked. `vizserve_pms_create_task`
+ * ⚠️ P13-03 — IT RETURNS THE DEPARTMENT ROSTER AND NOTHING ELSE. It briefly
+ * returned two — `colleagues` and `everyone` — and the DIALOG picked between
+ * them using a third input, `sharedDepartmentIds`. Three things to arrive
+ * correctly and be combined correctly; any one of them empty or stale silently
+ * produced the department answer, which on screen is indistinguishable from the
+ * collaboration space not working. It was got wrong three times in one
+ * afternoon.
+ *
+ * P13-03 answers it by SPLITTING THE FORM IN TWO instead, which is what Amier
+ * asked for: `NewPersonalTaskDialog` is the department form and gets
+ * `colleagues` from here; `NewCompanyTaskDialog` is the company-wide form and
+ * gets its own roster from `loadCollaborators()`. Neither of them chooses. The
+ * choice is made once, on the server, from the list being filed into — see
+ * `new-task-button.tsx`.
+ *
+ * ⚠️ THE DEPARTMENT IS STILL READ HERE, ON THE SERVER, from the caller's own
+ * row, and never sent up as something the browser picked. `vizserve_pms_create_task`
  * re-reads it and refuses any other, so this is the convenient copy rather than
  * the enforcement.
  *
- * ⚠️ `.neq` ON THEMSELVES IS NOT A TIDY-UP. "Myself" is the dialog's DEFAULT
- * rather than a row in the picker, because the two choices call two different
- * functions and produce two different `is_personal` values. Putting the reader
- * back in the list gives them two ways to say the same thing that mean
- * different things.
- *
- * NO SCOPE FILTER ON THE LISTS. RLS scopes them to the reader's own department;
- * adding one here would imply the policy were optional.
+ * NO SCOPE FILTER ON THE LISTS. RLS scopes them — which, since P13-01, includes
+ * the collaboration space's lists for everybody. Adding one here would imply the
+ * policy were optional.
  */
 
 export type PersonalTaskOptions = {
@@ -36,24 +45,21 @@ export type PersonalTaskOptions = {
    */
   departmentId: string | null;
   /**
-   * P13-01. `department_id` rides along so the dialog can tell a collaboration
-   * list from an ordinary one — which is what decides whether the whole company
-   * is assignable or only the reader's own team.
+   * P13-01. `department_id` rides along so the dialog can tell the picker WHICH
+   * list a task is going into — which is now the only input the roster depends
+   * on.
    */
   lists: { id: string; name: string; department_id: string }[];
-  colleagues: { id: string; full_name: string }[];
   /**
-   * P13-01 — EVERY ACTIVE PERSON, themselves excluded. Offered ONLY while a
-   * collaboration list is selected.
+   * Active people in the reader's OWN department, themselves excluded.
    *
-   * ⚠️ NOT A WIDER `colleagues`, AND THE TWO MUST NOT BE MERGED. In an ordinary
-   * department list, `vizserve_pms_create_task` still refuses an assignee from
-   * another team — the rule exists so nobody holds work their own lead cannot
-   * see. Offering this set there would be offering a guaranteed error message.
-   * In a shared space every lead can see it, which is exactly why the function
-   * relaxes the test there and only there.
+   * ⚠️ THIS IS THE DEPARTMENT FORM'S ROSTER AND ONLY ITS ROSTER. The
+   * company-wide form does not come through here at all — it has its own
+   * component and its own roster (`loadCollaborators`). Keeping the two apart
+   * is the point: a single dialog choosing between two rosters from a flag is
+   * what was wrong three times over.
    */
-  everyone: { id: string; full_name: string }[];
+  colleagues: { id: string; full_name: string }[];
 };
 
 export const loadPersonalTaskOptions = cache(
@@ -68,10 +74,7 @@ export const loadPersonalTaskOptions = cache(
 
     const myDepartment = me?.primary_department_id ?? null;
 
-    // ⚠️ `everyone` IS NOT DESTRUCTURED. The two above are PostgREST results
-    // and carry `{ data }`; `loadCollaborators` is an RPC wrapper that has
-    // already unwrapped and degraded its own, so it hands back the array.
-    const [{ data: lists }, { data: colleagues }, everyone] = await Promise.all([
+    const [{ data: lists }, { data: colleagues }] = await Promise.all([
       supabase
         .from("vizserve_pms_lists")
         // P13-01. `department_id` — see the note on the type.
@@ -91,45 +94,12 @@ export const loadPersonalTaskOptions = cache(
             .neq("id", userId)
             .order("full_name")
         : Promise.resolve({ data: [] as { id: string; full_name: string }[] }),
-
-      /*
-       * P13-01 — the whole company, for a collaboration list.
-       *
-       * ⚠️ P13-02 — THIS WAS A `from("vizserve_pms_users")` READ AND IT RETURNED
-       * THE READER'S OWN DEPARTMENT. Amier, standing in Company-wide with the
-       * picker open: "i cant still see all members in here". SELECT on that
-       * table is department-scoped by five additive policies, so a plain read
-       * through the caller's own client answers "everyone I could already see"
-       * — six names — however true the database rule underneath is.
-       *
-       * `loadCollaborators` is the definer RPC that reads past it. See the note
-       * there for why it is a function and not a wider policy.
-       *
-       * ⚠️ A SEPARATE CALL RATHER THAN A WIDER `colleagues`. The narrow list is
-       * an indexed `.eq("primary_department_id", …)` the database applies, and
-       * it is what every ORDINARY list still uses — deriving it by filtering
-       * this one in TypeScript would move the correctness of the common case out
-       * of the query and into this file. The two go out in the same wave.
-       */
-      loadCollaborators(),
     ]);
 
     return {
       departmentId: myDepartment,
       lists: lists ?? [],
       colleagues: colleagues ?? [],
-      /*
-       * ⚠️ SELF EXCLUDED HERE, BECAUSE THE RPC DOES NOT DO IT. The narrow query
-       * above carries `.neq("id", userId)` and `vizserve_pms_collaborators()`
-       * deliberately does not — it answers "who is assignable", which includes
-       * you, and it has other callers that want you in the list.
-       *
-       * This dialog is the one that must not have you in it: "Myself" is its
-       * DEFAULT rather than a row, because picking yourself calls a different
-       * function and produces a different KIND of task. A second way to say the
-       * same thing that means something else is the bug the `.neq` prevents.
-       */
-      everyone: everyone.filter((person) => person.id !== userId),
     };
   },
 );

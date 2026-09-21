@@ -4,6 +4,7 @@ import { isCollaborationSpace, requireAuthContext } from "@/lib/auth/authorizati
 import { roleAtLeast } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 
+import { NewCompanyTaskDialog } from "./new-company-task-dialog";
 import { NewPersonalTaskDialog } from "./new-personal-task-dialog";
 import { NewTaskDialog } from "./new-task-dialog";
 
@@ -93,6 +94,8 @@ export async function NewTaskButton({
       const dialog = (
         <NewPersonalTaskDialog
           lists={[personalList]}
+          /* Empty is how "this can only be your own work" is expressed — a
+             personal list holds only its owner's own personal tasks. */
           colleagues={[]}
           departmentId={context.primaryDepartmentId}
           selfId={context.userId}
@@ -129,21 +132,51 @@ export async function NewTaskButton({
     // ⚠️ SHARED WITH `app/_home/new-task-action.tsx`, WHICH WAS A COPY OF THIS
     // BLOCK — three queries and their comments, in two route groups. "Who may I
     // assign to" had two homes; now it has one.
-    const {
-      departmentId: myDepartment,
-      lists: myLists,
-      colleagues,
-      everyone,
-    } = await loadPersonalTaskOptions(context.userId);
+    const { departmentId: myDepartment, lists: myLists, colleagues } =
+      await loadPersonalTaskOptions(context.userId);
 
-    const dialog = (
+    /*
+     * ⚠️ P13-03 — WHICH OF THE TWO FORMS, DECIDED HERE AND NOWHERE ELSE.
+     *
+     * Amier asked for two: "new task 1 is the current we are using" for a
+     * department, and a second one for company-wide. This is the only place
+     * that chooses between them, and it chooses from the LIST — which is the
+     * thing that actually decides where the task is filed and therefore who may
+     * hold it.
+     *
+     * ⚠️ READ FROM THE LIST'S OWN DEPARTMENT ROW, NOT FROM
+     * `context.sharedDepartmentIds`. That field comes from a third query in
+     * `resolveAuth` which degrades to `[]` on any failure — and an empty array
+     * means "no collaboration space", so every failure silently selects the
+     * DEPARTMENT form. That is exactly how this shipped broken three times.
+     * Asking the department row directly has no such failure mode: it either
+     * answers or the whole page has already failed.
+     */
+    const listRow = listId ? myLists.find((list) => list.id === listId) : undefined;
+
+    const { data: listDepartment } = listRow
+      ? await supabase
+          .from("vizserve_pms_departments")
+          .select("is_shared")
+          .eq("id", listRow.department_id)
+          .maybeSingle()
+      : { data: null };
+
+    const dialog = listDepartment?.is_shared ? (
+      // NEW TASK 2 — the company-wide form. Its own component, its own roster.
+      <NewCompanyTaskDialog
+        lists={myLists}
+        departmentId={myDepartment}
+        selfId={context.userId}
+        trigger={trigger}
+        defaultListId={listId}
+      />
+    ) : (
+      // NEW TASK 1 — the department form, unchanged. `colleagues` is the
+      // reader's own department and is the ONLY roster it can draw.
       <NewPersonalTaskDialog
         lists={myLists}
         colleagues={colleagues}
-        /* P13-01. Offered only while a collaboration list is selected -- the
-           dialog decides, because only the dialog knows which list is. */
-        everyone={everyone}
-        sharedDepartmentIds={context.sharedDepartmentIds}
         departmentId={myDepartment}
         selfId={context.userId}
         trigger={trigger}

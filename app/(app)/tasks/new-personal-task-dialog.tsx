@@ -87,8 +87,7 @@ export function NewPersonalTaskDialog({
   lists,
   defaultListId = null,
   colleagues,
-  everyone = [],
-  sharedDepartmentIds = [],
+  scope = "department",
   departmentId,
   selfId,
   trigger = "toolbar",
@@ -102,22 +101,25 @@ export function NewPersonalTaskDialog({
    */
   defaultListId?: string | null;
   /**
-   * Active people in the member's own department, THEMSELVES EXCLUDED — "me" is
-   * the default rather than an entry in the list, because picking yourself and
-   * leaving it alone must not produce two different kinds of task.
+   * WHO MAY BE ASSIGNED. ONE ROSTER, DECIDED BY THE CALLER.
+   *
+   * ⚠️ THIS COMPONENT NO LONGER CHOOSES, AND THAT IS P13-03's WHOLE POINT. It
+   * used to be handed TWO rosters and a flag and asked to pick — and the
+   * picking was wrong three times running, silently, because every wrong answer
+   * looks exactly like a working one. `new-task-button.tsx` decides once, on the
+   * server, from the list being filed into, and renders either this dialog or
+   * `NewCompanyTaskDialog`. Each gets the one roster that is correct for it.
    */
   colleagues: { id: string; full_name: string }[];
   /**
-   * P13-01 — every active person, offered ONLY while a collaboration list is
-   * selected. Empty is a legitimate value and means "no shared lists reachable
-   * from here", which is what a caller that has no use for the feature passes.
+   * Which form this is, for the WORDING under the picker only.
+   *
+   * ⚠️ IT CHANGES NO BEHAVIOUR. `colleagues` is the roster whatever this says;
+   * if they ever disagree the sentence is wrong and the picker is still right.
+   * That split is deliberate — nothing about who can be assigned is allowed to
+   * depend on a display flag again.
    */
-  everyone?: { id: string; full_name: string }[];
-  /**
-   * P13-01 — the departments that are COLLABORATION SPACES. Empty before the
-   * migration is pasted, which is the truth then; see `loadSharedDepartmentIds`.
-   */
-  sharedDepartmentIds?: string[];
+  scope?: "department" | "company";
   /** The member's own department, read on the server. Never chosen here. */
   departmentId: string | null;
   /**
@@ -179,22 +181,12 @@ export function NewPersonalTaskDialog({
   const [dueDate, setDueDate] = useState<string | null>(null);
 
   /*
-   * P13-01 — WHO MAY BE TICKED DEPENDS ON WHICH LIST IS SELECTED.
+   * WHO MAY BE TICKED. THE PROP, AND NOTHING ELSE.
    *
-   * The list decides the department (`vizserve_pms_create_task`, §5 change 0),
-   * and the department decides who may be assigned. In a collaboration space
-   * that is every active person, which is the whole point of it; anywhere else
-   * it is the reader's own team, because the server still refuses an assignee
-   * from another one and offering them would be offering a guaranteed error.
-   *
-   * Derived from `listId` rather than held in state, so the two can never
-   * disagree — and `listId` already drives the Select, so nothing new is
-   * synchronised.
+   * ⚠️ NO BRANCH HERE ON PURPOSE. See the note on `colleagues` above: this
+   * component choosing its own roster is the bug, three times over.
    */
-  const inSharedList = sharedDepartmentIds.includes(
-    lists.find((list) => list.id === listId)?.department_id ?? "",
-  );
-  const candidates = inSharedList ? everyone : colleagues;
+  const candidates = colleagues;
 
   /*
    * ⚠️ PRUNED ON EVERY RENDER, NOT ON THE LIST CHANGE. Someone ticks three
@@ -214,20 +206,6 @@ export function NewPersonalTaskDialog({
     ...Object.fromEntries(candidates.map((person) => [person.id, person.full_name])),
   };
 
-  /*
-   * P13-02 — the rows the picker draws.
-   *
-   * "Myself" is an OPTION here rather than a special case inside the component,
-   * because to the picker it is just another row that can be ticked — and
-   * keeping the sentinel in this file is what stops `MINE` leaking into a
-   * generic control that would then have to know what it means. `submit` below
-   * is still the only place that reads it.
-   *
-   * ⚠️ FIRST, ALWAYS, AND NOT SUBJECT TO THE SEARCH FILTER'S ORDERING. It is
-   * the default and the most-used row; sorting it in among the names would put
-   * "Myself" somewhere different depending on who else is in the list.
-   */
-  const pickerOptions = [{ id: MINE, full_name: "Myself" }, ...candidates];
 
   /**
    * "Ace Guevarra", "Ace Guevarra and Raiza Mondina", "you and 3 others".
@@ -436,7 +414,11 @@ export function NewPersonalTaskDialog({
                   simply go inside `SelectContent`. */}
               <PeoplePicker
                 triggerId="assignee"
-                options={pickerOptions}
+                // "Myself" FIRST and never reordered by the search filter: it is
+                // the default and the most-used row, and it routes to a
+                // different create function, so the sentinel stays in the file
+                // that knows what it means.
+                options={[{ id: MINE, full_name: "Myself" }, ...candidates]}
                 value={assignees}
                 disabled={pending}
                 onChange={(value) => setAssignees(value.length === 0 ? [MINE] : value)}
@@ -456,7 +438,7 @@ export function NewPersonalTaskDialog({
                     RULE follows the list. Leaving the department caveat up while
                     the picker offers the whole company would be the screen
                     telling somebody they cannot do what they are doing. */}
-                {inSharedList
+                {scope === "company"
                   ? "Anyone in the company — this list is shared across every department."
                   : "Only your own department — work belongs to the department doing it, or somebody ends up holding a task their own Team Leader cannot see."}
               </p>

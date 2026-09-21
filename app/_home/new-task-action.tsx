@@ -29,22 +29,27 @@ export async function HomeNewTaskAction() {
   // ⚠️ THIS WAS A VERBATIM COPY of the member branch in
   // `app/(app)/tasks/new-task-button.tsx`, comments included. One definition
   // now, in `lib/personal-task-server.ts`.
-  const {
-    departmentId: myDepartment,
-    lists,
-    colleagues,
-    everyone,
-  } = await loadPersonalTaskOptions(context.userId);
+  const { departmentId: myDepartment, lists, colleagues } = await loadPersonalTaskOptions(
+    context.userId,
+  );
 
+  /*
+   * ⚠️ THE DEPARTMENT FORM, ALWAYS — P13-03, and it is a deliberate narrowing.
+   *
+   * This page has no list in hand: it is a personal glance, not a list view, so
+   * there is nothing to decide "which of the two forms" from. Defaulting to the
+   * DEPARTMENT one is the safe half of that choice — it offers only people the
+   * server will certainly accept for an unlisted task, which is filed under the
+   * caller's own department by `vizserve_pms_create_personal_task`.
+   *
+   * Company-wide work is filed from the Company-wide list itself, where
+   * `new-task-button.tsx` can see which list it is. If this page ever grows a
+   * list picker, it grows the same choice with it.
+   */
   return (
     <NewPersonalTaskDialog
       lists={lists}
       colleagues={colleagues}
-      /* P13-01. The collaboration space reaches this dialog too: it is in
-         `lists`, so somebody can file company-wide work from the home page
-         without going to /tasks first. */
-      everyone={everyone}
-      sharedDepartmentIds={context.sharedDepartmentIds}
       departmentId={myDepartment}
       selfId={context.userId}
       trigger="quick"
