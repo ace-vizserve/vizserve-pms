@@ -684,8 +684,44 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
     inheritedListId = values.list_id ?? parent.list_id;
   }
 
+  /*
+   * ⚠️ P13-01 — THE LIST OUTRANKS THE PERSON, WHEN THE LIST IS SHARED.
+   *
+   * Everything either side of this derives the department from somebody's own
+   * row, because until the collaboration space existed that was the only thing
+   * that could decide it. Typed into a shared list, that answer is wrong: the
+   * task would be filed under the assignee's own team while sitting in a list
+   * belonging to Collaboration Projects, which is a mismatch
+   * `vizserve_pms_create_task` refuses outright.
+   *
+   * ⚠️ BELOW THE PARENT LOOKUP AND ABOVE THE ASSIGNEE ONE, which is the whole
+   * ordering question. A SUBTASK still inherits its parent's department and
+   * must — `vizserve_pms_check_subtask_parent` refuses a child in another one,
+   * and a parent in the shared space is in the shared space anyway, so this
+   * changes nothing there. An ASSIGNEE's department must NOT win here, because
+   * that is exactly the disagreement this resolves.
+   *
+   * The function re-derives all of this itself (§5, change 0) and is the
+   * authority; this keeps the three copies of the create payload agreeing with
+   * it rather than finding out at the end. `quickAddTask`'s own history is the
+   * argument for bothering: three call sites building one payload, two of them
+   * right, and the failure looked like a save that had silently failed.
+   */
+  if (!departmentId && inheritedListId) {
+    const { data: targetList } = await supabase
+      .from("vizserve_pms_lists")
+      .select("department_id")
+      .eq("id", inheritedListId)
+      .maybeSingle();
+
+    if (targetList && context.sharedDepartmentIds.includes(targetList.department_id)) {
+      departmentId = targetList.department_id;
+    }
+  }
+
   // ⚠️ `!departmentId`: a parent has already decided, and its answer outranks
-  // the assignee's own department — see the subtask note above.
+  // the assignee's own department — see the subtask note above. P13-01 adds a
+  // shared list to the things that decide before this.
   if (forSomebodyElse && !departmentId) {
     // The DEPARTMENT COMES FROM THE PERSON. Read through the caller's own client
     // so RLS decides whether they can see that colleague at all — and

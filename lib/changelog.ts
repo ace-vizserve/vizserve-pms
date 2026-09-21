@@ -57,6 +57,25 @@ export const CHANGELOG: ChangelogEntry[] = [
   {
     date: "2026-09-21",
     area: "Tasks",
+    title: "Collaboration Projects — one space every department shares",
+    description:
+      "A project space that belongs to no single team. Anyone can add a task to it, everyone can see what is in it, and work can be handed to whoever is doing it whichever department they are in.",
+    items: [
+      "Anyone can add, edit and move a task there, and log time against it",
+      "The assignee picker offers the whole company — but only inside this space",
+      "That picker is searchable, so a long list is something you type into rather than scroll",
+      "Anyone can be @ mentioned in a comment on company-wide work",
+      "Every other department is unchanged: your own team's work still scopes to your team",
+      "It is a place to file work, not a queue: nothing in it goes to an approver",
+      "Nobody can be put IN it as their department — everybody is already in it",
+    ],
+    refs: ["P13-01", "P13-02"],
+    pending:
+      "P13-02 is written but not yet applied. Until it is pasted the assignee picker on company-wide work still shows only your own department.",
+  },
+  {
+    date: "2026-09-21",
+    area: "Tasks",
     title: "A list can be read as a timeline",
     description:
       "Gantt joins List and Board as a third view of the same list, so a schedule is something you look at rather than something you reconstruct from due dates.",

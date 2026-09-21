@@ -32,6 +32,7 @@ import type { TaskPriority } from "@/lib/schemas/tasks";
 import { createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
+import { PeoplePicker } from "./people-picker";
 
 /**
  * P3-12 — a task with no request behind it.
@@ -48,6 +49,14 @@ type Person = {
   primary_department_id: string | null;
 };
 type List = { id: string; name: string; department_id: string };
+/**
+ * P13-02 — what the assignee and QA pickers actually need: a name to show and
+ * an id to post. Narrower than `Person` on purpose, because
+ * `vizserve_pms_collaborators()` returns exactly this and nothing more — no
+ * email, no role, no department. The whole company's directory is not something
+ * to ship to the browser to fill a dropdown.
+ */
+type Assignable = { id: string; full_name: string };
 
 const NONE = "__none__";
 
@@ -88,14 +97,38 @@ const TRIGGER: Record<"toolbar" | "column" | "row", { label: string; button: Rea
 export function NewTaskDialog({
   departments,
   people,
+  collaborators,
   lists,
+  sharedDepartmentIds,
   defaultDepartmentId,
   defaultListId = null,
   trigger = "toolbar",
 }: {
   departments: Department[];
   people: Person[];
+  /**
+   * P13-02 — every assignable person in the company, used ONLY while the chosen
+   * department is a collaboration space.
+   *
+   * ⚠️ NOT DERIVABLE FROM `people`, WHICH IS WHY IT IS A SECOND PROP. That one
+   * comes from an ordinary read through the caller's own client, and SELECT on
+   * `vizserve_pms_users` is department-scoped — so for a team leader it holds
+   * the departments they lead and nothing else. No filter over it can produce
+   * somebody it never contained. This comes from `vizserve_pms_collaborators()`,
+   * which is `security definer`.
+   */
+  collaborators: Assignable[];
   lists: List[];
+  /**
+   * P13-01 — which of `departments` are COLLABORATION SPACES.
+   *
+   * Passed down rather than inferred from the department rows, because the flag
+   * that marks one is read in a query of its own that may legitimately come back
+   * empty before the migration is pasted — see `loadSharedDepartmentIds`. An
+   * empty array means "there are no shared spaces", which is the pre-migration
+   * truth and leaves every control below behaving exactly as it did.
+   */
+  sharedDepartmentIds: string[];
   defaultDepartmentId: string;
   /**
    * The list the reader is already filtered to, from `?list=`. See the note in
@@ -121,7 +154,9 @@ export function NewTaskDialog({
           <TaskForm
             departments={departments}
             people={people}
+            collaborators={collaborators}
             lists={lists}
+            sharedDepartmentIds={sharedDepartmentIds}
             defaultDepartmentId={defaultDepartmentId}
             defaultListId={defaultListId}
             onDone={() => setOpen(false)}
@@ -135,14 +170,18 @@ export function NewTaskDialog({
 function TaskForm({
   departments,
   people,
+  collaborators,
   lists,
+  sharedDepartmentIds,
   defaultDepartmentId,
   defaultListId = null,
   onDone,
 }: {
   departments: Department[];
   people: Person[];
+  collaborators: Assignable[];
   lists: List[];
+  sharedDepartmentIds: string[];
   defaultDepartmentId: string;
   defaultListId?: string | null;
   onDone: () => void;
@@ -172,9 +211,23 @@ function TaskForm({
 
   // Narrowed to the chosen department, because the server refuses an assignee
   // from elsewhere — offering them would be offering a guaranteed failure.
+  //
+  // ⚠️ P13-01 — UNLESS THE CHOSEN DEPARTMENT IS A COLLABORATION SPACE, where
+  // the server accepts anybody active. Nobody's `primary_department_id` is the
+  // shared space, so the filter alone would empty the picker there: the one
+  // department built for working across teams would be the one with nobody in
+  // it. `vizserve_pms_create_task` relaxes the same test, and this offers
+  // exactly what it accepts.
+  // ⚠️ P13-02 — THE SHARED BRANCH USES `collaborators`, NOT `people`. It first
+  // shipped as `people.filter(department_id !== null)`, and `people` is an
+  // RLS-scoped read: a lead of VizBytes got VizBytes. The list was narrowed
+  // upstream, so no filter here could widen it.
   const candidates = useMemo(
-    () => people.filter((person) => person.primary_department_id === departmentId),
-    [people, departmentId],
+    () =>
+      sharedDepartmentIds.includes(departmentId)
+        ? collaborators
+        : people.filter((person) => person.primary_department_id === departmentId),
+    [people, collaborators, departmentId, sharedDepartmentIds],
   );
 
   const departmentLists = useMemo(
@@ -196,8 +249,24 @@ function TaskForm({
   const peopleItems = Object.fromEntries(
     candidates.map((person) => [person.id, person.full_name]),
   );
-  const assigneeItems = { [NONE]: "Unassigned", ...peopleItems };
-  const qaItems = { [NONE]: "No QA reviewer", ...peopleItems };
+  // Annotated, not inferred: a computed key narrows the literal to `__none__`
+  // alone, so looking a person's id up in it is an error rather than a miss.
+  const assigneeItems: Record<string, string> = { [NONE]: "Unassigned", ...peopleItems };
+  const qaItems: Record<string, string> = { [NONE]: "No QA reviewer", ...peopleItems };
+
+  /*
+   * P13-02 — the rows for the two searchable pickers below.
+   *
+   * The "none" row is an OPTION rather than a special case inside the picker,
+   * for the same reason "Myself" is one in `NewPersonalTaskDialog`: the
+   * sentinel stays in the file that knows what it means. It is FIRST and is not
+   * reordered by the filter, because it is the default and must not move around
+   * depending on who else is in the list.
+   */
+  const pickerOptions = (noneId: string, noneLabel: string) => [
+    { id: noneId, full_name: noneLabel },
+    ...candidates,
+  ];
   const listItems = {
     [NONE]: "No list",
     ...Object.fromEntries(departmentLists.map((list) => [list.id, list.name])),
@@ -342,23 +411,19 @@ function TaskForm({
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="assignee">Person in charge</Label>
-            <Select
-              items={assigneeItems}
-              value={assigneeId}
-              onValueChange={(value) => value !== null && setAssigneeId(value)}
-            >
-              <SelectTrigger id="assignee">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>Unassigned</SelectItem>
-                {candidates.map((person) => (
-                  <SelectItem key={person.id} value={person.id}>
-                    {person.full_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {/* ⚠️ P13-02 — SEARCHABLE, because in a collaboration space
+                `candidates` is the whole company. `PeoplePicker` shows its
+                search box from eight options up, so a department of four is
+                unchanged and the shared space gains it. */}
+            <PeoplePicker
+              triggerId="assignee"
+              multiple={false}
+              options={pickerOptions(NONE, "Unassigned")}
+              value={[assigneeId]}
+              onChange={(value) => value[0] && setAssigneeId(value[0])}
+              summary={() => assigneeItems[assigneeId] ?? "Unassigned"}
+              searchLabel="Search people"
+            />
             {candidates.length === 0 ? (
               <p className="text-xs text-warning">Nobody belongs to this department yet.</p>
             ) : null}
@@ -366,23 +431,15 @@ function TaskForm({
 
           <div className="space-y-2">
             <Label htmlFor="qa">QA reviewer</Label>
-            <Select
-              items={qaItems}
-              value={qaAssigneeId}
-              onValueChange={(value) => value !== null && setQaAssigneeId(value)}
-            >
-              <SelectTrigger id="qa">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={NONE}>No QA reviewer</SelectItem>
-                {candidates.map((person) => (
-                  <SelectItem key={person.id} value={person.id}>
-                    {person.full_name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <PeoplePicker
+              triggerId="qa"
+              multiple={false}
+              options={pickerOptions(NONE, "No QA reviewer")}
+              value={[qaAssigneeId]}
+              onChange={(value) => value[0] && setQaAssigneeId(value[0])}
+              summary={() => qaItems[qaAssigneeId] ?? "No QA reviewer"}
+              searchLabel="Search people"
+            />
           </div>
         </div>
 

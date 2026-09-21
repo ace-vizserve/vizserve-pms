@@ -3,8 +3,13 @@ import { describe, expect, it } from "vitest";
 import {
   ROLE_ORDER,
   canAccessDepartment,
+  canManageAnyDepartmentTree,
+  canManageDepartmentTree,
   departmentPickerScope,
   departmentScopeFilter,
+  departmentTreeScope,
+  isCollaborationSpace,
+  realtimeDepartmentScope,
   roleAtLeast,
   type AuthContext,
   type Role,
@@ -22,6 +27,8 @@ import {
 const DEPT_A = "a1000000-0000-4000-8000-000000000001";
 const DEPT_B = "a1000000-0000-4000-8000-000000000002";
 const DEPT_C = "a1000000-0000-4000-8000-000000000003";
+/** P13-01 -- "Collaboration Projects (All departments)". Nobody's team. */
+const SHARED = "a1000000-0000-4000-8000-000000000005";
 
 function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext {
   return {
@@ -40,6 +47,10 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
     isDeptAdmin: false,
     primaryDepartmentId: null,
     managedDepartmentIds: [],
+    // P13-01. The collaboration spaces, EMPTY unless a test says otherwise —
+    // so every case written before this existed describes a company with no
+    // shared space, which is what it was testing.
+    sharedDepartmentIds: [],
     ...overrides,
   };
 }
@@ -181,5 +192,107 @@ describe("departmentPickerScope", () => {
 
   it("is `none` for a member, who routes nothing anywhere", () => {
     expect(departmentPickerScope(context({ role: "member" }))).toEqual({ kind: "none" });
+  });
+});
+
+/**
+ * P13-01 — THE COLLABORATION SPACE.
+ *
+ * ⚠️ THE POINT OF THESE CASES IS THE LINE, NOT THE WIDENING. A shared space is
+ * a place to FILE WORK, and it is deliberately not a place anybody APPROVES
+ * anything — so the two predicates that decide approval and visibility scope
+ * (`canAccessDepartment`, `departmentScopeFilter`) must be untouched by it,
+ * while the two that decide "may I shape this tree" and "may I file here" must
+ * admit everybody. Half of the assertions below are that nothing moved.
+ */
+describe("the collaboration space", () => {
+  const member = context({
+    role: "member",
+    primaryDepartmentId: DEPT_A,
+    sharedDepartmentIds: [SHARED],
+  });
+
+  it("is recognised from the context, and only the ids that are in it", () => {
+    expect(isCollaborationSpace(member, SHARED)).toBe(true);
+    expect(isCollaborationSpace(member, DEPT_A)).toBe(false);
+    expect(isCollaborationSpace(member, DEPT_B)).toBe(false);
+  });
+
+  it("is nothing at all before the migration is pasted", () => {
+    // `sharedDepartmentIds` degrades to empty when the `is_shared` read fails,
+    // which is the pre-migration truth. Nothing may turn that into a grant.
+    const before = context({ role: "member", primaryDepartmentId: DEPT_A, sharedDepartmentIds: [] });
+
+    expect(isCollaborationSpace(before, SHARED)).toBe(false);
+    expect(canManageDepartmentTree(before, SHARED)).toBe(false);
+  });
+
+  it("⚠️ a null department is never the shared space", () => {
+    // The same rule every other predicate in this module follows. A row with no
+    // department is not "everyone's".
+    expect(isCollaborationSpace(member, null)).toBe(false);
+  });
+
+  it("lets a plain member shape its tree", () => {
+    // P11-07's rule, extended: a list is a shelf. This member leads nothing and
+    // does not belong to this department — nobody does.
+    expect(canManageDepartmentTree(member, SHARED)).toBe(true);
+    // Still not another team's, which is the half that must not move.
+    expect(canManageDepartmentTree(member, DEPT_B)).toBe(false);
+  });
+
+  it("gives somebody with no department a tree to manage", () => {
+    const stray = context({ role: "member", primaryDepartmentId: null, sharedDepartmentIds: [SHARED] });
+
+    expect(canManageAnyDepartmentTree(stray)).toBe(true);
+    expect(canManageAnyDepartmentTree(context({ role: "member", primaryDepartmentId: null }))).toBe(
+      false,
+    );
+  });
+
+  it("appears in the tree picker for everybody, beside their own department", () => {
+    expect(departmentTreeScope(member)).toEqual({ kind: "some", ids: [SHARED, DEPT_A] });
+  });
+
+  it("⚠️ is `some`, never `none`, for somebody who shapes nothing else", () => {
+    // The sentinel trap `departmentPickerScope` was written for: "shapes
+    // nothing" must never become a filter that matches nothing. Here they DO
+    // shape something, so `none` would be wrong twice over.
+    const stray = context({ role: "member", primaryDepartmentId: null, sharedDepartmentIds: [SHARED] });
+
+    expect(departmentTreeScope(stray)).toEqual({ kind: "some", ids: [SHARED] });
+  });
+
+  it("does not turn an owner's `all` into a finite list", () => {
+    const owner = context({ role: "owner", sharedDepartmentIds: [SHARED] });
+
+    expect(departmentTreeScope(owner)).toEqual({ kind: "all" });
+  });
+
+  it("⚠️ confers NO approval or visibility scope", () => {
+    // The load-bearing negative. Nobody leads a shared space and it holds no
+    // queue; `canAccessDepartment` is what decides whose requests you review
+    // and whose timesheet week you sign off.
+    expect(canAccessDepartment(member, SHARED)).toBe(false);
+    expect(departmentScopeFilter(member)).toEqual([]);
+    expect(departmentPickerScope(member)).toEqual({ kind: "none" });
+  });
+
+  it("⚠️ does not make a team leader a lead of it", () => {
+    const tl = context({
+      role: "team_leader",
+      primaryDepartmentId: DEPT_A,
+      managedDepartmentIds: [DEPT_A],
+      sharedDepartmentIds: [SHARED],
+    });
+
+    expect(canAccessDepartment(tl, SHARED)).toBe(false);
+    expect(departmentScopeFilter(tl)).toEqual([DEPT_A]);
+  });
+
+  it("pushes realtime refreshes to everybody, so a shared board is not stale", () => {
+    // Four teams typing into one list is the case this space exists for, and it
+    // is the case where a page that does not repaint shows work already taken.
+    expect(realtimeDepartmentScope(member)).toEqual([DEPT_A, SHARED]);
   });
 });

@@ -25,6 +25,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const USER_ID = "00000000-0000-4000-8000-000000000001";
 const DEPT_A = "d1000000-0000-4000-8000-00000000000a";
+/** P13-01 — a collaboration space. Nobody belongs to it; everybody acts in it. */
+const SHARED_DEPT = "a1000000-0000-4000-8000-000000000005";
 
 type FakeError = { code: string; message: string } | null;
 
@@ -38,6 +40,20 @@ type FakeConfig = {
    * means the column is there and the read succeeds.
    */
   firstError: FakeError;
+  /**
+   * P13-01 — what the SHARED-DEPARTMENTS read fails with, independently of the
+   * profile read.
+   *
+   * ⚠️ THIS IS THE WHOLE REASON THAT READ IS A QUERY OF ITS OWN. `is_shared`
+   * does not exist until the migration is pasted, and the window between the
+   * deploy and the paste is the one this file exists for. On the profile select
+   * the column would take the entire request down with it and answer
+   * `not_provisioned` to everybody; on its own, it answers "there are no
+   * collaboration spaces", which is precisely true at that moment.
+   */
+  sharedError: FakeError;
+  /** The shared departments the database would return when the column is there. */
+  sharedRows: { id: string }[];
 };
 
 let config: FakeConfig;
@@ -75,8 +91,13 @@ function makeClient() {
 
           const wantsDeptAdmin = columns.includes("is_dept_admin");
 
+          // P13-01. The departments read is the only one that orders, and it
+          // is the only one on this table.
+          const isShared = table.endsWith("_departments") && !table.includes("managed");
+
           const query = {
             eq: () => query,
+            order: () => query,
             maybeSingle: async () => {
               if (config.firstError && wantsDeptAdmin) {
                 // PostgREST rejects the WHOLE select, not the column: no row.
@@ -89,9 +110,18 @@ function makeClient() {
               if (!wantsDeptAdmin) delete row.is_dept_admin;
               return { data: row, error: null };
             },
-            // The managed-departments read is awaited directly.
-            then: (resolve: (value: unknown) => unknown) =>
-              resolve({ data: table.endsWith("managed_departments") ? [] : [], error: null }),
+            // The managed-departments and shared-departments reads are both
+            // awaited directly.
+            then: (resolve: (value: unknown) => unknown) => {
+              if (isShared) {
+                return resolve(
+                  config.sharedError
+                    ? { data: null, error: config.sharedError }
+                    : { data: config.sharedRows, error: null },
+                );
+              }
+              return resolve({ data: [], error: null });
+            },
           };
 
           return query;
@@ -126,7 +156,13 @@ function profileRow(overrides: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   selects = [];
-  config = { user: { id: USER_ID }, profile: profileRow(), firstError: null };
+  config = {
+    user: { id: USER_ID },
+    profile: profileRow(),
+    firstError: null,
+    sharedError: null,
+    sharedRows: [],
+  };
 });
 
 describe("deptAdminColumnMissing — the detection, and how narrow it is", () => {
@@ -279,5 +315,68 @@ describe("resolveAuth — degrades rather than locking the company out", () => {
 
     expect(await resolveAuth()).toMatchObject({ context: null, denial: "no_session" });
     expect(selects).toHaveLength(0);
+  });
+});
+
+/**
+ * P13-01 — THE SHARED-DEPARTMENTS READ FAILS ALONE, OR IT IS THE SAME OUTAGE.
+ *
+ * `is_shared` is a column that does not exist until the migration is pasted by
+ * hand, which is exactly the situation the rest of this file is about. The
+ * decision was to ask for it in a query of its OWN rather than on the profile
+ * select, and these cases are what hold that decision in place: they fail if
+ * somebody "tidies" the third read into the first.
+ *
+ * The degrade GRANTS something, unlike `must_change_password`, so the safe
+ * direction had to be proved rather than assumed. Empty means "there are no
+ * collaboration spaces", which is the truth before the migration lands: the
+ * flag does not exist, nothing is flagged, and no policy admits anybody
+ * anywhere new. The failure direction is "the space is not there yet", never
+ * "everybody is in everything".
+ */
+describe("resolveAuth — the collaboration spaces ride along without risking the session", () => {
+  it("carries the shared departments onto the context", async () => {
+    config.sharedRows = [{ id: SHARED_DEPT }];
+
+    const result = await resolveAuth();
+
+    expect(result.context?.sharedDepartmentIds).toEqual([SHARED_DEPT]);
+  });
+
+  it("⚠️ still signs the person in when `is_shared` does not exist yet", async () => {
+    config.sharedError = {
+      code: "42703",
+      message: "column vizserve_pms_departments.is_shared does not exist",
+    };
+
+    const result = await resolveAuth();
+
+    // The session is INTACT. This is the assertion that matters: on the profile
+    // select the same error would have answered `not_provisioned` to everybody.
+    expect(result.context).not.toBeNull();
+    expect(result.context?.userId).toBe(USER_ID);
+    // And the feature is simply absent, which is what is true at that moment.
+    expect(result.context?.sharedDepartmentIds).toEqual([]);
+  });
+
+  it("⚠️ degrades to empty on ANY failure of that read, not only a missing column", async () => {
+    // There is no narrow error matcher here and there must not be one. The read
+    // only ever ADDS a department nobody leads; treating every failure as "none"
+    // cannot lock anybody out and cannot let anybody in.
+    config.sharedError = { code: "PGRST301", message: "JWT expired" };
+
+    const result = await resolveAuth();
+
+    expect(result.context).not.toBeNull();
+    expect(result.context?.sharedDepartmentIds).toEqual([]);
+  });
+
+  it("does not resurrect a denied session", async () => {
+    // A shared space is not app access. Somebody deactivated is still out, and
+    // the read that succeeded above cannot change that.
+    config.sharedRows = [{ id: SHARED_DEPT }];
+    config.profile = profileRow({ is_active: false });
+
+    expect(await resolveAuth()).toMatchObject({ context: null, denial: "deactivated" });
   });
 });

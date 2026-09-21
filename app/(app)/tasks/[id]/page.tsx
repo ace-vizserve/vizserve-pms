@@ -11,7 +11,12 @@ import { buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { RichText } from "@/components/ui/rich-text";
-import { canAdminDepartment, realtimeDepartmentFilter, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  canAdminDepartment,
+  isCollaborationSpace,
+  realtimeDepartmentFilter,
+  requireAuthContext,
+} from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { formatDate, formatDateTime } from "@/lib/dates";
 import { richTextToPlainText } from "@/lib/rich-text";
@@ -27,6 +32,7 @@ import {
 
 import { fetchJoinedTaskIdSet } from "@/lib/tasks-server";
 import { loadListFields } from "@/lib/list-fields-server";
+import { loadCollaborators } from "@/lib/departments-server";
 import { cn } from "@/lib/utils";
 import { requestToday } from "@/lib/dates-server";
 import { createClient } from "@/utils/supabase/server";
@@ -129,6 +135,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
     joinedTaskIdSet,
     // P7-73. Last, per the warning above: appended, never inserted.
     { fields: customFields },
+    // P13-02. Appended after it, same rule.
+    collaborators,
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_task_status_history")
@@ -298,6 +306,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
      */
     fetchJoinedTaskIdSet(context.userId),
     task.list_id ? loadListFields(task.list_id) : Promise.resolve({ fields: [], error: null }),
+    // P13-02. The company roster, for the assignee picker when this task sits in
+    // a collaboration space. `cache()`d and returns nothing when none exists, so
+    // issuing it unconditionally costs a cheap read rather than a round trip
+    // spent deciding whether to issue it.
+    loadCollaborators(),
   ]);
 
   // Null for internal work, for a caller with no seat, and for a task that does
@@ -437,7 +450,17 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
      * P11-03 added to both tasks policies. `primary_department_id` is what this
      * schema means by "a member of a department" everywhere else.
      */
-    inDepartment: context.primaryDepartmentId === task.department_id,
+    /*
+     * ⚠️ P13-01 — AND THE COLLABORATION SPACE, WHICH NOBODY'S
+     * `primary_department_id` POINTS AT. The test above is false for every
+     * person on every task in that space, so without this clause a
+     * company-wide task opened read-only for everyone including the person who
+     * typed it. Mirrors `vizserve_pms_may_collaborate`, which is the
+     * enforcement — see §3b and §6 of the migration.
+     */
+    inDepartment:
+      context.primaryDepartmentId === task.department_id ||
+      isCollaborationSpace(context, task.department_id),
     /*
      * P8-01c — the Admin tick on THIS task's department, which is what
      * `vizserve_pms_force_task_status` now also accepts.
@@ -485,10 +508,28 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
    * Who this work can be given to. The department's own people, which is the
    * same set `reassignTask` and `quickAddTask` will accept — offering anybody
    * else is offering a door the server does not open.
+   *
+   * ⚠️ P13-01 — IN THE COLLABORATION SPACE IT IS EVERYBODY, and that is the
+   * feature rather than a relaxation of this rule. The rule exists so nobody
+   * ends up holding work their own lead cannot see; in a shared space every
+   * lead can see it, which is why `vizserve_pms_create_task` and
+   * `vizserve_pms_add_task_assignee` both relax the same test to "is this person
+   * active" there. Without it the picker on a company-wide task would be empty:
+   * nobody's `primary_department_id` is the shared space.
    */
-  const departmentPeople = (people ?? [])
-    .filter((person) => person.primary_department_id === task.department_id)
-    .map((person) => ({ id: person.id, full_name: person.full_name }));
+  /*
+   * ⚠️ P13-02 — THE SHARED BRANCH READS THE RPC, NOT `people`. This first
+   * shipped as a filter that let every row through when the task was shared,
+   * which is "everybody I can already see": the `people` read above goes through
+   * the caller's own client, and SELECT on `vizserve_pms_users` is
+   * department-scoped. The rule was right in the database and the picker still
+   * showed one team.
+   */
+  const departmentPeople = isCollaborationSpace(context, task.department_id)
+    ? collaborators
+    : (people ?? [])
+        .filter((person) => person.primary_department_id === task.department_id)
+        .map((person) => ({ id: person.id, full_name: person.full_name }));
 
   return (
     // Full width, like the list pages. The old `max-w-4xl` centred a column and

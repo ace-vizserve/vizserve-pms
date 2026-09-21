@@ -47,6 +47,10 @@ function context(overrides: Partial<AuthContext> & { role: Role }): AuthContext 
     isDeptAdmin: false,
     primaryDepartmentId: null,
     managedDepartmentIds: [],
+    // P13-01. The collaboration spaces, EMPTY unless a test says otherwise —
+    // so every case written before this existed describes a company with no
+    // shared space, which is what it was testing.
+    sharedDepartmentIds: [],
     ...overrides,
   };
 }
