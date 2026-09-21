@@ -363,27 +363,44 @@ function TaskForm({
           />
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-2">
-            <Label htmlFor="department">Department</Label>
-            <Select
-              items={departmentItems}
-              value={departmentId}
-              onValueChange={(value) => value !== null && changeDepartment(value)}
-            >
-              <SelectTrigger id="department">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {departments.map((department) => (
-                  <SelectItem key={department.id} value={department.id}>
-                    {department.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+        {/* ⚠️ A ROW OF ITS OWN, NOT HALF OF ONE — P13-02. This shared the row
+            with Start date, which was fine while the longest department name was
+            "VizAssists". "Collaboration Projects (All departments)" is four times
+            that, and `SelectTrigger` is `w-fit whitespace-nowrap` with the value
+            line-clamped: in a half-width cell it grew to the cell and then
+            truncated, so the one option people come here to pick read as
+            "Collaboration Projects (All departme".
 
+            Widening the field beats shortening the name. The parenthetical IS
+            the explanation of what the space is — nothing else on this screen
+            says it — so it has to survive being looked at. */}
+        <div className="space-y-2">
+          <Label htmlFor="department">Department</Label>
+          <Select
+            items={departmentItems}
+            value={departmentId}
+            onValueChange={(value) => value !== null && changeDepartment(value)}
+          >
+            {/* `w-full` because the default is `w-fit`, and a trigger that sizes
+                to the CHOSEN label jumps width every time the picker is used. */}
+            <SelectTrigger id="department" className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {departments.map((department) => (
+                <SelectItem key={department.id} value={department.id}>
+                  {department.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* The two dates together, which is what they were always meant to be:
+            Due carries `min={startDate}`, so they are one decision made twice
+            and they belong on one line. They were split across two rows only
+            because Department used to sit where Due date now does. */}
+        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="start">Start date</Label>
             <DatePicker
@@ -392,9 +409,7 @@ function TaskForm({
               onChange={(value) => setStartDate(value ?? "")}
             />
           </div>
-        </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
           <div className="space-y-2">
             <Label htmlFor="due">Due date</Label>
             <DatePicker
@@ -404,7 +419,9 @@ function TaskForm({
               min={startDate || undefined}
             />
           </div>
+        </div>
 
+        <div className="grid gap-4 sm:grid-cols-2">
           <EstimateField value={estimate} onChange={setEstimate} disabled={pending} />
         </div>
 

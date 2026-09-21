@@ -689,7 +689,12 @@ function ListForm({
               // Moving a list between departments would strand every task in it
               // under a team that cannot see them.
               disabled={Boolean(list)}>
-              <SelectTrigger id="department">
+              {/* P13-02. `w-full`, because the default is `w-fit` and
+                  "Collaboration Projects (All departments)" is several times
+                  longer than any team name — left to size itself the trigger
+                  grew to its container and then line-clamped the one option
+                  this screen exists to offer. */}
+              <SelectTrigger id="department" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
