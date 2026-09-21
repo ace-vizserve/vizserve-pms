@@ -232,9 +232,10 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
 
   await acknowledge(result.data.request_id, result.data.reference_no, trackingUrl);
 
-  // Handed back so the browser can put it in the EmailJS parameters too —
-  // the raw token exists only here and is never stored, so this is the one
-  // moment it can be passed on.
+  // Handed back so the browser can show it on the confirmation screen — the
+  // raw token exists only here and is never stored, so this is the one moment
+  // it can be passed on. (It used to feed a browser-side EmailJS send as well;
+  // P8-10 moved every send to the server and P8-13 moved it to Resend.)
   return { ...result.data, status_url: trackingUrl ?? undefined };
 }
 

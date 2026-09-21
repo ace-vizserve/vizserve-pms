@@ -32,6 +32,9 @@ describe.skipIf(!recipient)("P0-11 deliverability", () => {
   it("sends the real template to a real address", async () => {
     const outcome = await sendEmail({
       to: recipient!,
+      // `notifications@` — the highest-volume of the four, so it is the sender
+      // whose reputation a one-off check is most worth spending.
+      sender: "notifications",
       subject: "VizServe Team Portal — deliverability check (P0-11)",
       body: {
         preheader: "Confirming transactional email is wired end to end.",
@@ -68,6 +71,7 @@ describe.skipIf(!recipient)("P0-11 deliverability", () => {
     // sending works, so nobody concludes "email is on" and forgets it is fenced.
     const outcome = await sendEmail({
       to: "test.admin@example.com",
+      sender: "notifications",
       subject: "Should never arrive",
       body: { preheader: "x", heading: "x", paragraphs: ["x"] },
     });

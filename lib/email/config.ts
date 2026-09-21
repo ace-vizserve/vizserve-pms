@@ -1,7 +1,7 @@
 import "server-only";
 
 /**
- * P0-11 / P8-10 — transactional email configuration, transport selection and
+ * P0-11 / P8-16 — transactional email configuration, the sender addresses and
  * the safety gate.
  *
  * The single most important thing in this file is `isDeliverable()`. This system
@@ -10,142 +10,145 @@ import "server-only";
  * through that check.
  *
  * ---------------------------------------------------------------------------
- * P8-10 — TWO TRANSPORTS, ONE CHOICE, MADE HERE.
+ * P8-16 — ONE TRANSPORT. EmailJS is gone.
  *
- * VizServe sends through EmailJS. Resend was built first, `RESEND_API_KEY` was
- * never set, `emailMode()` therefore returned `"dry-run"`, and every send in the
- * system was a silent no-op — which is why a client never received a Gate 3
- * approval email. The code was written, wired and correct; the transport was
- * simply off.
+ * The history, because this file carried the scaffolding for a choice that no
+ * longer exists and somebody will wonder why the seams are visible. Resend was
+ * built first in P0-11, `RESEND_API_KEY` was never set, `emailMode()` therefore
+ * returned `"dry-run"`, and every send was a silent no-op — which is why a
+ * client never received a Gate 3 approval email. P8-10 made the transport a
+ * CHOICE and EmailJS carried the traffic; P8-13 flipped it back to Resend the
+ * day the key arrived; P8-14 deleted the EmailJS template; P8-16 deleted the
+ * rest.
  *
- * The fix is not "swap Resend for EmailJS". It is to make the transport a
- * CHOICE rather than an assumption, so that the eventual move back to Resend is
- * one environment variable and not a search-and-replace across every call site.
- * `lib/email/send.ts` is the port; `lib/email/transports/*` are the adapters;
- * this file decides which one is in play.
- *
- * The env reading for BOTH adapters lives here rather than in each adapter,
- * because the selection has to be able to ask "is that one actually configured?"
- * without importing the adapters — which import this file. One direction of
- * dependency, no cycle.
+ * WHAT SURVIVES THE REMOVAL, and deliberately: `lib/email/send.ts` is still a
+ * PORT and `lib/email/transports/resend.ts` is still an ADAPTER behind it. One
+ * implementation does not make the seam pointless — the port is where the
+ * reserved-domain gate and the never-throws contract live, above any transport,
+ * and that is the part that must not be reachable around. The `EMAIL_TRANSPORT`
+ * variable is gone because a switch with one position is a lie; the boundary it
+ * switched across is not.
  * ---------------------------------------------------------------------------
  */
 
 export type EmailMode = "live" | "dry-run";
 
-/** The transports that exist. Add a member only alongside an adapter. */
-export type EmailTransport = "emailjs" | "resend";
-
 export type ResendConfig = { apiKey: string };
-
-/**
- * Everything EmailJS's REST API needs, or null when it is not set up.
- *
- * ⚠️ `EMAILJS_PRIVATE_KEY` CARRIES NO PREFIX — not `VITE_`, not `NEXT_PUBLIC_`.
- * The other three use Vite's prefix, which means nothing to Next and is exactly
- * why they were safe to hand to a browser back when the browser did the sending.
- * The private key never was. An unprefixed name is the guard, and this module is
- * `server-only` so nothing can read it from a component that ships.
- *
- * Null when ANY part is missing, including the private key. A partial config is
- * not a degraded config — EmailJS rejects a REST call without the access token,
- * so three-out-of-four fails at the transport with a message nobody reads.
- * Null means "not set up", and the port degrades to dry-run.
- *
- * ⚠️ SETTING THESE IS NECESSARY BUT NOT SUFFICIENT. Non-browser API requests are
- * DISABLED BY DEFAULT on an EmailJS account: every call comes back 403 with
- * perfectly correct credentials until somebody ticks "Allow EmailJS API for
- * non-browser applications" in **Account → Security**. No amount of code can do
- * that step. See docs/emailjs/README.md.
- */
-export type EmailJsConfig = {
-  /** EmailJS calls this `user_id` in the REST body. It is the PUBLIC key. */
-  publicKey: string;
-  serviceId: string;
-  templateId: string;
-  /** EmailJS calls this `accessToken`. Server-only, never in a bundle. */
-  privateKey: string;
-};
 
 export function resendConfig(): ResendConfig | null {
   const apiKey = process.env.RESEND_API_KEY;
   return apiKey ? { apiKey } : null;
 }
 
-export function emailJsConfig(): EmailJsConfig | null {
-  // The `VITE_` names are the ones already in `.env` — a leftover prefix from
-  // another project that Next ignores entirely. Renaming three live keys to buy
-  // nothing but tidiness is a deploy-day outage waiting to happen, so they stay.
-  const publicKey = process.env.VITE_EMAILJS_PUBLIC_KEY;
-  const serviceId = process.env.VITE_EMAILJS_SERVICE_ID;
-  const templateId = process.env.VITE_EMAILJS_TEMPLATE_ID;
-  const privateKey = process.env.EMAILJS_PRIVATE_KEY;
-
-  if (!publicKey || !serviceId || !templateId || !privateKey) return null;
-  return { publicKey, serviceId, templateId, privateKey };
-}
-
-/** Whether the named transport could send right now. */
-export function isTransportConfigured(transport: EmailTransport): boolean {
-  return transport === "emailjs" ? emailJsConfig() !== null : resendConfig() !== null;
-}
-
 /**
- * Which adapter the port will use.
- *
- * `EMAIL_TRANSPORT` wins when it names a transport that exists. An explicit
- * choice has to beat inference, because the one case that matters is a machine
- * where BOTH are configured and somebody is deliberately testing the other one.
- *
- * With it unset, infer from what is configured — EmailJS first, because that is
- * what VizServe uses and an inferred default that is not today's answer is a
- * trap. A garbage value is treated as unset rather than throwing: a typo in an
- * env var must not take the app down on boot, and the dry-run below is a loud
- * enough symptom.
- *
- * Falls back to `emailjs` when NEITHER is configured, so the log line a
- * developer sees names the transport they will eventually be configuring rather
- * than the one they will not.
- */
-export function emailTransport(): EmailTransport {
-  const requested = process.env.EMAIL_TRANSPORT?.trim().toLowerCase();
-
-  if (requested === "emailjs" || requested === "resend") return requested;
-
-  if (emailJsConfig()) return "emailjs";
-  if (resendConfig()) return "resend";
-
-  return "emailjs";
-}
-
-/**
- * `dry-run` when the SELECTED transport is not configured. Renders, logs, sends
- * nothing.
+ * `dry-run` when `RESEND_API_KEY` is absent. Renders, logs, sends nothing.
  *
  * Deliberately not an error, and this is unchanged from P0-11: a developer with
- * no keys must still be able to run the app, click Approve, and see what would
+ * no key must still be able to run the app, click Approve, and see what would
  * have gone out. A mailer that throws on a missing key turns every server action
  * into a landmine.
  *
  * ⚠️ IT IS ALSO NOT A SUCCESS. `SendOutcome` keeps `dry-run` as its own member
  * for exactly that reason — see the note on the union in
- * `lib/email/transports/types.ts`.
- *
- * The selected transport, not "any transport": with `EMAIL_TRANSPORT=resend` and
- * only the EmailJS keys present, this is dry-run and says so. Answering "live"
- * because some OTHER transport happens to be configured is how you get a system
- * that reports healthy and delivers nothing.
+ * `lib/email/transports/types.ts`. Counting it as sent is how the Gate 3 flow
+ * reported clean for months while delivering nothing.
  */
 export function emailMode(): EmailMode {
-  return isTransportConfigured(emailTransport()) ? "live" : "dry-run";
+  return resendConfig() ? "live" : "dry-run";
 }
 
-export function emailFrom(): string {
-  // Resend rejects an unverified sending domain, so this is required in
-  // production and defaulted only so dry-run has something to render.
-  return process.env.EMAIL_FROM ?? "VizServe Team Portal <onboarding@resend.dev>";
+/**
+ * P8-15 — WHICH MAILBOX A MESSAGE COMES FROM.
+ *
+ * Four addresses on vizserve.com, chosen by what the email IS rather than who
+ * it goes to:
+ *
+ *   approvals@      every approval gate — Gate 1's decisions, Gate 2's QA
+ *                   hand-off, Gate 3's client request and its reminders, and
+ *                   Phase 5's internal outcomes.
+ *   notifications@  the ambient traffic: assignment, status, comments.
+ *   support@        the public form's acknowledgement, which is the one email a
+ *                   stranger gets and the one they are likeliest to reply to.
+ *   survey@         the completion survey, and nothing else.
+ *
+ * WHY SPLIT AT ALL, given one verified domain would have done. A recipient
+ * filters, mutes and — the one that matters — marks as spam PER SENDER. Folding
+ * the completion survey in with the Gate 3 approval means one client who is
+ * tired of surveys can bin the email Phase 4 rests on. Separate addresses make
+ * that a per-purpose decision on their side and a per-purpose reputation on
+ * ours.
+ *
+ * ⚠️ EACH IS A REAL, MONITORED MAILBOX — none is a `noreply@`. A client who
+ * hits reply must reach a person, and a From nobody reads is a small but real
+ * spam signal on top of that.
+ */
+export type EmailSender = "approvals" | "notifications" | "support" | "survey";
+
+/**
+ * The env var holding each sender's address. Split out so `emailFrom` below is
+ * a lookup rather than a switch, and so a missing one names itself in the
+ * warning.
+ */
+const SENDER_ENV: Record<EmailSender, string> = {
+  approvals: "EMAIL_FROM_APPROVALS",
+  notifications: "EMAIL_FROM_NOTIFICATIONS",
+  support: "EMAIL_FROM_SUPPORT",
+  survey: "EMAIL_FROM_SURVEY",
+};
+
+/**
+ * The `From` header for one kind of message.
+ *
+ * ⚠️ RESEND REJECTS AN UNVERIFIED SENDING DOMAIN. Since P8-13 this is the
+ * single likeliest reason for "email is configured and nothing arrives": the
+ * key is valid, the transport is live, `emailMode()` says `live`, and every
+ * send comes back `failed` with Resend's own 403. D16/Q12 settled the domain as
+ * **vizserve.com**; it has to be verified in the Resend dashboard, with the
+ * DNS records published, before ANY address on it will send.
+ *
+ * ✅ VERIFYING THE DOMAIN COVERS ALL FOUR. Resend verifies a domain, not a
+ * mailbox, so adding a fifth sender here needs no dashboard work — only that
+ * somebody is actually reading the replies.
+ *
+ * Falls back to `EMAIL_FROM` and then to Resend's shared sandbox sender, which
+ * delivers ONLY to the Resend account owner's own address and silently refuses
+ * everything else. That last default is right for a fresh checkout with no DNS
+ * at all, and exactly wrong to leave in place for Phase 4 — so reaching it says
+ * so in the log rather than failing quietly at the transport.
+ */
+export function emailFrom(sender: EmailSender): string {
+  const configured = process.env[SENDER_ENV[sender]] ?? process.env.EMAIL_FROM;
+  if (configured) return configured;
+
+  console.warn(
+    `[email] neither ${SENDER_ENV[sender]} nor EMAIL_FROM is set — falling back to ` +
+      `Resend's sandbox sender, which only delivers to the Resend account owner.`,
+  );
+  return "VizServe Team Portal <onboarding@resend.dev>";
 }
 
+/**
+ * Where a reply goes. Optional, and UNSET IS THE RIGHT ANSWER TODAY.
+ *
+ * ⚠️ DELIBERATELY STATIC, and P8-13 checked this rather than assumed it.
+ * The old EmailJS notes described a per-message reply-to — "staff
+ * mail should reply to the client, client mail should reply to a monitored
+ * mailbox" — which was never implemented and no longer matches the shape of
+ * the system:
+ *
+ *   - all SEVEN senders in `client-emails.ts` go to the CLIENT, so there is no
+ *     staff/client split left to vary on. They all want the same monitored
+ *     mailbox.
+ *   - staff mail goes through `dispatchPendingEmails` instead, off notification
+ *     rows that carry no client address. Routing a staff reply to the client
+ *     would also be wrong on purpose: a reply typed into an email client is work
+ *     that happened outside the system meant to be tracking it. The button in
+ *     the body goes to the record; that is the path.
+ *
+ * With `EMAIL_FROM` set to a real monitored mailbox rather than a `noreply@`,
+ * this header is redundant — a Reply-To identical to the From is one more thing
+ * to keep in sync for no behaviour. Set it only when the two genuinely differ.
+ */
 export function emailReplyTo(): string | undefined {
   return process.env.EMAIL_REPLY_TO || undefined;
 }

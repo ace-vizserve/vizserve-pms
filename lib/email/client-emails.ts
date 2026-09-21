@@ -5,6 +5,27 @@ import { richTextToPlainText } from "@/lib/rich-text";
 import { sendEmail, type SendOutcome } from "./send";
 
 /**
+ * P8-14 — the chip each of these carries under its heading.
+ *
+ * ⚠️ WRITTEN HERE RATHER THAN READ OFF A STATUS ENUM, and that is the decision
+ * worth recording. `REQUEST_STATUS` in `components/status-badge.tsx` remains the
+ * only place a status becomes a colour IN THE APP; it is a React module that
+ * pulls in lucide, it does not export its map, and reaching into it from the
+ * mailer would drag a component tree into a server-only path to win four
+ * strings.
+ *
+ * The deeper reason is that these chips are not always the record's status. The
+ * Gate 3 email goes out while the task reads FOR_CLIENT_APPROVAL, which means
+ * nothing to the client; what they need to see is that WE are waiting on THEM.
+ * The chip states the email's own news, in the reader's terms.
+ *
+ * Where the wording does correspond to a status the team can see, it is
+ * deliberately the SAME WORD the app shows them — "Approved", "Returned",
+ * "Rejected", "Awaiting review" — so a client quoting their email and a Team
+ * Leader reading their queue are talking about the same thing.
+ */
+
+/**
  * P2-08 / P2-09 — mail to the requester.
  *
  * These do NOT go through the notification outbox, and the reason is structural
@@ -59,10 +80,12 @@ export function sendRequestSubmittedEmail(input: {
 }): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
+    sender: "support",
     subject: `${input.referenceNo} — we have got your request`,
     body: {
       preheader: `${input.title} — received, and with the team now.`,
       heading: "Request received",
+      status: { label: "Awaiting review", tone: "warning" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `Thanks for sending through "${input.title}". It has reached the team and somebody will review it shortly.`,
@@ -122,10 +145,12 @@ export function sendRequestApprovedEmail(input: {
 
   return sendEmail({
     to: input.to,
+    sender: "approvals",
     subject: `${input.referenceNo} — approved, we have started`,
     body: {
       preheader: `${input.title} — accepted and under way.`,
       heading: "Your request is under way",
+      status: { label: "Approved", tone: "success" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `Good news — "${input.title}" has been approved and somebody is now working on it.`,
@@ -163,10 +188,12 @@ type DecisionEmailInput = {
 export function sendRequestReturnedEmail(input: DecisionEmailInput): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
+    sender: "approvals",
     subject: `${input.referenceNo} — we need a little more before we start`,
     body: {
       preheader: `${input.title} — one thing to sort out first.`,
       heading: "We need a bit more information",
+      status: { label: "Returned", tone: "info" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `Thanks for sending through "${input.title}". Before we can start, there is something we need from you — the details are below.`,
@@ -189,10 +216,12 @@ export function sendRequestReturnedEmail(input: DecisionEmailInput): Promise<Sen
 export function sendRequestRejectedEmail(input: DecisionEmailInput): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
+    sender: "approvals",
     subject: `${input.referenceNo} — we are not able to take this on`,
     body: {
       preheader: `${input.title} — not proceeding.`,
       heading: "We are not able to take this on",
+      status: { label: "Rejected", tone: "danger" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `We have reviewed "${input.title}" and we are not able to proceed with it. The reason is below.`,
@@ -250,10 +279,13 @@ export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<Send
 
   return sendEmail({
     to: input.to,
+    sender: "approvals",
     subject: `${input.referenceNo} — ready for your approval`,
     body: {
       preheader: `${input.title} — please review by ${input.deadline}.`,
       heading: "Your request is ready for approval",
+      // Warning is the WAITING tone, and the wait is on them.
+      status: { label: "Awaiting your approval", tone: "warning" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `"${input.title}" is done and waiting for you to look at it. The page below shows what was produced alongside what you originally asked for, so you can check it against your own brief.`,
@@ -296,12 +328,16 @@ export function sendApprovalReminderEmail(
 
   return sendEmail({
     to: input.to,
+    sender: "approvals",
     subject: last
       ? `${input.referenceNo} — closing soon, last reminder`
       : `${input.referenceNo} — still waiting for your approval`,
     body: {
       preheader: `${input.title} — closes ${input.deadline}.`,
       heading: last ? "Last reminder before this closes" : "Still waiting for your approval",
+      // Unchanged between the two reminders: nothing about the request has
+      // moved, which is the entire reason a second one is being sent.
+      status: { label: "Awaiting your approval", tone: "warning" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `We sent "${input.title}" for your approval and have not heard back yet.`,
@@ -336,10 +372,21 @@ export function sendFeedbackRequestEmail(input: {
 }): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
+    sender: "survey",
     subject: `${input.referenceNo} — how did we do?`,
     body: {
       preheader: "One question, takes a few seconds.",
       heading: "How did we do?",
+      /*
+       * ⚠️ THE TWO COMPLETIONS MUST NOT LOOK ALIKE (design system §4.1).
+       * `COMPLETED` means the client approved; `COMPLETED_NO_RESPONSE` means
+       * the clock ran out and nobody looked. Showing a green "Completed" to
+       * somebody who never saw the approval email claims an approval they did
+       * not give — and this is the one email that reaches them afterwards.
+       */
+      status: input.autoCompleted
+        ? { label: "Closed without a response", tone: "neutral" }
+        : { label: "Completed", tone: "success" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         input.autoCompleted

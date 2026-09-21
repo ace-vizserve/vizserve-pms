@@ -125,7 +125,11 @@ describe("renderEmail", () => {
       paragraphs: ["FYI."],
     });
 
-    expect(html).not.toContain("border-radius:6px;background:#4359A5");
+    // Asserted as "no anchor at all" rather than as the button's own style
+    // string: the shell was restyled once already, and a literal that moves with
+    // the design is an assertion that passes for the wrong reason afterwards.
+    // The header lockup is an <img>, never a link, so this stays unambiguous.
+    expect(html).not.toContain("<a href");
     expect(text).not.toContain("http");
   });
 });

@@ -87,12 +87,6 @@ export function PublicFormRenderer({
   form,
 }: {
   form: PublicForm;
-  /**
-   * P7-49. Read on the server from the `VITE_EMAILJS_*` keys and handed down,
-   * because that prefix is Vite's and means nothing to Next — those values are
-   * invisible to the browser otherwise. Null when EmailJS is not set up, which
-   * is a normal state: the form still works, the client just gets no email.
-   */
 }) {
   const [submitted, setSubmitted] = useState<{ reference_no: string } | null>(null);
   const [formError, setFormError] = useState<string | null>(null);

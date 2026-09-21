@@ -1,3 +1,4 @@
+import type { EmailSender } from "../config";
 import type { EmailBody } from "../layout";
 
 /**
@@ -43,6 +44,17 @@ export type SendOutcome =
 export type TransportInput = {
   /** Trimmed, contains an `@`, and NOT a reserved domain. Checked by the port. */
   to: string;
+  /**
+   * P8-15 — WHICH MAILBOX THIS COMES FROM, as a purpose rather than an address.
+   *
+   * A PURPOSE, NOT AN ADDRESS, and the adapter resolves it — because only the
+   * adapter knows whether its transport can honour it. Resend sets `from` per
+   * message. The EmailJS adapter removed in P8-16 could not: its sender was a
+   * property of the connected service, fixed in a dashboard, so it silently
+   * collapsed all four into one. Passing a resolved address across this
+   * boundary would have hidden that mismatch instead of surfacing it.
+   */
+  sender: EmailSender;
   subject: string;
   body: EmailBody;
 };
