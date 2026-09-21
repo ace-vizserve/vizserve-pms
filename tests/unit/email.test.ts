@@ -87,6 +87,9 @@ describe("escapeHtml", () => {
   });
 });
 
+/** The button's stable hook -- see the note in `layout.ts`. */
+const BUTTON_MARKER = 'class="vz-btn"';
+
 describe("renderEmail", () => {
   it("produces both an HTML and a plain-text part", () => {
     // A message with no text/plain part scores worse with spam filters, and
@@ -125,7 +128,16 @@ describe("renderEmail", () => {
       paragraphs: ["FYI."],
     });
 
-    expect(html).not.toContain("border-radius:6px;background:#4359A5");
-    expect(text).not.toContain("http");
+    // Asserted as "no anchor at all" rather than as the button's own style
+    // string: the shell was restyled once already, and a literal that moves with
+    // the design is an assertion that passes for the wrong reason afterwards.
+    // The header lockup is an <img>, never a link, so this stays unambiguous.
+    // The hook is the button's own class, not "any anchor" and not its style
+    // string. Every email carries a footer with tel:, mailto: and two social
+    // links, so anchors are no longer a proxy for a call to action -- and a
+    // style literal is an assertion that passes for the wrong reason the next
+    // time the shell is restyled.
+    expect(html).not.toContain(BUTTON_MARKER);
+    expect(text).not.toContain("/requests/abc");
   });
 });

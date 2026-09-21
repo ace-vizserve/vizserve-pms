@@ -1,54 +1,72 @@
 import "server-only";
 
-import { emailMode, emailTransport, isDeliverable, type EmailTransport } from "./config";
+import { emailMode, isDeliverable, type EmailSender } from "./config";
 import type { EmailBody } from "./layout";
-import { sendViaEmailJs } from "./transports/emailjs";
 import { sendViaResend } from "./transports/resend";
 import type { EmailTransportAdapter, SendOutcome } from "./transports/types";
 
 /**
- * P0-11 / P8-10 — THE PORT. One function, every email in the system.
+ * P0-11 / P8-16 — THE PORT. One function, every email in the system.
  *
- * It used to be one function that talked to Resend. It is now one function that
- * talks to whichever transport is selected, and that is the whole of this
- * change: `lib/email/transports/emailjs.ts` is today's implementation,
- * `lib/email/transports/resend.ts` is where this goes later, and moving between
- * them is `EMAIL_TRANSPORT` in the environment. Nothing above this line knows
- * which one is in play.
+ * It talks to `lib/email/transports/resend.ts`, and after P8-16 that is the
+ * only adapter there is. The port stays anyway, and the distinction is the
+ * whole point of this file: everything that must be true of EVERY send lives
+ * HERE, above the transport, where no adapter can bypass it and no replacement
+ * adapter can forget it.
+ *
+ * The two-transport era earned its keep on the way out. P8-13 moved the entire
+ * system from EmailJS back to Resend by changing one environment variable, and
+ * P8-16 deleted EmailJS without touching a single one of the ten call sites.
+ * That is what the seam buys. It costs one indirection.
  *
  * ⚠️ THE SIGNATURE AND THE OUTCOME UNION ARE FROZEN. Seven senders in
  * `client-emails.ts`, the notification outbox and the Gate 3 module call this
  * and branch on what comes back. Keeping both fixed is what made the transport
- * swap a change to two files instead of twenty — and it is the property that has
- * to survive, because the next transport decision will be made by somebody who
- * has not read this comment.
+ * swap a change to two files instead of twenty — twice over, and then the
+ * removal for free — and it is the property that has to survive, because the
+ * next transport decision will be made by somebody who has not read this
+ * comment.
  *
  * WHAT LIVES HERE RATHER THAN IN AN ADAPTER: everything that must be true of
- * EVERY transport. The address check and the reserved-domain gate run BEFORE a
- * transport is even chosen, so no adapter can bypass them and no new adapter can
+ * EVERY transport. The address check and the reserved-domain gate run BEFORE
+ * the adapter is reached, so no adapter can bypass them and no replacement can
  * forget them. That is not theoretical — the browser EmailJS send this replaced
  * had its own hand-copied version of the reserved-domain list, which is a second
  * place for it to drift and a second place to get it wrong.
  *
- * WHAT DOES NOT LIVE HERE: rendering. Resend needs HTML and a text alternative;
- * EmailJS needs a bag of variables for a template stored in their dashboard. The
- * one thing both agree on is `EmailBody` — the structured content model in
- * `layout.ts` — which is why that, and not a rendered string, is what crosses
- * this boundary.
+ * WHAT DOES NOT LIVE HERE: rendering. The adapter decides what its transport
+ * wants — Resend takes HTML plus a text alternative, both built by
+ * `renderEmail`. What crosses this boundary is `EmailBody`, the structured
+ * content model in `layout.ts`, and NOT a rendered string. That is what let two
+ * transports with completely unalike payload shapes sit behind one port, and it
+ * is why a third could.
  */
 
 export type { SendOutcome };
 
 export type SendEmailInput = {
   to: string;
+  /**
+   * P8-15 — which of the four mailboxes this comes from. REQUIRED, and
+   * deliberately not defaulted.
+   *
+   * A default would mean a new sender silently inherits somebody else's
+   * reputation and somebody else's mute rule, which is the exact failure the
+   * split exists to prevent. Making it required costs one line at each of ten
+   * call sites and makes the compiler ask the question every time an eleventh
+   * appears.
+   */
+  sender: EmailSender;
   subject: string;
   body: EmailBody;
 };
 
-const ADAPTERS: Record<EmailTransport, EmailTransportAdapter> = {
-  emailjs: sendViaEmailJs,
-  resend: sendViaResend,
-};
+/**
+ * The transport. Annotated with the contract rather than left inferred, so the
+ * adapter is checked against `EmailTransportAdapter` HERE — at the port, which
+ * is the only place that contract means anything.
+ */
+const deliver: EmailTransportAdapter = sendViaResend;
 
 /**
  * Sends one email, or convincingly explains why it did not.
@@ -58,7 +76,12 @@ const ADAPTERS: Record<EmailTransport, EmailTransportAdapter> = {
  * worse outcome than a missing email. Callers get a discriminated outcome and
  * decide what to record.
  */
-export async function sendEmail({ to, subject, body }: SendEmailInput): Promise<SendOutcome> {
+export async function sendEmail({
+  to,
+  sender,
+  subject,
+  body,
+}: SendEmailInput): Promise<SendOutcome> {
   const recipient = to.trim();
 
   if (!recipient.includes("@")) {
@@ -78,33 +101,29 @@ export async function sendEmail({ to, subject, body }: SendEmailInput): Promise<
     return { status: "skipped", reason: `reserved domain, never delivered: ${recipient}` };
   }
 
-  const transport = emailTransport();
-
   if (emailMode() === "dry-run") {
     /*
-     * The selected transport has no keys. Render nothing, send nothing, say so.
+     * No `RESEND_API_KEY`. Render nothing, send nothing, say so.
      *
-     * ⚠️ NOT A SUCCESS, and the log line names the transport it would have used
-     * so that "nothing is arriving" and "EMAIL_TRANSPORT points at the one I did
-     * not configure" are distinguishable from the console alone. Counting this
-     * as sent is precisely how the Gate 3 flow reported clean for months while
-     * delivering nothing — see `reportOutcome` in `lib/client-approval-server.ts`.
+     * ⚠️ NOT A SUCCESS. Counting this as sent is precisely how the Gate 3 flow
+     * reported clean for months while delivering nothing — see `reportOutcome`
+     * in `lib/client-approval-server.ts`.
      *
-     * Subject and recipient only. The body can contain a client's brief, and in
-     * the Gate 3 emails a live approval token; neither belongs in a log that
-     * something else ships elsewhere.
+     * Sender, subject and recipient only. The body can carry a client's brief,
+     * and in the Gate 3 emails a live approval token; neither belongs in a log
+     * that something else ships elsewhere.
      */
-    console.info(`[email:dry-run] (${transport} not configured) → ${recipient} — ${subject}`);
+    console.info(`[email:dry-run] RESEND_API_KEY unset — ${sender}@ → ${recipient} — ${subject}`);
     return { status: "dry-run" };
   }
 
   try {
-    return await ADAPTERS[transport]({ to: recipient, subject, body });
+    return await deliver({ to: recipient, sender, subject, body });
   } catch (cause) {
-    // A backstop, not the plan. Each adapter maps its own failures, because only
+    // A backstop, not the plan. The adapter maps its own failures, because only
     // it can put the transport's own error text into the outcome. This catches
-    // the case an adapter did not think of, so that a mail bug can never reach a
-    // caller as a thrown error.
+    // the case it did not think of, so that a mail bug can never reach a caller
+    // as a thrown error.
     return { status: "failed", error: cause instanceof Error ? cause.message : String(cause) };
   }
 }

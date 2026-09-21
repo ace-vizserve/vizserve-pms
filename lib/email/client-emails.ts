@@ -1,8 +1,31 @@
 import "server-only";
 
+
+import type { RequestDetails } from "./request-details";
 import { richTextToPlainText } from "@/lib/rich-text";
 
 import { sendEmail, type SendOutcome } from "./send";
+
+/**
+ * P8-14 — the chip each of these carries under its heading.
+ *
+ * ⚠️ WRITTEN HERE RATHER THAN READ OFF A STATUS ENUM, and that is the decision
+ * worth recording. `REQUEST_STATUS` in `components/status-badge.tsx` remains the
+ * only place a status becomes a colour IN THE APP; it is a React module that
+ * pulls in lucide, it does not export its map, and reaching into it from the
+ * mailer would drag a component tree into a server-only path to win four
+ * strings.
+ *
+ * The deeper reason is that these chips are not always the record's status. The
+ * Gate 3 email goes out while the task reads FOR_CLIENT_APPROVAL, which means
+ * nothing to the client; what they need to see is that WE are waiting on THEM.
+ * The chip states the email's own news, in the reader's terms.
+ *
+ * Where the wording does correspond to a status the team can see, it is
+ * deliberately the SAME WORD the app shows them — "Approved", "Returned",
+ * "Rejected", "Awaiting review" — so a client quoting their email and a Team
+ * Leader reading their queue are talking about the same thing.
+ */
 
 /**
  * P2-08 / P2-09 — mail to the requester.
@@ -22,6 +45,59 @@ import { sendEmail, type SendOutcome } from "./send";
  * client who gets four emails about one request stops reading them, and Phase 4
  * rests entirely on them reading one.
  */
+
+/**
+ * The rows every client-facing email shares, in one order, from one shape.
+ *
+ * A NULL OMITS ITS ROW. Not "-", not "Not specified": a labelled row with
+ * nothing beside it is the EmailJS failure this codebase already paid for, and
+ * a client cannot tell "we do not know" from "the template is broken".
+ *
+ * The order is the order a person asks the questions in -- what service, for
+ * whom, when did it arrive, when did I want it, when will I get it, who has it.
+ * The email's own rows (a deadline, where to look) come after these, because
+ * they are about THIS message rather than about the request.
+ */
+/**
+ * ⚠️ THE REFERENCE NUMBER IS THE LAST ROW OF EVERY BLOCK, NOT THE FIRST.
+ *
+ * It used to lead -- the row and the subject line both -- and "COL-2026-0142"
+ * as the first thing a client reads is a filing cabinet introducing itself.
+ * They do not have our reference; they have a newsletter they asked us to lay
+ * out. So the title leads and the code trails, in the subject and in the table.
+ *
+ * It does NOT get removed. It is the only handle a client has on the request:
+ * support asks for it, every later email repeats it, and a reply quoting it can
+ * be found. Demoted, not deleted -- and the acknowledgement still says what it
+ * is for.
+ */
+function detailRows(details?: RequestDetails | null): { label: string; value: string }[] {
+  if (!details) return [];
+
+  const rows: { label: string; value: string }[] = [];
+  if (details.formName) rows.push({ label: "Service", value: details.formName });
+  if (details.requesterOrg) rows.push({ label: "Organisation", value: details.requesterOrg });
+  if (details.submittedAt) rows.push({ label: "Submitted", value: details.submittedAt });
+  if (details.targetDate) rows.push({ label: "Date you asked for", value: details.targetDate });
+  if (details.approvedTargetDate) {
+    rows.push({ label: "Agreed delivery", value: details.approvedTargetDate });
+  }
+  if (details.handledBy) rows.push({ label: "Looked after by", value: details.handledBy });
+  return rows;
+}
+
+/**
+ * The brief, read back to them -- but ONLY when the quote slot is free.
+ *
+ * `EmailBody` has one quote block, and on a return or a rejection that block is
+ * the Team Leader's reason, which is the entire message. Pushing the client's
+ * own words above it would bury the one paragraph they need to act on. So the
+ * brief appears where nothing else is competing: the acknowledgement, the
+ * approval and the feedback request.
+ */
+function briefQuote(details?: RequestDetails | null) {
+  return details?.description ? { label: "What you asked for", text: details.description } : undefined;
+}
 
 /**
  * P7-47 — the acknowledgement. Sent the moment a public form is submitted.
@@ -56,22 +132,33 @@ export function sendRequestSubmittedEmail(input: {
    * email then simply has no button, rather than one going nowhere.
    */
   statusUrl?: string | null;
+  /**
+   * P8-14 — the request itself, loaded once by `loadRequestDetails`. Every
+   * field is optional and a null omits its row, so a caller that cannot read it
+   * still sends a correct, shorter email.
+   */
+  details?: RequestDetails | null;
 }): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
-    subject: `${input.referenceNo} — we have got your request`,
+    sender: "support",
+    subject: `We have your request — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: `${input.title} — received, and with the team now.`,
       heading: "Request received",
+      status: { label: "Awaiting review", tone: "warning" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `Thanks for sending through "${input.title}". It has reached the team and somebody will review it shortly.`,
         "You do not need to do anything else for now. We will email you if we need more detail, and again once it is under way.",
       ],
       facts: [
-        { label: "Reference", value: input.referenceNo },
         { label: "Request", value: input.title },
+        ...detailRows(input.details),
+        { label: "Your reference number", value: input.referenceNo },
       ],
+      timeline: input.details?.timeline,
+      quote: briefQuote(input.details),
       /*
        * P7-51 — THE LINK THAT REPLACES THE "NO LINK" NOTE ABOVE.
        *
@@ -117,15 +204,23 @@ export function sendRequestApprovedEmail(input: {
   title: string;
   /** The NEGOTIATED date, not the requested one. Null when none was set. */
   approvedTargetDate: string | null;
+  /**
+   * P8-14 — the request itself, loaded once by `loadRequestDetails`. Every
+   * field is optional and a null omits its row, so a caller that cannot read it
+   * still sends a correct, shorter email.
+   */
+  details?: RequestDetails | null;
 }): Promise<SendOutcome> {
   const dated = Boolean(input.approvedTargetDate);
 
   return sendEmail({
     to: input.to,
-    subject: `${input.referenceNo} — approved, we have started`,
+    sender: "approvals",
+    subject: `Approved, we have started — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: `${input.title} — accepted and under way.`,
       heading: "Your request is under way",
+      status: { label: "Approved", tone: "success" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `Good news — "${input.title}" has been approved and somebody is now working on it.`,
@@ -133,12 +228,22 @@ export function sendRequestApprovedEmail(input: {
           ? "The date below is what the team has committed to. If that does not work for you, reply and tell us now rather than closer to the day."
           : "We have not fixed a delivery date yet. We will confirm one with you shortly.",
       ],
-      facts: dated
-        ? [
-            { label: "Reference", value: input.referenceNo },
-            { label: "Agreed delivery", value: input.approvedTargetDate! },
-          ]
-        : [{ label: "Reference", value: input.referenceNo }],
+      /*
+       * The agreed date is NOT restated here when `details` carries it --
+       * `detailRows` already emits "Agreed delivery", and the same date twice
+       * in one table reads as two different dates that happen to match.
+       */
+      facts: [
+        { label: "Request", value: input.title },
+        ...(input.details
+          ? detailRows(input.details)
+          : dated
+            ? [{ label: "Agreed delivery", value: input.approvedTargetDate! }]
+            : []),
+        { label: "Your reference number", value: input.referenceNo },
+      ],
+      timeline: input.details?.timeline,
+      quote: briefQuote(input.details),
       footnote: "You will hear from us again when there is something for you to review.",
     },
   });
@@ -151,6 +256,11 @@ type DecisionEmailInput = {
   reason: string;
   /** Where they resubmit. Only meaningful for a return. */
   formPath?: string;
+  /**
+   * P8-14 — the request itself, loaded once by `loadRequestDetails`. Every
+   * field is optional and a null omits its row.
+   */
+  details?: RequestDetails | null;
 };
 
 /**
@@ -163,16 +273,23 @@ type DecisionEmailInput = {
 export function sendRequestReturnedEmail(input: DecisionEmailInput): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
-    subject: `${input.referenceNo} — we need a little more before we start`,
+    sender: "approvals",
+    subject: `We need a little more — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: `${input.title} — one thing to sort out first.`,
       heading: "We need a bit more information",
+      status: { label: "Returned", tone: "info" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `Thanks for sending through "${input.title}". Before we can start, there is something we need from you — the details are below.`,
         "Nothing is lost. Send it back with that added and it goes straight into the queue.",
       ],
-      facts: [{ label: "Reference", value: input.referenceNo }],
+      facts: [
+        { label: "Request", value: input.title },
+        ...detailRows(input.details),
+        { label: "Your reference number", value: input.referenceNo },
+      ],
+      timeline: input.details?.timeline,
       quote: { label: "What we need", text: input.reason },
       button: input.formPath ? { label: "Submit the updated request", path: input.formPath } : undefined,
       footnote: "Quote the reference number if you reply to this email.",
@@ -189,16 +306,23 @@ export function sendRequestReturnedEmail(input: DecisionEmailInput): Promise<Sen
 export function sendRequestRejectedEmail(input: DecisionEmailInput): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
-    subject: `${input.referenceNo} — we are not able to take this on`,
+    sender: "approvals",
+    subject: `We are not able to take this on — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: `${input.title} — not proceeding.`,
       heading: "We are not able to take this on",
+      status: { label: "Rejected", tone: "danger" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `We have reviewed "${input.title}" and we are not able to proceed with it. The reason is below.`,
         "If circumstances change, or if you think this was the wrong call, reply to this email and we will look again.",
       ],
-      facts: [{ label: "Reference", value: input.referenceNo }],
+      facts: [
+        { label: "Request", value: input.title },
+        ...detailRows(input.details),
+        { label: "Your reference number", value: input.referenceNo },
+      ],
+      timeline: input.details?.timeline,
       quote: { label: "Reason", text: input.reason },
       footnote: "This request is closed. A new submission would start a new reference number.",
     },
@@ -224,6 +348,11 @@ type ApprovalEmailInput = {
   /** Human date the request closes itself, e.g. "7 Aug 2026". */
   deadline: string;
   token: string;
+  /**
+   * P8-14 — the request itself, loaded once by `loadRequestDetails`. Every
+   * field is optional and a null omits its row.
+   */
+  details?: RequestDetails | null;
 };
 
 /**
@@ -250,19 +379,25 @@ export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<Send
 
   return sendEmail({
     to: input.to,
-    subject: `${input.referenceNo} — ready for your approval`,
+    sender: "approvals",
+    subject: `Ready for your approval — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: `${input.title} — please review by ${input.deadline}.`,
       heading: "Your request is ready for approval",
+      // Warning is the WAITING tone, and the wait is on them.
+      status: { label: "Awaiting your approval", tone: "warning" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `"${input.title}" is done and waiting for you to look at it. The page below shows what was produced alongside what you originally asked for, so you can check it against your own brief.`,
       ],
       facts: [
-        { label: "Reference", value: input.referenceNo },
+        { label: "Request", value: input.title },
+        ...detailRows(input.details),
         { label: "Please respond by", value: input.deadline },
-        ...(outputs.length > 0 ? [{ label: "Output", value: outputs.join(" · ") }] : []),
+        ...(outputs.length > 0 ? [{ label: "Where to look", value: outputs.join(" · ") }] : []),
+        { label: "Your reference number", value: input.referenceNo },
       ],
+      timeline: input.details?.timeline,
       /*
        * ⚠️ FLATTENED. `layout.ts` runs every interpolation through `escapeHtml`,
        * so a resolution written with a bullet list would arrive in the client's
@@ -296,12 +431,16 @@ export function sendApprovalReminderEmail(
 
   return sendEmail({
     to: input.to,
+    sender: "approvals",
     subject: last
-      ? `${input.referenceNo} — closing soon, last reminder`
-      : `${input.referenceNo} — still waiting for your approval`,
+      ? `Closing soon, last reminder — ${input.title} (${input.referenceNo})`
+      : `Still waiting for your approval — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: `${input.title} — closes ${input.deadline}.`,
       heading: last ? "Last reminder before this closes" : "Still waiting for your approval",
+      // Unchanged between the two reminders: nothing about the request has
+      // moved, which is the entire reason a second one is being sent.
+      status: { label: "Awaiting your approval", tone: "warning" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         `We sent "${input.title}" for your approval and have not heard back yet.`,
@@ -310,9 +449,12 @@ export function sendApprovalReminderEmail(
           : "If it is fine as it is, one click approves it. If something needs changing, tell us on the same page.",
       ],
       facts: [
-        { label: "Reference", value: input.referenceNo },
+        { label: "Request", value: input.title },
+        ...detailRows(input.details),
         { label: "Closes on", value: input.deadline },
+        { label: "Your reference number", value: input.referenceNo },
       ],
+      timeline: input.details?.timeline,
       button: { label: "Review and approve", path: `/approve/${input.token}` },
       footnote: `If we do not hear from you by ${input.deadline}, this request will be closed as completed without a response.`,
     },
@@ -333,20 +475,41 @@ export function sendFeedbackRequestEmail(input: {
   title: string;
   token: string;
   autoCompleted: boolean;
+  /**
+   * P8-14 — the request itself, loaded once by `loadRequestDetails`. Every
+   * field is optional and a null omits its row.
+   */
+  details?: RequestDetails | null;
 }): Promise<SendOutcome> {
   return sendEmail({
     to: input.to,
-    subject: `${input.referenceNo} — how did we do?`,
+    sender: "survey",
+    subject: `How did we do? — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: "One question, takes a few seconds.",
       heading: "How did we do?",
+      /*
+       * ⚠️ THE TWO COMPLETIONS MUST NOT LOOK ALIKE (design system §4.1).
+       * `COMPLETED` means the client approved; `COMPLETED_NO_RESPONSE` means
+       * the clock ran out and nobody looked. Showing a green "Completed" to
+       * somebody who never saw the approval email claims an approval they did
+       * not give — and this is the one email that reaches them afterwards.
+       */
+      status: input.autoCompleted
+        ? { label: "Closed without a response", tone: "neutral" }
+        : { label: "Completed", tone: "success" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
         input.autoCompleted
           ? `"${input.title}" was closed as completed after the approval window passed. If that was not what you expected, please say so below — it is the fastest way to reach us.`
           : `"${input.title}" is complete. If you have a moment, tell us how it went.`,
       ],
-      facts: [{ label: "Reference", value: input.referenceNo }],
+      facts: [
+        { label: "Request", value: input.title },
+        ...detailRows(input.details),
+        { label: "Your reference number", value: input.referenceNo },
+      ],
+      timeline: input.details?.timeline,
       button: { label: "Leave feedback", path: `/feedback/${input.token}` },
       footnote: "One rating and an optional comment. Nothing else.",
     },

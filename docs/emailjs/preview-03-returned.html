@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>to the requester, on a status change</title>
+  </head>
+  <body style="margin:0;padding:32px 16px;background:#f2f3f5;">
+    <div style="max-width:600px;margin:0 auto;background:#ffffff;padding:24px;border-radius:10px;">
+      <div
+  style="
+    font-family: system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-size: 14px;
+    color: #202020;
+  "
+>
+  <div style="font-size: 15px; line-height: 1.6">Hi Maria, there is an update on your request.</div>
+
+  <div style="margin-top: 20px; padding: 16px; background-color: #4359a5; border-radius: 8px">
+    <div
+      style="
+        color: #ffffff;
+        font-size: 12px;
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+        opacity: 0.85;
+      "
+    >
+      VB-2026-0042
+    </div>
+    <div style="color: #ffffff; font-size: 20px; font-weight: 700; margin-top: 4px">
+      We need a bit more before we start
+    </div>
+  </div>
+
+  <div
+    style="
+      margin-top: 20px;
+      padding: 16px;
+      background-color: #f7f8fa;
+      border-left: 3px solid #4359a5;
+      border-radius: 0 6px 6px 0;
+    "
+  >
+    <div
+      style="
+        color: #5f6368;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        margin-bottom: 6px;
+      "
+    >
+      What this means
+    </div>
+    <div style="color: #202020; font-size: 15px; line-height: 1.6; white-space: pre-wrap">
+      Could you confirm the page count? The brief says four pages but the outline lists five sections.
+
+Send that back and it goes straight into the queue.
+    </div>
+  </div>
+
+  <!--
+    P7-51 — the SAME progress trail the tracking page shows, inline.
+
+    Here so the client does not have to click to learn where their request
+    stands. The wording is mirrored from `vizserve_pms_get_request_status`
+    (20260825150000_p7_51_request_status_page.sql) — an email and a page that
+    describe the same stage in different words is how a client ends up asking
+    which one is right.
+
+    The block below is EmailJS's LOOP form of the same section syntax the button
+    uses: it repeats once per array item, and the label, detail and at
+    placeholders resolve against each ITEM rather than the top-level bag. It
+    renders nothing when the array is empty or absent, so it needs no guard.
+
+    ⚠️ NO PLACEHOLDER SYNTAX IN THESE COMMENTS. An HTML comment is not a
+    template comment — EmailJS parses the whole file, so a section marker
+    written here as an example opens a real block, and everything down to the
+    next matching close tag is swallowed. That is not hypothetical: the first
+    draft of this comment did exactly that and ate the progress trail.
+
+    A TABLE PER ROW, not a bulleted list. Outlook draws through Word, which
+    ignores `list-style` on a styled `ul` and collapses the markers — a table is
+    the only construct that lays out reliably in every client.
+
+    The dot is a text character, not a background colour: state is never carried
+    by colour alone, and a client reading this in plain text or greyscale still
+    gets the order and the labels.
+  -->
+  <!--
+    Its own scalar rather than a heading inside the loop below — a heading in
+    the loop repeats once per stage. It is set only when there are stages to
+    show, so an email without a trail gets neither the heading nor a gap.
+  -->
+  
+  <div
+    style="
+      color: #5f6368;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin: 24px 0 4px;
+    "
+  >
+    Progress so far
+  </div>
+  
+
+  
+  <table
+    role="presentation"
+    cellpadding="0"
+    cellspacing="0"
+    style="width: 100%; border-collapse: collapse; margin-top: 12px"
+  >
+    <tr>
+      <td style="width: 18px; vertical-align: top; padding: 0; color: #4359a5; font-size: 15px">
+        &bull;
+      </td>
+      <td style="vertical-align: top; padding: 0">
+        <div style="color: #202020; font-size: 15px; font-weight: 600">Request received</div>
+        <div style="color: #5f6368; font-size: 13px; line-height: 1.5; margin-top: 2px">
+          We have your request and it is queued for review.
+        </div>
+        <div style="color: #9aa0a6; font-size: 12px; margin-top: 2px">25 Aug 2026, 2:14 PM</div>
+      </td>
+    </tr>
+  </table>
+  
+  <table
+    role="presentation"
+    cellpadding="0"
+    cellspacing="0"
+    style="width: 100%; border-collapse: collapse; margin-top: 12px"
+  >
+    <tr>
+      <td style="width: 18px; vertical-align: top; padding: 0; color: #4359a5; font-size: 15px">
+        &bull;
+      </td>
+      <td style="vertical-align: top; padding: 0">
+        <div style="color: #202020; font-size: 15px; font-weight: 600">More information needed</div>
+        <div style="color: #5f6368; font-size: 13px; line-height: 1.5; margin-top: 2px">
+          Could you confirm the page count? The brief says four pages but the outline lists five sections.
+        </div>
+        <div style="color: #9aa0a6; font-size: 12px; margin-top: 2px">26 Aug 2026, 9:02 AM</div>
+      </td>
+    </tr>
+  </table>
+  
+
+  <div style="margin-top: 20px; padding: 15px; background-color: #f7f8fa; border-radius: 8px">
+    <table role="presentation" style="width: 100%; border-collapse: collapse">
+      <tr>
+        <td
+          style="
+            padding: 8px 0;
+            border-bottom: 1px solid #e4e6eb;
+            width: 38%;
+            vertical-align: top;
+          "
+        >
+          <strong style="color: #4359a5">Request:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          Quarterly newsletter layout
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">From:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          Maria Santos &middot; HFSE
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">Email:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          maria.santos@hfse.edu.sg
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">Form:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          Design Request
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          <strong style="color: #4359a5">Date requested:</strong>
+        </td>
+        <td style="padding: 8px 0; border-bottom: 1px solid #e4e6eb; vertical-align: top">
+          5 Aug 2026
+        </td>
+      </tr>
+      <tr>
+        <td style="padding: 8px 0; vertical-align: top">
+          <strong style="color: #4359a5">Submitted:</strong>
+        </td>
+        <td style="padding: 8px 0; vertical-align: top">25 Aug 2026, 2:14 PM</td>
+      </tr>
+    </table>
+  </div>
+
+  <div
+    style="
+      margin-top: 20px;
+      padding: 15px 0;
+      border-width: 1px 0;
+      border-style: dashed;
+      border-color: #d9dce1;
+    "
+  >
+    <table role="presentation">
+      <tr>
+        <td style="vertical-align: top">
+          <div
+            style="
+              padding: 6px 10px;
+              margin: 0 10px 0 0;
+              background-color: #eef1f8;
+              border-radius: 5px;
+              font-size: 26px;
+            "
+            role="img"
+          >
+            📝
+          </div>
+        </td>
+        <td style="vertical-align: top">
+          <div style="color: #202020; font-size: 16px"><strong>Maria Santos</strong></div>
+          <div style="color: #9aa0a6; font-size: 13px">25 Aug 2026, 2:14 PM</div>
+          <p
+            style="
+              font-size: 15px;
+              color: #333333;
+              line-height: 1.6;
+              white-space: pre-wrap;
+              margin: 8px 0 0;
+            "
+          >
+            Four pages, A4.
+
+- Cover with the new logo
+- Two feature spreads
+- Back page for events &amp; notices
+
+Brand guide is in the shared drive.
+          </p>
+        </td>
+      </tr>
+    </table>
+  </div>
+
+  <!--
+    WRAPPED, and it has to be. EmailJS renders an unresolved variable as an
+    empty string and reports no error, so an unguarded button ships as a
+    full-size blue call to action with href="" — a dead link in a client's
+    inbox, which is worse than no button at all. The wrapper below is EmailJS's
+    section syntax: the block renders only when the variable is truthy, and an
+    empty string is not.
+
+    Three comments in the codebase already claimed this guard existed before it
+    did — lib/emailjs.ts, the README, and the call site in public-form.tsx.
+    preview-04-missing-values.html was the proof that it did not.
+  -->
+  
+  <table role="presentation" cellpadding="0" cellspacing="0" style="margin-top: 24px">
+    <tr>
+      <td style="border-radius: 6px; background: #4359a5">
+        <a
+          href="https://pms.vizserve.com/status/kQ7x2mVn8pLr4TzYbW1sJdHgFcAeRuNi"
+          style="
+            display: inline-block;
+            padding: 12px 24px;
+            color: #ffffff;
+            font-size: 15px;
+            font-weight: 600;
+            text-decoration: none;
+            border-radius: 6px;
+          "
+        >
+          Track this request
+        </a>
+      </td>
+    </tr>
+  </table>
+  
+
+  <div
+    style="
+      margin-top: 20px;
+      padding: 15px;
+      background-color: #fff3e0;
+      border-left: 4px solid #ff8930;
+      border-radius: 4px;
+    "
+  >
+    <p style="margin: 0; color: #666666; font-size: 13px; line-height: 1.6">
+      Quote <strong>VB-2026-0042</strong> in any reply about this request.
+    </p>
+  </div>
+
+  <p style="margin-top: 20px; color: #5f6368; font-size: 12px; line-height: 1.5">
+    Sent by VizServe PMS.
+  </p>
+</div>
+
+    </div>
+  </body>
+</html>

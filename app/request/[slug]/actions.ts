@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { sendRequestSubmittedEmail } from "@/lib/email/client-emails";
+import { loadRequestDetails } from "@/lib/email/request-details";
 import { generateStatusToken, hashStatusToken, statusUrl } from "@/lib/request-status";
 import { uploadPendingAttachment, type UploadResult } from "@/lib/attachments-server";
 import { readPublicFormResponse, type PublicFormLookup } from "@/lib/form-builder/public-lookup";
@@ -232,9 +233,10 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
 
   await acknowledge(result.data.request_id, result.data.reference_no, trackingUrl);
 
-  // Handed back so the browser can put it in the EmailJS parameters too —
-  // the raw token exists only here and is never stored, so this is the one
-  // moment it can be passed on.
+  // Handed back so the browser can show it on the confirmation screen — the
+  // raw token exists only here and is never stored, so this is the one moment
+  // it can be passed on. (It used to feed a browser-side EmailJS send as well;
+  // P8-10 moved every send to the server and P8-13 moved it to Resend.)
   return { ...result.data, status_url: trackingUrl ?? undefined };
 }
 
@@ -372,6 +374,7 @@ async function acknowledge(
 
     const outcome = await sendRequestSubmittedEmail({
       statusUrl: trackingUrl,
+      details: await loadRequestDetails(requestId),
       to: request.requester_email,
       requesterName: request.requester_name,
       referenceNo,
