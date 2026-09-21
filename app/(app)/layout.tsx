@@ -1,4 +1,6 @@
 import { Suspense } from "react";
+import Link from "next/link";
+import { ScrollText } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { AppSidebarSkeleton } from "@/components/app-shell/app-sidebar-skeleton";
@@ -10,9 +12,11 @@ import { RealtimeNotifications } from "@/components/realtime-refresh";
 import { TaskImageLightboxProvider } from "@/components/task-image-lightbox";
 import { ShiftReminder } from "@/components/shift-reminder";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 
 import { SidebarPanel } from "./sidebar-panel";
 
@@ -111,6 +115,25 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </div>
 
               <div className="ml-auto flex items-center gap-2 pr-4.5">
+                {/*
+                  Changelog, beside the theme switch.
+
+                  A LINK WEARING THE BUTTON CLASSES, not `<Button render={<Link/>}>`
+                  — it navigates, and Base UI's Button is a real `<button>` that
+                  warns when the semantics it promised are taken away (§2.1).
+                  `icon-xs` is `size-7`, which is exactly the height of a theme
+                  segment, so the two controls line up without a nudge.
+
+                  The accessible name lives on the link itself rather than in an
+                  `sr-only` span, which is the rule for every icon-only link here.
+                */}
+                <Link
+                  aria-label="Changelog"
+                  className={cn(buttonVariants({ variant: "ghost", size: "icon-xs" }), "text-muted-foreground")}
+                  href="/changelog"
+                >
+                  <ScrollText aria-hidden />
+                </Link>
                 <ThemeToggle />
               </div>
             </header>
