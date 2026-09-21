@@ -169,10 +169,15 @@ function buildRail(
   const received: EmailStep = {
     label: "Received",
     state: "done",
-    meta: request.submitted_at ? formatDateTime(request.submitted_at) : null,
+    meta: request.submitted_at ? formatDate(request.submitted_at.slice(0, 10)) : null,
   };
 
-  const reviewedAt = request.reviewed_at ? formatDateTime(request.reviewed_at) : null;
+  // Date only, matching `metaDate` in `components/stage-track.tsx`. A full
+  // timestamp under a horizontal stop wraps to three lines and pushes the whole
+  // rail out of shape.
+  const reviewedAt = request.reviewed_at
+    ? formatDate(request.reviewed_at.slice(0, 10))
+    : null;
 
   if (request.status === "RETURNED" || request.status === "REJECTED") {
     return [
@@ -228,7 +233,7 @@ function buildRail(
   const meta: (string | null)[] = [
     received.meta ?? null,
     reviewedAt,
-    task.created_at ? formatDateTime(task.created_at) : null,
+    task.created_at ? formatDate(task.created_at.slice(0, 10)) : null,
     null,
     null,
     null,

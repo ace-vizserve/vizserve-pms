@@ -80,6 +80,8 @@ const INK_META = "#656F82";
 
 /** `--brand` / `--primary`. White on it at 6.54:1 — the only safe pairing. */
 const PRIMARY = "#4359A5";
+/** `--gradient-chip`. The wash that gives a chip its lit top edge. */
+const GRADE_CHIP = "linear-gradient(180deg,rgba(255,255,255,.65),rgba(255,255,255,0))";
 /** `--gradient-primary`. What a primary button is actually filled with. */
 const GRADE_PRIMARY = "linear-gradient(180deg,#5169b4 0%,#3b4f94 100%)";
 
@@ -246,50 +248,112 @@ function renderHtml(body: EmailBody): string {
     .join("");
 
   /*
-   * The rail. A marker column and a label column, drawn as rows, with a 2px
-   * connector between markers -- the vertical form of `stage-track.tsx`, which
-   * is what that component itself falls back to below `sm`. An email is always
-   * below `sm`.
+   * The rail, drawn marker-for-marker against `components/stage-track.tsx`.
+   * The differences from that component are forced by the medium and are listed
+   * here so the next person can tell a constraint from a liberty:
    *
-   * The connector is filled GREEN ONLY WHERE THE WORK HAS PASSED, matching the
-   * component: a fully drawn rail would claim a route that has not been
-   * travelled.
+   *   - lucide draws its markers as <svg>; Gmail and Outlook strip SVG, so each
+   *     one is rebuilt out of a bordered box. `Check` becomes an entity, and
+   *     `CircleDot` becomes a ring with a dot inside it, which is what the glyph
+   *     is. Sizes, weights and colours are the component's.
+   *   - NO CONNECTOR. The component hides it below `sm` (`hidden sm:block`) and
+   *     an email is always below `sm`. An earlier cut here invented a vertical
+   *     one, which is a line that exists in no version of the real thing.
+   *   - no `sr-only` state word. Hidden text is a spam signal in an inbox, and
+   *     the text/plain part already spells every state out.
+   *
+   * The pending LABEL is `--muted-foreground`, never `--foreground-faint`: the
+   * faint token is 3.44:1 and non-text-only. Its ring is a shape, so it may
+   * wear it.
    */
-  const MARKER = {
-    done: { fill: "#1C7A52", border: "#1C7A52", glyph: "&#10003;", ink: "#ffffff" },
-    current: { fill: PRIMARY, border: PRIMARY, glyph: "&bull;", ink: "#ffffff" },
-    attention: { fill: "#8A6206", border: "#8A6206", glyph: "!", ink: "#ffffff" },
-    pending: { fill: "#ffffff", border: "#B9C1CE", glyph: "&nbsp;", ink: "#B9C1CE" },
-  } as const;
+  const MARKER: Record<
+    NonNullable<EmailBody["timeline"]>[number]["state"],
+    { box: string; glyph: string }
+  > = {
+    // A RAISED green chip with a white tick, not an outline: a passed gate has
+    // to read as green from across the page.
+    done: {
+      box: `background:#1C7A52;background-image:${GRADE_CHIP};border:1px solid #1C7A52;color:#ffffff;box-shadow:${ELEV_CONTROL};`,
+      glyph: `<span style="font-size:9px;line-height:16px;">&#10003;</span>`,
+    },
+    // `CircleDot` -- a ring with a filled centre, in the brand colour. No fill
+    // behind it, exactly as the component leaves it unfilled.
+    current: {
+      box: `border:2px solid ${PRIMARY};`,
+      glyph: `<span style="display:inline-block;width:6px;height:6px;margin-top:3px;background:${PRIMARY};border-radius:50%;"></span>`,
+    },
+    // `CircleAlert`, in the warning solid.
+    attention: {
+      box: "border:2px solid #8A6206;color:#8A6206;",
+      glyph: `<span style="font-size:10px;font-weight:700;line-height:12px;">!</span>`,
+    },
+    // `Circle` -- hollow, in the faint token. A ring is a shape, not text.
+    pending: { box: "border:2px solid #818B9C;", glyph: "" },
+  };
 
+  /*
+   * HORIZONTAL, with the connectors, which is the form the component actually
+   * renders -- `sm:flex-row` and `hidden sm:block` on the rail between stops.
+   * The email was 640px and I had been drawing its MOBILE fallback: a stack
+   * with no connectors. It is 760px now precisely so this fits.
+   *
+   * One cell per stop, one narrow cell per connector, all in a single row.
+   * `mt-[9px]` in the component puts the connector on the marker's centre line;
+   * 9px is that same offset.
+   *
+   * It restacks under 600px, which is what the component does at the same
+   * breakpoint -- and there the connectors go, for the same reason they are
+   * `hidden` there.
+   */
   const timeline = (body.timeline ?? []).length
-    ? `
+    ? (() => {
+        const steps = body.timeline ?? [];
+        const cells = steps
+          .map((step, index) => {
+            const mark = MARKER[step.state];
+            const faded = step.state === "pending";
+            const passed = step.state === "done" || steps[index - 1]?.state === "done";
+            // Filled only where the work has actually passed, as the component
+            // has it: a fully drawn rail claims a route not yet travelled.
+            const connector =
+              index === 0
+                ? ""
+                : `
+                    <td class="vz-join" width="18" style="width:18px;padding:9px 4px 0;vertical-align:top;">
+                      <div style="height:2px;background:${passed ? "#1C7A52" : BORDER};border-radius:2px;"></div>
+                    </td>`;
+            return `${connector}
+                    <td class="vz-stop" valign="top" style="padding:0;vertical-align:top;">
+                      <table role="presentation" cellpadding="0" cellspacing="0" border="0">
+                        <tr>
+                          <td width="16" style="width:16px;padding:2px 0 0;vertical-align:top;">
+                            <div style="width:16px;height:16px;border-radius:50%;text-align:center;${mark.box}">${mark.glyph}</div>
+                          </td>
+                          <td style="padding:0 0 0 10px;vertical-align:top;">
+                            <div style="color:${faded ? INK_META : INK};font-size:13px;line-height:1.25;font-weight:${faded ? "500" : "600"};">${escapeHtml(step.label)}</div>
+                            ${step.meta ? `<div style="margin-top:2px;color:${INK_META};font-size:12px;line-height:1.35;">${escapeHtml(step.meta)}</div>` : ""}
+                          </td>
+                        </tr>
+                      </table>
+                    </td>`;
+          })
+          .join("");
+
+        return `
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 0;">
                   <tr>
-                    <td colspan="2" style="padding:0 0 10px;color:${INK_META};font-size:12px;line-height:1.4;font-weight:600;letter-spacing:.04em;text-transform:uppercase;">Where it has got to</td>
-                  </tr>${(body.timeline ?? [])
-                    .map((step, index, all) => {
-                      const mark = MARKER[step.state];
-                      const passed = step.state === "done" || all[index - 1]?.state === "done";
-                      const connector =
-                        index === 0
-                          ? ""
-                          : `<div style="width:2px;height:10px;margin:0 auto;background:${passed ? "#1C7A52" : BORDER};"></div>`;
-                      const live = step.state === "current" || step.state === "attention";
-                      return `
+                    <td style="padding:0 0 10px;color:${INK_META};font-size:12px;line-height:1.4;font-weight:600;letter-spacing:.04em;text-transform:uppercase;">Where it has got to</td>
+                  </tr>
                   <tr>
-                    <td width="18" style="width:18px;padding:0;vertical-align:top;">
-                      ${connector}
-                      <div style="width:16px;height:16px;margin:0 auto;background:${mark.fill};border:1px solid ${mark.border};border-radius:50%;color:${mark.ink};font-size:10px;font-weight:700;line-height:16px;text-align:center;">${mark.glyph}</div>
+                    <td style="padding:0;">
+                      <table class="vz-rail" role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">
+                        <tr>${cells}
+                        </tr>
+                      </table>
                     </td>
-                    <td style="padding:${index === 0 ? "0" : "10px"} 0 0 10px;vertical-align:top;">
-                      <div style="color:${live ? INK : step.state === "done" ? INK_MUTED : INK_META};font-size:13px;line-height:1.4;font-weight:${live ? "700" : "500"};">${escapeHtml(step.label)}</div>
-                      ${step.meta ? `<div style="margin-top:2px;color:${INK_META};font-size:12px;line-height:1.4;">${escapeHtml(step.meta)}</div>` : ""}
-                    </td>
-                  </tr>`;
-                    })
-                    .join("")}
-                </table>`
+                  </tr>
+                </table>`;
+      })()
     : "";
 
   // FLAT, and that is a rule rather than a preference: a fill and a border, no
@@ -347,6 +411,10 @@ function renderHtml(body: EmailBody): string {
       /* The header links drop below the lockup rather than crowding it. */
       .vz-nav { display: block !important; width: 100% !important; text-align: left !important; padding-top: 10px !important; }
       .vz-nav a { padding-left: 0 !important; padding-right: 16px !important; }
+      /* The rail restacks, and the connectors go with it -- the component
+         hides them at this breakpoint too. */
+      .vz-rail .vz-stop { display: block !important; width: 100% !important; padding-bottom: 10px !important; }
+      .vz-rail .vz-join { display: none !important; }
     }
   </style>
 </head>
@@ -369,7 +437,7 @@ function renderHtml(body: EmailBody): string {
              Outlook and Gmail block remote images by default, and an identity
              that vanishes with the images is what makes a client read an
              approval request as phishing. -->
-        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;width:100%;margin:0 0 18px;font-family:${FONT};">
+        <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="max-width:760px;width:100%;margin:0 0 18px;font-family:${FONT};">
           <tr>
             <td style="width:36px;vertical-align:middle;">
               <table role="presentation" cellpadding="0" cellspacing="0" border="0">
@@ -401,7 +469,7 @@ function renderHtml(body: EmailBody): string {
         <!-- The panel. A Card: rounded-lg, a hairline border, the surface grade
              over a white fill, and shadow-raised-lg beneath. White ON grey. -->
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-               style="max-width:640px;background:${CARD};background-image:${GRADE_SURFACE};border:1px solid ${BORDER};border-radius:10px;box-shadow:${ELEV_PANEL};font-family:${FONT};">
+               style="max-width:760px;background:${CARD};background-image:${GRADE_SURFACE};border:1px solid ${BORDER};border-radius:10px;box-shadow:${ELEV_PANEL};font-family:${FONT};">
           <tr>
             <td class="vz-panel" style="padding:32px;">
               <h1 style="margin:0 0 12px;color:${INK};font-size:24px;line-height:1.25;font-weight:700;letter-spacing:-.015em;">${escapeHtml(body.heading)}</h1>
@@ -426,7 +494,7 @@ function renderHtml(body: EmailBody): string {
 
         <!-- Outside the panel, on the ground. It is about the system, not about
              the message, and the card is the message. -->
-        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;font-family:${FONT};">
+        <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:760px;font-family:${FONT};">
           <tr>
             <td style="padding:20px 4px 0;color:${INK_META};font-size:12px;line-height:1.55;">
               Sent by VizServe Team Portal. Everything here is also in your inbox in the app.
