@@ -6,6 +6,7 @@ import { formatDate } from "@/lib/dates";
 
 import { requireRole } from "@/lib/auth/authorization";
 import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
+import { loadRequestDetails } from "@/lib/email/request-details";
 import {
   sendRequestApprovedEmail,
   sendRequestRejectedEmail,
@@ -120,6 +121,7 @@ export async function decideOnRequest(
 
     if (requester) {
       const approvalEmail = await sendRequestApprovedEmail({
+        details: await loadRequestDetails(requestId),
         to: requester.requester_email,
         requesterName: requester.requester_name,
         referenceNo: result.data.reference_no,
@@ -171,10 +173,13 @@ export async function decideOnRequest(
   // recoverable with a phone call, and unwinding a committed decision because
   // the mail server was slow is not a trade worth making.
   const formPath = await resolveResubmitPath(supabase, requestId);
+  // Loaded once for whichever of the two emails goes out below.
+  const details = await loadRequestDetails(requestId);
 
   const send =
     decided.status === "RETURNED"
       ? sendRequestReturnedEmail({
+          details,
           to: decided.requester_email,
           requesterName: decided.requester_name,
           referenceNo: decided.reference_no,
@@ -187,6 +192,7 @@ export async function decideOnRequest(
           formPath,
         })
       : sendRequestRejectedEmail({
+          details,
           to: decided.requester_email,
           requesterName: decided.requester_name,
           referenceNo: decided.reference_no,

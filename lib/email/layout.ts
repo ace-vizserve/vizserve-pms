@@ -1,6 +1,7 @@
 import "server-only";
 
 import { absoluteUrl, escapeHtml } from "./config";
+import type { EmailStep } from "./request-details";
 
 /**
  * P0-11 / P8-14 — the shared email shell.
@@ -96,6 +97,59 @@ const FONT =
 const LOGO = "/assets/VizServeWhite.png";
 
 /**
+ * The company footer. One place, so an address change is one edit rather than
+ * twelve.
+ *
+ * NO UNSUBSCRIBE LINK, AND THERE MUST NOT BE ONE. Everything this file renders
+ * is transactional -- a request you filed, an approval waiting on you -- and an
+ * unsubscribe on the Gate 3 email invites the one client Phase 4 depends on to
+ * switch it off. The contact details are the opposite case: a client who cannot
+ * reach a human is the reason a request gets chased by phone instead.
+ */
+const CONTACT = {
+  copyright: "©2026 VizServe Private LTD. All rights reserved.",
+  offices: [
+    {
+      label: "Singapore",
+      lines: "Level 39 Marina Bay Financial Tower 2, 10 Marina Bay Boulevard 018983",
+    },
+    {
+      label: "Philippines",
+      lines:
+        "Unit 2001 Omm-Citra Bldg. San Miguel Avenue, San Antonio, Ortigas Center, City of Pasig, 2nd District, NCR, 1605",
+    },
+  ],
+  hours: "Monday–Friday: 09:00 AM – 06:00 PM",
+  phone: "+65 9726 7986",
+  email: "contactus@vizserve.com",
+  /**
+   * TEXT LINKS, NOT ICONS, and that is considered rather than lazy. Outlook and
+   * Gmail block remote images by default, so an icon row is a row of empty
+   * boxes on first open -- and unlike the lockup, which has the wordmark beside
+   * it, a failed icon leaves nothing at all. Swap them for images only
+   * alongside hosted PNGs in `public/assets`, and keep them readable when those
+   * do not load.
+   */
+  social: [
+    { label: "Facebook", url: "https://www.facebook.com/vizserve/" },
+    { label: "LinkedIn", url: "https://www.linkedin.com/company/vizserve" },
+  ],
+  /**
+   * The header link row, opposite the lockup.
+   *
+   * ⚠️ KEEP IT TO PLACES A CLIENT CAN ACTUALLY GO. The reference layout this
+   * borrows from carries About / Company / Blog, which are a marketing site's
+   * nav; most of this app is behind a login that a client does not have, so
+   * linking it would be a dead end for the half of these emails that matter
+   * most. Two links, both reachable without an account.
+   */
+  headerLinks: [
+    { label: "Website", url: "https://www.vizserve.com" },
+    { label: "Contact", url: "mailto:contactus@vizserve.com" },
+  ],
+} as const;
+
+/**
  * The status tones, copied from the `TONE` map in `components/status-badge.tsx`
  * — a subtle fill, its own border, and a solid for the text and the dot.
  *
@@ -139,6 +193,19 @@ export type EmailBody = {
   paragraphs: string[];
   /** Label/value rows, e.g. "Target date — 5 Aug 2026". Escaped for you. */
   facts?: { label: string; value: string }[];
+  /**
+   * The progress rail -- fixed stops in pipeline order, one of them live.
+   *
+   * ⚠️ THE EMAIL COUNTERPART OF `components/stage-track.tsx`, and it follows
+   * that component rather than inventing a second visual language for the same
+   * idea: four marker states, a connector filled only where the work has
+   * actually passed, and one line of meta under each label.
+   *
+   * Shape AND colour carry the state -- a tick, a filled dot, a hollow ring, an
+   * exclamation -- so the rail survives greyscale, a printout, and a client
+   * whose mail app strips background colours.
+   */
+  timeline?: EmailStep[];
   /** Quoted block — a decision reason, a QA comment. Escaped for you. */
   quote?: { label: string; text: string };
   button?: EmailButton;
@@ -178,6 +245,53 @@ function renderHtml(body: EmailBody): string {
     )
     .join("");
 
+  /*
+   * The rail. A marker column and a label column, drawn as rows, with a 2px
+   * connector between markers -- the vertical form of `stage-track.tsx`, which
+   * is what that component itself falls back to below `sm`. An email is always
+   * below `sm`.
+   *
+   * The connector is filled GREEN ONLY WHERE THE WORK HAS PASSED, matching the
+   * component: a fully drawn rail would claim a route that has not been
+   * travelled.
+   */
+  const MARKER = {
+    done: { fill: "#1C7A52", border: "#1C7A52", glyph: "&#10003;", ink: "#ffffff" },
+    current: { fill: PRIMARY, border: PRIMARY, glyph: "&bull;", ink: "#ffffff" },
+    attention: { fill: "#8A6206", border: "#8A6206", glyph: "!", ink: "#ffffff" },
+    pending: { fill: "#ffffff", border: "#B9C1CE", glyph: "&nbsp;", ink: "#B9C1CE" },
+  } as const;
+
+  const timeline = (body.timeline ?? []).length
+    ? `
+                <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:22px 0 0;">
+                  <tr>
+                    <td colspan="2" style="padding:0 0 10px;color:${INK_META};font-size:12px;line-height:1.4;font-weight:600;letter-spacing:.04em;text-transform:uppercase;">Where it has got to</td>
+                  </tr>${(body.timeline ?? [])
+                    .map((step, index, all) => {
+                      const mark = MARKER[step.state];
+                      const passed = step.state === "done" || all[index - 1]?.state === "done";
+                      const connector =
+                        index === 0
+                          ? ""
+                          : `<div style="width:2px;height:10px;margin:0 auto;background:${passed ? "#1C7A52" : BORDER};"></div>`;
+                      const live = step.state === "current" || step.state === "attention";
+                      return `
+                  <tr>
+                    <td width="18" style="width:18px;padding:0;vertical-align:top;">
+                      ${connector}
+                      <div style="width:16px;height:16px;margin:0 auto;background:${mark.fill};border:1px solid ${mark.border};border-radius:50%;color:${mark.ink};font-size:10px;font-weight:700;line-height:16px;text-align:center;">${mark.glyph}</div>
+                    </td>
+                    <td style="padding:${index === 0 ? "0" : "10px"} 0 0 10px;vertical-align:top;">
+                      <div style="color:${live ? INK : step.state === "done" ? INK_MUTED : INK_META};font-size:13px;line-height:1.4;font-weight:${live ? "700" : "500"};">${escapeHtml(step.label)}</div>
+                      ${step.meta ? `<div style="margin-top:2px;color:${INK_META};font-size:12px;line-height:1.4;">${escapeHtml(step.meta)}</div>` : ""}
+                    </td>
+                  </tr>`;
+                    })
+                    .join("")}
+                </table>`
+    : "";
+
   // FLAT, and that is a rule rather than a preference: a fill and a border, no
   // shadow. Depth in this system is outward only — the panel lifts, the blocks
   // inside it do not.
@@ -200,7 +314,7 @@ function renderHtml(body: EmailBody): string {
   // thing the button depends on.
   const button = body.button
     ? `
-                <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;">
+                <table class="vz-btn" role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 0;">
                   <tr>
                     <td style="background:${PRIMARY};background-image:${GRADE_PRIMARY};border-radius:8px;box-shadow:${ELEV_CONTROL};">
                       <a href="${absoluteUrl(body.button.path)}"
@@ -230,6 +344,9 @@ function renderHtml(body: EmailBody): string {
       .vz-gutter { padding-left: 16px !important; padding-right: 16px !important; }
       .vz-panel { padding: 24px 20px !important; }
       .vz-btn a { display: block !important; text-align: center !important; }
+      /* The header links drop below the lockup rather than crowding it. */
+      .vz-nav { display: block !important; width: 100% !important; text-align: left !important; padding-top: 10px !important; }
+      .vz-nav a { padding-left: 0 !important; padding-right: 16px !important; }
     }
   </style>
 </head>
@@ -268,6 +385,16 @@ function renderHtml(body: EmailBody): string {
               <div style="color:${INK};font-size:15px;font-weight:700;line-height:1.25;letter-spacing:-.01em;">VizServe</div>
               <div style="color:${INK_META};font-size:12px;line-height:1.35;">Team Portal</div>
             </td>
+            <!-- The link row, opposite the mark. It collapses under the lockup
+                 on a narrow screen rather than squeezing both onto one line. -->
+            <td class="vz-nav" align="right" style="vertical-align:middle;font-size:13px;line-height:1.4;">
+              ${CONTACT.headerLinks
+                .map(
+                  (link) =>
+                    `<a href="${link.url}" style="color:${INK_MUTED};text-decoration:none;font-weight:600;padding-left:14px;">${escapeHtml(link.label)}</a>`,
+                )
+                .join("")}
+            </td>
           </tr>
         </table>
 
@@ -290,8 +417,8 @@ function renderHtml(body: EmailBody): string {
               <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 0;border-bottom:1px solid ${BORDER};">${facts}
               </table>`
                   : ""
-              }${quote}
-              <div class="vz-btn">${button}</div>
+              }${timeline}${quote}
+              ${button}
               ${body.footnote ? `<p style="margin:20px 0 0;color:${INK_META};font-size:13px;line-height:1.5;">${escapeHtml(body.footnote)}</p>` : ""}
             </td>
           </tr>
@@ -301,8 +428,35 @@ function renderHtml(body: EmailBody): string {
              the message, and the card is the message. -->
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;font-family:${FONT};">
           <tr>
-            <td style="padding:18px 4px 0;color:${INK_META};font-size:12px;line-height:1.55;">
+            <td style="padding:20px 4px 0;color:${INK_META};font-size:12px;line-height:1.55;">
               Sent by VizServe Team Portal. Everything here is also in your inbox in the app.
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 4px 0;border-top:1px solid ${BORDER};">
+              <div style="margin:14px 0 8px;color:${INK};font-size:13px;font-weight:700;letter-spacing:-.01em;">Get in touch</div>
+              ${CONTACT.offices
+                .map(
+                  (office) => `<p style="margin:0 0 6px;color:${INK_META};font-size:12px;line-height:1.55;">
+                <span style="color:${INK_MUTED};font-weight:600;">${escapeHtml(office.label)}</span> &middot; ${escapeHtml(office.lines)}
+              </p>`,
+                )
+                .join("")}
+              <p style="margin:10px 0 0;color:${INK_META};font-size:12px;line-height:1.55;">${escapeHtml(CONTACT.hours)}</p>
+              <p style="margin:2px 0 0;color:${INK_META};font-size:12px;line-height:1.55;">
+                <a href="tel:${CONTACT.phone.replace(/[^+0-9]/g, "")}" style="color:${PRIMARY};text-decoration:none;">${escapeHtml(CONTACT.phone)}</a>
+                &nbsp;&middot;&nbsp;
+                <a href="mailto:${CONTACT.email}" style="color:${PRIMARY};text-decoration:none;">${escapeHtml(CONTACT.email)}</a>
+              </p>
+              <p style="margin:12px 0 0;font-size:12px;line-height:1.55;">
+                ${CONTACT.social
+                  .map(
+                    (link) =>
+                      `<a href="${link.url}" style="color:${PRIMARY};text-decoration:none;font-weight:600;">${escapeHtml(link.label)}</a>`,
+                  )
+                  .join(`<span style="color:${INK_META};">&nbsp;&middot;&nbsp;</span>`)}
+              </p>
+              <p style="margin:14px 0 0;color:${INK_META};font-size:11px;line-height:1.55;">${escapeHtml(CONTACT.copyright)}</p>
             </td>
           </tr>
         </table>
@@ -335,6 +489,24 @@ function renderText(body: EmailBody): string {
   }
   if (body.facts?.length) lines.push("");
 
+  if (body.timeline?.length) {
+    lines.push("Where it has got to");
+    for (const step of body.timeline) {
+      // The state spelled out, because the text part has no marker to read it
+      // off -- the same reason every status chip carries its label.
+      const mark =
+        step.state === "done"
+          ? "[done]"
+          : step.state === "current"
+            ? "[now] "
+            : step.state === "attention"
+              ? "[!]   "
+              : "[  ]  ";
+      lines.push(`  ${mark} ${step.label}${step.meta ? ` - ${step.meta}` : ""}`);
+    }
+    lines.push("");
+  }
+
   if (body.quote) {
     lines.push(`${body.quote.label}:`, ...body.quote.text.split("\n").map((l) => `  ${l}`), "");
   }
@@ -346,5 +518,16 @@ function renderText(body: EmailBody): string {
   if (body.footnote) lines.push(body.footnote, "");
 
   lines.push("— VizServe Team Portal");
+  lines.push("");
+
+  // The same details as the HTML footer. A plain-text reader gets the phone
+  // number too, or the text part becomes the degraded copy rather than the
+  // equivalent one.
+  lines.push("Get in touch");
+  for (const office of CONTACT.offices) lines.push(`${office.label}: ${office.lines}`);
+  lines.push(CONTACT.hours, `${CONTACT.phone} · ${CONTACT.email}`);
+  for (const link of CONTACT.social) lines.push(`${link.label}: ${link.url}`);
+  lines.push("", CONTACT.copyright);
+
   return lines.join("\n");
 }

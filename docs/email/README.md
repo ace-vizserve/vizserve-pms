@@ -116,6 +116,52 @@ panel more often than it gets it right. The status chip is where that does the
 most damage — an inverted fill with un-inverted text is how a status becomes
 unreadable in the one message that exists to convey it.
 
+## Header, footer and the rail
+
+**Header** -- the lockup on the left, a link row on the right, following
+react-email's header reference. The links are `Website` and `Contact` only:
+that reference carries About / Company / Blog, which is a marketing site's nav,
+and most of this app is behind a login a client does not have. On a phone the
+row drops below the lockup instead of crowding it.
+
+**Footer** -- "Get in touch", both offices, hours, phone, email, Facebook and
+LinkedIn, then the copyright line. Single column rather than the reference's
+two: two offices at full length do not share 640px, and a column that has to
+stack on a phone stacks only in the clients that honour a media query.
+
+Social links are **text, not icons**. Outlook and Gmail block remote images by
+default, so an icon row is a row of empty boxes on first open -- and unlike the
+lockup, which has the wordmark beside it, a failed icon leaves nothing at all.
+
+**There is no unsubscribe link and there must not be one.** Everything here is
+transactional, and an unsubscribe on the Gate 3 email invites the one client
+Phase 4 depends on to switch it off.
+
+**The feedback email is a redirect, not a form.** One button to
+`/feedback/{token}`, where the rating and the optional comment both live. An
+earlier cut asked the 1-5 question in the email itself, as five links carrying
+`?rating=N`; it worked, but a question answered in two places is two places to
+keep in step, and the page already had both halves.
+
+**The rail** mirrors `components/stage-track.tsx` -- fixed stops in pipeline
+order with one of them live, four marker states (green tick, brand dot, hollow
+ring, amber `!`), and a connector filled only where the work has passed. It is a
+ROUTE, not a log: a client asking "when do I get it" is not served by three
+things that already happened.
+
+`EmailStep` **is** that component's `Step`, imported with `import type` so
+nothing of React or lucide reaches this `server-only` path. The type is shared;
+the rendering cannot be. Run the component through `renderToStaticMarkup` and
+you get `class="text-primary"` pointing at a stylesheet no inbox has, and
+`<svg>` markers Gmail and Outlook strip -- so the email redraws the same rail in
+table HTML with inline styles. A new state or a renamed one happens once, in the
+component, and the compiler brings the email along.
+
+A returned or rejected request **stops at the decision** with no greyed-out
+stops after it, and `WAITING_FOR_INFO` renders as `attention` rather than
+`current`. Both come from that component's own warning: a pending Gate 3 drawn
+on work that will never reach one "reports closed work as unfinished, for ever".
+
 ## Two things that look like decoration and are not
 
 - **The wordmark is text beside the mark, not part of the image.** Outlook and

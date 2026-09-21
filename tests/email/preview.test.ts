@@ -43,10 +43,23 @@ const SAMPLES: Record<string, EmailBody> = {
       "If it is fine as it is, one click approves it. If something needs changing, tell us on the same page and it comes straight back to the team.",
     ],
     facts: [
-      { label: "Reference", value: "COL-2026-0142" },
-      { label: "Requested by", value: "Maria Santos, HFSE" },
-      { label: "Closes on", value: "5 Aug 2026" },
-      { label: "Attachments", value: "3 files" },
+      { label: "Request", value: "Quarterly newsletter layout" },
+      { label: "Service", value: "Design Request" },
+      { label: "Organisation", value: "HFSE" },
+      { label: "Submitted", value: "28 Jul 2026, 09:14" },
+      { label: "Date you asked for", value: "1 Aug 2026" },
+      { label: "Agreed delivery", value: "5 Aug 2026" },
+      { label: "Looked after by", value: "Creative · Ryza Santos" },
+      { label: "Please respond by", value: "7 Aug 2026" },
+      { label: "Your reference number", value: "COL-2026-0142" },
+    ],
+    timeline: [
+      { label: "Received", state: "done", meta: "28 Jul 2026, 09:14" },
+      { label: "Approved", state: "done", meta: "28 Jul 2026, 14:02" },
+      { label: "Work under way", state: "done", meta: "29 Jul 2026, 08:30" },
+      { label: "Checked by us", state: "done" },
+      { label: "Your approval", state: "current" },
+      { label: "Completed", state: "pending" },
     ],
     quote: {
       label: "What we did",
@@ -92,6 +105,35 @@ const SAMPLES: Record<string, EmailBody> = {
     },
     footnote: "Reply to this email and it reaches the team directly.",
   },
+  /**
+   * The feedback request, which is the only one that asks a question in the
+   * email itself rather than sending the reader somewhere to answer it.
+   */
+  "preview-04-feedback": {
+    preheader: "One question, takes a few seconds.",
+    heading: "How did we do?",
+    status: { label: "Completed", tone: "success" },
+    paragraphs: [
+      "Hi Maria,",
+      '"Quarterly newsletter layout" is complete. If you have a moment, tell us how it went.',
+    ],
+    facts: [
+      { label: "Request", value: "Quarterly newsletter layout" },
+      { label: "Service", value: "Design Request" },
+      { label: "Looked after by", value: "Creative · Ryza Santos" },
+      { label: "Your reference number", value: "COL-2026-0142" },
+    ],
+    timeline: [
+      { label: "Received", state: "done", meta: "28 Jul 2026, 09:14" },
+      { label: "Approved", state: "done", meta: "28 Jul 2026, 14:02" },
+      { label: "Work under way", state: "done", meta: "29 Jul 2026, 08:30" },
+      { label: "Checked by us", state: "done" },
+      { label: "Your approval", state: "current" },
+      { label: "Completed", state: "pending" },
+    ],
+    button: { label: "Leave feedback", path: "/feedback/sample-token" },
+    footnote: "One rating and an optional comment. Nothing else.",
+  },
 };
 
 describe("email previews", () => {
@@ -122,8 +164,10 @@ describe("email previews", () => {
     const withButton = renderEmail(SAMPLES["preview-02-internal-assigned"]!).html;
     const without = renderEmail(SAMPLES["preview-03-returned-no-button"]!).html;
 
-    expect(withButton).toContain("<a href");
-    // The header lockup is an <img>, never a link, so this stays unambiguous.
-    expect(without).not.toContain("<a href");
+    // The button's own class. Not "any anchor": the footer carries tel:, mailto:
+    // and two social links on every email, so an anchor no longer means a call
+    // to action.
+    expect(withButton).toContain('class="vz-btn"');
+    expect(without).not.toContain('class="vz-btn"');
   });
 });

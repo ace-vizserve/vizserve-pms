@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { sendRequestSubmittedEmail } from "@/lib/email/client-emails";
+import { loadRequestDetails } from "@/lib/email/request-details";
 import { generateStatusToken, hashStatusToken, statusUrl } from "@/lib/request-status";
 import { uploadPendingAttachment, type UploadResult } from "@/lib/attachments-server";
 import { readPublicFormResponse, type PublicFormLookup } from "@/lib/form-builder/public-lookup";
@@ -373,6 +374,7 @@ async function acknowledge(
 
     const outcome = await sendRequestSubmittedEmail({
       statusUrl: trackingUrl,
+      details: await loadRequestDetails(requestId),
       to: request.requester_email,
       requesterName: request.requester_name,
       referenceNo,

@@ -1,6 +1,8 @@
 import "server-only";
 
 import { formatDate } from "@/lib/dates";
+import type { RequestDetails } from "@/lib/email/request-details";
+import { loadRequestDetailsForTask } from "@/lib/email/request-details";
 import {
   sendClientApprovalEmail,
   sendFeedbackRequestEmail,
@@ -89,6 +91,7 @@ export async function issueAndSendApproval(taskId: string): Promise<IssueOutcome
     .eq("kind", "output");
 
   const outcome = await sendClientApprovalEmail({
+    details: await loadRequestDetailsForTask(taskId),
     to: token.requester_email,
     requesterName: request?.requester_name ?? "there",
     referenceNo: request?.reference_no ?? "your request",
@@ -136,6 +139,13 @@ export type FeedbackEmailPayload = {
   referenceNo: string;
   title: string;
   token: string;
+  /**
+   * P8-14 — the request block, gathered with the token rather than at send
+   * time. The two halves are deliberately split (mint here, send there) and a
+   * caller that holds a payload overnight should send the same email it was
+   * handed, not a newer one.
+   */
+  details?: RequestDetails | null;
 };
 
 /**
@@ -201,6 +211,7 @@ export async function issueFeedbackToken(taskId: string): Promise<FeedbackTokenO
     issued: true,
     token: token.token,
     email: {
+      details: await loadRequestDetailsForTask(taskId),
       to: token.requester_email,
       requesterName: request?.requester_name ?? "there",
       referenceNo: request?.reference_no ?? "your request",

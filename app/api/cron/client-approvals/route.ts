@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { issueAndSendFeedbackRequest } from "@/lib/client-approval-server";
 import { formatDate } from "@/lib/dates";
 import { sendApprovalReminderEmail } from "@/lib/email/client-emails";
+import { loadRequestDetailsForTask } from "@/lib/email/request-details";
 import { dispatchPendingEmails } from "@/lib/email/dispatch";
 import { createAdminClient } from "@/utils/supabase/admin";
 
@@ -80,6 +81,7 @@ export async function GET(request: Request) {
     }
 
     const outcome = await sendApprovalReminderEmail({
+      details: await loadRequestDetailsForTask(reminder.task_id),
       to: reminder.requester_email,
       requesterName: reminder.requester_name ?? "there",
       referenceNo: reminder.reference_no ?? "your request",
