@@ -86,6 +86,24 @@ export type AuthContext = {
   primaryDepartmentId: string | null;
   /** The departments they lead or oversee. Empty for a plain member. */
   managedDepartmentIds: string[];
+  /**
+   * P13-01 — THE COLLABORATION SPACES. Departments flagged `is_shared`:
+   * "Collaboration Projects (All departments)" and any other one an owner
+   * creates later.
+   *
+   * ⚠️ NOT SOMETHING THIS PERSON HOLDS. Every other field on this context is
+   * about the user; this one is the same short list for everybody signed in,
+   * and it rides along for the reason `gender` does — it is needed by the
+   * predicates below on almost every page, and a second read per screen for two
+   * rows that never change would be waste.
+   *
+   * ⚠️ IT GRANTS, SO THE EMPTY DEGRADE HAD TO BE PROVED SAFE RATHER THAN
+   * ASSUMED. Empty means "there are no collaboration spaces", which is exactly
+   * true before the migration is pasted — the flag does not exist, so nothing is
+   * flagged, so no policy admits anybody anywhere new. The failure direction is
+   * "the space is not there yet", never "everyone is in everything".
+   */
+  sharedDepartmentIds: string[];
 };
 
 /**
@@ -239,7 +257,17 @@ export const resolveAuth = cache(
      * failures as `error` on the result rather than rejecting, so `Promise.all`
      * has nothing to reject on and the error posture is exactly as it was.
      */
-    const [attempt, { data: managed }] = await Promise.all([
+    /*
+     * ⚠️ P13-01 ADDS A THIRD, AND IT IS A SEPARATE QUERY ON PURPOSE. It names
+     * `is_shared`, a column that does not exist until the migration is pasted by
+     * hand — and PostgREST rejects a select naming an unknown column WHOLE. Put
+     * on the profile read it would answer `not_provisioned` for every person in
+     * the company between the deploy and the paste, which is the total outage
+     * `deptAdminColumnMissing` exists to describe. In its own query it fails
+     * alone, returns no rows, and the collaboration space simply is not there
+     * yet. Full account above `loadSharedDepartmentIds`.
+     */
+    const [attempt, { data: managed }, { data: shared }] = await Promise.all([
       supabase
         .from("vizserve_pms_users")
         .select(`${PROFILE_COLUMNS}, is_dept_admin`)
@@ -249,6 +277,12 @@ export const resolveAuth = cache(
         .from("vizserve_pms_user_managed_departments")
         .select("department_id")
         .eq("user_id", userId),
+      supabase
+        .from("vizserve_pms_departments")
+        .select("id")
+        .eq("is_shared", true)
+        .eq("is_active", true)
+        .order("name"),
     ]);
 
     let profile: (typeof attempt)["data"] = attempt.data;
@@ -321,6 +355,9 @@ export const resolveAuth = cache(
         isDeptAdmin: profile.is_dept_admin,
         primaryDepartmentId: profile.primary_department_id,
         managedDepartmentIds: (managed ?? []).map((row) => row.department_id),
+        // P13-01. `?? []` is the degrade AND the pre-migration truth — see the
+        // note on the query above and on the field itself.
+        sharedDepartmentIds: (shared ?? []).map((row) => row.id),
       },
     };
   },
@@ -688,7 +725,37 @@ export function canManageDepartmentTree(
 ): boolean {
   if (canShapeDepartment(context, departmentId)) return true;
   if (!departmentId) return false;
+  if (isCollaborationSpace(context, departmentId)) return true;
   return context.primaryDepartmentId === departmentId;
+}
+
+/**
+ * P13-01 — "IS THIS THE SPACE EVERYBODY SHARES?"
+ *
+ * The TypeScript reading of `vizserve_pms_may_collaborate`, which is the
+ * enforcement. Both answer the same two-part question — the department is an
+ * active collaboration space, and the caller is an active user — and the second
+ * half is free here: `resolveAuth` returns no context at all for a deactivated
+ * or access-revoked account, so by the time there is an `AuthContext` to pass
+ * in, it holds.
+ *
+ * ⚠️ A SEPARATE PREDICATE RATHER THAN A CLAUSE INSIDE `canAccessDepartment`, and
+ * the reason is the one P11-07 gives for `canManageDepartmentTree` existing at
+ * all. `canAccessDepartment` is the APPROVAL AND VISIBILITY scope — it decides
+ * whose requests you review, whose DTR you read, whose timesheet week you sign
+ * off. Nobody leads the collaboration space and it holds no queue; widening that
+ * predicate would hand every member of the company a scope over work that has no
+ * approver, which is not what a shared list of tasks is.
+ *
+ * So this is OR-ed only into the two questions it actually answers: may I shape
+ * this department's tree, and may I file work into it.
+ */
+export function isCollaborationSpace(
+  context: AuthContext,
+  departmentId: string | null,
+): boolean {
+  if (!departmentId) return false;
+  return context.sharedDepartmentIds.includes(departmentId);
 }
 
 /**
@@ -699,7 +766,13 @@ export function canManageDepartmentTree(
  * screen with no department to create anything in.
  */
 export function canManageAnyDepartmentTree(context: AuthContext): boolean {
-  return canShapeAnyDepartment(context) || context.primaryDepartmentId !== null;
+  return (
+    canShapeAnyDepartment(context) ||
+    context.primaryDepartmentId !== null ||
+    // P13-01. Somebody with no department of their own still has the
+    // collaboration space to organise, so the page is worth rendering.
+    context.sharedDepartmentIds.length > 0
+  );
 }
 
 export function canShapeAnyDepartment(context: AuthContext): boolean {
@@ -772,11 +845,24 @@ export function departmentTreeScope(context: AuthContext): DepartmentPickerScope
 
   if (base.kind === "all") return base;
 
-  const own = context.primaryDepartmentId;
-  if (!own) return base;
+  /*
+   * P13-01 — the collaboration spaces go in for everybody, and they go in
+   * BEFORE the early return below. A person with no department of their own
+   * used to fall straight through to `base`; they can shape the shared space
+   * like anybody else, so returning here would give them the empty picker this
+   * function exists to prevent.
+   */
+  const ids = base.kind === "some" ? [...base.ids] : [];
+  for (const shared of context.sharedDepartmentIds) {
+    if (!ids.includes(shared)) ids.push(shared);
+  }
 
-  const ids = base.kind === "some" ? base.ids : [];
-  return { kind: "some", ids: ids.includes(own) ? ids : [...ids, own] };
+  const own = context.primaryDepartmentId;
+  if (own && !ids.includes(own)) ids.push(own);
+
+  // Still the sentinel rule: "shapes nothing" must stay `none`, never a filter
+  // that matches nothing. See `departmentPickerScope`.
+  return ids.length === 0 ? { kind: "none" } : { kind: "some", ids };
 }
 
 export function departmentShapeScope(context: AuthContext): DepartmentPickerScope {
@@ -857,6 +943,22 @@ export function realtimeDepartmentScope(context: AuthContext): string[] {
   if (context.primaryDepartmentId) ids.push(context.primaryDepartmentId);
 
   for (const id of context.managedDepartmentIds) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+
+  /*
+   * P13-01 — the collaboration space, for everybody.
+   *
+   * ⚠️ NEITHER OF THE TWO DELIBERATE GAPS ABOVE APPLIES HERE, which is why this
+   * is added rather than left to the "stale until you navigate" default. It is
+   * not the firehose an owner's full-company filter would be: it is one
+   * department id, the same one for every subscriber, already in hand on the
+   * context and needing no extra query. And a shared board is precisely where
+   * staleness bites hardest — four teams typing into one list is the case the
+   * space exists for, and it is the case where a page that does not repaint
+   * shows somebody work that was already picked up.
+   */
+  for (const id of context.sharedDepartmentIds) {
     if (!ids.includes(id)) ids.push(id);
   }
 

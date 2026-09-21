@@ -14,6 +14,7 @@ import { Reveal, RevealFallback } from "@/components/ui/reveal";
 import { TaskStatusGroups } from "./task-status-groups";
 import {
   canAdminDepartment,
+  isCollaborationSpace,
   realtimeDepartmentFilter,
   requireAuthContext,
   type AuthContext,
@@ -33,6 +34,7 @@ import { EmptyState } from "@/components/empty-state";
 import { loadPendingRequests } from "@/lib/pending-requests-server";
 import { applyTaskScope, QA_STAGES } from "@/lib/tasks-server";
 import { loadListFields } from "@/lib/list-fields-server";
+import { loadCollaborators } from "@/lib/departments-server";
 import {
   compareFieldValues,
   fieldIdFromKey,
@@ -129,7 +131,14 @@ type Kind = "all" | "internal" | "client";
  */
 type ListsResult = {
   data:
-    | { id: string; name: string; group_id: string | null; owner_id: string | null }[]
+    | {
+        id: string;
+        name: string;
+        group_id: string | null;
+        owner_id: string | null;
+        /** P13-01. Which department the list belongs to — see the select. */
+        department_id: string;
+      }[]
     | null;
 };
 type GroupsResult = { data: { id: string; name: string }[] | null };
@@ -256,7 +265,12 @@ export default async function TasksPage({
       // lists from the filter dropdown while the breadcrumb and the row labels —
       // the read's two other consumers — keep them. It is not filtered in SQL
       // for exactly that reason; see the note in that component.
-      .select("id, name, group_id, owner_id")
+      //
+      // P13-01. `department_id` likewise: the composer needs to know whether the
+      // list being looked at is the shared space, because that is what decides
+      // who may be assigned. An existing column, so it is safe to name here —
+      // unlike `is_shared`, which is not (see `loadSharedDepartmentIds`).
+      .select("id, name, group_id, owner_id, department_id")
       .eq("is_active", true)
       .order("name"),
   );
@@ -709,6 +723,8 @@ async function TaskGroups({
     pendingRequests,
     // P7-73. Appended. Fields belong to a list, so there are none without one.
     { fields: customFields },
+    // P13-02. Appended, per the warning above — one entry per line, in order.
+    collaborators,
   ] = await Promise.all([
     query,
     supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
@@ -719,6 +735,17 @@ async function TaskGroups({
     listsPromise,
     pendingRequestsPromise,
     params.list ? loadListFields(params.list) : Promise.resolve({ fields: [], error: null }),
+    /*
+     * P13-02 — the company roster, for a collaboration list.
+     *
+     * ⚠️ ISSUED UNCONDITIONALLY, in the wave, rather than behind a check on
+     * whether this list is shared. The test needs `lists`, which is one of the
+     * promises in this very batch — so gating on it would cost a whole extra
+     * round trip on the heaviest route in the app to save a query that returns
+     * nothing whenever no shared space exists. `cache()`d, so the two consumers
+     * below share the one read.
+     */
+    loadCollaborators(),
   ]);
 
   /*
@@ -1091,16 +1118,45 @@ async function TaskGroups({
     [context.primaryDepartmentId, ...context.managedDepartmentIds].filter((id): id is string => Boolean(id)),
   );
 
-  const assignable = (people ?? [])
-    .filter(
-      (person) =>
-        person.is_active &&
-        person.id !== context.userId &&
-        person.primary_department_id !== null &&
-        (roleAtLeast(context.role, "owner") ||
-          assignableScope.has(person.primary_department_id)),
-    )
-    .map((person) => ({ id: person.id, full_name: person.full_name }));
+  /*
+   * ⚠️ P13-01 — IS THE COMPOSER STANDING IN THE COLLABORATION SPACE?
+   *
+   * `?list=` is what this page is filtered to, so THE LIST DECIDES — the same
+   * rule `vizserve_pms_create_task` now applies server-side, and deriving it
+   * from anything else here would put the screen and the function into
+   * disagreement about where a task is going.
+   *
+   * Inside a shared list every active person is assignable, and that is the one
+   * place the "same department" rule below cannot hold: nobody's
+   * `primary_department_id` is the shared space, so the scope above matches
+   * NOBODY there and the composer would offer an empty picker on the one
+   * feature built for working across teams.
+   */
+  const currentListDepartment =
+    (lists ?? []).find((list) => list.id === params.list)?.department_id ?? null;
+  const inSharedList = isCollaborationSpace(context, currentListDepartment);
+
+  /*
+   * ⚠️ P13-02 — INSIDE A SHARED LIST THE ROSTER COMES FROM THE RPC, NOT FROM
+   * `people`. Filtering `people` was the bug: that read is department-scoped, so
+   * `inSharedList` widened a set that had already been narrowed upstream and the
+   * composer offered the reader's own team under a shared heading.
+   *
+   * Self excluded in both branches for the same reason it always was — "Myself"
+   * is the composer's default and picking it calls a different function.
+   */
+  const assignable = inSharedList
+    ? collaborators.filter((person) => person.id !== context.userId)
+    : (people ?? [])
+        .filter(
+          (person) =>
+            person.is_active &&
+            person.id !== context.userId &&
+            person.primary_department_id !== null &&
+            (roleAtLeast(context.role, "owner") ||
+              assignableScope.has(person.primary_department_id)),
+        )
+        .map((person) => ({ id: person.id, full_name: person.full_name }));
 
   /**
    * People by department, for the assignee picker.
@@ -1115,6 +1171,31 @@ async function TaskGroups({
     const list = byDepartment.get(person.primary_department_id) ?? [];
     list.push({ id: person.id, full_name: person.full_name });
     byDepartment.set(person.primary_department_id, list);
+  }
+
+  /*
+   * ⚠️ P13-01 — AND THE COLLABORATION SPACE GETS EVERYBODY.
+   *
+   * Keyed the same way as every other department, so the picker asks one
+   * question — "who is in this task's department" — and gets the right answer
+   * for both kinds. Without this the entry is simply ABSENT: the loop above
+   * keys on `primary_department_id` and nobody's points here, so the picker on
+   * a company-wide task would open empty rather than wrong, which reads as the
+   * feature being broken.
+   *
+   * ⚠️ P13-02 — `collaborators`, NOT `people` FILTERED. This first shipped as
+   * `people.filter(is_active)` and that is "everybody I can already see": the
+   * `people` read above goes through the caller's own client and SELECT on
+   * `vizserve_pms_users` is department-scoped, so a member got their own six
+   * colleagues under a heading promising the company. `loadCollaborators` is
+   * the definer RPC; see the note on it.
+   *
+   * `vizserve_pms_add_task_assignee` relaxes its department test to "is this
+   * person active" in a shared space, so this offers exactly what the server
+   * accepts — and, outside one, offers nothing it would refuse.
+   */
+  for (const sharedId of context.sharedDepartmentIds) {
+    byDepartment.set(sharedId, collaborators);
   }
 
   /*

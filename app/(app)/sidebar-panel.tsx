@@ -4,6 +4,7 @@ import {
   canDoHr,
   canShapeAnyDepartment,
   canShapeDepartment,
+  isCollaborationSpace,
   type AuthContext,
 } from "@/lib/auth/authorization";
 import {
@@ -346,6 +347,14 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
         // P7-74 — per department, because a lead of VizBytes may drag VizBytes'
         // folders and not VizMedia's, both of which an owner sees in one rail.
         // `reorderTaskGroups` asks the same predicate.
+        //
+        // ⚠️ P13-01 DELIBERATELY DOES NOT WIDEN THIS. Everybody may add a list
+        // to the collaboration space; the ORDER of the whole company's shared
+        // tree is not something each of them should be able to rearrange under
+        // the others, and a drag is silent and affects every viewer. It stays
+        // with owners, which is what `canShapeDepartment` answers for a
+        // department nobody leads. `reorderLists` and `reorderTaskGroups` ask
+        // the same predicate server-side, so this is the button, not the gate.
         canReorder: canShapeDepartment(context, department.id),
       };
     })
@@ -354,7 +363,22 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
     // department in the company here. The group itself still renders, carrying
     // the "Create a list" row, so the feature is reachable before anybody has
     // made one.
-    .filter((space) => space.lists.length > 0 || space.folders.length > 0);
+    //
+    // ⚠️ P13-01 — THE COLLABORATION SPACE IS THE ONE EXCEPTION, and it earns it
+    // by having nobody to set it up. Every other department here has a lead who
+    // will make its first list; this one belongs to everybody, which in practice
+    // means to no one in particular. Hidden while empty it would be a feature
+    // nobody could find their way into — and `SpaceNode` already draws "No lists
+    // yet" for exactly this case, with the `+` beside it.
+    //
+    // The migration seeds one list, so this is the state after somebody archives
+    // it rather than the state on day one.
+    .filter(
+      (space) =>
+        space.lists.length > 0 ||
+        space.folders.length > 0 ||
+        isCollaborationSpace(context, space.departmentId),
+    );
 
   /*
    * P11-06. `?? []` like every other read in this batch — a failure here renders
@@ -374,6 +398,29 @@ export async function SidebarPanel({ context }: { context: AuthContext }) {
         "/requests": labelledBadge(formatNavBadge(awaitingReview ?? 0), "awaiting review"),
       }}
       spaces={spaces}
+      /*
+       * ⚠️ TEAM LEADERS, MANAGERS AND ADMINS. NOT EVERY MEMBER.
+       *
+       * Amier, 21 Sep: "for the manage lists only tl manager and admin only".
+       *
+       * ⚠️ THIS WAS BRIEFLY `canManageAnyDepartmentTree` AND THAT WAS WRONG.
+       * The reasoning was that P11-07 opened the `/tasks/lists` PAGE to any
+       * member, so the rail was hiding a link to a screen that would have let
+       * them in — true, and not this component's call to make. P13-01 was
+       * scoped to the collaboration space; quietly putting "Manage lists" in
+       * front of every person in the company for every department they belong
+       * to is a change to a different feature, made on the way past.
+       *
+       * ⚠️ SO THE RAIL AND THE PAGE DISAGREE ON PURPOSE, and the direction is
+       * the safe one: the rail is narrower. A member who reaches `/tasks/lists`
+       * by URL is still admitted, because P11-07's policies still admit them —
+       * the link simply is not offered. Tightening the PAGE would mean
+       * reversing P11-07 itself, policies included, which is its own decision.
+       *
+       * `canShapeAnyDepartment` is team_leader-or-above, plus the department
+       * Admin tick (P8-01c) — which is the "admin" of that sentence at member
+       * rank, and the capability that tick exists to confer.
+       */
       canManageLists={canShapeAnyDepartment(context)}
       personalLists={personalLists}
       user={{

@@ -431,6 +431,41 @@
   --stage-lapsed: #446f5c;
   --stage-lapsed-subtle: #eef4f1;
   --stage-lapsed-border: #d3e2da;
+
+  /*
+   * GANTT BARS — a pale fill, its stage's solid as the edge, and that same
+   * solid as the label.
+   *
+   * ⚠️ NOT A SATURATED SLAB. A deep fill was tried first and read as a wall of
+   * colour across a wide timeline; a Gantt is mostly bar, so the bar has to be
+   * quiet enough to sit behind its own text. The colour that identifies the
+   * stage is carried by the EDGE and the LABEL, which are the existing
+   * `--stage-*` solids — so a bar and its chip can never disagree about a hue.
+   *
+   * ⚠️ THE FILL CANNOT CARRY THE BOUNDARY. Every fill here sits 1.07–1.53:1
+   * against `--background` — invisible as an edge. The 1px border is what makes
+   * a bar an object, and it measures 4.95–9.28:1 against the page. Removing the
+   * border leaves a shape with no boundary at all.
+   *
+   * Measured, label-on-fill: open 4.91 · ongoing 4.63 · waiting 4.61 · qa 4.63
+   * · qa-deep 6.06 · client 4.63 · completed 4.62 · lapsed 4.60.
+   */
+  --gantt-bar-open: #dce3ed;
+  --gantt-bar-open-ink: #556074;
+  --gantt-bar-ongoing: #c9daf7;
+  --gantt-bar-ongoing-ink: #4359a5;
+  --gantt-bar-waiting: #fbeac2;
+  --gantt-bar-waiting-ink: #8a6206;
+  --gantt-bar-qa: #e3d5f9;
+  --gantt-bar-qa-ink: #6d4baf;
+  --gantt-bar-qa-deep: #d3c2f2;
+  --gantt-bar-qa-deep-ink: #4c3286;
+  --gantt-bar-client: #fdebd9;
+  --gantt-bar-client-ink: #a9520b;
+  --gantt-bar-completed: #dff4e9;
+  --gantt-bar-completed-ink: #1c7a52;
+  --gantt-bar-lapsed: #d9ebe0;
+  --gantt-bar-lapsed-ink: #446f5c;
   --warning: #8a6206;
   --warning-subtle: #fbf2e0;
   --warning-border: #e8d6ac;
@@ -582,6 +617,27 @@
   --stage-lapsed: #8ab89f;
   --stage-lapsed-subtle: #17241f;
   --stage-lapsed-border: #2b3f36;
+
+  /* The gantt bars on a dark ground: the wash deepens instead of lightening and
+     the edge/label take the lifted stage solids. Measured label-on-fill — open
+     4.85 · ongoing 4.62 · waiting 5.47 · qa 5.93 · qa-deep 4.61 · client 4.88 ·
+     completed 4.70 · lapsed 5.55 — with the edge 5.21–8.43:1 against the page. */
+  --gantt-bar-open: #2c3646;
+  --gantt-bar-open-ink: #9aa4b6;
+  --gantt-bar-ongoing: #1f3056;
+  --gantt-bar-ongoing-ink: #8098de;
+  --gantt-bar-waiting: #453515;
+  --gantt-bar-waiting-ink: #d8a94a;
+  --gantt-bar-qa: #342a52;
+  --gantt-bar-qa-ink: #b9a3ea;
+  --gantt-bar-qa-deep: #241a41;
+  --gantt-bar-qa-deep-ink: #9878d6;
+  --gantt-bar-client: #4a2e16;
+  --gantt-bar-client-ink: #e0904f;
+  --gantt-bar-completed: #153d2c;
+  --gantt-bar-completed-ink: #4cb483;
+  --gantt-bar-lapsed: #1e3a2e;
+  --gantt-bar-lapsed-ink: #8ab89f;
   --warning: #d8a94a;
   --warning-subtle: #2a2213;
   --warning-border: #463a1f;

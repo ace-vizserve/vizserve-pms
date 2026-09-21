@@ -119,14 +119,24 @@ export function NavProjects({
 }: {
   spaces: ProjectSpace[];
   /**
-   * `/tasks/lists` calls `requireDepartmentShape()` and renders the forbidden
-   * page for anybody else.
+   * Whether to offer the route to `/tasks/lists` at all.
    *
-   * ⚠️ P8-01c CHANGED WHAT "ANYBODY ELSE" MEANS. That gate was
-   * `requireRole("team_leader")`; it now also admits a DEPARTMENT ADMIN of any
-   * rank, so the caller passes `canShapeAnyDepartment(context)` rather than a
-   * rank test. Leaving a rank test here would have hidden "Create a list" from
+   * ⚠️ P8-01c CHANGED WHAT THIS ADMITS. The gate was
+   * `requireRole("team_leader")`; it then also admitted a DEPARTMENT ADMIN of
+   * any rank. Leaving a rank test here would have hidden "Create a list" from
    * exactly the person the Admin tick was built for.
+   *
+   * ⚠️ THIS PROP IS DELIBERATELY NARROWER THAN THE PAGE IT LINKS TO, and that
+   * is not drift. P11-07 opened `/tasks/lists` to any member — a list is a
+   * shelf, not a permission boundary — and the caller still passes
+   * `canShapeAnyDepartment`: team leaders, managers, admins and the Admin tick
+   * (Amier, 21 Sep: "for the manage lists only tl manager and admin only").
+   *
+   * So the usual rule that hiding a link people may use is a bug does NOT
+   * apply here; this one is a deliberate choice about what the rail advertises.
+   * The failure it protects against is the other direction — a link offered to
+   * somebody the screen refuses — and that cannot happen while this is the
+   * narrower of the two. See the note at the call site in `sidebar-panel.tsx`.
    *
    * ⚠️ THIS ROW WAS SHIPPED UNGATED and sent every member to that error — the
    * feature was meant to make lists discoverable and instead made a dead end
@@ -144,15 +154,23 @@ export function NavProjects({
   // no `/tasks/lists/<id>` page and inventing one would be a second way to say
   // the same thing.
   //
-  // BOTH VIEWS, not just the list. Now that List and Board are two shapes of the
-  // same list rather than two separate destinations, `/tasks/board?list=<id>` is
-  // as much "inside that list" as `/tasks?list=<id>` is — and testing only the
-  // bare route would collapse the tree the moment somebody switched to the
-  // board, and light "All tasks" while they were plainly inside one.
+  // ALL THREE VIEWS, not just the list. Now that List, Board and Gantt are three
+  // shapes of the same list rather than separate destinations,
+  // `/tasks/board?list=<id>` and `/tasks/gantt?list=<id>` are as much "inside
+  // that list" as `/tasks?list=<id>` is — and testing only the bare route would
+  // collapse the tree the moment somebody switched view, and light "All tasks"
+  // while they were plainly inside one.
+  //
+  // ⚠️ A VIEW ADDED TO `VIEWS` IN tasks/toolbar.tsx HAS TO BE ADDED HERE TOO,
+  // and to `base` further down. They are two halves of one rule — the toolbar
+  // carries the list into the view, and these carry the view between lists —
+  // and a view listed in only one of them half-works in a way nobody reports
+  // precisely.
   //
   // `/tasks/lists` is excluded: it is the management screen, not a view of a
   // list, and it never carries `?list=`.
-  const onTaskView = pathname === "/tasks" || pathname === "/tasks/board";
+  const onTaskView =
+    pathname === "/tasks" || pathname === "/tasks/board" || pathname === "/tasks/gantt";
   const activeList = onTaskView ? params.get("list") : null;
 
   /*
@@ -602,15 +620,16 @@ function ListRow({
   /*
    * THE VIEW SURVIVES THE JUMP.
    *
-   * A list is a place and List/Board are two shapes of it, so somebody working
-   * on the board who clicks the next list expects the next board — being thrown
-   * back to the list view every time is the same complaint as a filter that
-   * resets, and it is why `TaskToolbar` carries the query string in the other
-   * direction.
+   * A list is a place and List/Board/Gantt are three shapes of it, so somebody
+   * working on the board who clicks the next list expects the next board —
+   * being thrown back to the list view every time is the same complaint as a
+   * filter that resets, and it is why `TaskToolbar` carries the query string in
+   * the other direction.
    *
    * Anywhere else in the app, the list view is the right landing.
    */
-  const base = pathname === "/tasks/board" ? "/tasks/board" : "/tasks";
+  const base =
+    pathname === "/tasks/board" || pathname === "/tasks/gantt" ? pathname : "/tasks";
 
   return (
     <SidebarMenuSubItem

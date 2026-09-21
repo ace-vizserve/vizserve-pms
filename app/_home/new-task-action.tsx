@@ -29,14 +29,22 @@ export async function HomeNewTaskAction() {
   // ⚠️ THIS WAS A VERBATIM COPY of the member branch in
   // `app/(app)/tasks/new-task-button.tsx`, comments included. One definition
   // now, in `lib/personal-task-server.ts`.
-  const { departmentId: myDepartment, lists, colleagues } = await loadPersonalTaskOptions(
-    context.userId,
-  );
+  const {
+    departmentId: myDepartment,
+    lists,
+    colleagues,
+    everyone,
+  } = await loadPersonalTaskOptions(context.userId);
 
   return (
     <NewPersonalTaskDialog
       lists={lists}
       colleagues={colleagues}
+      /* P13-01. The collaboration space reaches this dialog too: it is in
+         `lists`, so somebody can file company-wide work from the home page
+         without going to /tasks first. */
+      everyone={everyone}
+      sharedDepartmentIds={context.sharedDepartmentIds}
       departmentId={myDepartment}
       selfId={context.userId}
       trigger="quick"

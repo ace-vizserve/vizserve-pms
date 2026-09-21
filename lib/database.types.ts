@@ -191,6 +191,22 @@ export type Database = {
           id: string;
           name: string;
           is_active: boolean;
+          /**
+           * P13-01. A COLLABORATION SPACE rather than a team — "Collaboration
+           * Projects (All departments)". Every active user counts as a member
+           * of it for tasks, lists and folders; nobody may hold it as their
+           * `primary_department_id`, and nobody leads it.
+           *
+           * ⚠️ NEVER NAME THIS COLUMN IN A SELECT THAT ALSO FETCHES SOMETHING
+           * ELSE. Migrations in this repo are pasted by hand AFTER the code is
+           * deployed, and PostgREST rejects a select naming an unknown column
+           * WHOLE — so `select("id, name, is_shared")` in the department loader
+           * would empty every picker and the entire project tree in the window
+           * between the deploy and the paste. `loadSharedDepartmentIds` asks
+           * for it in a query of its own that degrades to "no shared spaces",
+           * which is exactly what is true before the migration lands.
+           */
+          is_shared: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -198,6 +214,7 @@ export type Database = {
           id?: string;
           name: string;
           is_active?: boolean;
+          is_shared?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -205,6 +222,7 @@ export type Database = {
           id?: string;
           name?: string;
           is_active?: boolean;
+          is_shared?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -2327,6 +2345,24 @@ export type Database = {
        */
       vizserve_pms_mentionable_for_task: {
         Args: { p_task_id: string };
+        Returns: {
+          id: string;
+          full_name: string;
+        }[];
+      };
+      /**
+       * P13-02. Everybody assignable on COLLABORATION work — id and display
+       * name only.
+       *
+       * ⚠️ CALL IT ONLY WHEN THE DESTINATION IS A SHARED DEPARTMENT. It reads
+       * past RLS on `vizserve_pms_users` by design, because the pickers'
+       * ordinary reads are department-scoped and so could never name anybody
+       * outside the reader's own team. Using it to fill a picker for an
+       * ORDINARY list would offer people `vizserve_pms_create_task` then
+       * refuses by name.
+       */
+      vizserve_pms_collaborators: {
+        Args: Record<PropertyKey, never>;
         Returns: {
           id: string;
           full_name: string;

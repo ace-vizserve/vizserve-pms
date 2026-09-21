@@ -29,6 +29,7 @@ import type { TaskPriority } from "@/lib/schemas/tasks";
 import { createPersonalTask, createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
+import { PeoplePicker } from "./people-picker";
 import { FieldError } from "@/components/ui/field-error";
 
 /**
@@ -86,12 +87,14 @@ export function NewPersonalTaskDialog({
   lists,
   defaultListId = null,
   colleagues,
+  everyone = [],
+  sharedDepartmentIds = [],
   departmentId,
   selfId,
   trigger = "toolbar",
 }: {
   /** The member's own department's lists. Optional — a task needs no list. */
-  lists: { id: string; name: string }[];
+  lists: { id: string; name: string; department_id: string }[];
   /**
    * The list the reader is already filtered to, from `?list=`. Pre-selected so
    * a task created while looking at a list lands IN that list — see the note in
@@ -104,6 +107,17 @@ export function NewPersonalTaskDialog({
    * leaving it alone must not produce two different kinds of task.
    */
   colleagues: { id: string; full_name: string }[];
+  /**
+   * P13-01 — every active person, offered ONLY while a collaboration list is
+   * selected. Empty is a legitimate value and means "no shared lists reachable
+   * from here", which is what a caller that has no use for the feature passes.
+   */
+  everyone?: { id: string; full_name: string }[];
+  /**
+   * P13-01 — the departments that are COLLABORATION SPACES. Empty before the
+   * migration is pasted, which is the truth then; see `loadSharedDepartmentIds`.
+   */
+  sharedDepartmentIds?: string[];
   /** The member's own department, read on the server. Never chosen here. */
   departmentId: string | null;
   /**
@@ -164,12 +178,56 @@ export function NewPersonalTaskDialog({
   const [startDate, setStartDate] = useState<string | null>(null);
   const [dueDate, setDueDate] = useState<string | null>(null);
 
+  /*
+   * P13-01 — WHO MAY BE TICKED DEPENDS ON WHICH LIST IS SELECTED.
+   *
+   * The list decides the department (`vizserve_pms_create_task`, §5 change 0),
+   * and the department decides who may be assigned. In a collaboration space
+   * that is every active person, which is the whole point of it; anywhere else
+   * it is the reader's own team, because the server still refuses an assignee
+   * from another one and offering them would be offering a guaranteed error.
+   *
+   * Derived from `listId` rather than held in state, so the two can never
+   * disagree — and `listId` already drives the Select, so nothing new is
+   * synchronised.
+   */
+  const inSharedList = sharedDepartmentIds.includes(
+    lists.find((list) => list.id === listId)?.department_id ?? "",
+  );
+  const candidates = inSharedList ? everyone : colleagues;
+
+  /*
+   * ⚠️ PRUNED ON EVERY RENDER, NOT ON THE LIST CHANGE. Someone ticks three
+   * people from another department while standing in the collaboration list,
+   * then switches to their own team's list — those ticks are now names the
+   * server will refuse, and an effect that cleared them would run a frame too
+   * late and briefly submit the stale set. Reading through `candidates` means
+   * there is no stale set to submit: the ticks that no longer apply simply stop
+   * counting, and `includesMe` below takes over as it does for an empty picker.
+   */
+  const candidateIds = new Set(candidates.map((person) => person.id));
+
   // Annotated, not inferred: a computed key narrows the literal to `__mine__`
   // alone, so looking a colleague's id up in it is an error rather than a miss.
   const assigneeItems: Record<string, string> = {
     [MINE]: "Myself",
-    ...Object.fromEntries(colleagues.map((person) => [person.id, person.full_name])),
+    ...Object.fromEntries(candidates.map((person) => [person.id, person.full_name])),
   };
+
+  /*
+   * P13-02 — the rows the picker draws.
+   *
+   * "Myself" is an OPTION here rather than a special case inside the component,
+   * because to the picker it is just another row that can be ticked — and
+   * keeping the sentinel in this file is what stops `MINE` leaking into a
+   * generic control that would then have to know what it means. `submit` below
+   * is still the only place that reads it.
+   *
+   * ⚠️ FIRST, ALWAYS, AND NOT SUBJECT TO THE SEARCH FILTER'S ORDERING. It is
+   * the default and the most-used row; sorting it in among the names would put
+   * "Myself" somewhere different depending on who else is in the list.
+   */
+  const pickerOptions = [{ id: MINE, full_name: "Myself" }, ...candidates];
 
   /**
    * "Ace Guevarra", "Ace Guevarra and Raiza Mondina", "you and 3 others".
@@ -192,10 +250,23 @@ export function NewPersonalTaskDialog({
   };
   const [pending, startTransition] = useTransition();
 
-  /** Offering the picker at all needs both a department and somebody in it. */
-  const canAssign = colleagues.length > 0 && departmentId !== null;
-  /** Everybody ticked who is not the reader, in the order the list offers them. */
-  const chosenColleagues = canAssign ? assignees.filter((id) => id !== MINE) : [];
+  /**
+   * Offering the picker at all needs both a department and somebody in it.
+   *
+   * P13-01 — `candidates`, not `colleagues`: in a collaboration list the set is
+   * the whole company, and a reader whose own team is just them would otherwise
+   * be refused a picker on the one list where everybody is assignable.
+   */
+  const canAssign = candidates.length > 0 && departmentId !== null;
+  /**
+   * Everybody ticked who is not the reader, in the order the list offers them.
+   *
+   * P13-01 — filtered through `candidateIds`, so a tick that no longer applies
+   * after a change of list cannot reach the server. See the note there.
+   */
+  const chosenColleagues = canAssign
+    ? assignees.filter((id) => id !== MINE && candidateIds.has(id))
+    : [];
   const includesMe = !canAssign || assignees.includes(MINE);
   /*
    * The whole branch, in one line: is there a second name on this.
@@ -346,46 +417,48 @@ export function NewPersonalTaskDialog({
           {canAssign ? (
             <div className="space-y-2">
               <Label htmlFor="assignee">Assign to</Label>
-              {/* `multiple`: the popup STAYS OPEN and each row toggles, which
+              {/* Multi-select: the popup STAYS OPEN and each row toggles, which
                   is what puts three people on a task in three clicks rather
                   than one create plus two visits to the task page.
 
                   Still no hidden input. The picked ids are read from state in
-                  `submit` and never travel through FormData — just as well,
-                  since a `multiple` Select would emit one input per value. */}
-              <Select
-                multiple
-                items={assigneeItems}
+                  `submit` and never travel through FormData.
+
+                  ⚠️ P13-02 — WAS A BASE UI `Select`, AND THE REASON IT IS NOT
+                  ANY MORE IS SIXTEEN NAMES. In a collaboration list this offers
+                  the whole company, and a listbox you can only scroll is not a
+                  way to find somebody. Amier: "in the company wide please
+                  include search so that if the person are not there i can just
+                  search it". `PeoplePicker` shows the search box from eight
+                  options up, so the department case is unchanged and the shared
+                  one gains it — without the picker knowing what a shared space
+                  is. See the note in that file for why a search box could not
+                  simply go inside `SelectContent`. */}
+              <PeoplePicker
+                triggerId="assignee"
+                options={pickerOptions}
                 value={assignees}
                 disabled={pending}
-                onValueChange={(value) => setAssignees(value.length === 0 ? [MINE] : value)}
-              >
-                <SelectTrigger id="assignee" className="w-full">
-                  {/* The trigger says WHO, not "3 selected" — a count is a
-                      number you have to reopen the menu to check. */}
-                  <SelectValue>
-                    {(value) => {
-                      const picked = value as string[];
-                      const ids = picked.filter((id) => id !== MINE);
-                      return ids.length === 0 ? "Myself" : nameList(ids, picked.includes(MINE));
-                    }}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={MINE}>Myself</SelectItem>
-                  {colleagues.map((person) => (
-                    <SelectItem key={person.id} value={person.id}>
-                      {person.full_name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                onChange={(value) => setAssignees(value.length === 0 ? [MINE] : value)}
+                searchLabel="Search people"
+                // The trigger says WHO, not "3 selected" — a count is a number
+                // you have to reopen the menu to check.
+                summary={(picked) => {
+                  const ids = picked.filter((id) => id !== MINE);
+                  return ids.length === 0 ? "Myself" : nameList(ids, picked.includes(MINE));
+                }}
+              />
               <p className="text-2xs text-muted-foreground">
                 {forSomebodyElse
                   ? "Everyone on it can open it, edit it, log time against it and move it. "
                   : "Pick as many people as are on it. "}
-                Only your own department — work belongs to the department doing it, or somebody ends
-                up holding a task their own Team Leader cannot see.
+                {/* P13-01 — the sentence has to follow the list, because the
+                    RULE follows the list. Leaving the department caveat up while
+                    the picker offers the whole company would be the screen
+                    telling somebody they cannot do what they are doing. */}
+                {inSharedList
+                  ? "Anyone in the company — this list is shared across every department."
+                  : "Only your own department — work belongs to the department doing it, or somebody ends up holding a task their own Team Leader cannot see."}
               </p>
               <FieldError messages={errors.assignee_id ?? errors.extra_assignee_ids} />
             </div>

@@ -1,6 +1,6 @@
 import { loadPersonalTaskOptions } from "@/lib/personal-task-server";
-import { loadActiveDepartments } from "@/lib/departments-server";
-import { requireAuthContext } from "@/lib/auth/authorization";
+import { loadActiveDepartments, loadCollaborators } from "@/lib/departments-server";
+import { isCollaborationSpace, requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 
@@ -84,7 +84,7 @@ export async function NewTaskButton({
   if (listId) {
     const { data: personalList } = await supabase
       .from("vizserve_pms_lists")
-      .select("id, name")
+      .select("id, name, department_id")
       .eq("id", listId)
       .eq("owner_id", context.userId)
       .maybeSingle();
@@ -133,12 +133,17 @@ export async function NewTaskButton({
       departmentId: myDepartment,
       lists: myLists,
       colleagues,
+      everyone,
     } = await loadPersonalTaskOptions(context.userId);
 
     const dialog = (
       <NewPersonalTaskDialog
         lists={myLists}
         colleagues={colleagues}
+        /* P13-01. Offered only while a collaboration list is selected -- the
+           dialog decides, because only the dialog knows which list is. */
+        everyone={everyone}
+        sharedDepartmentIds={context.sharedDepartmentIds}
         departmentId={myDepartment}
         selfId={context.userId}
         trigger={trigger}
@@ -153,7 +158,7 @@ export async function NewTaskButton({
 
   // RLS scopes all three: a TL sees the departments they lead, the people in
   // them, and those departments' lists. No `.in(...)` needed here.
-  const [departments, { data: people }, { data: lists }] = await Promise.all([
+  const [departments, { data: people }, { data: lists }, collaborators] = await Promise.all([
     loadActiveDepartments(),
     supabase
       .from("vizserve_pms_users")
@@ -171,14 +176,32 @@ export async function NewTaskButton({
       .is("owner_id", null)
       .eq("is_active", true)
       .order("name"),
+    /*
+     * P13-02 — the company roster, for when the department picker is set to a
+     * collaboration space.
+     *
+     * ⚠️ THE `people` READ ABOVE CANNOT SERVE THAT. Its comment says "RLS
+     * scopes all three: a TL sees the departments they lead" — which is correct
+     * and is exactly the problem: a lead of VizBytes filing into the shared
+     * space would be offered VizBytes, under a heading that says everybody.
+     */
+    loadCollaborators(),
   ]);
 
   // An admin sees every department; a TL should only be offered the ones they
   // actually lead, or the create call fails after they have filled in the form.
+  //
+  // ⚠️ P13-01 — PLUS THE COLLABORATION SPACES, FOR EVERYONE. A lead does not
+  // lead the shared space and nobody does, so the filter below drops it — which
+  // would leave the one department every person may file into missing from the
+  // only picker that offers a choice of department. `vizserve_pms_create_task`
+  // admits any active user there, so this offers exactly what it accepts.
   const allowed = roleAtLeast(context.role, "owner")
       ? departments
-      : departments.filter((department) =>
-          context.managedDepartmentIds.includes(department.id),
+      : departments.filter(
+          (department) =>
+            context.managedDepartmentIds.includes(department.id) ||
+            isCollaborationSpace(context, department.id),
         );
 
   if (allowed.length === 0) return null;
@@ -187,7 +210,11 @@ export async function NewTaskButton({
     <NewTaskDialog
       departments={allowed}
       people={people ?? []}
+      /* P13-02. Used by the dialog ONLY while the chosen department is a
+         collaboration space — see the note on `candidates` there. */
+      collaborators={collaborators}
       lists={lists ?? []}
+      sharedDepartmentIds={context.sharedDepartmentIds}
       defaultDepartmentId={allowed[0]!.id}
       defaultListId={listId}
       trigger={trigger}
