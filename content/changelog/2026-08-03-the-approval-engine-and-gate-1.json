@@ -1,0 +1,17 @@
+{
+  "date": "2026-08-03",
+  "kind": "added",
+  "area": "Approvals",
+  "title": "The approval engine, and Gate 1",
+  "description": "Built generically once, with the client request gate as its first consumer rather than its implementation — proven by routing a throwaway request type end to end without touching engine code.",
+  "items": [
+    "The team leader review screen, with a live capacity panel per assignee",
+    "Editing the date, title and description before approving, all audited with before and after",
+    "PIC and QA selectors, QA defaulting to the approving lead",
+    "Return and reject both refuse to submit without a reason, enforced in three places"
+  ],
+  "refs": [
+    "P2-00",
+    "P2-13"
+  ]
+}

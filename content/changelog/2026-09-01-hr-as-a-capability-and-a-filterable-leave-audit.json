@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-01",
+  "kind": "changed",
+  "area": "Leave",
+  "title": "HR as a capability, and a filterable leave audit",
+  "description": "HR stops being a role and becomes something a person can hold, so the leave audit is reachable by the people who need it without promoting them.",
+  "refs": [
+    "P7-52",
+    "P7-53"
+  ]
+}

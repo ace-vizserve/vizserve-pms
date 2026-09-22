@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-14",
+  "kind": "fixed",
+  "area": "Platform",
+  "title": "Error boundaries, and a faster task policy",
+  "description": "The app had no error boundaries at all — a single failing component took the whole page down. It now fails in one place instead. Separately, the task policy is evaluated once per statement rather than once per row.",
+  "refs": [
+    "P12-04",
+    "P12-14"
+  ]
+}

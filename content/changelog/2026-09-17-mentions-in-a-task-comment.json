@@ -1,0 +1,11 @@
+{
+  "date": "2026-09-17",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "@ mentions in a task comment",
+  "description": "A comment can name somebody and notify them. Replies and reactions are still deliberately absent — the thread stays flat.",
+  "refs": [
+    "P7-71"
+  ],
+  "pending": "The status doc records both migrations as written but not yet applied."
+}

@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-07",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The performance pass",
+  "description": "No business logic changed anywhere in this pass — only when queries were issued, and how often. Auth round trips per request went from two to none.",
+  "items": [
+    "Request waterfalls collapsed and duplicate reads memoised",
+    "27 Suspense boundaries added, so chrome paints before data arrives",
+    "Next.js 16.2.12 to 16.3.4"
+  ],
+  "refs": [
+    "P10"
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "date": "2026-09-21",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "A list can be read as a timeline",
+  "description": "Gantt joins List and Board as a third view of the same list, so a schedule is something you look at rather than something you reconstruct from due dates.",
+  "items": [
+    "Bars run from a task's start date to its due date, grouped by stage",
+    "Drag a bar to reschedule it, or drag an edge to change the span",
+    "Filter which stages appear, without touching the List or Board views",
+    "Tasks missing a start or due date are counted on screen rather than quietly dropped"
+  ]
+}

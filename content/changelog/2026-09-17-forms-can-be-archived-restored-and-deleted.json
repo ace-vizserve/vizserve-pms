@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-17",
+  "kind": "added",
+  "area": "Forms",
+  "title": "Forms can be archived, restored and deleted",
+  "description": "A form that is finished with no longer has to stay in the rail forever, and a draft stops appearing in the tasks tree.",
+  "refs": [
+    "P7-72"
+  ]
+}

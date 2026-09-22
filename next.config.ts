@@ -25,6 +25,24 @@ const nextConfig: NextConfig = {
   cacheComponents: true,
   partialPrefetching: true,
 
+  /**
+   * The changelog entries are one JSON file each under `content/changelog/`,
+   * read with `readdirSync` at module load (`lib/changelog.ts`).
+   *
+   * ⚠️ WITHOUT THIS THE PAGE WORKS LOCALLY AND THROWS ENOENT ON VERCEL. Output
+   * tracing decides which files ship with a function by statically analysing
+   * the code, and a directory read is exactly what it cannot see — there is no
+   * literal path to follow. Naming the glob here is the supported way to say
+   * "these files too".
+   *
+   * Kept even though the route is statically prerendered today, so the read
+   * happens at build: that is one `searchParams` away from changing, and the
+   * failure it would cause appears only in production.
+   */
+  outputFileTracingIncludes: {
+    "/changelog": ["./content/changelog/**/*.json"],
+  },
+
   experimental: {
     /**
      * P12-01 — THE CLIENT ROUTER CACHE, WHICH WAS OFF.

@@ -1,0 +1,17 @@
+{
+  "date": "2026-08-03",
+  "kind": "added",
+  "area": "Forms",
+  "title": "Client request forms, public and with no login",
+  "description": "A form can be built, published, and reached at a public URL by somebody who has never seen the app.",
+  "items": [
+    "Reference numbers that are gapless per form per year",
+    "Attachments, with size, MIME and magic-number checks",
+    "Rate limiting and a honeypot on the public endpoint",
+    "The SLA timer starts on submission"
+  ],
+  "refs": [
+    "P1-01",
+    "P1-16"
+  ]
+}

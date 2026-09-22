@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-05",
+  "kind": "added",
+  "area": "Leave",
+  "title": "Leave hand-over, and an approval chain with real stages",
+  "description": "Every leave request now needs two approvals — the department's team leader, then a manager. A lead approving leave no longer finishes it.",
+  "items": [
+    "Leave types HR marks as needing a reliever gain a third stage in front of those two",
+    "The requester names one to three colleagues and hands each of them specific tasks",
+    "A request can be withdrawn"
+  ],
+  "refs": [
+    "P9-01",
+    "P9-08"
+  ]
+}

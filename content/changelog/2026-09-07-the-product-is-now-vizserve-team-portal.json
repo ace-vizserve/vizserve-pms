@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-07",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The product is now VizServe Team Portal",
+  "description": "Eighteen user-visible strings were renamed. The codebase deliberately was not: the repo, the table prefixes and the app-access key all stay vizserve-pms, because changing that last one locks everybody out.",
+  "items": [
+    "An approval timeline that prints names instead of ids",
+    "Character counters on the fields that have a limit",
+    "Clock-in and clock-out reminders get their own separate lead times",
+    "A department's members may now edit its tasks — reversing P7-14, which is why every direct update is audited"
+  ],
+  "refs": [
+    "P11-01",
+    "P11-02",
+    "P11-03",
+    "P11-04"
+  ]
+}

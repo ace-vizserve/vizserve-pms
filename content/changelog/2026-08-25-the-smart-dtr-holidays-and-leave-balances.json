@@ -1,0 +1,22 @@
+{
+  "date": "2026-08-25",
+  "kind": "added",
+  "area": "DTR",
+  "title": "The smart DTR, holidays, and leave balances",
+  "description": "The daily time record learned the shape of a real working month — holidays, balances, and a leave audit somebody can hand over.",
+  "items": [
+    "A holiday calendar, which needed no migration at all",
+    "Leave balances and gender, so entitlements that differ can differ",
+    "The leave audit as a PDF",
+    "VAWC leave",
+    "The timesheet entry editor rebuilt"
+  ],
+  "refs": [
+    "P7-32",
+    "P7-35",
+    "P7-36",
+    "P7-40",
+    "P7-41",
+    "P7-44"
+  ]
+}

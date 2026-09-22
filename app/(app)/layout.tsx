@@ -129,7 +129,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 */}
                 <Link
                   aria-label="Changelog"
-                  className={cn(buttonVariants({ variant: "ghost", size: "icon-xs" }), "text-muted-foreground")}
+                  className={cn(buttonVariants({ variant: "outline", size: "icon-xs" }), "text-muted-foreground")}
                   href="/changelog"
                 >
                   <ScrollText aria-hidden />

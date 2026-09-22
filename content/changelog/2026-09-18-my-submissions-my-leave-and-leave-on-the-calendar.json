@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-18",
+  "kind": "added",
+  "area": "Leave",
+  "title": "My submissions, My leave, and leave on the calendar",
+  "description": "Two pages that answer 'what have I asked for, and where did it get to' without going through an approvals queue built for approvers. Requested leave now appears on the shared calendar rather than only once approved.",
+  "items": [
+    "An allocation on its own no longer shows a gendered leave type on My leave"
+  ],
+  "refs": [
+    "P7-45",
+    "P7-75"
+  ]
+}

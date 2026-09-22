@@ -1,0 +1,7 @@
+{
+  "date": "2026-08-04",
+  "kind": "added",
+  "area": "Platform",
+  "title": "The design system, and an app shell that holds together",
+  "description": "A Base UI primitive layer, the sidebar shell, four shared layout components the app never had, and dark mode finally reachable. Loading skeletons went onto the eleven routes that had none."
+}

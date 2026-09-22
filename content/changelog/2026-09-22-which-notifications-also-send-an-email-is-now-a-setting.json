@@ -1,0 +1,18 @@
+{
+  "date": "2026-09-22",
+  "kind": "added",
+  "area": "Platform",
+  "title": "Which notifications also send an email is now a setting",
+  "description": "Admin / Settings lists every kind of notification the portal sends with a switch beside it, so an owner can decide what is worth an inbox without waiting on a deploy. Everything still lands in the portal inbox either way — the switch only decides whether an email chases it.",
+  "items": [
+    "Each one says what it fires on and which address it would send from",
+    "Approvals, QA hand-offs, assignments, client decisions and mentions send email today; comments and ordinary status changes do not",
+    "Changes apply to notifications written from then on — turning one on does not email a backlog",
+    "Every change is recorded, so \"who turned client decisions off\" has an answer",
+    "Being mentioned now emails you when you post the comment, rather than whenever the next scheduled sweep happened to run"
+  ],
+  "refs": [
+    "P8-19",
+    "P8-20"
+  ]
+}

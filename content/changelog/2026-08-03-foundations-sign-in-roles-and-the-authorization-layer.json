@@ -1,0 +1,18 @@
+{
+  "date": "2026-08-03",
+  "kind": "added",
+  "area": "Platform",
+  "title": "Foundations — sign-in, roles, and the authorization layer",
+  "description": "Everything the rest of the app is allowed to assume: who you are, what you may see, and a record of what you did.",
+  "items": [
+    "Entra SSO and email/password, resolving to one profile",
+    "Four inclusive roles, with every scope decision in one authorization layer",
+    "Row-level security on every table, plus the grants migration that followed it",
+    "An audit log, notifications and an inbox, and transactional email",
+    "User management at /admin/users, and a scope test suite as the exit criterion"
+  ],
+  "refs": [
+    "P0-01",
+    "P0-12"
+  ]
+}

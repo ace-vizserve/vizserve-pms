@@ -1,0 +1,18 @@
+{
+  "date": "2026-08-18",
+  "kind": "changed",
+  "area": "Timesheet",
+  "title": "The timesheet is a week grid",
+  "description": "Rebuilt from a rail-and-day-list into the shape the team already knows: tasks down the side, days across the top, a duration typed into the cell, totals on both axes.",
+  "items": [
+    "A bare number in a cell means hours — 1.5 becomes 90 minutes, and re-renders as 1:30 so the reading is visible where it was typed",
+    "A cell holding more than one entry goes read-only and defers to its popover, because one number cannot honestly replace two notes",
+    "Monday start, with the week in the URL"
+  ],
+  "refs": [
+    "P6-01",
+    "P6-02",
+    "P6-03",
+    "D21"
+  ]
+}

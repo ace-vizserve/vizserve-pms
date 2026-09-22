@@ -1,0 +1,10 @@
+{
+  "date": "2026-07-30",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The brand palette, and a shell that works on a phone",
+  "description": "The brand blue became the primary colour rather than the template's near-black, and the shell became responsive.",
+  "refs": [
+    "D11"
+  ]
+}

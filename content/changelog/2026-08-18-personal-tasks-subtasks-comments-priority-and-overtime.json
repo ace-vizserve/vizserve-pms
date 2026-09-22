@@ -1,0 +1,24 @@
+{
+  "date": "2026-08-18",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Personal tasks, subtasks, comments, priority and overtime",
+  "description": "Work that belongs to a person rather than to a client request. The timesheet approval built on this became the third consumer of the Phase 2 approval engine, with no change to the engine.",
+  "items": [
+    "A member can create work for themselves",
+    "Subtasks, one level deep, enforced by a trigger",
+    "Task comments — flat, author-only edit",
+    "Task priority, and several assignees on one task",
+    "Overtime as an internal request type, capped at 960 minutes",
+    "Leave types became an admin-editable table"
+  ],
+  "refs": [
+    "P7-01",
+    "P7-05",
+    "P7-07",
+    "P7-09",
+    "P7-11",
+    "P7-12",
+    "P7-13"
+  ]
+}

@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-17",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Custom fields on a list, and a tree you can reorder",
+  "description": "A list can carry its own fields — text, number, date, dropdown, labels, checkbox — editable straight from the task list. Lists and folders can be dragged into order.",
+  "items": [
+    "An empty field is clickable rather than dead space",
+    "The button and the filter label both read \"Custom fields\"",
+    "A drag never refiles: a list moves within its folder only"
+  ],
+  "refs": [
+    "P7-73",
+    "P7-74"
+  ],
+  "pending": "The status doc records the custom-fields migration as written but not yet applied, and not verified in a browser."
+}

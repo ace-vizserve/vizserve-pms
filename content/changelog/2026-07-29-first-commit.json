@@ -1,0 +1,7 @@
+{
+  "date": "2026-07-29",
+  "kind": "added",
+  "area": "Platform",
+  "title": "First commit",
+  "description": "The scaffold: Next.js, React, TypeScript, Tailwind and Supabase, with the planning docs that still set the phase order."
+}

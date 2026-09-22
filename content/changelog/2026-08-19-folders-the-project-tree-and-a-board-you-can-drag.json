@@ -1,0 +1,19 @@
+{
+  "date": "2026-08-19",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Folders, the project tree, and a board you can drag",
+  "description": "The sidebar became the shape people already know: department, then folder, then list. Folders are a real table, because the grouping people wanted — \"VizServe Projects\" — is not a department.",
+  "items": [
+    "Deleting an internal task, with the damage named before it happens",
+    "Dragging a card on the board, and a subtask that stays with its parent",
+    "Department visibility and collapsible sidebar groups",
+    "Every native control moved onto the design system, fixing 19 broken dropdowns"
+  ],
+  "refs": [
+    "P7-17",
+    "P7-18",
+    "P7-19",
+    "P7-20"
+  ]
+}

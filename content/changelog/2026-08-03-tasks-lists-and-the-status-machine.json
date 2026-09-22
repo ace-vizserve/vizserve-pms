@@ -1,0 +1,16 @@
+{
+  "date": "2026-08-03",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Tasks, lists, and the status machine",
+  "description": "The eight stages, and a state machine that is enforced in the database rather than in the screen. status is not an updatable column — only the transition function moves a task.",
+  "items": [
+    "The task list with URL filters, and the board as its companion",
+    "The task detail page, which doubles as the QA screen",
+    "The resolution gate: a task cannot be closed without saying how"
+  ],
+  "refs": [
+    "P3-01",
+    "P3-15"
+  ]
+}

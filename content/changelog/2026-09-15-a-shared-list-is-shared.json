@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-15",
+  "kind": "fixed",
+  "area": "Tasks",
+  "title": "A shared list is shared",
+  "description": "A list shared with somebody now behaves as shared for them, rather than only saying so.",
+  "refs": [
+    "P12-16"
+  ]
+}

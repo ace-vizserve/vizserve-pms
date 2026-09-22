@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-18",
+  "kind": "changed",
+  "area": "Timesheet",
+  "title": "The rest of the week can be filled in early",
+  "description": "The week grid no longer refuses days that have not happened yet, so planned work can be encoded before the week runs.",
+  "refs": [
+    "P7-76"
+  ]
+}

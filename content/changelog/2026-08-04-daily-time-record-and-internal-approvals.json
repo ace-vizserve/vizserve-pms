@@ -1,0 +1,16 @@
+{
+  "date": "2026-08-04",
+  "kind": "added",
+  "area": "DTR",
+  "title": "Daily time record and internal approvals",
+  "description": "Clocking in and out, and the four internal request types, routed through the same approval engine Gate 1 uses — the engine was not touched to do it.",
+  "items": [
+    "Earliest-in and latest-out, so a second punch cannot shorten a day",
+    "A correction is the only path allowed to overwrite an earliest-in",
+    "Payroll export as CSV"
+  ],
+  "refs": [
+    "P5-01",
+    "P5-12"
+  ]
+}

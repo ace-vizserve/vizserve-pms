@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-16",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Subtasks, checklists, copies and comment images",
+  "description": "The task page stopped being a single flat record. The largest run of task work so far.",
+  "items": [
+    "Anybody who can see a task can break it into subtasks",
+    "A task can carry a checklist",
+    "A task can be copied into another list; a subtask lands where its parent lives",
+    "Images can be pasted into a comment and opened full size",
+    "The task page shows the last three entries and hands the full thread to a sheet",
+    "The task list stops hiding its controls, and a board card drags by the card"
+  ],
+  "refs": [
+    "P7-67",
+    "P7-68",
+    "P7-69",
+    "P11-08",
+    "P12-18",
+    "P12-19"
+  ]
+}

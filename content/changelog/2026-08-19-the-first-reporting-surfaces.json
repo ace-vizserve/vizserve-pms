@@ -1,0 +1,10 @@
+{
+  "date": "2026-08-19",
+  "kind": "added",
+  "area": "Reporting",
+  "title": "The first reporting surfaces",
+  "description": "Tasks by stage, requests by status, what is overdue, and hours per department — the narrow reading of the reporting backlog, not the whole of it.",
+  "refs": [
+    "P6-05"
+  ]
+}

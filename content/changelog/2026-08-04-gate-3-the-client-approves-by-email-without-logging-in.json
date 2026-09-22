@@ -1,0 +1,16 @@
+{
+  "date": "2026-08-04",
+  "kind": "added",
+  "area": "Approvals",
+  "title": "Gate 3 — the client approves by email, without logging in",
+  "description": "A tokenised link, stored only as a hash and bound to one email address. Two reminders go out before anything expires.",
+  "items": [
+    "The public approval page shows the original specs alongside the output",
+    "An hourly job completes unanswered requests as COMPLETED (no response) — never as COMPLETED",
+    "Feedback is requested on every completion, including the automatic ones"
+  ],
+  "refs": [
+    "P4-01",
+    "P4-13"
+  ]
+}
