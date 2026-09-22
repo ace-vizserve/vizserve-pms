@@ -76,3 +76,44 @@ export const loadAppSettings = cache(async (): Promise<AppSettings> => {
     fellBack: Boolean(error) || !data,
   };
 });
+
+/**
+ * P8-19 — the per-type email switches, for the settings screen.
+ *
+ * One row per notification type. Read through the CALLER'S client rather than
+ * the service role: the SELECT policy on this table is "any active user", which
+ * is deliberate — `docs/12` wants the inbox to be able to say which events also
+ * email — and reading it as the user keeps the screen honest about that.
+ *
+ * ⚠️ IT REPORTS FAILURE INSTEAD OF FALLING BACK, which is the opposite of
+ * `loadAppSettings` above and the difference matters. That reader degrades to a
+ * default because its callers only NUDGE. This one feeds a form of switches: a
+ * failed read rendered as a default would draw eight switches in the OFF
+ * position, and an owner who then pressed Save would turn company-wide email
+ * off for every gate in the app while being told it worked. So the page gets
+ * `null` and says it could not read them.
+ */
+export type NotificationEmailSetting = {
+  type: string;
+  sendEmail: boolean;
+  updatedAt: string;
+};
+
+export async function loadNotificationEmailSettings(): Promise<NotificationEmailSetting[] | null> {
+  const supabase = await createClient();
+  const { data, error } = await supabase
+    .from("vizserve_pms_notification_type_settings")
+    .select("type, send_email, updated_at");
+
+  // An empty table is a failure too, not an empty list. The migrations seed one
+  // row per enum value, so zero rows means the read was refused or the seed
+  // never ran — and rendering "no notification types" would invite somebody to
+  // conclude the feature does not exist.
+  if (error || !data || data.length === 0) return null;
+
+  return data.map((row) => ({
+    type: row.type,
+    sendEmail: row.send_email,
+    updatedAt: row.updated_at,
+  }));
+}

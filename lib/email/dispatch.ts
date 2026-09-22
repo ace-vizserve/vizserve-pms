@@ -1,11 +1,11 @@
 import "server-only";
 
+import { NOTIFICATION_EMAIL_SENDER } from "@/lib/notifications";
 import { richTextToPlainText } from "@/lib/rich-text";
 
 import type { VizservePmsNotificationType } from "@/lib/database.types";
 import { createAdminClient } from "@/utils/supabase/admin";
 
-import type { EmailSender } from "./config";
 import type { EmailBody } from "./layout";
 import { sendEmail } from "./send";
 
@@ -44,7 +44,6 @@ const PRESENTATION: Record<
   {
     subject: (title: string) => string;
     action: string;
-    sender: EmailSender;
     /**
      * P8-14 — the chip under the heading, where the TYPE alone settles what it
      * should say.
@@ -62,23 +61,20 @@ const PRESENTATION: Record<
     status?: NonNullable<EmailBody["status"]>;
   }
 > = {
-  // P8-15 — `approvals@` for anything sitting on one of the three gates, and
-  // that is read from the lifecycle rather than from the word in the type name:
-  // Gate 1 is `pending_approval`, Gate 2 is `qa_requested`, Gate 3 comes back as
-  // `client_decision`. A colleague who mutes `notifications@` because the
-  // comment traffic is noisy must not thereby mute the queue they are the
-  // bottleneck on.
+  // P8-15's sender choice is NOT here any more — it is
+  // `NOTIFICATION_EMAIL_SENDER` in `lib/notifications.ts`, read at the send
+  // below. It moved so P8-19's settings screen, which is a client component and
+  // cannot import this `server-only` file, can tell an owner which mailbox a
+  // switch is about without a second copy of the map.
   pending_approval: {
     subject: (title) => `Approval needed — ${title}`,
     action: "Review the request",
     status: { label: "Awaiting your approval", tone: "warning" },
-    sender: "approvals",
   },
   assigned: {
     subject: (title) => `Assigned to you — ${title}`,
     action: "Open the task",
     status: { label: "Assigned to you", tone: "brand" },
-    sender: "notifications",
   },
   // Gate 2. An approval in everything but the name — see CLAUDE.md's three-gate
   // spine.
@@ -86,18 +82,15 @@ const PRESENTATION: Record<
     subject: (title) => `Ready for your QA — ${title}`,
     action: "Open QA",
     status: { label: "Ready for QA", tone: "warning" },
-    sender: "approvals",
   },
   // Gate 3's answer coming back. The staff-side half of `approvals@`.
   client_decision: {
     subject: (title) => `Client decision — ${title}`,
     action: "Open the task",
-    sender: "approvals",
   },
   status_changed: {
     subject: (title) => title,
     action: "Open in VizServe Team Portal",
-    sender: "notifications",
   },
   // Ships email-off (P5-05 seeds send_email = false) — the requester is staff
   // with an inbox, and docs/12 reserves email for people who have no other
@@ -106,9 +99,6 @@ const PRESENTATION: Record<
   internal_decision: {
     subject: (title) => `Your request — ${title}`,
     action: "Open the request",
-    // Phase 5's HR approvals reuse the same engine, so they reuse the same
-    // mailbox. This is the outcome of an approval, not ambient traffic.
-    sender: "approvals",
   },
   // Also email-off (P7-08 seeds send_email = false). Discussion on a shared task
   // is not an interruption, and a mailbox copy of every comment is the fastest
@@ -123,24 +113,37 @@ const PRESENTATION: Record<
    * they are waiting on you specifically, which is the same test docs/12 §3
    * applies to an assignment or a QA hand-off.
    *
-   * `notifications@`, not `approvals@`: nothing is being decided.
+   * It sends from `notifications@`, not `approvals@` — nothing is being
+   * decided. That choice lives in `NOTIFICATION_EMAIL_SENDER`.
    */
   mentioned: {
     subject: (title) => `You were mentioned — ${title}`,
     action: "Open the task",
-    sender: "notifications",
     status: { label: "You were mentioned", tone: "brand" },
   },
   commented: {
     subject: (title) => title,
     action: "Open the task",
-    sender: "notifications",
   },
 };
 
 export type DispatchSummary = {
   claimed: number;
   sent: number;
+  /**
+   * ⚠️ ITS OWN COUNTER, NOT PART OF `sent`, AND THIS IS THE SECOND TIME THE
+   * DISTINCTION HAS HAD TO BE LEARNED. `SendOutcome` keeps `dry-run` as a
+   * separate member precisely because counting it as success is how the Gate 3
+   * flow reported clean for months while delivering nothing — and this summary
+   * then folded the two back together anyway, which made the cron route's
+   * reply say `sent: 1` for an email that was never handed to Resend.
+   *
+   * That reply is the only view anybody has of this queue from outside the
+   * database. A drain returning `dryRun: 1` says `RESEND_API_KEY` is missing in
+   * that environment, in one number, instead of sending somebody to look for a
+   * message Resend never received.
+   */
+  dryRun: number;
   skipped: number;
   failed: number;
 };
@@ -154,7 +157,7 @@ export type DispatchSummary = {
  */
 export async function dispatchPendingEmails(limit = 50): Promise<DispatchSummary> {
   const supabase = createAdminClient();
-  const summary: DispatchSummary = { claimed: 0, sent: 0, skipped: 0, failed: 0 };
+  const summary: DispatchSummary = { claimed: 0, sent: 0, dryRun: 0, skipped: 0, failed: 0 };
 
   const { data: pending, error } = await supabase
     .from("vizserve_pms_notifications")
@@ -199,6 +202,10 @@ export async function dispatchPendingEmails(limit = 50): Promise<DispatchSummary
     }
 
     const presentation = PRESENTATION[notification.type];
+    // P8-19. Two Records over the same generated union, so they go missing
+    // together — checked together for the same reason, because a `From` of
+    // `undefined` is a failed send rather than a skipped one.
+    const sender = NOTIFICATION_EMAIL_SENDER[notification.type];
 
     /*
      * ⚠️ A TYPE NOBODY MAPPED. Unreachable while the union in
@@ -210,7 +217,7 @@ export async function dispatchPendingEmails(limit = 50): Promise<DispatchSummary
      * Skipped rather than sent blank, and the claim is left unwritten so the
      * email is still owed once somebody maps it.
      */
-    if (!presentation) {
+    if (!presentation || !sender) {
       console.error(`[email:dispatch] no presentation for type "${notification.type}"`);
       summary.skipped += 1;
       continue;
@@ -246,13 +253,19 @@ export async function dispatchPendingEmails(limit = 50): Promise<DispatchSummary
 
     const outcome = await sendEmail({
       to: recipient.email,
-      sender: presentation.sender,
+      sender,
       subject: presentation.subject(notification.title),
       body,
     });
 
-    if (outcome.status === "sent" || outcome.status === "dry-run") {
+    if (outcome.status === "sent") {
       summary.sent += 1;
+    } else if (outcome.status === "dry-run") {
+      // Claimed and counted, but nothing left the building. Kept claimed rather
+      // than retried: without a key it would be a dry run every time, and an
+      // outbox that never drains in development is an outbox that grows for
+      // months and then floods the day a key is added.
+      summary.dryRun += 1;
     } else if (outcome.status === "skipped") {
       // Reserved domain — seeded accounts. Stays claimed so it is not retried
       // hourly forever.

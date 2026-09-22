@@ -373,6 +373,23 @@ export async function addTaskComment(taskId: string, input: unknown): Promise<Ac
 
   if (error) return { ok: false, error: readableError(error) };
 
+  /*
+   * P8-20 — THE MENTION EMAIL, AND WHY IT WAS NOT ARRIVING.
+   *
+   * The insert above fires `vizserve_pms_notify_task_comment`, which writes a
+   * `mentioned` row inside Postgres. P8-18 made that row owed an email. Nothing
+   * here drained the outbox, so the email waited for the quarter-hourly cron
+   * in `vercel.json` — and where that cron is not firing, it waited forever. Every
+   * other notifying action in this file has called this since P0-11; the
+   * comment path was simply never given one, because when it was written the
+   * only notification it produced was `commented`, which does not email.
+   *
+   * Fire-and-forget, exactly as everywhere else: the cron remains the reliable
+   * path, and a person posting a comment must not wait on Resend to see it
+   * appear.
+   */
+  dispatchPendingEmailsInBackground();
+
   refresh(taskId);
   return { ok: true, data: undefined };
 }
@@ -427,6 +444,15 @@ export async function editTaskComment(commentId: string, input: unknown): Promis
    * see markup differences that are not image differences.
    */
   await sweepCommentImages({ taskId, previousBody: before?.body, nextBody: body });
+
+  /*
+   * P8-20 — AN EDIT NOTIFIES TOO, AND THAT IS NOT AN OVERSIGHT. The trigger
+   * fires `after insert or update of body` for mentions specifically, because
+   * "sorry — @Amier, see above" typed thirty seconds later is the ordinary way
+   * people use this. Only ids absent from the old body are notified, so the
+   * outbox is empty here unless the edit genuinely named somebody new.
+   */
+  dispatchPendingEmailsInBackground();
 
   refresh(taskId);
   return { ok: true, data: undefined };

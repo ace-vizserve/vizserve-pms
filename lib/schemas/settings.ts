@@ -61,3 +61,40 @@ export const appSettingsSchema = z.object({
 });
 
 export type AppSettingsInput = z.infer<typeof appSettingsSchema>;
+
+/**
+ * P8-19 CONTRACT — the per-type email switches.
+ *
+ * `vizserve_pms_notification_type_settings` is one row per notification type
+ * with one boolean on it, and until now the only way to change one was a SQL
+ * console. The table has been ready for this since P0-10 — "whether a type
+ * emails is a per-type SETTING from day one, not a hardcoded `if`" — and the
+ * RLS has said `for all to authenticated using (vizserve_pms_is_admin())` for
+ * just as long. Nothing was ever pointed at it.
+ *
+ * ⚠️ AN ARRAY, NOT A PARTIAL RECORD, AND THE WHOLE SET EVERY TIME. The form
+ * renders every type it was given and posts every type back, so a save is a
+ * statement about all of them rather than a patch. A partial payload would make
+ * "this type is absent" mean both "leave it alone" and "the enum grew since
+ * this page was rendered", and those need different answers.
+ *
+ * The type is NOT validated against a local enum list here. `NOTIFICATION_TYPES`
+ * in `lib/notifications.ts` is a hand-maintained mirror of a Postgres enum and
+ * it has already been four days out of date once (`mentioned`, P8-18). The
+ * action checks each key against the rows it actually read from the database,
+ * which cannot drift, and anything unrecognised is dropped rather than refused
+ * — a stale tab must not be able to fail a save for the seven types it does
+ * still know about.
+ */
+export const notificationEmailSettingsSchema = z.object({
+  types: z
+    .array(
+      z.object({
+        type: z.string().min(1),
+        send_email: z.boolean(),
+      }),
+    )
+    .min(1, "Nothing to save."),
+});
+
+export type NotificationEmailSettingsInput = z.infer<typeof notificationEmailSettingsSchema>;

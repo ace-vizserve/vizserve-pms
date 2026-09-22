@@ -3,7 +3,8 @@
 import { revalidatePath } from "next/cache";
 
 import { requireRole } from "@/lib/auth/authorization";
-import { appSettingsSchema } from "@/lib/schemas/settings";
+import type { VizservePmsNotificationType } from "@/lib/database.types";
+import { appSettingsSchema, notificationEmailSettingsSchema } from "@/lib/schemas/settings";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { flattenIssues } from "@/lib/action-result";
 
@@ -125,6 +126,131 @@ export async function updateAppSettings(input: unknown): Promise<ActionResult> {
   // it is the one screen where a stale figure would say "you are 30m short"
   // against a threshold the database no longer applies.
   revalidatePath("/timesheet");
+
+  return { ok: true, data: undefined };
+}
+
+/**
+ * P8-19 — flipping a notification type's email switch.
+ *
+ * ⚠️ WHAT THIS DOES NOT DO, AND THE SENTENCE THE FORM HAS TO CARRY BECAUSE OF
+ * IT: turning a type on does not email the backlog. `vizserve_pms_notifications`
+ * denormalises `send_email` at write time — "flipping the switch later must not
+ * rewrite what already happened" (P0-10) — so this decides what future
+ * notifications are owed an email and nothing else. The rows already sitting in
+ * people's inboxes stay as they were written.
+ *
+ * Service-role client with `requireRole("owner")` above it, exactly as
+ * `updateAppSettings` does. The table's own RLS says the same thing
+ * (`vizserve_pms_is_admin()` on `for all`), and the service role bypasses it, so
+ * the check here is the one actually doing the work.
+ */
+const NOTIFICATION_SETTINGS_AUDIT_ID = "00000000-0000-0000-0000-000000000000";
+
+export async function updateNotificationEmailSettings(input: unknown): Promise<ActionResult> {
+  const context = await requireRole("owner");
+
+  const parsed = notificationEmailSettingsSchema.safeParse(input);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      error: "Could not read those settings.",
+      fieldErrors: flattenIssues(parsed.error),
+    };
+  }
+
+  const admin = createAdminClient();
+
+  /*
+   * READ FIRST, AND THE READ IS ALSO THE ALLOWLIST. Every `type` from the form
+   * is checked against the rows that are actually in the table, so a
+   * hand-crafted payload cannot insert a type the enum does not have and a
+   * stale tab cannot resurrect one that was removed. It is what lets the schema
+   * take `type` as a plain string — the database, not a hand-maintained mirror
+   * of the enum, decides what is real.
+   */
+  const { data: before, error: readError } = await admin
+    .from("vizserve_pms_notification_type_settings")
+    .select("type, send_email");
+
+  if (readError) return { ok: false, error: readError.message };
+  if (!before || before.length === 0) {
+    return { ok: false, error: "The notification types are not set up in this database." };
+  }
+
+  const current = new Map(before.map((row) => [row.type as string, row.send_email]));
+
+  const changes = parsed.data.types.filter(
+    (row) => current.has(row.type) && current.get(row.type) !== row.send_email,
+  );
+
+  // Nothing moved. Not an error, and not worth an audit row either — a log full
+  // of no-op saves is a log nobody reads (see `updateAppSettings` above).
+  if (changes.length === 0) return { ok: true, data: undefined };
+
+  /*
+   * ⚠️ ONE UPDATE PER TYPE, AND `.select()` ON EACH. There is no single
+   * statement for "set these eight booleans to these eight values", and an
+   * upsert would need `description` — which this form does not own and would
+   * therefore blank. `.select()` because a policy-refused or key-missed UPDATE
+   * is success with zero rows, not an error.
+   *
+   * A failure part-way through leaves the earlier types changed. That is
+   * reported rather than hidden: the audit row records what DID land, the toast
+   * names the type that did not, and the page revalidates so the switches
+   * redraw from the database instead of from what the form hoped.
+   */
+  const applied: { type: string; send_email: boolean }[] = [];
+  let failure: string | null = null;
+
+  for (const change of changes) {
+    const { data, error } = await admin
+      .from("vizserve_pms_notification_type_settings")
+      .update({ send_email: change.send_email, updated_at: new Date().toISOString() })
+      /*
+       * Cast because the schema carries `type` as a plain string and the column
+       * is the Postgres enum. It is not a hole: `changes` was filtered against
+       * `current`, which came out of this very table a few lines up, so every
+       * value reaching here is one the enum already had.
+       */
+      .eq("type", change.type as VizservePmsNotificationType)
+      .select("type");
+
+    if (error) {
+      failure = error.message;
+      break;
+    }
+
+    if (!data || data.length === 0) {
+      failure = `"${change.type}" is no longer a notification type.`;
+      break;
+    }
+
+    applied.push(change);
+  }
+
+  if (applied.length > 0) {
+    /*
+     * ONE ROW FOR THE SAVE, NOT ONE PER TYPE. `entity_id` is `uuid NOT NULL`
+     * and a notification type's key is an enum label, so there is no uuid to
+     * give it — the nil UUID stands for the singleton set, exactly as
+     * `SETTINGS_AUDIT_ID` does above. The before/after payloads carry the type
+     * names, which is where the answer to "who turned client approvals off"
+     * actually lives.
+     */
+    await admin.rpc("vizserve_pms_write_audit_log", {
+      p_entity_type: "notification_type_settings",
+      p_entity_id: NOTIFICATION_SETTINGS_AUDIT_ID,
+      p_action: "updated",
+      p_actor_id: context.userId,
+      p_before: Object.fromEntries(applied.map((row) => [row.type, current.get(row.type)])),
+      p_after: Object.fromEntries(applied.map((row) => [row.type, row.send_email])),
+    });
+  }
+
+  revalidatePath("/admin/settings");
+
+  if (failure) return { ok: false, error: failure };
 
   return { ok: true, data: undefined };
 }
