@@ -307,9 +307,23 @@ export function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
                     className="relative rounded-lg border bg-card grade-surface p-5 shadow-raised-lg"
                     key={`${entry.date}-${entry.title}`}
                   >
+                    {/*
+                      ⚠️ `--border-strong` WAS INVISIBLE HERE. #B9C1CE on the
+                      #F5F7FA ground is barely over 1.3:1 — the dot blended
+                      into the page and the spine looked like a plain rule.
+                      The faint end of the scale is legal for decoration, but
+                      "legal" is not "legible", and a marker nobody can see is
+                      not decoration, it is a missing marker.
+
+                      `--primary` instead: 6.54:1 on white, and #8FA3E0 on the
+                      dark ground, so it reads in both themes. The 3px
+                      `border-background` ring is what punches it out of the
+                      rule it sits on, so the dot reads as a node rather than a
+                      bead threaded on a line.
+                    */}
                     <span
                       aria-hidden
-                      className="absolute top-6 -left-[30px] size-2.5 rounded-full border-2 border-background bg-border-strong md:-left-[38px]"
+                      className="absolute top-[1.4rem] -left-[33px] size-3 rounded-full border-[3px] border-background bg-primary md:-left-[41px]"
                     />
 
                     {/* Kind, area, date — one row, where there is width for
