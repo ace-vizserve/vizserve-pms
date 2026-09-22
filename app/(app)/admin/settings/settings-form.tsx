@@ -66,7 +66,7 @@ export function SettingsForm({
 
   return (
     <form
-      className="max-w-md space-y-4 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+      className="w-full space-y-4 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
       action={submit}
     >
       <div className="space-y-2">

@@ -63,18 +63,18 @@ export default async function SettingsPage() {
         recorded.
       </p>
 
-      <div className="flex w-full flex-1 flex-wrap gap-4">
+      <div className="grid w-full grid-cols-1 items-start gap-4 lg:grid-cols-3">
         <SettingsForm graceMinutes={settings.graceMinutes} breakMinutes={settings.breakMinutes} />
 
         {/* ⚠️ NOT AN EMPTY STATE — a failed read. `loadNotificationEmailSettings`
           returns null rather than falling back precisely so this branch exists:
           eight switches drawn in the OFF position from a default would let an
           owner "save" company-wide email off for every gate in the app. */}
-        <div className="w-full">
+        <div className="lg:col-span-2">
           {orderedNotificationEmails ? (
             <NotificationEmailForm rows={orderedNotificationEmails} />
           ) : (
-            <p className="max-w-2xl rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
+            <p className="rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
               Could not read the email notification settings. The switches are hidden rather than shown at a guess,
               because saving a guess would turn email off for everything. Reload, and if it persists the notification
               types are missing from this database.
