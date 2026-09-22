@@ -55,7 +55,7 @@ export default async function SettingsPage() {
     : null;
 
   return (
-    <PageShell className="lg:flex-row flex-wrap">
+    <PageShell>
       {/* No <h1> — the breadcrumb says "Admin / Settings". */}
       <p className="text-xs text-muted-foreground">
         Company-wide rules. These take effect immediately, for everybody. The timekeeping ones are read on every punch
@@ -63,22 +63,24 @@ export default async function SettingsPage() {
         recorded.
       </p>
 
-      <SettingsForm graceMinutes={settings.graceMinutes} breakMinutes={settings.breakMinutes} />
+      <div className="flex w-full flex-1 flex-wrap gap-4">
+        <SettingsForm graceMinutes={settings.graceMinutes} breakMinutes={settings.breakMinutes} />
 
-      {/* ⚠️ NOT AN EMPTY STATE — a failed read. `loadNotificationEmailSettings`
+        {/* ⚠️ NOT AN EMPTY STATE — a failed read. `loadNotificationEmailSettings`
           returns null rather than falling back precisely so this branch exists:
           eight switches drawn in the OFF position from a default would let an
           owner "save" company-wide email off for every gate in the app. */}
-      <div className="w-full">
-        {orderedNotificationEmails ? (
-          <NotificationEmailForm rows={orderedNotificationEmails} />
-        ) : (
-          <p className="max-w-2xl rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
-            Could not read the email notification settings. The switches are hidden rather than shown at a guess,
-            because saving a guess would turn email off for everything. Reload, and if it persists the notification
-            types are missing from this database.
-          </p>
-        )}
+        <div className="w-full">
+          {orderedNotificationEmails ? (
+            <NotificationEmailForm rows={orderedNotificationEmails} />
+          ) : (
+            <p className="max-w-2xl rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
+              Could not read the email notification settings. The switches are hidden rather than shown at a guess,
+              because saving a guess would turn email off for everything. Reload, and if it persists the notification
+              types are missing from this database.
+            </p>
+          )}
+        </div>
       </div>
     </PageShell>
   );
