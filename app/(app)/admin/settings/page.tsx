@@ -1,9 +1,9 @@
 import type { Metadata } from "next";
 
+import { PageShell } from "@/components/page-shell";
 import { requireRole } from "@/lib/auth/authorization";
 import { NOTIFICATION_TYPES } from "@/lib/notifications";
 import { loadAppSettings, loadNotificationEmailSettings } from "@/lib/settings-server";
-import { PageShell } from "@/components/page-shell";
 
 import { NotificationEmailForm } from "./notification-email-form";
 import { SettingsForm } from "./settings-form";
@@ -33,10 +33,7 @@ export const metadata: Metadata = { title: "Settings" };
 export default async function SettingsPage() {
   await requireRole("owner");
 
-  const [settings, notificationEmails] = await Promise.all([
-    loadAppSettings(),
-    loadNotificationEmailSettings(),
-  ]);
+  const [settings, notificationEmails] = await Promise.all([loadAppSettings(), loadNotificationEmailSettings()]);
 
   /*
    * P8-19 — ORDERED HERE, IN THE UI, RATHER THAN BY THE QUERY. The useful order
@@ -53,18 +50,17 @@ export default async function SettingsPage() {
     ? [...notificationEmails].sort((a, b) => {
         const left = (NOTIFICATION_TYPES as readonly string[]).indexOf(a.type);
         const right = (NOTIFICATION_TYPES as readonly string[]).indexOf(b.type);
-        return (left === -1 ? Number.MAX_SAFE_INTEGER : left) -
-          (right === -1 ? Number.MAX_SAFE_INTEGER : right);
+        return (left === -1 ? Number.MAX_SAFE_INTEGER : left) - (right === -1 ? Number.MAX_SAFE_INTEGER : right);
       })
     : null;
 
   return (
-    <PageShell>
+    <PageShell className="lg:flex-row flex-wrap">
       {/* No <h1> — the breadcrumb says "Admin / Settings". */}
       <p className="text-xs text-muted-foreground">
-        Company-wide rules. These take effect immediately, for everybody. The timekeeping ones
-        are read on every punch rather than copied onto records — so changing one changes how
-        existing days are described, not what was recorded.
+        Company-wide rules. These take effect immediately, for everybody. The timekeeping ones are read on every punch
+        rather than copied onto records — so changing one changes how existing days are described, not what was
+        recorded.
       </p>
 
       <SettingsForm graceMinutes={settings.graceMinutes} breakMinutes={settings.breakMinutes} />
@@ -73,15 +69,17 @@ export default async function SettingsPage() {
           returns null rather than falling back precisely so this branch exists:
           eight switches drawn in the OFF position from a default would let an
           owner "save" company-wide email off for every gate in the app. */}
-      {orderedNotificationEmails ? (
-        <NotificationEmailForm rows={orderedNotificationEmails} />
-      ) : (
-        <p className="max-w-2xl rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
-          Could not read the email notification settings. The switches are hidden rather than
-          shown at a guess, because saving a guess would turn email off for everything. Reload,
-          and if it persists the notification types are missing from this database.
-        </p>
-      )}
+      <div className="w-full">
+        {orderedNotificationEmails ? (
+          <NotificationEmailForm rows={orderedNotificationEmails} />
+        ) : (
+          <p className="max-w-2xl rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
+            Could not read the email notification settings. The switches are hidden rather than shown at a guess,
+            because saving a guess would turn email off for everything. Reload, and if it persists the notification
+            types are missing from this database.
+          </p>
+        )}
+      </div>
     </PageShell>
   );
 }

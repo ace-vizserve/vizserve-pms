@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
 import { Mail, MailX } from "lucide-react";
+import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -62,9 +62,7 @@ function fallbackLabel(type: string): string {
 
 export function NotificationEmailForm({ rows }: { rows: NotificationEmailRow[] }) {
   const [saved, setSaved] = useState(rows);
-  const [values, setValues] = useState(() =>
-    Object.fromEntries(rows.map((row) => [row.type, row.sendEmail])),
-  );
+  const [values, setValues] = useState(() => Object.fromEntries(rows.map((row) => [row.type, row.sendEmail])));
   const [pending, startTransition] = useTransition();
 
   // Compared against what the server last confirmed rather than against the
@@ -96,16 +94,13 @@ export function NotificationEmailForm({ rows }: { rows: NotificationEmailRow[] }
   }
 
   return (
-    <form
-      className="max-w-2xl space-y-4 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
-      action={submit}
-    >
+    <form className="w-full space-y-4 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg" action={submit}>
       <div className="space-y-1">
         <h2 className="text-lg font-medium">Email notifications</h2>
         <p className="text-xs text-muted-foreground">
-          Every event below always lands in the recipient&rsquo;s portal inbox. These switches
-          decide only whether an email chases it, and they take effect on notifications written
-          from now on — turning one on does not email anything already sitting in an inbox.
+          Every event below always lands in the recipient&rsquo;s portal inbox. These switches decide only whether an
+          email chases it, and they take effect on notifications written from now on — turning one on does not email
+          anything already sitting in an inbox.
         </p>
       </div>
 
@@ -158,9 +153,7 @@ export function NotificationEmailForm({ rows }: { rows: NotificationEmailRow[] }
               <Switch
                 id={id}
                 checked={on}
-                onCheckedChange={(checked) =>
-                  setValues((previous) => ({ ...previous, [row.type]: checked }))
-                }
+                onCheckedChange={(checked) => setValues((previous) => ({ ...previous, [row.type]: checked }))}
               />
             </li>
           );
