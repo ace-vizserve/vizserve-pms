@@ -32,5 +32,18 @@
       "c:\\Users\\Ace\\.claude\\projects\\c--Users-Ace-OneDrive---HFSE-International-School-Desktop-vizserve-pms\\memory",
       "C:\\Users\\Ace\\OneDrive - HFSE International School\\Desktop\\vizserve-pms\\app\\(builder)\\forms\\[id]"
     ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node scripts/changelog-gap.mjs --hook"
+          }
+        ]
+      }
+    ]
   }
 }

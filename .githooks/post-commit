@@ -1,0 +1,19 @@
+#!/bin/sh
+# Prints a reminder when a user-facing commit lands that /changelog does not
+# cover. Advisory only — the commit is already made by the time post-commit
+# runs, so this cannot and must not block anything.
+#
+# ⚠️ IT DOES NOT WRITE THE CHANGELOG. `lib/changelog.ts` is hand-maintained on
+# purpose; the entry is prose for a colleague, not a commit subject. The
+# detector only names the commits nothing covers — see scripts/changelog-gap.mjs
+# and .claude/skills/changelog/.
+#
+# `--quiet` so a clean tree stays silent: a hook that speaks on every commit
+# gets ignored by the third day.
+#
+# Silent and non-fatal when node is missing (a bare checkout, a CI image with
+# no toolchain) — the same posture as the rest of .githooks.
+if command -v node >/dev/null 2>&1; then
+  node scripts/changelog-gap.mjs --quiet 2>/dev/null
+fi
+exit 0

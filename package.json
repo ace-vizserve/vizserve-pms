@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "check:metadata": "node scripts/check-user-metadata.mjs",
     "check:select-items": "node scripts/check-select-items.mjs",
+    "changelog:check": "node scripts/changelog-gap.mjs",
     "seed": "node scripts/seed.mjs",
     "seed:team": "node scripts/seed-team.mjs",
     "diagnose:login": "node scripts/diagnose-login.mjs",
