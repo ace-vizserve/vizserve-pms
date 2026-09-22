@@ -4,6 +4,12 @@ import * as React from "react";
 import { AlertTriangle, ScrollText, Search, X } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
+import {
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "@/components/ui/accordion";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group";
@@ -43,6 +49,14 @@ import {
  *     three things now sit on one row inside the card, where there is width for
  *     them, and the rail's job (saying when) belongs to the month heading and
  *     the dot.
+ *   · **The cards collapse.** Thirty entries fully expanded is a page nobody
+ *     scrolls to the bottom of, and the detail under a heading is only ever
+ *     wanted one entry at a time. The heading row — kind, area, date, title —
+ *     is what stays; the description, the items, the caveat and the backlog
+ *     refs are the panel. Adapted from a shadcn/Radix accordion block, on the
+ *     Base UI primitive this app actually has (`components/ui/accordion.tsx`),
+ *     and WITHOUT the pattern's version numbers: nothing here tags a build, and
+ *     the changelog carries dates and backlog IDs by rule.
  *
  * ⚠️ CLIENT-SIDE FILTERING ON PURPOSE, AND THE ALTERNATIVE WAS WORSE. The usual
  * shape for filters in this app is `searchParams` — shareable, server-rendered,
@@ -84,6 +98,34 @@ const KIND_VARIANT: Record<ChangelogKind, "accent" | "secondary" | "outline" | "
   removed: "destructive",
 };
 
+/**
+ * The accordion's value for an entry.
+ *
+ * Date plus title, which is what the list was already keyed on — there is no id
+ * in the schema and adding one would put a field in 30 JSON files that only the
+ * UI reads. Two entries on one date is normal here; two with the same date AND
+ * the same title would be one entry written twice.
+ */
+const entryKey = (entry: ChangelogEntry) => `${entry.date}-${entry.title}`;
+
+/**
+ * WHICH PANELS START OPEN, and it depends on whether anybody is searching.
+ *
+ * ⚠️ A SEARCH MUST OPEN ITS MATCHES. The filter reads the title, the
+ * description, the items AND the refs — three of those four now live inside a
+ * collapsed panel. Searching "P8-19", getting one card back and finding nothing
+ * on it that says P8-19 is a search that looks broken. So a query opens
+ * everything it matched, and the words that caused the match are on screen.
+ *
+ * Unsearched, exactly one: the newest entry. All-closed is a page that opens as
+ * a wall of headings and makes the reader click to learn anything at all, and
+ * all-open is the layout this replaced.
+ */
+function initialOpen(entries: ChangelogEntry[], needle: string) {
+  if (needle) return entries.map(entryKey);
+  return entries.length > 0 ? [entryKey(entries[0]!)] : [];
+}
+
 export function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
   const [query, setQuery] = React.useState("");
   const [kind, setKind] = React.useState<KindFilter>("all");
@@ -122,9 +164,10 @@ export function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
     [years],
   );
 
-  const filtered = React.useMemo(() => {
-    const needle = query.trim().toLowerCase();
+  // Hoisted out of the memo below, because the open-panel rule reads it too.
+  const needle = query.trim().toLowerCase();
 
+  const filtered = React.useMemo(() => {
     return entries.filter((entry) => {
       if (kind !== "all" && entry.kind !== kind) return false;
       if (area !== "all" && entry.area !== area) return false;
@@ -138,7 +181,34 @@ export function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
         .toLowerCase()
         .includes(needle);
     });
-  }, [entries, query, kind, area, year]);
+  }, [entries, needle, kind, area, year]);
+
+  /*
+   * THE OPEN PANELS, RESET WHENEVER THE RESULT SET CHANGES.
+   *
+   * ⚠️ ADJUSTED DURING RENDER, NOT IN AN EFFECT. This is React's documented
+   * "derive state from props" pattern and it is the right one here: an effect
+   * would paint the old disclosure state for a frame first, so every keystroke
+   * in the search box would show the matches closed and then snap them open.
+   * The `if` runs before anything is committed, so there is no flash.
+   *
+   * The signature is every filter, not just the query. Narrowing to one area and
+   * leaving a panel open that belongs to an entry no longer on screen is how the
+   * page ends up entirely collapsed with no explanation.
+   *
+   * ONE ARRAY ACROSS EVERY MONTH. Each month renders its own accordion — they
+   * have to, the spine is per-month — and each is handed the whole array and
+   * hands the whole array back with one value toggled. A per-month array would
+   * close September when somebody opened something in August.
+   */
+  const signature = `${needle}|${kind}|${area}|${year}`;
+  const [open, setOpen] = React.useState<string[]>(() => initialOpen(filtered, needle));
+  const [lastSignature, setLastSignature] = React.useState(signature);
+
+  if (signature !== lastSignature) {
+    setLastSignature(signature);
+    setOpen(initialOpen(filtered, needle));
+  }
 
   /*
    * Grouped by calendar month, in the order the entries already have. A `Map`
@@ -301,11 +371,32 @@ export function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
                 faint end of the scale is reserved for (§1.1). The kind is on
                 the badge, in words.
               */}
-              <div className="ml-[5px] space-y-4 border-l border-border pl-6 md:pl-8">
+              {/*
+                ⚠️ ONE ACCORDION PER MONTH, NOT ONE PER PAGE. The spine is this
+                element's own left border, so a single accordion spanning every
+                month would have to hand that border to a wrapper per month —
+                and the arrow keys would then walk from September's last entry
+                into August's first, across a heading that says the month
+                changed.
+
+                `multiple`, because the entries are independent: reading what
+                shipped on the 21st is not a reason to close the 22nd.
+              */}
+              <Accordion
+                className="ml-[5px] space-y-4 border-l border-border pl-6 md:pl-8"
+                multiple
+                onValueChange={(value) => setOpen(value)}
+                value={open}
+              >
                 {monthEntries.map((entry) => (
-                  <article
-                    className="relative rounded-lg border bg-card grade-surface p-5 shadow-raised-lg"
-                    key={`${entry.date}-${entry.title}`}
+                  <AccordionItem
+                    /* `last:border-b` puts back what the primitive's
+                       `last:border-b-0` takes away. That default is right for a
+                       plain divided list and wrong for a card, which needs all
+                       four sides. */
+                    className="relative rounded-lg border last:border-b bg-card grade-surface shadow-raised-lg"
+                    key={entryKey(entry)}
+                    value={entryKey(entry)}
                   >
                     {/*
                       ⚠️ `--border-strong` WAS INVISIBLE HERE. #B9C1CE on the
@@ -326,34 +417,55 @@ export function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
                       className="absolute top-[1.4rem] -left-[33px] size-3 rounded-full border-[3px] border-background bg-primary md:-left-[41px]"
                     />
 
-                    {/* Kind, area, date — one row, where there is width for
-                        them. `flex-wrap` so a phone gets two lines rather than
-                        a squeeze. */}
-                    <div className="mb-2.5 flex flex-wrap items-center gap-2">
-                      <Badge variant={KIND_VARIANT[entry.kind]}>
-                        {CHANGELOG_KIND_LABELS[entry.kind]}
-                      </Badge>
-                      <Badge variant="secondary">{entry.area}</Badge>
-                      {/* `formatDate` rather than a local format: it parses the
-                          bare date as midday UTC, which is what stops "21 Sep"
-                          rendering as the 20th for anybody west of UTC. */}
-                      <time
-                        className="text-2xs font-medium tabular-nums text-muted-foreground"
-                        dateTime={entry.date}
-                      >
-                        {formatDate(entry.date)}
-                      </time>
-                    </div>
+                    {/*
+                      THE HEADER IS THE WHOLE SUMMARY, and that is what makes
+                      collapsing legitimate. Kind, area, date and title all stay
+                      on screen closed — the panel holds the detail, never the
+                      identity of the entry. A disclosure whose closed state
+                      names only a version number makes the reader open all
+                      thirty to find one.
 
-                    {/* The measure lives on the prose, not on the card — the
-                        card spans the column and the paragraph stops at 72ch,
-                        which is where prose stops being comfortable to read. */}
-                    <h3 className="mb-1.5 max-w-[68ch] text-lg leading-tight font-semibold tracking-[-0.018em]">
-                      {entry.title}
-                    </h3>
-                    <p className="max-w-[72ch] text-sm text-foreground-muted">
-                      {entry.description}
-                    </p>
+                      `rounded-lg` matches the card, so the focus outline traces
+                      the card's own corners rather than a rectangle inside
+                      them; the bottom pair is dropped while the panel is open
+                      so the hover wash does not round off mid-card.
+                    */}
+                    <AccordionTrigger className="w-full rounded-lg px-5 py-4 transition-colors hover:bg-muted/40 data-panel-open:rounded-b-none">
+                      <div className="min-w-0 flex-1">
+                        {/* Kind, area, date — one row, where there is width for
+                            them. `flex-wrap` so a phone gets two lines rather
+                            than a squeeze. */}
+                        <div className="mb-2 flex flex-wrap items-center gap-2">
+                          <Badge variant={KIND_VARIANT[entry.kind]}>
+                            {CHANGELOG_KIND_LABELS[entry.kind]}
+                          </Badge>
+                          <Badge variant="secondary">{entry.area}</Badge>
+                          {/* `formatDate` rather than a local format: it parses
+                              the bare date as midday UTC, which is what stops
+                              "21 Sep" rendering as the 20th for anybody west of
+                              UTC. */}
+                          <time
+                            className="text-2xs font-medium tabular-nums text-muted-foreground"
+                            dateTime={entry.date}
+                          >
+                            {formatDate(entry.date)}
+                          </time>
+                        </div>
+
+                        {/* The measure lives on the prose, not on the card —
+                            the card spans the column and the paragraph stops at
+                            72ch, which is where prose stops being comfortable
+                            to read. */}
+                        <h3 className="max-w-[68ch] text-lg leading-tight font-semibold tracking-[-0.018em]">
+                          {entry.title}
+                        </h3>
+                      </div>
+                    </AccordionTrigger>
+
+                    <AccordionContent className="px-5 pb-5">
+                      <p className="max-w-[72ch] text-sm text-foreground-muted">
+                        {entry.description}
+                      </p>
 
                     {entry.items && entry.items.length > 0 ? (
                       <ul className="mt-3 ml-4 max-w-[72ch] space-y-1.5 text-sm text-muted-foreground">
@@ -400,9 +512,10 @@ export function ChangelogList({ entries }: { entries: ChangelogEntry[] }) {
                         ))}
                       </p>
                     ) : null}
-                  </article>
+                    </AccordionContent>
+                  </AccordionItem>
                 ))}
-              </div>
+              </Accordion>
             </section>
           ))}
         </div>
