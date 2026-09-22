@@ -166,10 +166,17 @@ export function NewPersonalTaskDialog({
    * department, so pre-selecting one blindly would turn a mistyped URL into a
    * dialog that cannot be submitted at all. Falling back to "No list" keeps a
    * bad parameter to a missing convenience rather than a broken form.
+   *
+   * P13-04 — AND WHEN IT DOES CHECK OUT, THE LIST IS NOT A QUESTION. Amier:
+   * open a project, press New task, and the task belongs to that project. The
+   * picker below used to render anyway, pre-selected, asking a question whose
+   * answer was already on screen. Now it is the answer and the control is gone;
+   * the hidden input still posts it. The check above is exactly what keeps that
+   * safe, which is why the fallback stays.
    */
-  const [listId, setListId] = useState(
-    defaultListId && lists.some((list) => list.id === defaultListId) ? defaultListId : NO_LIST,
-  );
+  const lockedListId =
+    defaultListId && lists.some((list) => list.id === defaultListId) ? defaultListId : null;
+  const [listId, setListId] = useState(lockedListId ?? NO_LIST);
   /*
    * P7-56 — the notes are a rich-text editor now, which has no form value of
    * its own, so it joins the controlled-state-plus-hidden-input arrangement
@@ -492,16 +499,37 @@ export function NewPersonalTaskDialog({
           <div className="grid gap-4 sm:grid-cols-2">
             <EstimateField value={estimate} onChange={setEstimate} disabled={pending} />
 
-            {/* Only when there is somewhere to file it. A lone "None" option is
-                a control that does nothing. */}
-            {lists.length > 0 ? (
+            {/* ⚠️ OUTSIDE THE CONDITIONAL, because the value is posted whether
+                or not the picker renders — and with the list locked it is the
+                ONLY thing carrying it. `type="hidden"` is `display: none`, so
+                it takes no grid cell here. */}
+            <input type="hidden" name="list_id" value={listId === NO_LIST ? "" : listId} />
+
+            {/* ⚠️ SHOWN, NOT ASKED. Where the task lands is the one thing the
+                picker was actually telling anybody, and it is worth keeping —
+                a dialog that files work somewhere it never names is how a task
+                ends up in a list nobody was looking at. A `<p>` and not a
+                `<Label>`: a label with no control to point at is a label that
+                lies to a screen reader.
+
+                The FieldError comes with it, because a refusal about a field
+                with no control still has to be read. */}
+            {lockedListId !== null ? (
+              <div className="space-y-1">
+                <p className="text-sm font-medium">List</p>
+                <p className="text-sm text-muted-foreground">
+                  {lists.find((list) => list.id === lockedListId)?.name}
+                </p>
+                <FieldError messages={errors.list_id} />
+              </div>
+            ) : null}
+
+            {/* Only when there is somewhere to file it and something to decide.
+                A lone "None" option is a control that does nothing; so is a
+                picker showing the list you are already standing in (P13-04). */}
+            {lockedListId === null && lists.length > 0 ? (
               <div className="space-y-2">
                 <Label htmlFor="list_id">List</Label>
-                <input
-                  type="hidden"
-                  name="list_id"
-                  value={listId === NO_LIST ? "" : listId}
-                />
                 <Select
                   items={listItems}
                   value={listId}

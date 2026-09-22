@@ -189,7 +189,37 @@ function TaskForm({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  const [departmentId, setDepartmentId] = useState(defaultDepartmentId);
+  /*
+   * P13-04 — STANDING IN A LIST, THE LIST IS NOT A QUESTION.
+   *
+   * Amier: open a project, press New task, and the task belongs to that
+   * project. The picker below used to render anyway, pre-selected, which asked
+   * a question whose answer was already on screen — and made "file it somewhere
+   * else" the same two clicks as "file it where I am".
+   *
+   * ⚠️ THE LIST'S OWN DEPARTMENT COMES WITH IT. `defaultDepartmentId` is
+   * `allowed[0]` — the first department the reader leads, alphabetically, which
+   * has nothing to do with the list they are looking at. Seeding the department
+   * from the list is what makes the lock legal: `departmentLists` is filtered
+   * by department, so locking to a list from elsewhere would post an assignee
+   * and a list the server refuses each other.
+   *
+   * ⚠️ AND ONLY IF THAT DEPARTMENT IS ONE THEY MAY FILE INTO. `lists` is every
+   * active shared list RLS will show, which is wider than `departments` — a
+   * lead can READ a list they cannot CREATE in. Locking there would be a form
+   * that cannot be submitted, so an out-of-reach list falls back to the picker
+   * exactly as an unknown id always did.
+   */
+  const lockedList = useMemo(() => {
+    if (!defaultListId) return null;
+    const list = lists.find((candidate) => candidate.id === defaultListId);
+    if (!list) return null;
+    return departments.some((department) => department.id === list.department_id) ? list : null;
+  }, [defaultListId, lists, departments]);
+
+  const [departmentId, setDepartmentId] = useState(
+    lockedList?.department_id ?? defaultDepartmentId,
+  );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [assigneeId, setAssigneeId] = useState<string>(NONE);
@@ -203,9 +233,14 @@ function TaskForm({
    * department they lead — so an id that is not in `lists` falls back to NONE
    * rather than pre-selecting something the server would refuse.
    */
-  const [listId, setListId] = useState<string>(
-    defaultListId && lists.some((list) => list.id === defaultListId) ? defaultListId : NONE,
-  );
+  const [listId, setListId] = useState<string>(lockedList?.id ?? NONE);
+  /*
+   * The lock is STATE, not the derived `lockedList`, because changing the
+   * department un-does it: the list belongs to the department they walked away
+   * from, and keeping it hidden would post it invisibly. Move department and
+   * the picker comes back, at "No list", which is what the picker always did.
+   */
+  const [listLocked, setListLocked] = useState(lockedList !== null);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
   const [formError, setFormError] = useState<string | null>(null);
 
@@ -279,6 +314,9 @@ function TaskForm({
     setAssigneeId(NONE);
     setQaAssigneeId(NONE);
     setListId(NONE);
+    // The list they were standing in is in the department they just left, so
+    // the lock goes with it and the picker returns.
+    setListLocked(false);
   }
 
   function submit() {
@@ -460,7 +498,18 @@ function TaskForm({
           </div>
         </div>
 
-        {departmentLists.length > 0 ? (
+        {/* P13-04 — SHOWN, NOT ASKED, while the list is the one they opened.
+            `listId` still carries it into `submit()`; what is gone is the
+            question, not the answer. A `<p>` and not a `<Label>`: a label with
+            no control to point at is a label that lies to a screen reader. */}
+        {listLocked && lockedList ? (
+          <div className="space-y-1">
+            <p className="text-sm font-medium">List</p>
+            <p className="text-sm text-muted-foreground">{lockedList.name}</p>
+          </div>
+        ) : null}
+
+        {!listLocked && departmentLists.length > 0 ? (
           <div className="space-y-2">
             <Label htmlFor="list">List</Label>
             <Select

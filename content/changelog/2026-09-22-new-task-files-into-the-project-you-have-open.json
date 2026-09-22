@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-22",
+  "kind": "changed",
+  "area": "Tasks",
+  "title": "New task files into the project you have open",
+  "description": "Opening a project and pressing New task used to ask which project to file into, with the one you were already reading pre-filled. The question is gone: the task lands in the project you are standing in, and the dialog says which one that is.",
+  "items": [
+    "Where the task will be filed is still named in the dialog — it is a line to read now, not a dropdown to answer",
+    "For a team leader the department follows the project too, instead of starting on the first department they lead",
+    "Changing the department brings the picker back, since the project belonged to the department just left",
+    "The picker still appears where there is no project to follow: My tasks, the QA queue, and the quick add on the home page"
+  ],
+  "refs": [
+    "P13-04"
+  ]
+}
