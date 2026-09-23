@@ -5,7 +5,7 @@ import { headers } from "next/headers";
 import { createClient } from "@/utils/supabase/server";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { sendRequestSubmittedEmail } from "@/lib/email/client-emails";
-import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
+import { dispatchPendingEmails } from "@/lib/email/dispatch";
 import { loadRequestDetails } from "@/lib/email/request-details";
 import { generateStatusToken, hashStatusToken, statusUrl } from "@/lib/request-status";
 import { uploadPendingAttachment, type UploadResult } from "@/lib/attachments-server";
@@ -232,11 +232,16 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
 
   const trackingUrl = await issueTrackingLink(result.data.request_id, result.data.reference_no);
 
-  await acknowledge(result.data.request_id, result.data.reference_no, trackingUrl);
-
-  // The Team Leader's "Approval needed" row was queued inside the RPC. Drain it
-  // now, as the Gate 1 decision does, rather than leaving it for the cron.
-  dispatchPendingEmailsInBackground();
+  // Both emails at once, both awaited: the client's acknowledgement, and the
+  // Team Leader's "Approval needed" row the RPC just queued. Awaited so Vercel
+  // cannot freeze the function before Resend is called; a failed drain is
+  // logged and retried by the cron, never a failed submission.
+  await Promise.all([
+    acknowledge(result.data.request_id, result.data.reference_no, trackingUrl),
+    dispatchPendingEmails().catch((error) => {
+      console.error("[submit] Team Leader email failed:", error);
+    }),
+  ]);
 
   // Handed back so the browser can show it on the confirmation screen — the
   // raw token exists only here and is never stored, so this is the one moment
