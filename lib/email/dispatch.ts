@@ -71,6 +71,12 @@ const PRESENTATION: Record<
     action: "Review the request",
     status: { label: "Awaiting your approval", tone: "warning" },
   },
+  // P7-77. Gate 1's outcome, to the department's Team Leaders.
+  request_approved: {
+    subject: (title) => title,
+    action: "Open the task",
+    status: { label: "Approved", tone: "success" },
+  },
   assigned: {
     subject: (title) => `Assigned to you — ${title}`,
     action: "Open the task",

@@ -20,6 +20,7 @@ import type { EmailSender } from "@/lib/email/config";
 
 export const NOTIFICATION_TYPES = [
   "pending_approval",
+  "request_approved",
   "assigned",
   "qa_requested",
   "client_decision",
@@ -36,6 +37,7 @@ export const NOTIFICATION_TYPES = [
  */
 export const NOTIFICATION_TYPE_LABELS: Record<VizservePmsNotificationType, string> = {
   pending_approval: "Needs your approval",
+  request_approved: "Approved requests",
   assigned: "Assigned to you",
   qa_requested: "Your QA",
   client_decision: "Client decision",
@@ -61,6 +63,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<VizservePmsNotificationType, strin
  */
 export const NOTIFICATION_TYPE_HINTS: Record<VizservePmsNotificationType, string> = {
   pending_approval: "A request has reached a gate you are the approver on.",
+  request_approved: "A client request in a department you lead was approved. Team Leaders only.",
   assigned: "A task became yours as PIC.",
   qa_requested: "A task you are QA on reached FOR_QA.",
   client_decision: "A client approved, rejected, or ran out of time to answer.",
@@ -93,6 +96,7 @@ export const NOTIFICATION_TYPE_HINTS: Record<VizservePmsNotificationType, string
  */
 export const NOTIFICATION_EMAIL_SENDER: Record<VizservePmsNotificationType, EmailSender> = {
   pending_approval: "approvals",
+  request_approved: "approvals",
   qa_requested: "approvals",
   client_decision: "approvals",
   internal_decision: "approvals",

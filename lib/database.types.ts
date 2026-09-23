@@ -32,7 +32,9 @@ export type VizservePmsNotificationType =
   // union, so a value the union does not know about is a value nothing forces
   // anybody to map -- and an unmapped type that is later switched on sends a
   // blank email, or throws inside the outbox drain.
-  | "mentioned";
+  | "mentioned"
+  // P7-77, hand-added for the same reason.
+  | "request_approved";
 
 export type VizservePmsFieldType =
   | "text"
