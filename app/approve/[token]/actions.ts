@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 
 import { issueFeedbackToken, sendFeedbackRequestEmailFor } from "@/lib/client-approval-server";
+import { dispatchPendingEmails } from "@/lib/email/dispatch";
 import {
   clientDecisionSchema,
   feedbackSchema,
@@ -89,19 +90,14 @@ export async function submitClientDecision(token: string, input: unknown): Promi
   // confirmation screen cannot render the inline rating form without it. A
   // token we did not wait for is a token we do not have.
   //
-  // The EMAIL is NOT, and that is the load-bearing half. The decision is
-  // ALREADY COMMITTED in Postgres by this point, and awaiting an outbound
-  // request to a mail provider would put a recorded approval at the mercy of
-  // how long that provider takes to answer. `try/catch` does not cover this: a
-  // serverless timeout is not an exception, it kills the invocation, and the
-  // browser's `await submitClientDecision(...)` would reject with no
-  // confirmation at all for a decision that stands. So it is fired and
-  // forgotten, with the rejection swallowed — the email is the fallback for a
-  // client who closes the tab, not something this response depends on.
+  // The EMAIL is started here and awaited with the team's emails below (P7-79)
+  // — fire-and-forget was cut off by Vercel after the response. Its failure is
+  // swallowed, so it can never turn a recorded decision into an error.
   //
   // Every path below therefore still ends in `ok: true`; a missing token just
   // means the confirmation card falls back to plain text.
   let feedbackToken: string | undefined;
+  let feedbackEmail: Promise<unknown> = Promise.resolve();
 
   if (result.decision === "APPROVED") {
     try {
@@ -112,7 +108,7 @@ export async function submitClientDecision(token: string, input: unknown): Promi
       } else if (feedback.issued) {
         feedbackToken = feedback.token;
 
-        void sendFeedbackRequestEmailFor(feedback.email, { autoCompleted: false }).catch(
+        feedbackEmail = sendFeedbackRequestEmailFor(feedback.email, { autoCompleted: false }).catch(
           (cause: unknown) => {
             console.error(`[gate3] feedback email failed: ${String(cause)}`);
           },
@@ -122,6 +118,23 @@ export async function submitClientDecision(token: string, input: unknown): Promi
       console.error(`[gate3] feedback request threw: ${String(cause)}`);
     }
   }
+
+  /*
+   * P7-79 — THE EMAILS, SENT TOGETHER AND AWAITED.
+   *
+   * The team's "Client approved / asked for changes" rows were queued inside
+   * the RPC and nothing here drained them, so they waited for the cron. And the
+   * feedback email above was fire-and-forget, which Vercel cuts off once the
+   * response is sent. Both now go out in parallel before the response; each
+   * swallows its own failure, so a slow mail provider can never turn a recorded
+   * decision into an error.
+   */
+  await Promise.all([
+    feedbackEmail,
+    dispatchPendingEmails().catch((cause: unknown) => {
+      console.error(`[gate3] team email failed: ${String(cause)}`);
+    }),
+  ]);
 
   return { ok: true, decision: result.decision!, status: result.status!, feedbackToken };
 }
