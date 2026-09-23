@@ -330,3 +330,95 @@ export async function loadFeedback(supabase: Supabase, period: Period): Promise<
       .map((row) => ({ rating: row.rating, comment: row.comment!.trim(), at: row.created_at })),
   };
 }
+
+// ---------------------------------------------------------------------------
+// P7-80 — ratings by person, and by priority
+// ---------------------------------------------------------------------------
+
+/** A task priority, or null for a task nobody ranked. */
+export type RatingPriority = "URGENT" | "HIGH" | "NORMAL" | "LOW" | null;
+
+export type RatingBucket = { priority: RatingPriority; average: number; count: number };
+
+export type PersonRating = {
+  id: string;
+  name: string;
+  average: number;
+  count: number;
+  /** Highest priority first, unranked last; only buckets that hold a rating. */
+  byPriority: RatingBucket[];
+};
+
+export type RatingsByPerson = {
+  /** The department-wide report: every rating in the period, split by priority. */
+  byPriority: RatingBucket[];
+  people: PersonRating[];
+};
+
+const PRIORITY_ORDER: RatingPriority[] = ["URGENT", "HIGH", "NORMAL", "LOW", null];
+
+function buckets(rows: { priority: RatingPriority; rating: number }[]): RatingBucket[] {
+  return PRIORITY_ORDER.flatMap((priority) => {
+    const ratings = rows.filter((row) => row.priority === priority).map((row) => row.rating);
+    return ratings.length === 0 ? [] : [{ priority, average: mean(ratings)!, count: ratings.length }];
+  });
+}
+
+/**
+ * A client's rating is the DEPARTMENT's, and it is also the rating of the
+ * people who did the work — the PIC and the QA reviewer (Ace, 23 Sep 2026).
+ * One rating on a task counts once for each of them; a PIC who is also the QA
+ * counts it once.
+ *
+ * Split by the TASK'S priority, so a lead can see whether someone holds up on
+ * urgent work as well as on routine work. Same RLS scoping as `loadFeedback`:
+ * feedback is readable by the leads of the task's department.
+ */
+export async function loadRatingsByPerson(supabase: Supabase, period: Period): Promise<RatingsByPerson> {
+  const [{ data }, { data: people }] = await Promise.all([
+    supabase
+      .from("vizserve_pms_feedback")
+      .select("rating, vizserve_pms_tasks!inner(priority, assignee_id, qa_assignee_id)")
+      .gte("created_at", period.from)
+      .lt("created_at", exclusiveEnd(period.to)),
+    supabase.from("vizserve_pms_users").select("id, full_name"),
+  ]);
+
+  type Row = {
+    rating: number;
+    vizserve_pms_tasks: {
+      priority: RatingPriority;
+      assignee_id: string | null;
+      qa_assignee_id: string | null;
+    } | null;
+  };
+
+  const rows = ((data ?? []) as unknown as Row[]).flatMap((row) =>
+    row.vizserve_pms_tasks ? [{ rating: row.rating, ...row.vizserve_pms_tasks }] : [],
+  );
+
+  const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
+  const perPerson = new Map<string, { priority: RatingPriority; rating: number }[]>();
+
+  for (const row of rows) {
+    for (const personId of new Set([row.assignee_id, row.qa_assignee_id])) {
+      if (!personId) continue;
+      const list = perPerson.get(personId) ?? [];
+      list.push({ priority: row.priority, rating: row.rating });
+      perPerson.set(personId, list);
+    }
+  }
+
+  return {
+    byPriority: buckets(rows),
+    people: [...perPerson.entries()]
+      .map(([id, list]) => ({
+        id,
+        name: nameOf.get(id) ?? "Someone no longer active",
+        average: mean(list.map((row) => row.rating))!,
+        count: list.length,
+        byPriority: buckets(list),
+      }))
+      .sort((a, b) => b.average - a.average || b.count - a.count || a.name.localeCompare(b.name)),
+  };
+}

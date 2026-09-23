@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
-import { ChartPie, CheckSquare, ListChecks, TriangleAlert } from "lucide-react";
+import { ChartPie, CheckSquare, FileBarChart, ListChecks, TriangleAlert } from "lucide-react";
+import Link from "next/link";
 
 import { departmentPickerScope, requireRole } from "@/lib/auth/authorization";
 import {
@@ -12,6 +13,7 @@ import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { StatTile } from "@/components/stat-tile";
+import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/utils/supabase/server";
 
@@ -422,6 +424,14 @@ export default async function AnalyticsPage({
 
   return (
     <PageShell>
+      {/* /reports has no nav row of its own; this is the way in. Same gate
+          (team_leader), so nobody is shown a link they cannot open. */}
+      <div className="flex justify-end">
+        <Link href="/reports" className={buttonVariants({ variant: "outline", size: "sm" })}>
+          <FileBarChart aria-hidden />
+          Reports
+        </Link>
+      </div>
       <AnalyticsFilters departments={departments} allLabel={allLabel} from={from} to={to} />
 
       {error ? (

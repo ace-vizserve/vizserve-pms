@@ -23,8 +23,10 @@ import {
   loadClientEngagement,
   loadFeedback,
   loadNegotiation,
+  loadRatingsByPerson,
   loadTurnaround,
 } from "@/lib/reports-server";
+import { RatingsCard } from "./ratings-card";
 import {
   EngagementCard,
   FeedbackCard,
@@ -117,6 +119,8 @@ export default async function ReportsPage({
     negotiation,
     engagement,
     feedback,
+    // P7-80. Appended, so no name above it shifts.
+    ratings,
   ] = await Promise.all([
     /*
      * Tasks CREATED in the period, not tasks touched in it.
@@ -168,6 +172,7 @@ export default async function ReportsPage({
     inverted ? null : loadNegotiation(supabase, period),
     inverted ? null : loadClientEngagement(supabase, period),
     inverted ? null : loadFeedback(supabase, period),
+    inverted ? null : loadRatingsByPerson(supabase, period),
   ]);
 
   const departmentName = departmentsResult;
@@ -338,6 +343,8 @@ export default async function ReportsPage({
             {engagement ? <EngagementCard data={engagement} /> : null}
             {feedback ? <FeedbackCard data={feedback} /> : null}
           </div>
+
+          {ratings ? <RatingsCard data={ratings} /> : null}
 
           <Card size="sm">
             <CardHeader>
