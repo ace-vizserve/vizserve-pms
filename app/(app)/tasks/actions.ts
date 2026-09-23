@@ -25,7 +25,7 @@ import {
   uploadTaskAttachment,
 } from "@/lib/attachments-server";
 import { issueAndSendApproval } from "@/lib/client-approval-server";
-import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
+import { dispatchPendingEmails, dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
 import {
   INITIAL_TASK_STATUS,
   TASK_PRIORITIES,
@@ -138,7 +138,13 @@ export async function transitionTask(
   // FOR_QA and a QA send-back both write notification rows inside the
   // transaction. Draining is outside it — an email failure must not undo a
   // status change somebody has already been told about on screen.
-  dispatchPendingEmailsInBackground();
+  //
+  // P7-78 — AWAITED. In the background it was cut off when Vercel froze the
+  // function after the response, so "Ready for QA" and "QA sent back" waited
+  // for the cron. A failure is logged, never a failed move.
+  await dispatchPendingEmails().catch((error) => {
+    console.error("[transition] email drain failed:", error);
+  });
 
   refresh(taskId);
   return { ok: true, data: { status } };

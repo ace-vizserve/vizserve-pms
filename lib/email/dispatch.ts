@@ -89,6 +89,12 @@ const PRESENTATION: Record<
     action: "Open QA",
     status: { label: "Ready for QA", tone: "warning" },
   },
+  // P7-78. Gate 2's "no" — the PIC has work to redo.
+  qa_returned: {
+    subject: (title) => title,
+    action: "Open the task",
+    status: { label: "Sent back by QA", tone: "info" },
+  },
   // Gate 3's answer coming back. The staff-side half of `approvals@`.
   client_decision: {
     subject: (title) => `Client decision — ${title}`,

@@ -34,7 +34,9 @@ export type VizservePmsNotificationType =
   // blank email, or throws inside the outbox drain.
   | "mentioned"
   // P7-77, hand-added for the same reason.
-  | "request_approved";
+  | "request_approved"
+  // P7-78, hand-added for the same reason.
+  | "qa_returned";
 
 export type VizservePmsFieldType =
   | "text"

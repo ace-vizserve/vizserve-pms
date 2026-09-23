@@ -114,7 +114,12 @@ export function TaskActions({
         {ordered.map((transition) => (
           <Button
             key={`${transition.from}-${transition.to}`}
-            variant={toneButtonVariant(transitionTone(transition))}
+            // "Send back to PIC" is a QA rejection, so it reads as destructive.
+            variant={
+              transition.from === "QA_IN_PROGRESS" && transition.to === "ONGOING"
+                ? "destructive"
+                : toneButtonVariant(transitionTone(transition))
+            }
             // The spinner goes on the one that was pressed; the others simply
             // stop taking clicks until it settles.
             loading={move.isRunning(transition)}
