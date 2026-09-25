@@ -44,13 +44,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
 
           Renders nothing. It subscribes to `vizserve_pms_notifications` filtered
           to `user_id=eq.<me>` — the same predicate as the "notifications read
-          own" policy — and calls `router.refresh()`, which re-runs this layout
-          and therefore re-runs the count inside `<SidebarPanel>`. No count is
-          computed in the browser and there is no second source of truth for it.
-
-          ⚠️ P11-05 moved that query behind a Suspense boundary, which does not
-          change this: a refresh still re-renders the panel, it just no longer
-          holds the page back while it does.
+          own" policy. P12-01: a ping invalidates the rail's query key rather
+          than calling `router.refresh()`, so the badge moves without
+          re-rendering the page. The count itself is still computed by the
+          database, never in the browser.
         */}
         <RealtimeNotifications userId={context.userId} />
 

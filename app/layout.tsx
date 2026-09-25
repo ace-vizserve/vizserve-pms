@@ -4,6 +4,7 @@ import NextTopLoader from "nextjs-toploader";
 import { Toaster } from "@/components/ui/toast";
 
 import { ThemeProvider } from "@/components/theme-provider";
+import { QueryProvider } from "@/lib/query/provider";
 import "./globals.css";
 
 // The design refresh: Figtree.
@@ -57,7 +58,11 @@ export default function RootLayout({
       <body className="flex min-h-full flex-col">
         <ThemeProvider>
           <NextTopLoader color="#4359A5" height={2} showSpinner={false} />
-          {children}
+          {/* P12-01 — the query cache, at the ROOT and not in `(app)/layout.tsx`:
+              `app/page.tsx` sits outside the `(app)` group, and staging learned
+              that the hard way (`No QueryClient set`). The public pages carry an
+              empty client and never run a query — `anon` has no table grants. */}
+          <QueryProvider>{children}</QueryProvider>
           {/* Position, theme and every visual decision live in the wrapper —
               see `components/ui/toast.tsx`. Nothing in the app imports the
               toast library directly, so replacing it costs that one file. */}

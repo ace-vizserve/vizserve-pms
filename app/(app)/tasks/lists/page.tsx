@@ -94,10 +94,9 @@ export default async function ListsPage() {
       // How many tasks each list holds, so nobody archives a list that is
       // carrying live work without knowing.
       //
-      // ⚠️ SHARED WITH THE RAIL. `sidebar-panel.tsx` shows the same number as a
-      // badge and is on screen beside this table — it was the same query and
-      // the same reduce loop written out twice, and the two had already drifted
-      // once. `cache()` inside the loader means both get it in one read.
+      // ⚠️ THE RAIL SHOWS THE SAME NUMBER beside this table, and since P12-01
+      // counts it in `vizserve_pms_sidebar_snapshot()` instead. Both exclude
+      // COMPLETED and COMPLETED_NO_RESPONSE — change one, change the other.
       countOpenTasksByList(),
     ]);
 

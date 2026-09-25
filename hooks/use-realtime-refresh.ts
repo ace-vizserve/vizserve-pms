@@ -59,6 +59,12 @@ export type UseRealtimeRefreshOptions = {
    * shaped, which is the exact second-source-of-truth this hook refuses.
    */
   onPing?: () => void;
+  /**
+   * P12-01. `false` skips `router.refresh()` and leaves the reaction to
+   * `onPing` — for a subscriber whose only consumer reads from the query cache,
+   * where invalidating one key beats re-rendering the whole route.
+   */
+  refreshRoute?: boolean;
   /** Defaults to every event. Narrowing this narrows the SERVER-side stream. */
   event?: RealtimeRefreshEvent;
 };
@@ -187,6 +193,7 @@ export function useRealtimeRefresh({
   channelName,
   enabled = true,
   onPing,
+  refreshRoute = true,
   event = "*",
 }: UseRealtimeRefreshOptions): void {
   const router = useRouter();
@@ -211,8 +218,8 @@ export function useRealtimeRefresh({
    * field changed identity.
    */
   const refresh = useCallback(() => {
-    router.refresh();
-  }, [router]);
+    if (refreshRoute) router.refresh();
+  }, [router, refreshRoute]);
 
   useEffect(() => {
     if (!enabled) return;

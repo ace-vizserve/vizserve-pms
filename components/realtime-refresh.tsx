@@ -1,6 +1,10 @@
 "use client";
 
+import { usePathname, useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+
 import { toast } from "@/components/ui/toast";
+import { qk } from "@/lib/query/keys";
 
 import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
 
@@ -49,12 +53,27 @@ import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
  * topic is unique per subscriber and cannot collide with the task channel below.
  */
 export function RealtimeNotifications({ userId }: { userId: string }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  const queryClient = useQueryClient();
+
   useRealtimeRefresh({
     table: "vizserve_pms_notifications",
     filter: `user_id=eq.${userId}`,
     channelName: `p8-03:notifications:${userId}`,
     event: "INSERT",
+    /*
+     * P12-01 — THE BADGE MOVES WITHOUT RE-RENDERING THE PAGE. The unread count
+     * lives in the rail's query now, so a new notification invalidates that one
+     * key instead of `router.refresh()` re-running the layout and whatever page
+     * somebody is in the middle of. /inbox is the exception: its list is still
+     * server-rendered, so it still needs the route refresh to show the new row.
+     */
+    refreshRoute: false,
     onPing: () => {
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+      if (pathname.startsWith("/inbox")) router.refresh();
+
       /*
        * ⚠️ GENERIC TEXT, AND IT MUST STAY GENERIC. The notification's own title
        * is sitting in the payload and is exactly what must not be rendered: the

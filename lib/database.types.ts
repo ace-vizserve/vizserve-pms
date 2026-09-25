@@ -2622,6 +2622,10 @@ export type Database = {
           days: number;
         }[];
       };
+      vizserve_pms_sidebar_snapshot: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
       vizserve_pms_submit_request: {
         Args: {
           p_slug: string;

@@ -361,7 +361,7 @@ function NavSection({
                   Nested inside, it would sit in the flex row and push the
                   label. */}
               {badge ? (
-                <SidebarMenuBadge className="bg-primary/10 text-primary">
+                <SidebarMenuBadge className="bg-destructive text-white peer-hover/menu-button:text-white peer-data-active/menu-button:text-white dark:bg-red-700">
                   {badge.value}
                   {/* The number alone reads as decoration to a screen reader,
                       which announces the link as "Inbox 12" — so the badge
