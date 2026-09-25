@@ -31,6 +31,7 @@ import {
   fetchVisibleLists,
 } from "@/lib/query/fetchers/task";
 import { qk } from "@/lib/query/keys";
+import { useRefetchOnServerRender } from "@/lib/query/use-refetch-on-server-render";
 import { richTextToPlainText } from "@/lib/rich-text";
 import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
 import {
@@ -103,6 +104,7 @@ export function TaskDetail({
   seat,
   realtimeFilter,
   today,
+  serverRenderedAt,
 }: {
   taskId: string;
   seat: TaskSeat;
@@ -110,7 +112,12 @@ export function TaskDetail({
   realtimeFilter: string | null;
   /** The request's date in the app zone, from the server — so overdue agrees with it. */
   today: string;
+  /** When the server last rendered the page. See `useRefetchOnServerRender`. */
+  serverRenderedAt: number;
 }) {
+  // Any write that only revalidates the path still reaches the cached task.
+  useRefetchOnServerRender(serverRenderedAt, [qk.task(taskId)]);
+
   const taskQuery = useQuery({
     queryKey: qk.task(taskId),
     queryFn: () => fetchTaskDetail(browserClient(), taskId),

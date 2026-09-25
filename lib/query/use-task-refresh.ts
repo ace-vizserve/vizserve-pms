@@ -13,7 +13,8 @@ import { qk } from "./keys";
  * ⚠️ TWO KINDS OF PAGE SHARE THESE CONTROLS. `/tasks/[id]` reads from the query
  * cache; `/tasks`, the board and the gantt are still server-rendered. So one
  * refresh has to reach both: `router.refresh()` re-runs the server pages, and
- * invalidating `["task"]` refetches whatever task detail is on screen.
+ * invalidating `["task"]` and `["tasks"]` refetches the cached detail, list and
+ * board views on screen — only observed entries refetch; the rest go stale.
  *
  * ⚠️ AWAIT IT INSIDE THE TRANSITION. The controls paint with `useOptimistic`,
  * which reverts the moment its transition ends. Awaiting the refetch keeps the
@@ -32,6 +33,8 @@ export function useTaskRefresh() {
     void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ["task"] }),
+      queryClient.invalidateQueries({ queryKey: qk.tasks() }),
+      queryClient.invalidateQueries({ queryKey: ["requests", "pending"] }),
       queryClient.invalidateQueries({ queryKey: ["lists", "fields"] }),
     ]);
   }, [router, queryClient]);

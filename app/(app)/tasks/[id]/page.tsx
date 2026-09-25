@@ -60,6 +60,15 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   };
 
   return (
-    <TaskDetail taskId={task.id} seat={seat} realtimeFilter={realtimeDepartmentFilter(context)} today={today} />
+    <TaskDetail
+      taskId={task.id}
+      seat={seat}
+      realtimeFilter={realtimeDepartmentFilter(context)}
+      today={today}
+      // Once per request on the server, so the fact reported rather than an
+      // impure render. See `useRefetchOnServerRender`.
+      // eslint-disable-next-line react-hooks/purity -- see the note above
+      serverRenderedAt={Date.now()}
+    />
   );
 }

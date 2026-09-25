@@ -1,106 +1,42 @@
 import { Suspense } from "react";
-import { ListChecks } from "lucide-react";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 
-import {
-  TaskColumnsMenu,
-  TaskColumnsProvider,
-  type ListRow,
-  type TaskRow,
-} from "./tasks-table";
+import { TaskColumnsMenu, TaskColumnsProvider } from "./tasks-table";
 import { isTaskStatus } from "@/components/status-badge";
-import { Reveal, RevealFallback } from "@/components/ui/reveal";
-import { TaskStatusGroups } from "./task-status-groups";
-import {
-  canAdminDepartment,
-  isCollaborationSpace,
-  realtimeDepartmentFilter,
-  requireAuthContext,
-  type AuthContext,
-} from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
-import type { VizservePmsTaskStatus } from "@/lib/database.types";
-import { sanitizeRichText } from "@/lib/rich-text-server";
-import type { PendingRequest } from "@/lib/schemas/approvals";
-import {
-  isTerminal,
-  TASK_PRIORITIES,
-  TASK_STATUSES,
-  type TaskPriority,
-} from "@/lib/schemas/tasks";
-
-import { EmptyState } from "@/components/empty-state";
-import { loadPendingRequests } from "@/lib/pending-requests-server";
-import { applyTaskScope, QA_STAGES } from "@/lib/tasks-server";
+import { canAdminDepartment, realtimeDepartmentFilter, requireAuthContext } from "@/lib/auth/authorization";
+import { TASK_PRIORITIES, type TaskPriority } from "@/lib/schemas/tasks";
 import { loadListFields } from "@/lib/list-fields-server";
-import { loadCollaborators } from "@/lib/departments-server";
-import { assignableInList } from "@/lib/assignable";
-import {
-  compareFieldValues,
-  fieldIdFromKey,
-  fieldKey,
-  matchesFieldFilter,
-  parseFieldFilter,
-  readFieldValue,
-} from "@/lib/schemas/list-fields";
 import { ListFieldsSheet } from "./list-fields-sheet";
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
-import { QueryError } from "@/components/query-error";
-import { FilterBarSkeleton, TaskStatusGroupSkeleton } from "@/components/skeletons";
+import { FilterBarSkeleton } from "@/components/skeletons";
 import { requestToday } from "@/lib/dates-server";
 import { createClient } from "@/utils/supabase/server";
-import type { TaskComment } from "./comment-thread";
 
 import { TaskSelectionProvider } from "./task-selection";
 import { TaskFilters } from "./filters";
 import { NewTaskButton } from "./new-task-button";
-import { PendingRequestList } from "./pending-requests";
+import { TaskListView } from "./task-list-view";
 import { TaskToolbar } from "./toolbar";
 
 export const metadata: Metadata = { title: "Tasks" };
 
 
 /*
- * P7-65 — WIDENED FOR THE SORTABLE HEADERS.
- *
- * `due` and `priority` are the two the toolbar Select has always offered; the
- * rest are the columns whose header is now a control. They share one `?sort=`
- * param, so the Select and the headers cannot disagree about what the list is
- * ordered by.
- *
- * ⚠️ SORTING THE QUERY IS WHAT MAKES THIS WORK ON A GROUPED LIST. The rows are
- * ordered before they are split into stages, so all eight tables reorder
- * together. A browser-side sort would have reordered each group independently
- * and meant nothing across them, which is why the headers were left inert when
- * the tables first moved onto TanStack.
+ * P7-65 / P12-07 — the sort (`?sort=`, `?dir=`) is applied in the query by
+ * `fetchTaskListView` (lib/query/fetchers/task-list.ts), which now holds the
+ * sortable columns and the default order. `tasks-table.tsx` passes the same
+ * default to `DataTable` — change one and change the other.
  */
-const SORTS = ["due", "priority", "title", "start", "estimate"] as const;
-type Sort = (typeof SORTS)[number];
-
-function isSort(value: string | undefined): value is Sort {
-  return typeof value === "string" && (SORTS as readonly string[]).includes(value);
-}
-
-/**
- * The order applied when the URL asks for none: by deadline, soonest first.
- *
- * `tasks-table.tsx` passes the same pair to `DataTable` as `defaultSort`, which
- * is the only reason the headers can draw an arrow for an order nobody put in
- * the query string — change one and change the other or it goes back to lying
- * about it.
- */
-const DEFAULT_SORT = { sort: "due", ascending: true } as const;
-
 function isPriority(value: string | undefined): value is TaskPriority {
   return typeof value === "string" && (TASK_PRIORITIES as readonly string[]).includes(value);
 }
 
 /**
- * Named rather than written inline on the page signature, because the streaming
- * child below takes the same bag. See `TaskGroups`.
+ * Named rather than written inline on the page signature. The rows themselves
+ * are read by `TaskListView` (P12-07) from the filters narrowed out of it.
  */
 type TasksSearchParams = {
   status?: string;
@@ -288,50 +224,16 @@ export default async function TasksPage({
       .order("name"),
   );
 
-  /*
-   * P7-26 — the requests that have not been decided yet.
-   *
-   * This note has now said three different things, and all three are still
-   * true. It was awaited on its own line, because this is an ADDITION to the
-   * page rather than part of it — the task queries decide whether the page
-   * renders at all and this one must not be able to change that. Then it moved
-   * INTO the task batch, to save the round trip the separate await cost.
-   *
-   * It is fired here, before anything is awaited, so it still runs alongside
-   * the task batch exactly as it did inside it, and it still cannot fail the
-   * page: `loadPendingRequests` returns [] on its own errors rather than
-   * throwing (lib/pending-requests-server.ts). What is new is that it no longer
-   * has to FINISH alongside the batch — the queue has its own boundary and
-   * paints the moment it lands, without waiting on ten task queries.
-   *
-   * ⚠️ TWO READERS, ONE CALL. The queue list reads it, and so does the empty
-   * state inside `TaskGroups` — "Nothing approved yet" is a different sentence
-   * from "Nothing here yet" and only the request count tells them apart. This
-   * is a real async function rather than a PostgREST builder, so both children
-   * await the one promise and the query runs once.
-   *
-   * `status` and `priority` are passed as one boolean rather than as values —
-   * the rule is "any task-only filter hides these", and `pendingRequestsApply`
-   * should not have to learn what a status is to express that.
-   */
-  const pendingRequestsPromise = loadPendingRequests({
-    listId: params.list ?? null,
-    kind,
-    scope: view,
-    hasTaskOnlyFilter: Boolean(params.status || priorityFilter || params.group),
-  });
-
   return (
     <PageShell>
       {/*
         P8-03 — the list refreshes itself when a task in one of this
         person's departments changes.
 
-        Renders nothing. On a row event it calls `router.refresh()`, which
-        re-runs THIS server component — so every query above runs again
-        under RLS, with the same filters and the same sort, and the rows
-        that come back are the rows a navigation would have produced. No
-        row is patched into client state.
+        Renders nothing. On a row event it invalidates the cached rows
+        (`["tasks"]`), which `TaskListView` refetches under RLS with the same
+        filters and sort, and refreshes this server page for the filter panel.
+        No row is patched in from the payload.
 
         The scope comes from `realtimeDepartmentFilter`, which is narrower
         than the SELECT policy on purpose: a task assigned to you in
@@ -429,32 +331,10 @@ export default async function TasksPage({
       </div>
 
       {/*
-        THE QUEUE, ABOVE THE STAGES — and OUTSIDE the empty-state branch below.
-
-        ⚠️ Putting this inside the `rows.length === 0` ternary is the obvious
-        placement and it is wrong: a department with three requests waiting and
-        no tasks yet would render "Nothing here yet" and hide the very thing it
-        is waiting on, which is the exact bug this feature exists to fix.
-
-        Above the stages because a queue is read before the work. "Open" being
-        the first heading on the page while three requests sit unlooked-at is
-        how a request waits a week.
-
-        Renders nothing for a member — `vizserve_pms_requests` is readable only
-        by a lead of the form's department, so the array is empty and the
-        component returns null. No role check here.
-
-        ⚠️ ITS FALLBACK IS `null`, AND IT IS THE ONE STREAMING REGION WITH NO
-        LOADING ANNOUNCEMENT. On most loads it resolves to nothing at all — a
-        member has no readable requests and a lead usually has an empty queue —
-        so a skeleton here would be a block that flashes and then vanishes, and
-        a polite "loading" that resolves to silence is worse than saying
-        nothing. There is no layout to reserve for a region whose ordinary size
-        is zero.
+        P12-07 — THE QUEUE AND THE STAGES ARE ONE CLIENT VIEW NOW, reading from
+        the query cache (`task-list-view.tsx`). The queue still renders above the
+        stages and outside the empty-state branch; the reasons travelled with it.
       */}
-      <Suspense fallback={null}>
-        <PendingRequests pendingRequestsPromise={pendingRequestsPromise} />
-      </Suspense>
 
       {/*
         THE SLOW PART, AND THE REASON THE REST OF THE PAGE IS ALREADY ON SCREEN.
@@ -476,27 +356,46 @@ export default async function TasksPage({
         {/* P11-05 — the skeleton yields to the list rather than being replaced
             by it. This is the busiest boundary in the app: it re-resolves on
             every filter, every list switch and every status change. */}
-        <Suspense
-          fallback={
-            <RevealFallback>
-              <div role="status" aria-busy="true">
-                <span className="sr-only">Loading tasks…</span>
-                <TaskStatusGroupSkeleton />
-              </div>
-            </RevealFallback>
-          }>
-          <Reveal>
-          <TaskGroups
-            params={params}
-            context={context}
-            view={view}
-            kind={kind}
-            priorityFilter={priorityFilter}
-            listsPromise={listsPromise}
-            pendingRequestsPromise={pendingRequestsPromise}
-          />
-          </Reveal>
-        </Suspense>
+        <TaskListView
+          filters={{
+            listId: params.list ?? null,
+            view,
+            kind,
+            status: isTaskStatus(params.status) ? params.status : null,
+            group: params.group ?? null,
+            priority: priorityFilter,
+            sort: params.sort ?? null,
+            dir: params.dir ?? null,
+            fieldFilters: Object.fromEntries(
+              Object.entries(params).filter(
+                (entry): entry is [string, string] => entry[0].startsWith("cf:") && typeof entry[1] === "string",
+              ),
+            ),
+          }}
+          viewer={{
+            userId: context.userId,
+            role: context.role,
+            managedDepartmentIds: context.managedDepartmentIds,
+            deptAdminOf: canAdminDepartment(context, context.primaryDepartmentId)
+              ? context.primaryDepartmentId
+              : null,
+            primaryDepartmentId: context.primaryDepartmentId,
+          }}
+          seat={{
+            sharedDepartmentIds: context.sharedDepartmentIds,
+            role: context.role,
+            managedDepartmentIds: context.managedDepartmentIds,
+            primaryDepartmentId: context.primaryDepartmentId,
+          }}
+          today={await requestToday()}
+          // A server component renders once per request, so this is the fact
+          // being reported, not an impure render. See `useRefetchOnServerRender`.
+          // eslint-disable-next-line react-hooks/purity -- see the note above
+          serverRenderedAt={Date.now()}
+          baseFiltered={
+            Boolean(params.status || params.list || params.group || priorityFilter) || view !== "all" || kind !== "all"
+          }
+        />
       </TaskSelectionProvider>
       </TaskColumnsProvider>
     </PageShell>
@@ -569,821 +468,6 @@ async function TaskFiltersSection({
   if (inPersonalList) return <TaskFilters lists={[]} groups={[]} customFields={customFields} />;
 
   return <TaskFilters lists={departmentLists} groups={groups ?? []} customFields={customFields} />;
-}
-
-/** The Gate 1 queue, waiting on `loadPendingRequests` and nothing else. */
-async function PendingRequests({
-  pendingRequestsPromise,
-}: {
-  pendingRequestsPromise: Promise<PendingRequest[]>;
-}) {
-  const pendingRequests = await pendingRequestsPromise;
-
-  return <PendingRequestList requests={pendingRequests} />;
-}
-
-/**
- * The stages, and every query that costs anything.
- *
- * Split out of the page purely so it can stream. Nothing about the query, the
- * filters or the derivations below changed on the way here — they are the same
- * lines in the same order, and the only thing they lost was the ability to hold
- * the toolbar off the screen while they ran.
- *
- * `view`, `kind` and `priorityFilter` are read on the page rather than here
- * because the pending-request call needs the same three, and two readings of
- * "what does `?kind=` mean" is exactly one too many.
- */
-async function TaskGroups({
-  params,
-  context,
-  view,
-  kind,
-  priorityFilter,
-  listsPromise,
-  pendingRequestsPromise,
-}: {
-  params: TasksSearchParams;
-  context: AuthContext;
-  view: View;
-  kind: Kind;
-  priorityFilter: TaskPriority | null;
-  listsPromise: Promise<ListsResult>;
-  pendingRequestsPromise: Promise<PendingRequest[]>;
-}) {
-  const supabase = await createClient();
-
-  /* `undefined` when the URL named no sort we recognise, and that distinction is
-     load-bearing: it decides whether `?dir=` is obeyed at all, so it cannot be
-     collapsed into `sort`. */
-  const requested: Sort | undefined = isSort(params.sort) ? params.sort : undefined;
-  const sort: Sort = requested ?? DEFAULT_SORT.sort;
-
-  /*
-   * P7-18 — filtering by FOLDER needs an embed, not an `.eq()`.
-   *
-   * A task carries `list_id` and never `group_id` (deliberately: a task holding
-   * its own folder would be a second source of truth that disagrees with its
-   * list the first time a list moves). So the folder is reached through the
-   * list, and PostgREST does that with an embedded filter.
-   *
-   * `!inner` is what makes the filter actually restrict rather than just
-   * decorate the rows — and it also drops tasks with no list at all, which is
-   * right when a folder is selected, since a task with no list has no folder.
-   * That is also why the embed is CONDITIONAL: always-on `!inner` would silently
-   * hide every list-less task from the unfiltered board.
-   *
-   * Resolved in the same round trip rather than by fetching the folder's list
-   * ids first — the lists query sits in the same `Promise.all` as this one, so
-   * reading it first would make the slow query wait on the fast one.
-   */
-  const TASK_COLUMNS =
-    "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields";
-
-  let query = supabase
-    .from("vizserve_pms_tasks")
-    .select(
-      params.group ? `${TASK_COLUMNS}, vizserve_pms_lists!inner(group_id)` : TASK_COLUMNS,
-    );
-
-  /*
-   * J — SORTING, or the column is decoration.
-   *
-   * `priority` is a Postgres enum declared LOW → HIGH, so `descending` is
-   * highest-first with no CASE and no lookup table — the same trick the role
-   * enum relies on. `nullsFirst: false` is what puts the unranked majority at
-   * the bottom instead of on top of the urgent work.
-   *
-   * Due date stays the default. A queue is read by deadline most days; priority
-   * is the question you ask when there is more work than time.
-   */
-  /*
-   * P7-65 — ONE SOURCE FOR THE DIRECTION.
-   *
-   * An explicit sort obeys `?dir=` — ascending unless it says otherwise, which
-   * is why the table leaves `asc` out of the URL — and no explicit sort takes
-   * the default's. This used to read the direction off the COLUMN NAME instead,
-   * so a click on "Priority" wrote `?sort=priority` with no `dir`, the header
-   * drew an ascending arrow and the server returned descending rows, and that
-   * column could not be sorted ascending at all.
-   *
-   * Priority still reads highest-first where it is meant to: the toolbar Select
-   * writes `dir=desc` beside it, because that is now the only thing that says
-   * so.
-   */
-  const ascending = requested ? params.dir !== "desc" : DEFAULT_SORT.ascending;
-
-  /*
-   * ⚠️ A LITERAL COLUMN PER KEY, NEVER `.order(params.sort)`. `?sort=` is a
-   * string somebody can type, and an unknown column name reaches Postgres as
-   * `invalid input value` and 500s the page.
-   */
-  const ORDER_COLUMN: Record<Sort, string> = {
-    due: "due_date",
-    priority: "priority",
-    title: "title",
-    start: "start_date",
-    estimate: "estimate_minutes",
-  };
-
-  query = query
-    // `nullsFirst: false` is what puts the unranked, undated majority at the
-    // bottom instead of on top of the work that has a deadline.
-    .order(ORDER_COLUMN[sort], { ascending, nullsFirst: false })
-    // A stable tie-break, so two tasks due the same day do not swap places
-    // between renders.
-    .order("created_at", { ascending: false });
-
-  /*
-   * The list's OWN filters. The board's toolbar does not offer these — see the
-   * note on `applyTaskScope`, which holds the four both views share.
-   */
-  if (isTaskStatus(params.status)) query = query.eq("status", params.status);
-  if (params.group) query = query.eq("vizserve_pms_lists.group_id", params.group);
-  if (priorityFilter) query = query.eq("priority", priorityFilter);
-  /*
-   * P12-02 — list, kind and scope, through the definition `/tasks/board` uses.
-   *
-   * P3-08 said the QA queue is a view of this list rather than a separate screen
-   * with rules that can drift from it. That was true of the two QA stages and
-   * false of everything else: the board spelled the same four filters out twice
-   * more, and `?group=`/`?status=`/`?priority=` reached only one of the views.
-   * This is the half that is genuinely shared.
-   */
-  query = applyTaskScope(query, {
-    listId: params.list ?? null,
-    view,
-    kind,
-    userId: context.userId,
-  });
-
-  const [
-    { data: tasks, error: tasksError },
-    { data: people },
-    { data: lists },
-    pendingRequests,
-    // P7-73. Appended. Fields belong to a list, so there are none without one.
-    { fields: customFields },
-    // P13-02. Appended, per the warning above — one entry per line, in order.
-    collaborators,
-  ] = await Promise.all([
-    query,
-    supabase.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active"),
-    /* Both of these were fired on the page, before this component was rendered.
-       Awaiting them here costs nothing and keeps them in the same wave as the
-       two queries above — they are simply no longer the reason anything else on
-       the page has to wait. */
-    listsPromise,
-    pendingRequestsPromise,
-    params.list ? loadListFields(params.list) : Promise.resolve({ fields: [], error: null }),
-    /*
-     * P13-02 — the company roster, for a collaboration list.
-     *
-     * ⚠️ ISSUED UNCONDITIONALLY, in the wave, rather than behind a check on
-     * whether this list is shared. The test needs `lists`, which is one of the
-     * promises in this very batch — so gating on it would cost a whole extra
-     * round trip on the heaviest route in the app to save a query that returns
-     * nothing whenever no shared space exists. `cache()`d, so the two consumers
-     * below share the one read.
-     */
-    loadCollaborators(),
-  ]);
-
-  /*
-   * `as unknown` first, and only because the select string is CONDITIONAL.
-   *
-   * supabase-js types a query by parsing the select string at the type level,
-   * and it can only do that for a literal. The ternary above hands it a union of
-   * two, which it reports as a ParserError — a type-level complaint about a
-   * string, not a claim that the rows are wrong. The columns are identical
-   * either way; the embed adds a `vizserve_pms_lists` key that nothing here
-   * reads.
-   *
-   * Widening the cast is the cost of one round trip instead of two. The
-   * alternative — two literal branches — means maintaining the fifteen-column
-   * list twice, which drifts the first time somebody adds a column to one.
-   */
-  const fetchedRows = (tasks ?? []) as unknown as TaskRow[];
-
-  /*
-   * P7-73 — CUSTOM FIELDS FILTER AND SORT HERE, AFTER THE READ, and that is
-   * correct rather than lazy.
-   *
-   * This query is not paginated: the page holds every task in scope, which is
-   * what `urlSort` on the table already relies on. So narrowing and ordering the
-   * fetched rows is the same answer SQL would give — and a better one for the
-   * sort, because `order by custom_fields->>id` compares TEXT: "10" before "9",
-   * and a dropdown alphabetically instead of in the order its options were set.
-   *
-   * Before the ids are taken, so the comment, subtask and hours queries below
-   * are scoped to the tasks that survived the filter. A field id in the URL that
-   * is not one of this list's fields is ignored, never trusted.
-   */
-  const fieldFilters = customFields.flatMap((field) => {
-    const filter = parseFieldFilter(field, params[fieldKey(field.id) as `cf:${string}`]);
-    return filter ? [{ field, filter }] : [];
-  });
-
-  const sortField = customFields.find((field) => field.id === fieldIdFromKey(params.sort));
-
-  const filteredRows = fieldFilters.length
-    ? fetchedRows.filter((task) =>
-        fieldFilters.every(({ field, filter }) =>
-          matchesFieldFilter(field, filter, readFieldValue(field, task.custom_fields)),
-        ),
-      )
-    : fetchedRows;
-
-  // `sort` is stable, so tasks with equal values keep the default order the
-  // query returned them in.
-  const rows = sortField
-    ? [...filteredRows].sort((a, b) =>
-        compareFieldValues(
-          sortField,
-          readFieldValue(sortField, a.custom_fields),
-          readFieldValue(sortField, b.custom_fields),
-          params.dir === "desc" ? "desc" : "asc",
-        ),
-      )
-    : filteredRows;
-
-  const taskIds = rows.map((task) => task.id);
-
-  /*
-   * Three queries against the visible ids, run together.
-   *
-   * All three are scoped by `.in()` on ids the policy has ALREADY returned, so a
-   * task somebody cannot see cannot have its comments, its children or its hours
-   * pulled in through the back door — and each of the three has its own policy
-   * underneath this anyway.
-   */
-  const [
-    { data: commentRows },
-    { data: childRows },
-    { data: trackedRows },
-    { data: coverageRows },
-    { data: assigneeRows },
-    { data: closedRows },
-  ] = taskIds.length
-    ? await Promise.all([
-        /*
-         * P7-08 / K5 — every comment on every visible task, in ONE query.
-         *
-         * A query per row is an N+1 on the page people leave open all day, and
-         * the cell needs the whole thread rather than just the last line:
-         * clicking it opens the conversation in place, so fetching only the
-         * latest would mean a second round trip on every open.
-         */
-        supabase
-          .from("vizserve_pms_task_comments")
-          .select("id, task_id, body, author_id, created_at, updated_at")
-          .in("task_id", taskIds)
-          .order("created_at", { ascending: true }),
-
-        /*
-         * K5 — PROGRESS COMES FROM THE SUBTASKS, and it is fetched rather than
-         * derived from `rows`.
-         *
-         * Deriving it from what is already on screen would be wrong under every
-         * filter: a status filter or the `mine` view hides most children, so a
-         * parent would report 1/1 done because that is all the page happened to
-         * load. P7-09 is one level deep and trigger-enforced, so this is a
-         * single flat query — no recursion, and no stored counter to drift.
-         */
-        supabase.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", taskIds),
-
-        /*
-         * P7-15 / K5 — TIME TRACKED CANNOT BE A PLAIN SUM. This is the trap.
-         *
-         * `vizserve_pms_timesheet_entries`' SELECT policy is owner-or-their-lead,
-         * so a member summing that table for a task sees only the hours THEY
-         * logged and calls it the task total. Two people on one task would read
-         * two different figures on the same row and a lead a third. Nobody
-         * reports that as a bug; they quietly stop trusting the column.
-         *
-         * So it is a SECURITY DEFINER rollup that sums inside and returns a row
-         * only for tasks the caller may already see — same shape and same reason
-         * as `vizserve_pms_leave_calendar`.
-         */
-        supabase.rpc("vizserve_pms_task_time_tracked", { p_task_ids: taskIds }),
-
-        /*
-         * P9-01 — who is holding which of these while somebody is away.
-         *
-         * `vizserve_pms_active_task_coverage` already filters to APPROVED leave
-         * whose dates contain today in Manila, so this is a lookup rather than a
-         * date calculation, and it is scoped to the ids on screen.
-         *
-         * ⚠️ ON THE LIST AND NOT ONLY THE DETAIL. "The person whose name is on
-         * this row is away until Friday" is exactly the fact somebody scanning a
-         * board needs, and it is the one place they will not think to open the
-         * task to find out. Ordinarily this returns nothing at all.
-         *
-         * `security_invoker`, so a reader who cannot see the leave request
-         * behind it gets no row — which is right for a request whose reason they
-         * have no business reading.
-         */
-        supabase
-          .from("vizserve_pms_active_task_coverage")
-          .select("task_id, reliever_id, end_date")
-          .in("task_id", taskIds),
-
-        /*
-         * P7-13 — everyone on the visible tasks, in one query.
-         *
-         * The row shows the accountable name and a `+n`, so it needs the join
-         * table as well as `assignee_id`. The table has its own policy; this is
-         * scoped by `.in()` on ids the tasks policy has already returned.
-         */
-        supabase.from("vizserve_pms_task_assignees").select("task_id, user_id").in("task_id", taskIds),
-
-        /*
-         * K5 — DATE CLOSED, AND IT NEEDS NO COLUMN.
-         *
-         * `vizserve_pms_task_status_history` already records the move to
-         * COMPLETED / COMPLETED_NO_RESPONSE with its timestamp, so reading it
-         * from there is one query and cannot disagree with the trail — which a
-         * `completed_at` column eventually would.
-         *
-         * Ordered ASCENDING and reduced by last-write-wins below, so a REOPENED
-         * task (P7-06 lets internal work go COMPLETED → ONGOING) reports the
-         * date it was closed MOST RECENTLY rather than the first time. It is
-         * nullable in practice for exactly that reason: a task can be closed,
-         * reopened, and be live again with a closing date in its past.
-         */
-        supabase
-          .from("vizserve_pms_task_status_history")
-          .select("task_id, to_status, created_at")
-          .in("task_id", taskIds)
-          .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
-          .order("created_at", { ascending: true }),
-      ])
-    : // ⚠️ ONE ENTRY PER QUERY ABOVE, and the compiler says so only indirectly:
-      // a short tuple here does not error on this line, it mis-binds every
-      // destructured name after the gap and reports the type mismatch several
-      // hundred lines away. P9-01's coverage read is the sixth.
-      [
-        { data: [] },
-        { data: [] },
-        { data: [] },
-        { data: [] },
-        { data: [] },
-        { data: [] },
-      ];
-
-  const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
-  /* Plain objects from here on: a Map cannot cross the RSC boundary. */
-  const listName = new Map((lists ?? []).map((list) => [list.id, list.name]));
-
-  // Threads by task, oldest first — the order they were fetched in, so the cell
-  // can take the last one without sorting again.
-  const threads = new Map<string, TaskComment[]>();
-  for (const row of commentRows ?? []) {
-    const thread = threads.get(row.task_id) ?? [];
-    thread.push({
-      id: row.id,
-      body: sanitizeRichText(row.body),
-      authorId: row.author_id,
-      authorName: nameOf.get(row.author_id) ?? "Someone no longer active",
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    });
-    threads.set(row.task_id, thread);
-  }
-
-  /** `parent id → [done, total]`. Both counts, because a bar needs the ratio. */
-  const progress = new Map<string, { done: number; total: number }>();
-  for (const child of childRows ?? []) {
-    if (!child.parent_task_id) continue;
-    const entry = progress.get(child.parent_task_id) ?? { done: 0, total: 0 };
-    entry.total += 1;
-    // COMPLETED and COMPLETED_NO_RESPONSE both count as done. They are
-    // deliberately distinct statuses, but "the work is finished" is true of both
-    // and that is the only question a progress bar asks.
-    if (isTerminal(child.status)) entry.done += 1;
-    progress.set(child.parent_task_id, entry);
-  }
-
-  /** Everyone on a task besides its PIC, named. */
-  const extraAssignees = new Map<string, { id: string; full_name: string }[]>();
-  for (const row of assigneeRows ?? []) {
-    const list = extraAssignees.get(row.task_id) ?? [];
-    list.push({ id: row.user_id, full_name: nameOf.get(row.user_id) ?? "Someone no longer active" });
-    extraAssignees.set(row.task_id, list);
-  }
-
-  /** The most recent close, from the trail. Ascending fetch, last one wins. */
-  const closedOn = new Map<string, string>();
-  for (const row of closedRows ?? []) closedOn.set(row.task_id, row.created_at);
-
-  const tracked = new Map(
-    ((trackedRows ?? []) as { task_id: string; minutes: number }[]).map((row) => [row.task_id, row.minutes]),
-  );
-
-  /*
-   * P9-01. Keyed by task, carrying the covering person and the last day. The
-   * name is resolved through `nameOf` in the row, like every other person on
-   * this page — a second map of names would be a second thing to keep in step.
-   */
-  const coverage = new Map(
-    (coverageRows ?? []).map((row) => [
-      row.task_id,
-      { relieverId: row.reliever_id, until: row.end_date },
-    ]),
-  );
-
-  const isFiltered =
-    Boolean(params.status || params.list || params.group || priorityFilter) ||
-    fieldFilters.length > 0 ||
-    view !== "all" ||
-    kind !== "all";
-
-  /*
-   * Does this view actually hold both kinds of work?
-   *
-   * Read off the rows already fetched, so it costs nothing. Counted BEFORE the
-   * grouping below, and on the unfiltered-by-status set, because the question
-   * is "is there a split here to filter", not "is there one in the stage you
-   * happen to have open".
-   *
-   * A pending request counts as client work: it is client work, and it is on
-   * screen. Without it, a list showing three pending requests and two internal
-   * chores would call itself single-kind.
-   */
-
-  /*
-   * P7-09 — A SUBTASK LIVES UNDER ITS PARENT, NOT IN ITS OWN STAGE.
-   *
-   * It used to be pushed into the group for its own status, so moving a subtask
-   * to Ongoing tore it out of the piece of work it belongs to and stranded it
-   * three headings away from its parent. On a board that reads as the subtask
-   * having been promoted to a task of its own, which is precisely what it is not.
-   *
-   * So a subtask renders indented beneath its parent, IN THE PARENT'S GROUP,
-   * whatever its own status. Two exceptions, and both are the same idea:
-   *
-   *   * FINISHED subtasks leave the nest and join their own terminal group.
-   *     That is what "done" means on a checklist — it stops being outstanding
-   *     work under the parent and becomes a completed thing in its own right.
-   *   * A subtask whose PARENT IS NOT ON SCREEN stays top level. Filters and
-   *     the kind tabs can hide a parent, and nesting a row under something that
-   *     is not rendered would delete it from the view entirely.
-   */
-  const visibleIds = new Set(rows.map((task) => task.id));
-  const childrenByParent = new Map<string, TaskRow[]>();
-  const nested = new Set<string>();
-
-  for (const task of rows) {
-    if (!task.parent_task_id) continue;
-    if (isTerminal(task.status)) continue;
-    if (!visibleIds.has(task.parent_task_id)) continue;
-
-    const bucket = childrenByParent.get(task.parent_task_id) ?? [];
-    bucket.push(task);
-    childrenByParent.set(task.parent_task_id, bucket);
-    nested.add(task.id);
-  }
-
-  /** `depth` is what the Task column indents on. Flat list, one level only. */
-  const grouped = new Map<VizservePmsTaskStatus, ListRow[]>(
-    TASK_STATUSES.map((status) => [status, [] as ListRow[]]),
-  );
-
-  for (const task of rows) {
-    if (nested.has(task.id)) continue;
-
-    const bucket = grouped.get(task.status);
-    if (!bucket) continue;
-
-    /*
-     * P7-65 — NESTED, NOT FLATTENED.
-     *
-     * These used to be pushed as two sibling rows carrying a `depth` marker,
-     * and the indent was the only thing that said one belonged to the other.
-     * TanStack's expanded row model wants the real shape, so a parent now
-     * carries its children and the table flattens them itself — which is what
-     * lets a parent collapse.
-     *
-     * `subRows` is left UNDEFINED rather than `[]` on a childless task:
-     * `getCanExpand()` is true for an empty array, and a chevron that opens
-     * onto nothing is worse than no chevron.
-     */
-    const children = childrenByParent.get(task.id);
-    bucket.push({
-      ...task,
-      depth: 0,
-      subRows: children?.map((child) => ({ ...child, depth: 1 as const })),
-    });
-  }
-
-  /**
-   * Which headings to draw.
-   *
-   * A group is worth an empty heading only where a task could legitimately have
-   * landed: it tells you the stage is clear rather than leaving you to wonder
-   * whether the page failed to load it. So the set follows the FILTERS, not the
-   * results — one group under a status filter, the two QA stages in the QA view,
-   * and the full workflow otherwise.
-   */
-  const visibleStatuses: readonly VizservePmsTaskStatus[] = isTaskStatus(params.status)
-    ? [params.status]
-    : view === "qa"
-        // The same two the QA scope filters on — one list, so a heading cannot
-      // appear for a stage the query excludes.
-      ? QA_STAGES
-      : TASK_STATUSES;
-
-  /**
-   * Which seat the reader is in, per task.
-   *
-   * The status control needs this and it is cheap: two comparisons and a lookup
-   * in a list that is almost always empty or one long. It is NOT an authorization
-   * decision — `vizserve_pms_transition_task` re-checks every part of it — it
-   * only decides which moves are worth offering.
-   */
-  /**
-   * Who the composer may assign to.
-   *
-   * ⚠️ THE RULE MOVED TO `lib/assignable.ts` (P13-02) AND THE SCOPE SET THAT
-   * USED TO BE BUILT HERE WENT WITH IT. It is a pure function with cases now,
-   * because this filter has been got wrong twice — see the header there. The
-   * short version: the LIST decides, and only a listless view falls back to the
-   * caller's own scope.
-   *
-   * Still a convenience and never a gate. The server re-derives the department
-   * from whoever is picked, so offering somebody unassignable produces an error
-   * message rather than an unauthorized task.
-   */
-
-  /*
-   * ⚠️ P13-01 — IS THE COMPOSER STANDING IN THE COLLABORATION SPACE?
-   *
-   * `?list=` is what this page is filtered to, so THE LIST DECIDES — the same
-   * rule `vizserve_pms_create_task` now applies server-side, and deriving it
-   * from anything else here would put the screen and the function into
-   * disagreement about where a task is going.
-   *
-   * Inside a shared list every active person is assignable, and that is the one
-   * place the "same department" rule below cannot hold: nobody's
-   * `primary_department_id` is the shared space, so the scope above matches
-   * NOBODY there and the composer would offer an empty picker on the one
-   * feature built for working across teams.
-   */
-  const currentListDepartment =
-    (lists ?? []).find((list) => list.id === params.list)?.department_id ?? null;
-  const inSharedList = isCollaborationSpace(context, currentListDepartment);
-
-  /*
-   * ⚠️ P13-02 — INSIDE A SHARED LIST THE ROSTER COMES FROM THE RPC, NOT FROM
-   * `people`. Filtering `people` was the bug: that read is department-scoped, so
-   * `inSharedList` widened a set that had already been narrowed upstream and the
-   * composer offered the reader's own team under a shared heading.
-   *
-   * Self excluded in both branches for the same reason it always was — "Myself"
-   * is the composer's default and picking it calls a different function.
-   */
-  /*
-   * ⚠️ THE LIST YOU ARE STANDING IN DECIDES, AND THAT IS A BUG FIX — P13-02.
-   *
-   * Amier, 21 Sep: "i can only search all member UNDER THE COMPANY WIDE. IF I AM
-   * VIZBYTES AND IT WAS UNDER VIZBYTES I CANT SEARCH ALL, ONLY THE MEMBER OF
-   * THAT DEPARTMENT".
-   *
-   * The rule below used to be the CALLER's scope alone — an owner passed
-   * `roleAtLeast("owner")` and was offered every active person in the company,
-   * in every list, and a lead of two departments was offered both teams'
-   * people in either team's list. That predates the collaboration space and it
-   * was already wrong, not merely untidy: `quickAddTask` derives the department
-   * from the ASSIGNEE, so picking a VizMedia name while standing in a VizBytes
-   * list builds a VizMedia task filed into a VizBytes list, and
-   * `vizserve_pms_create_task` refuses the pair — "That list belongs to another
-   * department." The picker was offering a guaranteed error message.
-   *
-   * So when there IS a list, its department is the answer, for everybody
-   * including an owner. The caller's own scope still decides which lists they
-   * can be standing in, which is the part RLS was always doing.
-   *
-   * ⚠️ THE FALLBACK IS NOT DEAD CODE. `?view=mine` and `?view=qa` carry no
-   * list, and neither does a bare visit — there is no list department to scope
-   * to, so those keep the caller-scope rule they have always had.
-   */
-  const assignable = assignableInList({
-    people: (people ?? []).map((person) => ({
-      id: person.id,
-      full_name: person.full_name,
-      primary_department_id: person.primary_department_id,
-      is_active: person.is_active,
-    })),
-    collaborators,
-    listDepartmentId: currentListDepartment,
-    sharedDepartmentIds: context.sharedDepartmentIds,
-    role: context.role,
-    managedDepartmentIds: context.managedDepartmentIds,
-    primaryDepartmentId: context.primaryDepartmentId,
-    selfId: context.userId,
-  });
-
-  /**
-   * People by department, for the assignee picker.
-   *
-   * The task's OWN department decides who may join it — `add_task_assignee`
-   * refuses anybody else — which is a different question from `assignable`
-   * above, where the CALLER's scope decides who they may create work for.
-   */
-  const byDepartment = new Map<string, { id: string; full_name: string }[]>();
-  for (const person of people ?? []) {
-    if (!person.is_active || !person.primary_department_id) continue;
-    const list = byDepartment.get(person.primary_department_id) ?? [];
-    list.push({ id: person.id, full_name: person.full_name });
-    byDepartment.set(person.primary_department_id, list);
-  }
-
-  /*
-   * ⚠️ P13-01 — AND THE COLLABORATION SPACE GETS EVERYBODY.
-   *
-   * Keyed the same way as every other department, so the picker asks one
-   * question — "who is in this task's department" — and gets the right answer
-   * for both kinds. Without this the entry is simply ABSENT: the loop above
-   * keys on `primary_department_id` and nobody's points here, so the picker on
-   * a company-wide task would open empty rather than wrong, which reads as the
-   * feature being broken.
-   *
-   * ⚠️ P13-02 — `collaborators`, NOT `people` FILTERED. This first shipped as
-   * `people.filter(is_active)` and that is "everybody I can already see": the
-   * `people` read above goes through the caller's own client and SELECT on
-   * `vizserve_pms_users` is department-scoped, so a member got their own six
-   * colleagues under a heading promising the company. `loadCollaborators` is
-   * the definer RPC; see the note on it.
-   *
-   * `vizserve_pms_add_task_assignee` relaxes its department test to "is this
-   * person active" in a shared space, so this offers exactly what the server
-   * accepts — and, outside one, offers nothing it would refuse.
-   */
-  /*
-   * ⚠️ ONLY WHEN SHARED WORK IS ACTUALLY ON THIS SCREEN — P13-02.
-   *
-   * This used to run unconditionally, which was not a permission hole (the
-   * entry is keyed by the shared department, and a VizBytes row looks itself up
-   * under VizBytes) but DID put the whole company's roster into the serialized
-   * props of a VizBytes list page. Amier's rule is that the company roster
-   * belongs to the company-wide space, so it should not be travelling with a
-   * department's board at all.
-   *
-   * ⚠️ NOT GATED ON `inSharedList` ALONE. `?view=mine` and `?view=qa` carry no
-   * list and can absolutely show a collaboration task beside a VizBytes one —
-   * gating on the list filter would leave those rows with an empty picker. The
-   * rows are already in hand, so the honest question is asked directly: is any
-   * task on this screen in a shared department.
-   */
-  const showsSharedWork =
-    inSharedList ||
-    rows.some((row) => context.sharedDepartmentIds.includes(row.department_id));
-
-  if (showsSharedWork) {
-    for (const sharedId of context.sharedDepartmentIds) {
-      byDepartment.set(sharedId, collaborators);
-    }
-  }
-
-  /*
-   * P7-64 — THE MAPS, FLATTENED FOR THE WIRE.
-   *
-   * Every lookup above is a `Map`, which does not survive the RSC boundary. The
-   * table reads plain objects instead; `Object.fromEntries` is the whole
-   * translation and it happens once, here, rather than eight times at the call
-   * site.
-   */
-  const viewer = {
-    userId: context.userId,
-    role: context.role,
-    managedDepartmentIds: context.managedDepartmentIds,
-    /*
-     * P8-01c — the Admin tick, resolved HERE rather than shipped as the raw
-     * `is_dept_admin` column.
-     *
-     * `canAdminDepartment` is the single TypeScript reading of
-     * `vizserve_pms_is_dept_admin`, and it lives in a `server-only` module, so
-     * the boolean has to be answered on this side of the wire. Sending the flag
-     * instead would put a second reading of the capability in a client
-     * component — which is the "scattered `if (role === 'admin')`" CLAUDE.md
-     * exists to forbid, one capability later.
-     */
-    deptAdminOf: canAdminDepartment(context, context.primaryDepartmentId)
-      ? context.primaryDepartmentId
-      : null,
-    /* P11-05 — the department this person BELONGS to, compared against each
-       task's own on the client. Raw, unlike `deptAdminOf` above: this one
-       carries no capability by itself, it is one half of a comparison. */
-    primaryDepartmentId: context.primaryDepartmentId,
-  };
-
-  const lookups = {
-    /*
-     * P12-20 — TODAY, FOR A CLIENT COMPONENT THAT CANNOT ASK FOR IT.
-     *
-     * `tasks-table.tsx` is `"use client"`, so it cannot await `connection()`
-     * — and `isTaskOverdue` reading the clock on its own is what Cache
-     * Components refuses during a prerender, at the cost of this route's
-     * prerendered shell.
-     *
-     * It travels in `lookups` because that is already the bag of server-decided
-     * values this table reads, and because a prop threaded through
-     * `TaskStatusGroups` to eight tables is the same value written in four more
-     * places. It also makes the server pass and the browser agree on the date,
-     * which two clock reads would not at midnight.
-     */
-    today: await requestToday(),
-    customFields,
-    nameOf: Object.fromEntries(nameOf),
-    listName: Object.fromEntries(listName),
-    threads: Object.fromEntries(threads),
-    progress: Object.fromEntries(progress),
-    extraAssignees: Object.fromEntries(extraAssignees),
-    closedOn: Object.fromEntries(closedOn),
-    tracked: Object.fromEntries(tracked),
-    coverage: Object.fromEntries(coverage),
-    byDepartment: Object.fromEntries(byDepartment),
-  };
-
-
-  /*
-   * Three messages, because there are three ways of arriving at an empty
-   * screen and only two of them are somebody's fault: a filter that is too
-   * narrow needs loosening, an empty system needs explaining, and a failed
-   * query needs saying out loud rather than being dressed up as either of
-   * the others. Drawing eight empty stage headings in any of those cases
-   * would bury the sentence that actually helps.
-   *
-   * Early returns rather than the nested ternary this used to be — the three
-   * branches are unchanged, but they are now the whole output of a component
-   * instead of one expression inside a page, and a ternary chain that spans a
-   * hundred lines reads worse than three exits.
-   */
-  if (tasksError) return <QueryError what="tasks" message={tasksError.message} />;
-
-  if (rows.length === 0) {
-    return (
-      <div className="rounded-lg border bg-card grade-surface shadow-raised-lg">
-        {isFiltered ? (
-          <EmptyState
-            icon={<ListChecks />}
-            title={
-              view === "qa"
-                ? "Nothing waiting on your review"
-                : view === "mine"
-                  ? "No tasks assigned to you"
-                  : "No tasks match these filters"
-            }
-            description={
-              view === "qa"
-                ? "No work is sitting in QA with you as the reviewer. Switch to All to see the rest of the list."
-                : view === "mine"
-                  ? "Nothing is currently yours to move. Switch to All to see the rest of your department's work."
-                  : "Clear the status, list or priority filter to see the rest of the list."
-            }
-          />
-        ) : (
-          <EmptyState
-            icon={<ListChecks />}
-            title={pendingRequests.length > 0 ? "Nothing approved yet" : "Nothing here yet"}
-            // ⚠️ Two sentences, because this heading can now sit directly
-            // under a list of requests waiting to be approved — and "tasks
-            // appear once a Team Leader approves a request" reads as a
-            // brush-off when the reader IS the team leader and the requests
-            // are on screen above it.
-            description={
-              pendingRequests.length > 0
-                ? "The requests above have not been approved yet. Approving one creates the task and files it in a list."
-                : "Tasks appear once a Team Leader approves a request, or when one is added by hand. Each moves through set stages — the server refuses any step that is not one of them."
-            }
-          />
-        )}
-      </div>
-    );
-  }
-
-  return (
-    /*
-     * P11-05 — THE BUCKETS ARE ASSIGNED IN THE BROWSER NOW.
-     *
-     * The server still does the expensive half above: the query, the filters and
-     * the parent/child nesting. What it no longer decides is which heading a row
-     * sits under at this instant — that moved into `<TaskStatusGroups>` so a
-     * status change moves the row on click rather than 2–3 seconds later, once
-     * this page had re-run all fourteen of its queries.
-     *
-     * `grouped` is a Map and a Map does not cross the RSC boundary
-     * (`components/data-table.tsx` carries the same warning), so it is handed
-     * over as a plain object.
-     */
-    <TaskStatusGroups
-      groups={Object.fromEntries(grouped)}
-      visibleStatuses={visibleStatuses}
-      viewer={viewer}
-      lookups={lookups}
-      assignable={assignable}
-    />
-  );
 }
 
 /**

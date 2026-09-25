@@ -126,6 +126,12 @@ export const qk = {
     ["tasks", "list", listId, normalize(filters)] as const,
   taskBoard: (listId: string, filters: TaskFilters) =>
     ["tasks", "board", listId, normalize(filters)] as const,
+  /**
+   * P12-07 (main) — one `/tasks` view: every URL filter, custom-field filters
+   * included, flattened into one bag. Under `["tasks"]`, so the sweep reaches it.
+   */
+  taskListView: (filters: Record<string, string | undefined>) =>
+    ["tasks", "list-view", normalize(filters)] as const,
   /** Cross-list views that no single list can answer — `?view=mine`, `?view=qa`. */
   taskView: (view: "mine" | "qa", filters: TaskFilters) =>
     ["tasks", "view", view, normalize(filters)] as const,

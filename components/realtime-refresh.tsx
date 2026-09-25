@@ -125,6 +125,7 @@ export function RealtimeTasks({ filter }: { filter: string | null }) {
      */
     onPing: () => {
       void queryClient.invalidateQueries({ queryKey: ["task"] });
+      void queryClient.invalidateQueries({ queryKey: qk.tasks() });
       void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
     },
   });
