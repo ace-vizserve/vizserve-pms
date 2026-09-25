@@ -29,6 +29,9 @@ const CALLERS = [
   "app/(app)/tasks/board/page.tsx",
   "app/(app)/approvals/page.tsx",
   "lib/tasks-server.ts",
+  // P12-07 — the scope rules and the list's reads moved here.
+  "lib/task-scope.ts",
+  "lib/query/fetchers/task-list.ts",
 ];
 
 describe("no id list ever reaches a PostgREST filter", () => {
@@ -54,7 +57,10 @@ describe("the Mine view asks Postgres, not the URL", () => {
   it("names the computed column once and shares it", () => {
     // A wrong column name here is a PostgREST error at runtime and NOTHING at
     // compile time — it is a string the generated types have never heard of.
-    expect(read("lib/tasks-server.ts")).toMatch(/export const MINE_COLUMN = "is_mine"/);
+    // P12-07 — defined in `lib/task-scope.ts` (browser-safe), re-exported by
+    // `lib/tasks-server.ts` for every server caller.
+    expect(read("lib/task-scope.ts")).toMatch(/export const MINE_COLUMN = "is_mine"/);
+    expect(read("lib/tasks-server.ts")).toMatch(/MINE_COLUMN,[\s\S]*from "@\/lib\/task-scope"/);
   });
 
   it("applies the column in exactly one place", () => {
@@ -67,13 +73,14 @@ describe("the Mine view asks Postgres, not the URL", () => {
      * The rule being guarded is unchanged — one definition, and a boolean on
      * the wire rather than an id list.
      */
-    const helper = read("lib/tasks-server.ts");
+    const helper = read("lib/task-scope.ts");
     expect(helper).toMatch(/scoped = scoped\.eq\(MINE_COLUMN, true\)/);
     // Never the literal, or the constant is decoration.
     expect(helper).not.toMatch(/\.eq\("is_mine"/);
   });
 
-  it.each(["app/(app)/tasks/page.tsx", "app/(app)/tasks/board/page.tsx"])(
+  // P12-07 — `/tasks` reads its rows in the browser; its scoping lives in the fetcher.
+  it.each(["lib/query/fetchers/task-list.ts", "app/(app)/tasks/board/page.tsx"])(
     "%s scopes through the shared helper rather than its own copy",
     (path) => {
       const source = read(path);
