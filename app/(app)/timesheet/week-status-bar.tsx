@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState } from "react";
+import { useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { Send, Undo2 } from "lucide-react";
 import { toast } from "@/components/ui/toast";
 
@@ -20,9 +21,23 @@ import {
   formatCellDuration,
   isWeekLocked,
 } from "@/lib/schemas/timesheet";
+import { invalidateTimesheetWrite } from "@/lib/query/invalidate";
+import { fromAction } from "@/lib/query/mutate";
+import { placeholderId } from "@/lib/query/placeholder";
+import {
+  beginTimesheetWrite,
+  cancelTimesheetRefetches,
+  patchWeekSubmitted,
+  patchWeekWithdrawn,
+  rollbackTimesheetWrite,
+} from "@/lib/query/timesheet-cache";
 import { cn } from "@/lib/utils";
 
 import { submitTimesheetWeek, withdrawTimesheetWeek } from "./actions";
+
+/** The Server Action, as a promise TanStack can drive `onError` off. */
+const handIn = fromAction(submitTimesheetWeek);
+const withdraw = fromAction(withdrawTimesheetWeek);
 
 export type WeekState = {
   status: TimesheetWeekStatus;
@@ -52,12 +67,15 @@ export type WeekState = {
  */
 export function WeekStatusBar({
   weekStart,
+  weekKey,
   week,
   weekTotalMinutes,
   scheduledWeek = null,
   weekHasEnded = false,
 }: {
   weekStart: string;
+  /** `qk.week(userId, weekStart)` — the entry the lock is painted into. */
+  weekKey: QueryKey;
   week: WeekState;
   weekTotalMinutes: number;
   /**
@@ -88,8 +106,89 @@ export function WeekStatusBar({
    */
   weekHasEnded?: boolean;
 }) {
-  const [pending, start] = useTransition();
+  const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  /*
+   * P12-23 — SUBMITTING LOCKS THE GRID NOW, RATHER THAN AFTER A ROUND TRIP.
+   *
+   * ⚠️ THE LOCK IS THE HONEST OPTIMISTIC PAINT HERE, and it is the only one this
+   * control makes. `isWeekLocked` decides whether the cells accept a keystroke,
+   * and every entry policy calls `vizserve_pms_timesheet_week_locked` — so a
+   * number typed in the gap between pressing Submit and the server answering
+   * would have been refused anyway, SILENTLY: a refused UPDATE comes back as
+   * success with zero rows, so the figure simply springs back with no
+   * explanation. Painting the lock closes that gap rather than opening one.
+   *
+   * ⚠️ AND A REFUSAL PUTS THE GRID BACK. A short week is confirmed rather than
+   * refused since P8-05b, but a future week still is, and leaving a read-only
+   * grid behind after any refusal would take somebody's week away from them
+   * over a message they can no longer act on.
+   */
+  const submitWeek = useMutation({
+    mutationFn: () => handIn({ week_start: weekStart }),
+
+    onMutate: () => {
+      const snapshot = beginTimesheetWrite(queryClient);
+
+      patchWeekSubmitted(queryClient, weekKey, {
+        // Never sent anywhere and replaced by the refetch — there may be no week
+        // row at all before this write, because no row IS the draft state.
+        id: placeholderId(),
+        status: "SUBMITTED",
+        submitted_at: new Date().toISOString(),
+      });
+
+      cancelTimesheetRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTimesheetWrite(queryClient, snapshot);
+      toast.error(error.message || "That week could not be handed in.");
+    },
+
+    onSuccess: () => {
+      toast.success("Week sent to your department lead.");
+    },
+
+    /* Fired, never awaited. The lead's grid moves too — see
+       `invalidateTimesheetWrite`. */
+    onSettled: () => {
+      invalidateTimesheetWrite(queryClient);
+    },
+  });
+
+  /*
+   * P7-05b — cancelling a submission, on the same terms. The row is deleted, so
+   * the grid unlocks on the click; a refusal (the lead decided in the meantime)
+   * puts the lock back.
+   */
+  const withdrawWeek = useMutation({
+    mutationFn: () => withdraw({ week_start: weekStart }),
+
+    onMutate: () => {
+      const snapshot = beginTimesheetWrite(queryClient);
+      patchWeekWithdrawn(queryClient, weekKey);
+      cancelTimesheetRefetches(queryClient);
+      return snapshot;
+    },
+
+    onError: (error, _vars, snapshot) => {
+      if (snapshot) rollbackTimesheetWrite(queryClient, snapshot);
+      toast.error(error.message || "That submission could not be cancelled.");
+    },
+
+    onSuccess: () => {
+      toast.success("Submission cancelled. Edit the week and submit it again when it is ready.");
+    },
+
+    onSettled: () => {
+      invalidateTimesheetWrite(queryClient);
+    },
+  });
+
+  const pending = submitWeek.isPending || withdrawWeek.isPending;
 
   const status = week?.status ?? null;
   const locked = isWeekLocked(status);
@@ -149,35 +248,16 @@ export function WeekStatusBar({
 
   function send() {
     setConfirmOpen(false);
-    start(async () => {
-      const result = await submitTimesheetWeek({ week_start: weekStart });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success("Week sent to your department lead.");
-    });
+    submitWeek.mutate();
   }
 
+  /* P8-05b — a short week is confirmed first, not refused. */
   function submit() {
     if (short) {
       setConfirmOpen(true);
       return;
     }
     send();
-  }
-
-  /* No confirmation: nothing is lost — the hours stay exactly as logged and
-     the week can be submitted again straight away. */
-  function cancelSubmission() {
-    start(async () => {
-      const result = await withdrawTimesheetWeek({ week_start: weekStart });
-      if (!result.ok) {
-        toast.error(result.error);
-        return;
-      }
-      toast.success("Submission cancelled. Edit the week and submit it again when it is ready.");
-    });
   }
 
   return (
@@ -270,7 +350,7 @@ export function WeekStatusBar({
           a signed week is the lead's call, and a greyed button would only
           invite the question. Anything else → submit. */}
       {status === "SUBMITTED" ? (
-        <Button variant="outline" onClick={cancelSubmission} loading={pending}>
+        <Button variant="outline" onClick={() => withdrawWeek.mutate()} loading={pending}>
           <Undo2 />
           Cancel submission
         </Button>
