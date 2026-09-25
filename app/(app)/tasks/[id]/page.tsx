@@ -40,7 +40,11 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
   const supabase = await createClient();
 
   const [{ data: task }, joinedTaskIdSet, today] = await Promise.all([
-    supabase.from("vizserve_pms_tasks").select("id, department_id").eq("id", id).maybeSingle(),
+    supabase
+      .from("vizserve_pms_tasks")
+      .select("id, department_id, list_id, request_id")
+      .eq("id", id)
+      .maybeSingle(),
     fetchJoinedTaskIdSet(context.userId),
     requestToday(),
   ]);
@@ -69,6 +73,8 @@ export default async function TaskDetailPage({ params }: { params: Promise<{ id:
       // impure render. See `useRefetchOnServerRender`.
       // eslint-disable-next-line react-hooks/purity -- see the note above
       serverRenderedAt={Date.now()}
+      initialListId={task.list_id}
+      initialRequestId={task.request_id}
     />
   );
 }

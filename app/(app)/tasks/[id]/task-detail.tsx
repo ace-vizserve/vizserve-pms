@@ -105,6 +105,8 @@ export function TaskDetail({
   realtimeFilter,
   today,
   serverRenderedAt,
+  initialListId,
+  initialRequestId,
 }: {
   taskId: string;
   seat: TaskSeat;
@@ -114,6 +116,9 @@ export function TaskDetail({
   today: string;
   /** When the server last rendered the page. See `useRefetchOnServerRender`. */
   serverRenderedAt: number;
+  /** The task's list and request, from the row `page.tsx` read. See `listId` below. */
+  initialListId: string | null;
+  initialRequestId: string | null;
 }) {
   // Any write that only revalidates the path still reaches the cached task.
   useRefetchOnServerRender(serverRenderedAt, [qk.task(taskId)]);
@@ -124,12 +129,23 @@ export function TaskDetail({
   });
 
   const task = taskQuery.data?.task;
-  const hasRequest = Boolean(task?.request_id);
+
+  /*
+   * ⚠️ THE LIST AND REQUEST IDS COME FROM THE SERVER'S ROW UNTIL THE CACHED ONE
+   * LANDS. History, custom fields and the request row each need one of them;
+   * waiting for `taskQuery` to supply it put two more browser → database round
+   * trips IN SERIES behind it, and the page shows nothing until the last read
+   * is in. `page.tsx` has already read the row to decide the seat, so these
+   * reads now start in the same wave as the rest. Once the cached row arrives it
+   * wins, so a task moved to another list re-keys and refetches.
+   */
+  const listId = task ? task.list_id : initialListId;
+  const requestId = task ? task.request_id : initialRequestId;
+  const hasRequest = Boolean(requestId);
 
   const historyQuery = useQuery({
     queryKey: qk.taskPart(taskId, "history"),
     queryFn: () => fetchTaskHistory(browserClient(), taskId, { hasRequest }),
-    enabled: Boolean(task),
   });
   const commentsQuery = useQuery({
     queryKey: qk.taskPart(taskId, "comments"),
@@ -160,9 +176,9 @@ export function TaskDetail({
     queryFn: () => fetchVisibleLists(browserClient()),
   });
   const fieldsQuery = useQuery({
-    queryKey: qk.listFields(task?.list_id ?? ""),
-    queryFn: () => fetchListFields(browserClient(), task!.list_id!),
-    enabled: Boolean(task?.list_id),
+    queryKey: qk.listFields(listId ?? ""),
+    queryFn: () => fetchListFields(browserClient(), listId!),
+    enabled: Boolean(listId),
   });
   const collaboratorsQuery = useQuery({
     queryKey: qk.ref("collaborators"),
@@ -170,8 +186,8 @@ export function TaskDetail({
     enabled: seat.collaboration,
   });
   const requestQuery = useQuery({
-    queryKey: qk.request(task?.request_id ?? ""),
-    queryFn: () => fetchTaskRequest(browserClient(), task!.request_id!),
+    queryKey: qk.request(requestId ?? ""),
+    queryFn: () => fetchTaskRequest(browserClient(), requestId!),
     enabled: hasRequest,
   });
 
@@ -185,7 +201,7 @@ export function TaskDetail({
     checklistQuery,
     peopleQuery,
     listsQuery,
-    ...(task?.list_id ? [fieldsQuery] : []),
+    ...(listId ? [fieldsQuery] : []),
     ...(seat.collaboration ? [collaboratorsQuery] : []),
   ];
 
