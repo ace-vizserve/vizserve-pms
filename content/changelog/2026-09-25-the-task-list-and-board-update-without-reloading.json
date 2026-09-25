@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-25",
+  "kind": "changed",
+  "area": "Tasks",
+  "title": "The task list and board update without reloading the page",
+  "description": "Changing a task's status, priority or dates on the list, or dragging a card on the board, used to reload the whole page to show the result. Now only the tasks are read again, and a list or board you have already opened comes back at once.",
+  "items": [
+    "The list and board look and work as before, including custom fields, filters, subtasks and the requests waiting for approval",
+    "If a list's comments, time or subtasks cannot be loaded, the page says so instead of showing them as empty"
+  ],
+  "refs": [
+    "P12-07",
+    "P12-08"
+  ]
+}
