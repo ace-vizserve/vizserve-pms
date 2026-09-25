@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-25",
+  "kind": "changed",
+  "area": "DTR",
+  "title": "The DTR and the punch panel load from one place",
+  "description": "Your time record and the Time in / Time out panel on the home page, the dashboard and the DTR now share what they know, so a punch shows up on all of them together and the clock reminder no longer asks the server separately.",
+  "items": [
+    "Coming back to the DTR shows your record straight away",
+    "Pressing Time in twice no longer asks you about the punch you made hours earlier"
+  ],
+  "refs": [
+    "P12-23"
+  ]
+}

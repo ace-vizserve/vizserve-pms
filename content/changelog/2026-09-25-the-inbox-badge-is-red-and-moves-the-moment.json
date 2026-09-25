@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-25",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The inbox badge is red and moves the moment something happens",
+  "description": "The unread count beside Inbox used to be a quiet blue number that only changed when the page reloaded. It is now red with a white number, and it goes up when a notification arrives and down when you read one, without the page you are on reloading.",
+  "items": [
+    "Marking a notification read, or all of them, updates the row and the sidebar badge on the click",
+    "If the portal cannot save a read receipt, the row goes back to unread and says why, instead of looking read when it is not",
+    "The inbox list loads straight away when you come back to it",
+    "The project tree's task counts no longer undercount on very large departments"
+  ],
+  "refs": [
+    "P12-01",
+    "P12-17"
+  ]
+}

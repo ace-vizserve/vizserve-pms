@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-25",
+  "kind": "changed",
+  "area": "Timesheet",
+  "title": "Typing hours into the timesheet no longer waits for the server",
+  "description": "A cell used to hold its old number until the save came back and the page redrew. Now the week updates as you type, and a save the portal refuses puts the cell back exactly as it was, with the reason.",
+  "items": [
+    "Submitting a week locks it on the click, and cancelling a submission unlocks it the same way",
+    "Going back to a week you have already opened shows it at once",
+    "The team week no longer counts leave that has only been requested as time off — only approved leave excuses a missing timesheet"
+  ],
+  "refs": [
+    "P12-23"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-25",
+  "kind": "changed",
+  "area": "Tasks",
+  "title": "Opening a task starts before you click",
+  "description": "A task's page used to load everything on it only after you clicked. Pointing at a task in the list or on the board now starts loading it, and a task you have already opened comes back at once.",
+  "items": [
+    "The page looks and works as before — details, custom fields, checklist, files, subtasks, activity and history",
+    "A change you make stays on screen while it saves, instead of flicking back to the old value for a moment",
+    "A colleague's change to the task you have open appears without reloading"
+  ],
+  "refs": [
+    "P12-06"
+  ]
+}
