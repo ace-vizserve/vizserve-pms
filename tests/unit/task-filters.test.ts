@@ -79,8 +79,10 @@ describe("the Mine view asks Postgres, not the URL", () => {
     expect(helper).not.toMatch(/\.eq\("is_mine"/);
   });
 
-  // P12-07 — `/tasks` reads its rows in the browser; its scoping lives in the fetcher.
-  it.each(["lib/query/fetchers/task-list.ts", "app/(app)/tasks/board/page.tsx"])(
+  // P12-07/08 — `/tasks` and the board read their rows in the browser, and both
+  // fetchers live in this one file, so it is where the scoping must go through
+  // the helper. The gantt, still server-rendered, is held to the same rule.
+  it.each(["lib/query/fetchers/task-list.ts", "app/(app)/tasks/gantt/page.tsx"])(
     "%s scopes through the shared helper rather than its own copy",
     (path) => {
       const source = read(path);

@@ -21,6 +21,7 @@ import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 import { transitionTask } from "../actions";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * P7-20 — dragging a card between columns.
@@ -122,6 +123,7 @@ export function BoardDnd({ children }: { children: ReactNode }) {
     height: number;
   } | null>(null);
   const [, startMove] = useTransition();
+  const refresh = useTaskRefresh();
 
   const sensors = useSensors(
     /*
@@ -194,11 +196,12 @@ export function BoardDnd({ children }: { children: ReactNode }) {
       if (!result.ok) {
         toast.error(result.error);
         // Nothing to roll back: the card never moved in the DOM. The server is
-        // the only thing that decides where it sits, and `router.refresh()`
-        // below re-reads it.
+        // the only thing that decides where it sits.
         return;
       }
 
+      // P12-08 — the columns are a cache entry; this is what moves the card.
+      await refresh();
     });
   }
 

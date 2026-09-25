@@ -318,3 +318,104 @@ export function subtaskProgress(childRows: TaskListView["childRows"]) {
   }
   return progress;
 }
+
+/* -------------------------------------------------------------------------- */
+/* The board.                                                                  */
+/* -------------------------------------------------------------------------- */
+
+const BOARD_TASK_COLUMNS =
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution";
+
+/** One card's row — the columns `BOARD_TASK_COLUMNS` selects. */
+export type BoardTask = {
+  id: string;
+  title: string;
+  status: TaskStatus;
+  due_date: string | null;
+  start_date: string | null;
+  assignee_id: string | null;
+  qa_assignee_id: string | null;
+  department_id: string;
+  created_by: string | null;
+  request_id: string | null;
+  is_personal: boolean;
+  priority: string | null;
+  output_link: string | null;
+  parent_task_id: string | null;
+  list_id: string | null;
+  resolution: string | null;
+};
+
+/** How many finished cards a terminal column shows before it stops. */
+export const FINISHED_PER_COLUMN = 12;
+
+export type BoardView = {
+  /** Every LIVE task in scope, subtasks included. */
+  tasks: BoardTask[];
+  people: TaskListPerson[];
+  /** Per terminal status, in `finishedStatuses` order: the newest cards and the true total. */
+  finished: { data: BoardTask[]; count: number | null }[];
+  childRows: { id: string; parent_task_id: string | null; status: TaskStatus }[];
+  /** Tasks the viewer holds a join-table seat on (P7-43). */
+  joinedTaskIds: string[];
+};
+
+/**
+ * `qk.taskBoardView(filters)` — the board's cards, the same reads the server
+ * board ran: live work uncapped, each finished column its own capped query with
+ * an exact count (a cap without a stated limit is a lie about the number), and
+ * the children of the top-level cards for their progress bars.
+ */
+export async function fetchBoardView(
+  client: TaskReadClient,
+  scope: { listId: string | null; view: TaskView; kind: TaskKind; userId: string },
+  finishedStatuses: readonly TaskStatus[],
+): Promise<BoardView> {
+  const live = applyTaskScope(
+    client
+      .from("vizserve_pms_tasks")
+      .select(BOARD_TASK_COLUMNS)
+      .order("due_date", { ascending: true, nullsFirst: false })
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+    scope,
+  );
+
+  const [joined, tasks, people, finished] = await Promise.all([
+    read(client.from("vizserve_pms_task_assignees").select("task_id").eq("user_id", scope.userId)),
+    read(live),
+    read(client.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active")),
+    Promise.all(
+      finishedStatuses.map(async (status) => {
+        const { data, count, error } = await applyTaskScope(
+          client
+            .from("vizserve_pms_tasks")
+            .select(BOARD_TASK_COLUMNS, { count: "exact" })
+            .eq("status", status)
+            .is("parent_task_id", null)
+            .order("updated_at", { ascending: false })
+            .limit(FINISHED_PER_COLUMN),
+          scope,
+        );
+        if (error) await read(Promise.resolve({ data: null, error }));
+        return { data: (data ?? []) as unknown as BoardTask[], count };
+      }),
+    ),
+  ]);
+
+  const liveTasks = (tasks ?? []) as unknown as BoardTask[];
+  const parentIds = liveTasks.filter((task) => !task.parent_task_id).map((task) => task.id);
+
+  const childRows = parentIds.length
+    ? await read(
+        client.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", parentIds),
+      )
+    : [];
+
+  return {
+    tasks: liveTasks,
+    people: (people ?? []) as TaskListPerson[],
+    finished,
+    childRows: (childRows ?? []) as BoardView["childRows"],
+    joinedTaskIds: (joined ?? []).map((row) => row.task_id),
+  };
+}

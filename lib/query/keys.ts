@@ -132,6 +132,9 @@ export const qk = {
    */
   taskListView: (filters: Record<string, string | undefined>) =>
     ["tasks", "list-view", normalize(filters)] as const,
+  /** P12-08 (main) — one board view: list, scope and kind. Under `["tasks"]`. */
+  taskBoardView: (filters: Record<string, string | undefined>) =>
+    ["tasks", "board-view", normalize(filters)] as const,
   /** Cross-list views that no single list can answer — `?view=mine`, `?view=qa`. */
   taskView: (view: "mine" | "qa", filters: TaskFilters) =>
     ["tasks", "view", view, normalize(filters)] as const,
