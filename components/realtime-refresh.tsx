@@ -1,6 +1,5 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 
 import { toast } from "@/components/ui/toast";
@@ -53,8 +52,6 @@ import { useRealtimeRefresh } from "@/hooks/use-realtime-refresh";
  * topic is unique per subscriber and cannot collide with the task channel below.
  */
 export function RealtimeNotifications({ userId }: { userId: string }) {
-  const router = useRouter();
-  const pathname = usePathname();
   const queryClient = useQueryClient();
 
   useRealtimeRefresh({
@@ -66,13 +63,15 @@ export function RealtimeNotifications({ userId }: { userId: string }) {
      * P12-01 — THE BADGE MOVES WITHOUT RE-RENDERING THE PAGE. The unread count
      * lives in the rail's query now, so a new notification invalidates that one
      * key instead of `router.refresh()` re-running the layout and whatever page
-     * somebody is in the middle of. /inbox is the exception: its list is still
-     * server-rendered, so it still needs the route refresh to show the new row.
+     * somebody is in the middle of. P12-17: /inbox reads from the cache too,
+     * so its list and count are invalidated the same way — only if they are
+     * being observed does anything refetch.
      */
     refreshRoute: false,
     onPing: () => {
       void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
-      if (pathname.startsWith("/inbox")) router.refresh();
+      void queryClient.invalidateQueries({ queryKey: ["inbox"] });
+      void queryClient.invalidateQueries({ queryKey: qk.unread() });
 
       /*
        * ⚠️ GENERIC TEXT, AND IT MUST STAY GENERIC. The notification's own title
