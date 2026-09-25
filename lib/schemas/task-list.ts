@@ -15,3 +15,17 @@ export const directoryPersonSchema = z.object({
 });
 
 export type DirectoryPerson = z.infer<typeof directoryPersonSchema>;
+
+/**
+ * `qk.listsVisible()` — one list the reader may see, across departments. A
+ * superset shape, shared by every task surface that names or offers a list.
+ */
+export const visibleListSchema = z.object({
+  id: z.uuid(),
+  name: z.string(),
+  group_id: z.uuid().nullable(),
+  owner_id: z.uuid().nullable(),
+  department_id: z.uuid(),
+});
+
+export type VisibleList = z.infer<typeof visibleListSchema>;

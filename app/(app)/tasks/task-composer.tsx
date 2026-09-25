@@ -4,7 +4,7 @@ import { useState, useTransition } from "react";
 
 import { toast } from "@/components/ui/toast";
 import { CalendarPlus, CircleUser, CornerDownLeft, Flag, Hourglass, Plus, X } from "lucide-react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useOptimisticMove } from "./optimistic-move";
 
 import { TaskPriorityBadge } from "@/components/status-badge";
@@ -29,6 +29,7 @@ import { cn } from "@/lib/utils";
 
 import { quickAddTask } from "./actions";
 import { focusWithoutScroll } from "@/lib/focus";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * K3 — INLINE CREATION, as a whole row rather than a title box.
@@ -99,7 +100,7 @@ function useComposer({
   const searchParams = useSearchParams();
   const listId = searchParams.get("list");
   const [draft, setDraft] = useState<Draft>(EMPTY);
-  const router = useRouter();
+  const refresh = useTaskRefresh();
   const [pending, startTransition] = useTransition();
 
   function set<K extends keyof Draft>(key: K, value: Draft[K]) {
@@ -149,7 +150,7 @@ function useComposer({
       /* ⚠️ Holds the transition open until the fresh data lands — without it
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      await refresh();
       setDraft(EMPTY);
       onDone?.();
     });

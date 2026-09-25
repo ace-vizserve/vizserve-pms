@@ -2,7 +2,6 @@
 
 import { toast } from "@/components/ui/toast";
 import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { startTransition, useCallback, useOptimistic, useState, useTransition } from "react";
 
 import { isPlaceholder, placeholderId } from "./optimistic-move";
@@ -22,6 +21,7 @@ import {
   uploadCommentImage,
 } from "./actions";
 import { Monogram, initials } from "./assignees";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 export type TaskComment = {
   id: string;
@@ -200,7 +200,7 @@ export function CommentThread({
   const [body, setBody] = useState("");
   const [editing, setEditing] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
-  const router = useRouter();
+  const refresh = useTaskRefresh();
   const [pending, startPending] = useTransition();
 
   /*
@@ -271,9 +271,16 @@ export function CommentThread({
        * by it" note. Anything that refreshes after an await on this page needs
        * the same treatment.
        */
+      //
+      // P12-06 — and AWAITED from the outer transition too. The detail page's
+      // thread is a cache entry, so the optimistic row must stay until the
+      // refetch lands; letting the outer transition end first would drop the
+      // comment for a beat and then put it back.
+      let refreshing: Promise<void> = Promise.resolve();
       startTransition(() => {
-        router.refresh();
+        refreshing = refresh();
       });
+      await refreshing;
 
       if (!result.ok) {
         // Put it back: a comment the server refused must not be lost to a toast

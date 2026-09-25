@@ -1,4 +1,4 @@
-import Link from "next/link";
+import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 
 import { TaskPriorityBadge, TaskStatusGlyph } from "@/components/status-badge";
 import { formatDate } from "@/lib/dates";
@@ -106,7 +106,7 @@ export function SubtaskList({
                   <div className="flex items-center gap-2">
                     <TaskStatusGlyph status={subtask.status} />
 
-                    <Link
+                    <HoverPrefetchLink
                       href={`/tasks/${subtask.id}`}
                       className={cn(
                         "min-w-0 flex-1 truncate text-sm hover:underline",
@@ -116,7 +116,7 @@ export function SubtaskList({
                       )}
                       title={subtask.title}>
                       {subtask.title}
-                    </Link>
+                    </HoverPrefetchLink>
 
                     <TaskPriorityBadge priority={subtask.priority} />
 

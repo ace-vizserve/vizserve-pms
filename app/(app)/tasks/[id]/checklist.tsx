@@ -19,6 +19,7 @@ import { toast } from "@/components/ui/toast";
 import { focusWithoutScroll } from "@/lib/focus";
 import { CHECKLIST_LABEL_MAX } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * P7-68 — THE PROCEDURE, next to the work.
@@ -133,6 +134,7 @@ function Row({
   onTick: (next: { id: string; is_done: boolean }) => void;
 }) {
   const [pending, start] = useTransition();
+  const refresh = useTaskRefresh();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(item.label);
 
@@ -144,7 +146,12 @@ function Row({
 
       // The optimistic value reverts on its own when the transition ends, so a
       // failure needs no undo — only an explanation.
-      if (!result.ok) toast.error(result.error);
+      if (!result.ok) {
+        toast.error(result.error);
+        return;
+      }
+      // P12-06 — held open until the cache has the tick, so it does not flash back.
+      await refresh();
     });
   }
 
@@ -161,6 +168,8 @@ function Row({
       if (!result.ok) {
         toast.error(result.error);
         setDraft(item.label);
+      } else {
+        await refresh();
       }
       setEditing(false);
     });
@@ -247,6 +256,7 @@ function Row({
           start(async () => {
             const result = await removeChecklistItem(taskId, item.id);
             if (!result.ok) toast.error(result.error);
+            else await refresh();
           })
         }>
         <Trash2 />
@@ -265,6 +275,7 @@ function Row({
 function AddStep({ taskId, onClose }: { taskId: string; onClose: () => void }) {
   const [label, setLabel] = useState("");
   const [pending, start] = useTransition();
+  const refresh = useTaskRefresh();
   const inputRef = useRef<HTMLInputElement>(null);
 
   function submit() {
@@ -282,6 +293,7 @@ function AddStep({ taskId, onClose }: { taskId: string; onClose: () => void }) {
         return;
       }
 
+      await refresh();
       setLabel("");
       inputRef.current?.focus({ preventScroll: true });
     });

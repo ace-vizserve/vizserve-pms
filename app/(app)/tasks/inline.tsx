@@ -2,7 +2,6 @@
 
 import { toast } from "@/components/ui/toast";
 import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
-import { useRouter } from "next/navigation";
 import { useOptimistic, useState, type ReactNode } from "react";
 
 import { useOptimisticMove } from "./optimistic-move";
@@ -29,6 +28,7 @@ import { DeleteTaskDialog } from "./delete-task-dialog";
 
 import { updateTaskField } from "./actions";
 import { ComposerCard, type Assignable } from "./task-composer";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * K3 — editing a task without opening it.
@@ -62,7 +62,7 @@ import { ComposerCard, type Assignable } from "./task-composer";
  * One transition. Set, await, done — all in the caller.
  */
 function usePatch(taskId: string) {
-  const router = useRouter();
+  const refresh = useTaskRefresh();
 
   /*
    * ⚠️ THE ROW IS PATCHED, NOT JUST THIS CONTROL'S OWN STATE.
@@ -96,7 +96,7 @@ function usePatch(taskId: string) {
     // Keeps the action pending until the fresh payload is applied, so the
     // optimistic value is replaced by the real one rather than blinking back to
     // the old one in between.
-    router.refresh();
+    await refresh();
 
     if (success) toast.success(success);
   }

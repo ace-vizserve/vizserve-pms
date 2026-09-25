@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useOptimistic, useRef, useState, useTransition } from "react";
 import { ChevronDown, Download, Link2, Loader2, Paperclip, Plus, Upload, X } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -41,6 +40,7 @@ import {
   updateTaskField,
   uploadTaskOutput,
 } from "../actions";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * P3-13 — the PIC's output files.
@@ -111,7 +111,7 @@ export function TaskOutputs({
   variant?: "card" | "field";
 }) {
   const inputRef = useRef<HTMLInputElement>(null);
-  const router = useRouter();
+  const refresh = useTaskRefresh();
   const [pending, startTransition] = useTransition();
   const [opening, setOpening] = useState<string | null>(null);
 
@@ -175,7 +175,7 @@ export function TaskOutputs({
       /* ⚠️ Holds the transition open until the fresh data lands — without it
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      await refresh();
       toast.success(parsed.data ? "Link saved" : "Link removed");
     });
   }
@@ -203,6 +203,11 @@ export function TaskOutputs({
       }
 
       if (inputRef.current) inputRef.current.value = "";
+
+      // P12-06 — the files list is a cache entry now, and the action's
+      // `revalidatePath` does not reach it. Refreshed even after a partial
+      // failure: the files that DID go up must appear.
+      await refresh();
     });
   }
 
@@ -233,7 +238,7 @@ export function TaskOutputs({
       /* ⚠️ Holds the transition open until the fresh data lands — without it
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      await refresh();
       toast.success("Removed");
     });
   }

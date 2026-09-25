@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useOptimistic, useState, useTransition } from "react";
 import Link from "next/link";
 import { AlertTriangle, ArrowRight, Check } from "lucide-react";
@@ -48,6 +47,7 @@ import { InlineDate, InlineEstimate, InlineList, InlinePriority } from "../inlin
 import { ACTION_LINK } from "./grid";
 import { useTaskGate } from "./task-gate";
 import { useTaskAutosave } from "./use-task-autosave";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * P7-56 — THE TASK'S MAIN PANE. One surface, in the shape the team already
@@ -275,7 +275,7 @@ export function TaskSurface({
    * autosave that is the one change that makes this page feel broken: disabling
    * a focused textarea mid-save blurs it and drops the caret to position 0.
    */
-  const router = useRouter();
+  const refresh = useTaskRefresh();
   const [moving, startTransition] = useTransition();
   const autosave = useTaskAutosave(taskId);
   const gate = useTaskGate();
@@ -362,7 +362,7 @@ export function TaskSurface({
       /* ⚠️ Holds the transition open until the fresh data lands — without it
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      await refresh();
       toast.success(success);
       setOverrideOpen(false);
       setOverrideReason("");
@@ -402,7 +402,7 @@ export function TaskSurface({
       /* ⚠️ Holds the transition open until the fresh data lands — without it
          `useOptimistic` reverts the moment the action resolves. See
          `tasks/inline.tsx` for the full account. */
-      router.refresh();
+      await refresh();
       toast.success("Reassigned");
     });
   }

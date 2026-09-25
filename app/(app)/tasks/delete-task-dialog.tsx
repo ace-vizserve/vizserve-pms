@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { useOptimisticMove } from "./optimistic-move";
@@ -19,6 +18,7 @@ import {
 import { formatDuration } from "@/lib/dates";
 
 import { deleteTask, taskDeleteImpact, type TaskDeleteImpact } from "./actions";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * P7-19 — deleting an internal task, with the damage named first.
@@ -54,7 +54,7 @@ export function DeleteTaskDialog({
   const [open, setOpen] = useState(false);
   const [impact, setImpact] = useState<TaskDeleteImpact | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const router = useRouter();
+  const refresh = useTaskRefresh();
   const [loadingImpact, startImpact] = useTransition();
   const [pending, startDelete] = useTransition();
 
@@ -97,7 +97,7 @@ export function DeleteTaskDialog({
       }
 
       /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
-      router.refresh();
+      await refresh();
       toast.success("Task deleted");
       onDeleted?.();
     });

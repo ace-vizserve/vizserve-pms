@@ -1,10 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
 import { toast } from "@/components/ui/toast";
 
 import { updateTaskField } from "../actions";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * P7-55 — per-field autosave for `/tasks/[id]`.
@@ -85,7 +85,7 @@ export type TaskAutosave = {
 };
 
 export function useTaskAutosave(taskId: string): TaskAutosave {
-  const router = useRouter();
+  const refresh = useTaskRefresh();
 
   const [states, setStates] = useState<Record<string, FieldState>>({});
 
@@ -127,9 +127,9 @@ export function useTaskAutosave(taskId: string): TaskAutosave {
       }
 
       setState(key, "saved");
-      if (options.refresh !== false) router.refresh();
+      if (options.refresh !== false) await refresh();
     },
-    [router, setState, taskId],
+    [refresh, setState, taskId],
   );
 
   const clearTimer = useCallback((key: string) => {

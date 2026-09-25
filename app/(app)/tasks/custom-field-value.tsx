@@ -24,6 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 
 import { setTaskFieldValue } from "./field-actions";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * P7-73 — a custom field's value: drawn, and edited.
@@ -118,6 +119,7 @@ export function CustomFieldEditor({
 }) {
   const [open, setOpen] = useState(false);
   const [, startTransition] = useTransition();
+  const refresh = useTaskRefresh();
   /*
    * `useOptimistic` inside a transition — see the note on `InlinePriority`. The
    * value moves on the click; if the server refuses, the transition ends and it
@@ -132,6 +134,7 @@ export function CustomFieldEditor({
       setShown(next);
       const result = await setTaskFieldValue(taskId, field.id, next);
       if (!result.ok) toast.error(result.error);
+      else await refresh();
     });
   }
 

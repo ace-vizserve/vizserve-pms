@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { startTransition, useEffect, useOptimistic, useRef, useState } from "react";
 import { Pencil } from "lucide-react";
 import { toast } from "@/components/ui/toast";
@@ -8,6 +7,7 @@ import { toast } from "@/components/ui/toast";
 import { cn } from "@/lib/utils";
 
 import { updateTaskField } from "../actions";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**
  * The task's name, on the one screen that could not change it.
@@ -47,7 +47,7 @@ export function EditableTitle({
    * `setDraft(title)` restored an input nobody could see. Now the heading really
    * does show it, and React puts it back by itself if the server refuses.
    */
-  const router = useRouter();
+  const refresh = useTaskRefresh();
   const [shownTitle, setShownTitle] = useOptimistic(title);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -93,7 +93,7 @@ export function EditableTitle({
       }
 
       /* ⚠️ Keeps the transition pending until the fresh data is applied. Without it `useOptimistic` reverts the instant the action resolves and the value snaps back until the payload lands — see `tasks/inline.tsx`. */
-      router.refresh();
+      await refresh();
       toast.success("Renamed");
     });
   }

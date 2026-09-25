@@ -51,7 +51,9 @@ export type TaskPart =
   | "assignees"
   | "history"
   | "attachments"
-  | "time";
+  | "time"
+  /** P7-68 — the checklist, in position order. */
+  | "checklist";
 
 /**
  * Reference data — admin-managed, changes rarely, read by pickers everywhere.
@@ -90,7 +92,9 @@ export type RefTable =
    * table is not published to Realtime. Phase 6 owns forms and is where an
    * invalidation from the builder belongs.
    */
-  | "client-forms";
+  | "client-forms"
+  /** P13-01 — who may be handed work in the collaboration space. */
+  | "collaborators";
 
 /**
  * Drops keys whose value is `undefined` or `""`.
@@ -176,6 +180,8 @@ export const qk = {
    * `qk.lists(…)` together.
    */
   listsVisible: () => ["lists", "visible"] as const,
+  /** P7-73 — one list's active custom fields. Under `["lists"]`, so a list write sweeps it. */
+  listFields: (listId: string) => ["lists", "fields", listId] as const,
 
   /**
    * P12-16 — THE LIST MANAGEMENT SCREEN'S ROW SET. `/tasks/lists`, and only it.

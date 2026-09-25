@@ -2,6 +2,12 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+
+import { prefetchTask } from "@/lib/query/prefetch-task";
+
+/** `/tasks/<uuid>` exactly — a list, the board or `/tasks/lists` is not a task page. */
+const TASK_PAGE = /^\/tasks\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$/i;
 
 /**
  * P11-05 — a link that prefetches when you point at it, not when it scrolls
@@ -38,6 +44,20 @@ export function HoverPrefetchLink({
   ...rest
 }: React.ComponentProps<typeof Link>) {
   const [active, setActive] = useState(false);
+  const queryClient = useQueryClient();
+
+  /*
+   * P12-06 — A TASK PAGE READS FROM THE QUERY CACHE, so prefetching its route
+   * shell alone warms nothing that matters: the data would still be read after
+   * the click. On intent, the task's own reads start too, under the keys the
+   * page uses, and the page usually finds them already in. Fresh entries are
+   * not read again, so passing back and forth over a row costs nothing.
+   */
+  function activate() {
+    setActive(true);
+    const taskId = typeof href === "string" ? TASK_PAGE.exec(href)?.[1] : undefined;
+    if (taskId) prefetchTask(queryClient, taskId);
+  }
 
   return (
     <Link
@@ -45,10 +65,10 @@ export function HoverPrefetchLink({
       href={href}
       className={className}
       prefetch={active ? null : false}
-      onMouseEnter={() => setActive(true)}
+      onMouseEnter={activate}
       // Keyboard readers never fire mouseenter, and they are exactly the people
       // who tab down a list one row at a time before choosing.
-      onFocus={() => setActive(true)}
+      onFocus={activate}
     >
       {children}
     </Link>

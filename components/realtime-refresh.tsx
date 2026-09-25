@@ -111,10 +111,22 @@ export function RealtimeNotifications({ userId }: { userId: string }) {
  * is a function of what is being watched, which is the property that has to hold.
  */
 export function RealtimeTasks({ filter }: { filter: string | null }) {
+  const queryClient = useQueryClient();
+
   useRealtimeRefresh({
     table: "vizserve_pms_tasks",
     filter,
     channelName: `p8-03:tasks:${filter ?? "none"}`,
+    /*
+     * P12-06 — the route refresh still repaints the server-rendered list, board
+     * and gantt; `/tasks/[id]` reads from the cache, which the route refresh does
+     * not reach. Invalidating `["task"]` refetches the detail on screen, and only
+     * that — an entry nothing observes is merely marked stale.
+     */
+    onPing: () => {
+      void queryClient.invalidateQueries({ queryKey: ["task"] });
+      void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
+    },
   });
 
   return null;
