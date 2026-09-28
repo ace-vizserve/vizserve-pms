@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useOptimistic } from "react";
+import { useDeferredValue, useMemo, useOptimistic } from "react";
 
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 
@@ -34,6 +34,9 @@ import { TaskGroupTable, type ListRow, type TaskLookups, type Viewer } from "./t
  * Nothing here has to un-apply anything, and a refused move needs no rollback
  * code — the row simply returns to the group the server still says it is in.
  */
+
+/** How many rows per stage the first render draws. More than a screen holds. */
+const FIRST_PASS_ROWS = 20;
 
 export function TaskStatusGroups({
   groups,
@@ -109,17 +112,43 @@ export function TaskStatusGroups({
     return buckets;
   }, [rows, visibleStatuses]);
 
+  /*
+   * P12 — THE FIRST SCREENFUL FIRST, THE REST IN THE BACKGROUND.
+   *
+   * Measured on staging: opening a list whose rows were already cached took up
+   * to 1.3s, and almost all of it was React drawing EVERY row of every stage
+   * before Next would switch the URL — a navigation commits only once the new
+   * page has rendered. A first visit was quicker precisely because it drew a
+   * skeleton instead.
+   *
+   * So the first render draws at most `FIRST_PASS_ROWS` per stage — more than a
+   * screen holds — and `useDeferredValue` then renders the whole list as a
+   * background, interruptible render: the page switches at once, stays
+   * responsive to clicks, and the rest of the rows arrive a moment later.
+   * Later updates (an edit, a refetch) defer the same way, so a keystroke never
+   * waits on a full redraw.
+   *
+   * The COUNT in each stage heading always reads the full list.
+   */
+  const firstPass = useMemo(() => {
+    const truncated = new Map<VizservePmsTaskStatus, ListRow[]>();
+    for (const [status, group] of grouped) truncated.set(status, group.slice(0, FIRST_PASS_ROWS));
+    return truncated;
+  }, [grouped]);
+
+  const shown = useDeferredValue(grouped, firstPass);
+
   return (
     <OptimisticMoveContext value={applyMove}>
       <div className="flex flex-col gap-3">
         {visibleStatuses.map((status) => {
-          const group = grouped.get(status) ?? [];
+          const group = shown.get(status) ?? [];
 
           return (
             <TaskStatusGroup
               key={status}
               status={status}
-              count={group.length}
+              count={(grouped.get(status) ?? []).length}
               // A stage with nothing in it opens to one line. Closing it by
               // default would hide the only thing it has to say.
               defaultOpen
