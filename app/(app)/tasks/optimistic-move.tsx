@@ -44,7 +44,12 @@ export type OptimisticMove =
    *
    * One patch on the row feeds all three, because all three render from it.
    */
-  | { kind: "patch"; id: string; fields: Record<string, unknown> };
+  | { kind: "patch"; id: string; fields: Record<string, unknown> }
+  /**
+   * P7-82 — a drag. `ids` are the siblings top to bottom: the top-level rows
+   * of one status when `parentId` is null, one parent's subtasks otherwise.
+   */
+  | { kind: "order"; parentId: string | null; ids: string[] };
 
 /*
  * THE PLACEHOLDER ID — AND WHY IT IS NOT A UUID.

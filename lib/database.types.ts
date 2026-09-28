@@ -1168,6 +1168,11 @@ export type Database = {
           created_at: string;
           updated_at: string;
           /**
+           * P7-82. The manual order. Starts as the creation time; a drag permutes
+           * the values a group already holds (`vizserve_pms_reorder_tasks`).
+           */
+          position: number;
+          /**
            * P9-05 — NOT A REAL COLUMN. A PostgREST computed column, backed by
            * `is_mine(vizserve_pms_tasks)`: the caller is the PIC, or the task is
            * internal and they are on it (P7-43).
@@ -1206,6 +1211,8 @@ export type Database = {
           list_id: string | null;
           priority: VizservePmsTaskPriority | null;
           estimate_minutes: number | null;
+          /** P7-82. */
+          position: number;
         }>;
         Relationships: [
           {
@@ -2743,6 +2750,11 @@ export type Database = {
       };
       /** P7-67. Deletes the rows and hands back the objects to remove. */
       /** P7-69. Copies a task into a list in its own department. */
+      /** P7-82. The group, top to bottom. Returns how many rows moved. */
+      vizserve_pms_reorder_tasks: {
+        Args: { p_task_ids: string[] };
+        Returns: number;
+      };
       vizserve_pms_copy_task: {
         Args: { p_task_id: string; p_list_id: string | null; p_include?: string[] };
         Returns: string;

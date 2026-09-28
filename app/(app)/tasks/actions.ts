@@ -39,6 +39,7 @@ import {
   listOrderSchema,
   taskGroupOrderSchema,
   taskGroupSchema,
+  taskOrderSchema,
   taskParentSchema,
   taskPatchSchema,
   taskStatusSchema,
@@ -521,6 +522,32 @@ export async function setTaskParent(taskId: string, input: unknown): Promise<Act
 
   refresh(taskId);
   return { ok: true, data: undefined };
+}
+
+/**
+ * P7-82 — a group of rows, in the order somebody dragged them into.
+ *
+ * `taskIds` is the whole group top to bottom, not "this one moved to index 3":
+ * the list on screen may be sorted by due date, and the first drag is what
+ * turns it into a manual order. `vizserve_pms_reorder_tasks` permutes the
+ * values the group already holds, so the tasks keep their place relative to
+ * everything outside the group. RLS decides which rows may move.
+ */
+export async function reorderTasks(taskIds: string[]): Promise<ActionResult<{ moved: number }>> {
+  await requireAuthContextOrThrow();
+
+  const parsed = taskOrderSchema.safeParse(taskIds);
+  if (!parsed.success) return { ok: false, error: "That order could not be saved." };
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("vizserve_pms_reorder_tasks", {
+    p_task_ids: [...new Set(parsed.data)],
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  refresh();
+  return { ok: true, data: { moved: data ?? 0 } };
 }
 
 /**

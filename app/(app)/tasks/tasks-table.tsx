@@ -45,6 +45,7 @@ import { TaskSelectAll, TaskSelectCheckbox } from "./task-selection";
 import { TaskStatusSelect } from "./status-select";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 import { isPlaceholder } from "./optimistic-move";
+import { DraggableTaskRow, NestTarget, TaskGrip, useTaskDndEnabled } from "./task-dnd";
 
 /**
  * P7-64 - the task list's columns, in a client component.
@@ -252,6 +253,11 @@ export function TaskGroupTable({
   /* Null outside the provider — the board and any future caller render a group
      table without the page chrome, and a missing menu must not be a crash. */
   const columnState = useContext(TaskColumnsContext);
+  /* P7-82. False wherever the list's drag provider is absent — the board, and
+     anything else that borrows this table — and then there is no grip and no
+     drop target, rather than handles that do nothing. A boolean that never
+     changes mid-drag, so dragging does not re-render the table. */
+  const dnd = useTaskDndEnabled();
   const isAdmin = roleAtLeast(viewer.role, "owner");
   /**
    * P7-19 — whether to offer the trash on this row.
@@ -408,12 +414,35 @@ export function TaskGroupTable({
       /* Every selectable row in this group. Built from `group` rather than the
          rendered rows so a collapsed parent's children still count — they are
          selected, merely not on screen. */
-      header: <TaskSelectAll rows={selectableInGroup} />,
-      className: "w-8 pr-0",
-      cell: (task) =>
-        canSelect(task) ? (
+      /*
+       * P7-82 — THE GRIP SHARES THIS CELL rather than taking a column of its
+       * own. As a separate column it pushed the checkbox under the sticky Task
+       * column; in one cell the two always travel together. Offered on the same
+       * rows as the checkbox: moving a task is editing it, and the UPDATE policy
+       * (P11-03) is what finally decides.
+       */
+      header: dnd ? (
+        <span className="flex items-center gap-0.5">
+          <span className="block size-6 shrink-0" aria-hidden />
+          <TaskSelectAll rows={selectableInGroup} />
+        </span>
+      ) : (
+        <TaskSelectAll rows={selectableInGroup} />
+      ),
+      className: dnd ? "w-14 pr-0 pl-1" : "w-8 pr-0",
+      cell: (task) => {
+        const box = canSelect(task) ? (
           <TaskSelectCheckbox taskId={task.id} title={task.title} />
-        ) : null,
+        ) : null;
+        return dnd ? (
+          <span className="flex items-center gap-0.5">
+            <TaskGrip title={task.title} />
+            {box}
+          </span>
+        ) : (
+          box
+        );
+      },
     },
     {
       key: "task",
@@ -558,6 +587,12 @@ export function TaskGroupTable({
                 is the whole reason it is a variant rather than a click handler
                 on the glyph.
               */}
+              {/* P7-82 — the badge and the title are one drop target: land a
+                  dragged task here and it becomes this task's subtask. */}
+              <NestTargetIf
+                enabled={dnd}
+                id={task.id}
+                isChild={isChild || task.parent_task_id !== null}>
               <TaskStatusSelect
                 variant="glyph"
                 taskId={task.id}
@@ -601,6 +636,7 @@ export function TaskGroupTable({
               >
                 {task.title}
               </HoverPrefetchLink>
+              </NestTargetIf>
 
               {/* Renders nothing when unranked, which is most tasks. A "None"
                   chip on every row would mark everything, and a mark carried by
@@ -949,6 +985,19 @@ export function TaskGroupTable({
          group whatever stage it is at (P7-09), so the row wash is the only
          thing that can say so. */
       rowClassName={(task) => cn(taskCategoryEdge(taskCategory(task)), taskStatusRow(task.status))}
+      /* P7-82. Every row is a drop target; only the ones the viewer may change
+         can be picked up. */
+      renderRow={
+        dnd
+          ? (task, row) => (
+              <DraggableTaskRow
+                id={task.id}
+                draggable={!isPlaceholder(task.id) && canSelect(task)}
+                row={{ ...row, className: cn(row.className, "group/row") }}
+              />
+            )
+          : undefined
+      }
       empty={
         <p className="px-3.5 py-4 text-xs text-muted-foreground">
           {status === INITIAL_TASK_STATUS
@@ -966,5 +1015,26 @@ export function TaskGroupTable({
         )
       }
     />
+  );
+}
+
+/** The title cluster as a nest target when the list can drag, as itself otherwise. */
+function NestTargetIf({
+  enabled,
+  id,
+  isChild,
+  children,
+}: {
+  enabled: boolean;
+  id: string;
+  isChild: boolean;
+  children: React.ReactNode;
+}) {
+  return enabled ? (
+    <NestTarget id={id} isChild={isChild}>
+      {children}
+    </NestTarget>
+  ) : (
+    <>{children}</>
   );
 }

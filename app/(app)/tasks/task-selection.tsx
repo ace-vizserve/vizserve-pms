@@ -156,6 +156,10 @@ export function TaskSelectCheckbox({
       checked={selection.isSelected(taskId)}
       onCheckedChange={() => selection.toggle(taskId, title)}
       aria-label={`Select ${title}`}
+      /* A FILLED BOX, not just an outline. The hovered row's grey is close to
+         `--input`, so a bare outline vanished on exactly the row the pointer
+         was on. `data-checked` still paints it primary. */
+      className="border-foreground-faint bg-card"
     />
   );
 }

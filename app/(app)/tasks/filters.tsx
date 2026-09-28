@@ -138,6 +138,8 @@ export function TaskFilters({
   const sortItems: Record<string, string> = {
     due: "Due date",
     priority: "Priority",
+    // P7-82. What the drag handle writes.
+    manual: "Manual (drag)",
     // P7-73. Without these the trigger would print `cf:<uuid>` after a header
     // click on a custom column — the raw-value trap in the note below.
     ...Object.fromEntries(customFields.map((field) => [fieldKey(field.id), field.name])),

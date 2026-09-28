@@ -955,6 +955,9 @@ export const taskParentSchema = z.object({
   parent_task_id: z.uuid().nullable(),
 });
 
+/** P7-82. One status group, top to bottom. Capped: a group is a screenful, not a table dump. */
+export const taskOrderSchema = z.array(z.uuid()).min(1).max(1000);
+
 export const listSchema = z.object({
   department_id: z.uuid("Choose a department."),
   name: z.string().trim().min(1, "Give the list a name.").max(80),

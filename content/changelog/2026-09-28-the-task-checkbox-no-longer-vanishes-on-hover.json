@@ -1,0 +1,7 @@
+{
+  "date": "2026-09-28",
+  "kind": "fixed",
+  "area": "Tasks",
+  "title": "The task checkbox no longer vanishes on hover",
+  "description": "The checkbox on a task row was a thin grey outline, and the grey a row turns on hover was close enough to hide it — so it disappeared on exactly the row you were pointing at. It is a filled box now and shows on every row."
+}

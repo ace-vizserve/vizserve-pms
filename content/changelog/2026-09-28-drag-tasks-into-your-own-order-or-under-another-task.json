@@ -1,0 +1,20 @@
+{
+  "date": "2026-09-28",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Drag tasks into your own order, or under another task",
+  "description": "Every row on the task list has a handle beside its checkbox. Drag a task between two rows to put it there, or onto the middle of another task to make it that task's subtask — as many as you like under the same parent.",
+  "items": [
+    "The rows slide out of the way as you drag, the same as the timesheet",
+    "Aim at the middle of a row and it lights up with \"Make subtask\"; aim at its top or bottom edge to move beside it",
+    "Dragging a subtask out between two top-level rows makes it an ordinary task again; dragging a task between two subtasks puts it under their parent",
+    "The first reorder switches Sort by to the new \"Manual (drag)\", so the list keeps your order instead of snapping back to due dates",
+    "A task stays in its own status group — change the status to move it to another one",
+    "Subtasks are still one level deep, and a task that has subtasks cannot become one",
+    "The handle only appears on tasks you can edit. From the keyboard: Tab to the handle, Space to pick up, arrows to move, Space to drop"
+  ],
+  "refs": [
+    "P7-82"
+  ],
+  "pending": "The manual-order migration is written but not yet applied. Until it is, making a subtask by dragging works, but reordering does not save and choosing \"Manual (drag)\" errors."
+}

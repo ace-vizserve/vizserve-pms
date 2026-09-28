@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   flexRender,
@@ -169,6 +169,20 @@ export type RowControls = {
   toggleExpanded: () => void;
 };
 
+/**
+ * P7-82 — what a custom row must put on its `<tr>`. `ref` and `data-index` are
+ * the virtualiser's measuring; the pointer/focus handlers are `armRows`' arming.
+ * Drop them and a virtualised table mis-sizes, or an armed row never arms.
+ */
+export type RowProps = {
+  className: string;
+  children: React.ReactNode;
+  "data-index"?: number;
+  ref?: (node: HTMLTableRowElement | null) => void;
+  onPointerEnter?: () => void;
+  onFocusCapture?: (event: React.FocusEvent<HTMLTableRowElement>) => void;
+};
+
 export function DataTable<T>({
   columns,
   rows,
@@ -177,6 +191,7 @@ export function DataTable<T>({
   footer,
   onRowHref,
   rowClassName,
+  renderRow,
   bare = false,
   appendRow,
   className,
@@ -202,6 +217,12 @@ export function DataTable<T>({
    * wants to mark a row will want to mark it for a different reason.
    */
   rowClassName?: (row: T) => string | undefined;
+  /**
+   * P7-82. Draw each body row yourself — for the task list, whose rows are drag
+   * sources and drop targets. Spread every `RowProps` field onto the `<tr>`.
+   * Omit it and rows are plain `TableRow`s.
+   */
+  renderRow?: (row: T, props: RowProps) => React.ReactNode;
   empty?: React.ReactNode;
   /**
    * A totals row, as `<tr>` content. Inside the table rather than under it
@@ -575,7 +596,7 @@ export function DataTable<T>({
       ? virtualizer.getTotalSize() - (virtualItems[virtualItems.length - 1]!.end - scrollMargin)
       : 0;
 
-  const renderRow = (row: (typeof modelRows)[number], virtualIndex?: number) => {
+  const drawRow = (row: (typeof modelRows)[number], virtualIndex?: number) => {
     const className = cn(
       "align-top",
       onRowHref?.(row.original) && "cursor-pointer",
@@ -600,9 +621,28 @@ export function DataTable<T>({
 
     if (armRows) {
       return (
-        <ArmableRow key={row.id} index={virtualIndex} measure={measure} className={className}>
+        <ArmableRow
+          key={row.id}
+          index={virtualIndex}
+          measure={measure}
+          className={className}
+          render={renderRow ? (props) => renderRow(row.original, props) : undefined}
+        >
           {cells}
         </ArmableRow>
+      );
+    }
+
+    if (renderRow) {
+      return (
+        <Fragment key={row.id}>
+          {renderRow(row.original, {
+            className,
+            children: cells,
+            "data-index": virtualIndex,
+            ref: measure,
+          })}
+        </Fragment>
       );
     }
 
@@ -721,7 +761,7 @@ export function DataTable<T>({
                 <td colSpan={visibleCount} className="p-0" />
               </tr>
             ) : null}
-            {virtualItems.map((item) => renderRow(modelRows[item.index]!, item.index))}
+            {virtualItems.map((item) => drawRow(modelRows[item.index]!, item.index))}
             {padBottom > 0 ? (
               <tr aria-hidden style={{ height: padBottom }}>
                 <td colSpan={visibleCount} className="p-0" />
@@ -729,7 +769,7 @@ export function DataTable<T>({
             ) : null}
           </>
         ) : (
-          modelRows.map((row) => renderRow(row))
+          modelRows.map((row) => drawRow(row))
         )}
 
         {appendRow}
@@ -799,11 +839,14 @@ function ArmableRow({
   index,
   measure,
   className,
+  render,
   children,
 }: {
   index: number | undefined;
   measure: ((node: Element | null) => void) | undefined;
   className: string;
+  /** The caller's own `<tr>` (see `renderRow`); the plain `TableRow` otherwise. */
+  render?: (props: RowProps) => React.ReactNode;
   children: React.ReactNode;
 }) {
   const [armed, setArmed] = useState(false);
@@ -828,28 +871,36 @@ function ArmableRow({
     rowRef.current?.querySelector<HTMLElement>(`[data-arm-slot="${slot}"]`)?.focus({ preventScroll: true });
   }, [armed]);
 
-  return (
-    <TableRow
-      data-index={index}
-      ref={(node) => {
-        rowRef.current = node;
-        measure?.(node);
-      }}
-      className={className}
-      onPointerEnter={armed ? undefined : () => setArmed(true)}
-      onFocusCapture={
-        armed
-          ? undefined
-          : (event) => {
-              pendingFocus.current =
-                (event.target as HTMLElement).closest<HTMLElement>("[data-arm-slot]")?.dataset.armSlot ?? null;
-              setArmed(true);
-            }
-      }
-    >
-      <RowArmedContext value={armed}>{children}</RowArmedContext>
-    </TableRow>
-  );
+  const props: RowProps = {
+    "data-index": index,
+    ref: (node) => {
+      rowRef.current = node;
+      measure?.(node);
+    },
+    className,
+    onPointerEnter: armed ? undefined : () => setArmed(true),
+    onFocusCapture: armed
+      ? undefined
+      : (event) => {
+          pendingFocus.current =
+            (event.target as HTMLElement).closest<HTMLElement>("[data-arm-slot]")?.dataset.armSlot ?? null;
+          setArmed(true);
+        },
+    children: <RowArmedContext value={armed}>{children}</RowArmedContext>,
+  };
+
+  return render ? <CustomRow render={render} props={props} /> : <TableRow {...props} />;
+}
+
+/** A component, not a call, so the ref in `props` is never touched during render. */
+function CustomRow({
+  render,
+  props,
+}: {
+  render: (props: RowProps) => React.ReactNode;
+  props: RowProps;
+}) {
+  return render(props);
 }
 
 /** Below this many rows a virtualised table renders whole: no benefit, and no measuring. */

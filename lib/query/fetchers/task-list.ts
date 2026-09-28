@@ -103,7 +103,8 @@ export async function fetchPendingRequests(
  * ordered before they are split into stages, so all eight tables reorder
  * together; a per-table sort would mean nothing across them.
  */
-export const TASK_LIST_SORTS = ["due", "priority", "title", "start", "estimate"] as const;
+// P7-82 — `manual` is the order people drag the rows into.
+export const TASK_LIST_SORTS = ["due", "priority", "title", "start", "estimate", "manual"] as const;
 export type TaskListSort = (typeof TASK_LIST_SORTS)[number];
 
 export function isTaskListSort(value: string | undefined): value is TaskListSort {
@@ -118,6 +119,7 @@ const ORDER_COLUMN: Record<TaskListSort, string> = {
   title: "title",
   start: "start_date",
   estimate: "estimate_minutes",
+  manual: "position",
 };
 
 const TASK_COLUMNS =
