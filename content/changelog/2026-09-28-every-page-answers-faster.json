@@ -1,0 +1,10 @@
+{
+  "date": "2026-09-28",
+  "kind": "fixed",
+  "area": "Platform",
+  "title": "Every page answers faster",
+  "description": "The portal's server ran in the United States while its data sits in Tokyo, so every click waited on several trips across the Pacific. The server now runs in Tokyo beside the data, which shortens the wait on every page, not only the ones that load from the cache.",
+  "items": [
+    "Opening a task no longer waits for three rounds of loading one after another; everything on it loads together"
+  ]
+}
