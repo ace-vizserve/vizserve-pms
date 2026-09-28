@@ -59,16 +59,32 @@ const nextConfig: NextConfig = {
      * that tab already received — it can only ever show somebody their own rows
      * again. There is no shared store and no cross-user path.
      *
-     * Thirty seconds, matched to how long a flip takes rather than picked. A
+     * It was thirty seconds, matched to how long a flip takes. A
      * mutation still invalidates it: every server action here calls
      * `revalidatePath`, and `router.refresh()` clears it outright — which is
      * what the optimistic paths on the board and the task list already do.
      *
-     * `static` is left at its default: those are the prerendered shells, and
-     * they carry no rows.
+     * ⚠️ P12 PHASE A RAISED BOTH, BECAUSE THE PAYLOAD NO LONGER CARRIES ROWS.
+     * The pages people flip between (/tasks, /tasks/board, /tasks/[id],
+     * /timesheet, /timesheet/team, /dtr, /inbox) are client pages now: their
+     * payload is "render this component" and the data lives in the query cache,
+     * which refreshes itself. At 30s, revisiting a page opened a minute ago made
+     * the router go back to the server and draw the skeleton while it waited —
+     * the long top-loader bar — even though every row it needed was already in
+     * the browser.
+     *
+     *   dynamic 300 — a page opened with a normal click is reused for 5 min.
+     *   static 1800 — a page prefetched with `prefetch={true}` (hover, sidebar
+     *                 lists) is reused for 30 min.
+     *
+     * The server-rendered pages still on this cache (/requests, /approvals,
+     * /dashboard, …) can now be up to 5 minutes old on a revisit. Every write
+     * still clears it (`revalidatePath`, `router.refresh()`), and their realtime
+     * subscriptions refresh them on a colleague's change.
      */
     staleTimes: {
-      dynamic: 30,
+      dynamic: 300,
+      static: 1800,
     },
 
     /**
