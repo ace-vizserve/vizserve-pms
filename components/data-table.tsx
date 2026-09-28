@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   flexRender,
@@ -13,6 +13,7 @@ import {
   type SortingState,
   type VisibilityState,
 } from "@tanstack/react-table";
+import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 
 import { DataTableColumns } from "@/components/data-table-columns";
@@ -186,6 +187,7 @@ export function DataTable<T>({
   defaultExpanded = true,
   columnVisibility,
   onColumnVisibilityChange,
+  virtualize = false,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -292,6 +294,21 @@ export function DataTable<T>({
   defaultExpanded?: boolean;
   columnVisibility?: VisibilityState;
   onColumnVisibilityChange?: (next: VisibilityState) => void;
+  /**
+   * P12 — only build the rows near the viewport (window scroll).
+   *
+   * For long lists whose rows are expensive: a task row mounts about ten
+   * interactive widgets, and a 388-task list took seconds to open because every
+   * one of them was built. With this on, rows outside the viewport (plus an
+   * overscan margin) are not rendered at all; spacer rows keep the table's
+   * height, and each rendered row is measured so wrapped titles are sized right.
+   * Below `VIRTUALIZE_FROM` rows it is a no-op — a short table renders whole.
+   *
+   * ⚠️ OFF-SCREEN ROWS ARE NOT IN THE DOM, so the browser's find-in-page cannot
+   * see them. Everything that reads rows (sorting, selection, counts) reads the
+   * data, not the DOM, and is unaffected.
+   */
+  virtualize?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -513,6 +530,73 @@ export function DataTable<T>({
   const headers = table.getHeaderGroups()[0]?.headers ?? [];
   const visibleCount = table.getVisibleLeafColumns().length;
 
+  /*
+   * P12 — window virtualisation. `scrollMargin` is where this table's body
+   * starts in the document, because several of these tables stack on one page
+   * (a stage group each) and all of them scroll with the window.
+   */
+  const modelRows = table.getRowModel().rows;
+  const virtual = virtualize && modelRows.length >= VIRTUALIZE_FROM;
+  const bodyRef = useRef<HTMLTableSectionElement>(null);
+  const [scrollMargin, setScrollMargin] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!virtual) return;
+    const measure = () => {
+      const top = bodyRef.current?.getBoundingClientRect().top;
+      if (top !== undefined) setScrollMargin(top + window.scrollY);
+    };
+    measure();
+    // Content above this table (another group opening, a banner) moves it.
+    const observer = new ResizeObserver(measure);
+    observer.observe(document.body);
+    return () => observer.disconnect();
+  }, [virtual]);
+
+  const virtualizer = useWindowVirtualizer({
+    count: virtual ? modelRows.length : 0,
+    estimateSize: () => ESTIMATED_ROW_HEIGHT,
+    overscan: 8,
+    scrollMargin,
+    getItemKey: (index) => modelRows[index]?.id ?? index,
+  });
+
+  const virtualItems = virtual ? virtualizer.getVirtualItems() : [];
+  const padTop = virtual && virtualItems.length > 0 ? virtualItems[0]!.start - scrollMargin : 0;
+  const padBottom =
+    virtual && virtualItems.length > 0
+      ? virtualizer.getTotalSize() - (virtualItems[virtualItems.length - 1]!.end - scrollMargin)
+      : 0;
+
+  const renderRow = (row: (typeof modelRows)[number], virtualIndex?: number) => (
+    <TableRow
+      key={row.id}
+      data-index={virtualIndex}
+      ref={virtualIndex === undefined ? undefined : virtualizer.measureElement}
+      className={cn(
+        "align-top",
+        onRowHref?.(row.original) && "cursor-pointer",
+        rowClassName?.(row.original),
+      )}
+    >
+      {row.getVisibleCells().map((cell) => {
+        const column = (cell.column.columnDef.meta as { column: Column<T> }).column;
+        return (
+          <TableCell
+            key={cell.id}
+            className={cn(
+              column.align === "end" && "text-right",
+              column.key === pinnedKey && pinnedCell,
+              column.className,
+            )}
+          >
+            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+          </TableCell>
+        );
+      })}
+    </TableRow>
+  );
+
   const body = (
     <Table>
       <TableHeader>
@@ -595,7 +679,7 @@ export function DataTable<T>({
         </TableRow>
       </TableHeader>
 
-      <TableBody>
+      <TableBody ref={bodyRef}>
         {/*
           The empty state still renders when there is an `appendRow`, and that is
           the whole point of the pair: an empty stage shows BOTH the sentence
@@ -614,35 +698,22 @@ export function DataTable<T>({
               {empty ?? <EmptyRow />}
             </TableCell>
           </TableRow>
+        ) : virtual ? (
+          <>
+            {padTop > 0 ? (
+              <tr aria-hidden style={{ height: padTop }}>
+                <td colSpan={visibleCount} className="p-0" />
+              </tr>
+            ) : null}
+            {virtualItems.map((item) => renderRow(modelRows[item.index]!, item.index))}
+            {padBottom > 0 ? (
+              <tr aria-hidden style={{ height: padBottom }}>
+                <td colSpan={visibleCount} className="p-0" />
+              </tr>
+            ) : null}
+          </>
         ) : (
-          table.getRowModel().rows.map((row) => (
-            <TableRow
-              key={row.id}
-              className={cn(
-                "align-top",
-                onRowHref?.(row.original) && "cursor-pointer",
-                rowClassName?.(row.original),
-              )}
-            >
-              {row.getVisibleCells().map((cell) => {
-                const column = (
-                  cell.column.columnDef.meta as { column: Column<T> }
-                ).column;
-                return (
-                  <TableCell
-                    key={cell.id}
-                    className={cn(
-                      column.align === "end" && "text-right",
-                      column.key === pinnedKey && pinnedCell,
-                      column.className,
-                    )}
-                  >
-                    {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                  </TableCell>
-                );
-              })}
-            </TableRow>
-          ))
+          modelRows.map((row) => renderRow(row))
         )}
 
         {appendRow}
@@ -702,6 +773,12 @@ export function DataTable<T>({
 function keyOf<T>(columns: Column<T>[], sortKey: string): string {
   return columns.find((column) => column.sortKey === sortKey)?.key ?? sortKey;
 }
+
+/** Below this many rows a virtualised table renders whole: no benefit, and no measuring. */
+const VIRTUALIZE_FROM = 30;
+
+/** A task row's usual height before it is measured. Wrapped titles are measured on render. */
+const ESTIMATED_ROW_HEIGHT = 52;
 
 function EmptyRow() {
   return (

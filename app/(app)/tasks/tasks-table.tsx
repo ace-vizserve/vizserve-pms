@@ -914,6 +914,9 @@ export function TaskGroupTable({
   return (
     <DataTable
       bare
+      /* P12 — a stage can hold hundreds of tasks and each row mounts about ten
+         interactive widgets; only the rows near the viewport are built. */
+      virtualize
       columns={rendered}
       rows={group}
       getRowKey={(task) => task.id}
