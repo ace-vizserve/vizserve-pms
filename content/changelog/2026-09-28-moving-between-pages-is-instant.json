@@ -1,0 +1,19 @@
+{
+  "date": "2026-09-28",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "Moving between pages is instant",
+  "description": "Task lists, the board, a task, the timesheet, the DTR and the inbox now open straight away instead of waiting on the server each time. A page you have already opened comes back at once, and pointing at a link starts loading it before you click.",
+  "items": [
+    "Saving a change — hours, a status, a field, a comment — shows at once instead of after a round trip",
+    "Switching back to a timesheet week you have already opened no longer shows a loading placeholder",
+    "A page you opened in the last few minutes is kept, so going back and forth between pages costs nothing"
+  ],
+  "refs": [
+    "P12-06",
+    "P12-07",
+    "P12-08",
+    "P12-17",
+    "P12-23"
+  ]
+}

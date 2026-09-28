@@ -10,7 +10,6 @@ import {
   BreadcrumbLabelProvider,
   DynamicBreadcrumb,
 } from "@/components/app-shell/dynamic-breadcrumb";
-import { NavTimer } from "@/components/nav-timer";
 import { RealtimeNotifications } from "@/components/realtime-refresh";
 import { TaskImageLightboxProvider } from "@/components/task-image-lightbox";
 import { ShiftReminder } from "@/components/shift-reminder";
@@ -58,11 +57,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           database, never in the browser.
         */}
         <RealtimeNotifications userId={context.userId} />
-
-        {/* P12 — navigation stopwatch, staging/localhost only. See the component. */}
-        <Suspense fallback={null}>
-          <NavTimer />
-        </Suspense>
 
         {/*
           P8-12 — the clock reminder, mounted beside the realtime badge for the

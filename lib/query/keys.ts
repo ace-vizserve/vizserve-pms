@@ -364,8 +364,8 @@ export const qk = {
    * ⚠️ OUTSIDE THE `["timesheet"]` ROOT ON PURPOSE. The layout SEEDS
    * `useLayoutAutosave`, which owns it from the first render on; an entry write
    * invalidating this and re-seeding the grid mid-edit would put back rows
-   * somebody had just removed. It is read fresh on every mount instead
-   * (`gcTime: 0` in `timesheet-view.tsx`).
+   * somebody had just removed. `useLayoutAutosave` writes every change into
+   * this entry, so the cached copy never lags the screen.
    */
   weekLayout: (userId: string, weekStart: string) =>
     ["timesheet-layout", userId, weekStart] as const,

@@ -1,8 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 
 import { toast } from "@/components/ui/toast";
+import { useAuth } from "@/lib/auth/client-auth";
+import type { WeekLayout } from "@/lib/query/fetchers/timesheet";
+import { qk } from "@/lib/query/keys";
 import { sameTimesheetLayout, type TimesheetLayoutInput } from "@/lib/schemas/timesheet";
 
 import { saveTimesheetLayout } from "./writes";
@@ -81,6 +85,8 @@ function payloadOf(monday: string, layout: TimesheetLayout): TimesheetLayoutInpu
 
 export function useLayoutAutosave(monday: string, initial: TimesheetLayout): LayoutAutosave {
   const [layout, setLayout] = useState<TimesheetLayout>(initial);
+  const queryClient = useQueryClient();
+  const { userId } = useAuth();
 
   /**
    * The current layout, readable from a callback that must not re-create when
@@ -136,6 +142,24 @@ export function useLayoutAutosave(monday: string, initial: TimesheetLayout): Lay
       layoutRef.current = next;
       setLayout(next);
 
+      /*
+       * P12 — THE CACHED COPY FOLLOWS EVERY CHANGE, SYNCHRONOUSLY. The grid is
+       * seeded from `qk.weekLayout` on mount, so a cached layout older than what
+       * the person last arranged would put back rows they had just removed. It
+       * used to be thrown away on leaving the week for exactly that reason,
+       * which made every return to a visited week reload it behind a skeleton.
+       * Kept in step here, the cache is never older than the screen, so it can
+       * be kept — and a revisited week draws at once.
+       */
+      queryClient.setQueryData<WeekLayout>(qk.weekLayout(userId, monday), (current) =>
+        current
+          ? {
+              ...current,
+              layout: { extraTasks: next.extraTasks, rowOrder: next.rowOrder, alreadyCopied: next.copiedLastWeek },
+            }
+          : current,
+      );
+
       const payload = payloadOf(monday, next);
 
       if (timerRef.current !== null) clearTimeout(timerRef.current);
@@ -162,7 +186,7 @@ export function useLayoutAutosave(monday: string, initial: TimesheetLayout): Lay
         if (queued) void write(queued);
       }, DEBOUNCE_MS);
     },
-    [monday, write],
+    [monday, write, queryClient, userId],
   );
 
   const setExtraTasks = useCallback(

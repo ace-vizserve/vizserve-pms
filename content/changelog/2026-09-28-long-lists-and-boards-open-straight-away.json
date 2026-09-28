@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-28",
+  "kind": "changed",
+  "area": "Tasks",
+  "title": "Long lists and boards open straight away, and finished work keeps scrolling",
+  "description": "A list with hundreds of tasks used to take several seconds to open, because every row was built at once. Only the rows you can see are drawn now, so a big list opens as fast as a small one. On the board, the finished columns no longer stop at twelve cards: scroll down and more load.",
+  "items": [
+    "A 388-task list went from up to eight seconds to about a quarter of a second",
+    "The board's Completed columns load twenty more cards each time you reach the bottom, and the heading shows the full count",
+    "Your browser's find-in-page only searches the rows on screen — scroll, or use the list's filters, to find the rest"
+  ],
+  "refs": [
+    "P12-07",
+    "P12-08"
+  ]
+}

@@ -92,15 +92,15 @@ export function TimesheetView({
    * press of the back arrow for a list that did not change.
    */
   /*
-   * P6-02b/P6-02d — last week's tasks and the saved layout. `gcTime: 0` so every
-   * mount reads it fresh: it only SEEDS `useLayoutAutosave`, and a cached copy
-   * from before the last drag would seed the grid with the old arrangement —
-   * which the autosave would then write back. See `qk.weekLayout`.
+   * P6-02b/P6-02d — last week's tasks and the saved layout. It only SEEDS
+   * `useLayoutAutosave`, so a stale cached copy would put back an old
+   * arrangement. It is kept anyway since P12: `useLayoutAutosave` writes every
+   * change into this entry synchronously, so it is never older than the screen,
+   * and a revisited week draws without waiting on it.
    */
   const layoutQuery = useQuery({
     queryKey: qk.weekLayout(userId, monday),
     queryFn: () => fetchWeekLayout(browserClient(), { userId, monday }),
-    gcTime: 0,
   });
 
   const tasksQuery = useQuery({
