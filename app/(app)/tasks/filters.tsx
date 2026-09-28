@@ -16,6 +16,9 @@ import { TASK_STATUS_OPTIONS } from "@/components/status-badge";
 import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/schemas/tasks";
 import { FIELD_KEY_PREFIX, fieldKey, type ListField } from "@/lib/schemas/list-fields";
 
+import { EXTRA_FILTER_KEYS } from "@/lib/task-extra-filters";
+
+import { TaskExtraFilters } from "./extra-filters";
 import { FieldFilters } from "./field-filters";
 
 const ALL = "__all__";
@@ -109,7 +112,7 @@ export function TaskFilters({
   }
 
   const hasFilters =
-    ["status", "view", "list", "group", "priority", "sort"].some((key) => params.get(key)) ||
+    ["status", "view", "group", "priority", "sort", ...EXTRA_FILTER_KEYS].some((key) => params.get(key)) ||
     [...params.keys()].some((key) => key.startsWith(FIELD_KEY_PREFIX));
 
   /*
@@ -168,6 +171,9 @@ export function TaskFilters({
 
   return (
     <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
+      {/* P12 — search, person and due date; shared with the board. */}
+      <TaskExtraFilters />
+
       <div className="space-y-1.5">
         <Label htmlFor="status" className="text-xs text-muted-foreground">
           Status
@@ -294,7 +300,16 @@ export function TaskFilters({
       <FieldFilters fields={customFields} params={params as unknown as URLSearchParams} setParam={setParam} />
 
       {hasFilters ? (
-        <Button variant="ghost" size="sm" onClick={() => router.push("/tasks")}>
+        <Button
+          variant="ghost"
+          size="sm"
+          // Clears the filters, not the place: staying inside the open list.
+          // A bare `/tasks` redirects to the list index.
+          onClick={() => {
+            const list = params.get("list");
+            router.push(list ? `/tasks?list=${list}` : "/tasks");
+          }}
+        >
           <X />
           Clear
         </Button>

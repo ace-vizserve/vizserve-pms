@@ -1,3 +1,4 @@
+import type { Json } from "@/lib/database.types";
 import type { TaskComment } from "@/app/(app)/tasks/comment-thread";
 import type { TaskRow } from "@/app/(app)/tasks/tasks-table";
 import { read } from "@/lib/query/read";
@@ -17,6 +18,7 @@ import {
   type ListField,
 } from "@/lib/schemas/list-fields";
 import { isTerminal, type TaskPriority, type TaskStatus } from "@/lib/schemas/tasks";
+import { applyExtraFilters, type ExtraTaskFilters } from "@/lib/task-extra-filters";
 import { applyTaskScope, type TaskKind, type TaskView } from "@/lib/task-scope";
 
 import { fetchCollaborators, fetchListFields, type TaskReadClient } from "./task";
@@ -121,6 +123,21 @@ const ORDER_COLUMN: Record<TaskListSort, string> = {
 const TASK_COLUMNS =
   "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields";
 
+/**
+ * P12 — the base of a task query: the table, or, with a person filter set, the
+ * tasks that person is on (`vizserve_pms_tasks_for_person`, SECURITY INVOKER —
+ * the same rows the tasks policy returns, narrowed). PostgREST treats the
+ * function's result like the table, so every filter, order and range the
+ * callers chain works on either. See the migration for why this is a function.
+ */
+function selectTasks(client: TaskReadClient, extra: ExtraTaskFilters, columns: string, count?: "exact") {
+  const table = client.from("vizserve_pms_tasks").select(columns, count ? { count } : undefined);
+  if (!extra.person) return table;
+  return client
+    .rpc("vizserve_pms_tasks_for_person", { p_user: extra.person, p_role: extra.role }, count ? { count } : undefined)
+    .select(columns) as unknown as typeof table;
+}
+
 export type TaskListFilters = {
   listId: string | null;
   view: TaskView;
@@ -133,6 +150,8 @@ export type TaskListFilters = {
   dir: string | null;
   /** `cf:<id>` → the raw filter string, for the list's custom fields. */
   fieldFilters: Record<string, string>;
+  /** P12 — search, person and due date. See `lib/task-extra-filters.ts`. */
+  extra: ExtraTaskFilters;
 };
 
 export type TaskListPerson = {
@@ -170,9 +189,11 @@ export async function fetchTaskListView(
   const sort: TaskListSort = requested ?? DEFAULT_SORT.sort;
   const ascending = requested ? filters.dir !== "desc" : DEFAULT_SORT.ascending;
 
-  let query = client
-    .from("vizserve_pms_tasks")
-    .select(filters.group ? `${TASK_COLUMNS}, vizserve_pms_lists!inner(group_id)` : TASK_COLUMNS)
+  let query = selectTasks(
+    client,
+    filters.extra,
+    filters.group ? `${TASK_COLUMNS}, vizserve_pms_lists!inner(group_id)` : TASK_COLUMNS,
+  )
     .order(ORDER_COLUMN[sort], { ascending, nullsFirst: false })
     .order("created_at", { ascending: false });
 
@@ -180,6 +201,7 @@ export async function fetchTaskListView(
   if (filters.group) query = query.eq("vizserve_pms_lists.group_id", filters.group);
   if (filters.priority) query = query.eq("priority", filters.priority);
   query = applyTaskScope(query, { listId: filters.listId, view: filters.view, kind: filters.kind, userId });
+  query = applyExtraFilters(query, filters.extra);
 
   const [tasks, people, customFields, collaborators] = await Promise.all([
     read(query),
@@ -324,7 +346,7 @@ export function subtaskProgress(childRows: TaskListView["childRows"]) {
 /* -------------------------------------------------------------------------- */
 
 const BOARD_TASK_COLUMNS =
-  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution";
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution, custom_fields";
 
 /** One card's row — the columns `BOARD_TASK_COLUMNS` selects. */
 export type BoardTask = {
@@ -344,6 +366,8 @@ export type BoardTask = {
   parent_task_id: string | null;
   list_id: string | null;
   resolution: string | null;
+  /** P7-73 / P12 — read by the board's custom-field filters. */
+  custom_fields: Json | null;
 };
 
 /** How many finished cards a terminal column loads per page as it is scrolled. */
@@ -364,18 +388,22 @@ export type BoardView = {
  * an exact count (a cap without a stated limit is a lie about the number), and
  * the children of the top-level cards for their progress bars.
  */
+/** P12 — what the board narrows by beyond scope and kind. */
+export type BoardFilters = { extra: ExtraTaskFilters; priority: TaskPriority | null };
+
 export async function fetchBoardView(
   client: TaskReadClient,
   scope: { listId: string | null; view: TaskView; kind: TaskKind; userId: string },
+  filters: BoardFilters,
 ): Promise<BoardView> {
-  const live = applyTaskScope(
-    client
-      .from("vizserve_pms_tasks")
-      .select(BOARD_TASK_COLUMNS)
+  let live = applyTaskScope(
+    selectTasks(client, filters.extra, BOARD_TASK_COLUMNS)
       .order("due_date", { ascending: true, nullsFirst: false })
       .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
     scope,
   );
+  if (filters.priority) live = live.eq("priority", filters.priority);
+  live = applyExtraFilters(live, filters.extra);
 
   const [joined, tasks, people] = await Promise.all([
     read(client.from("vizserve_pms_task_assignees").select("task_id").eq("user_id", scope.userId)),
@@ -419,11 +447,10 @@ export async function fetchFinishedPage(
   scope: { listId: string | null; view: TaskView; kind: TaskKind; userId: string },
   status: TaskStatus,
   offset: number,
+  filters: BoardFilters,
 ): Promise<FinishedPage> {
-  const { data, count, error } = await applyTaskScope(
-    client
-      .from("vizserve_pms_tasks")
-      .select(BOARD_TASK_COLUMNS, { count: "exact" })
+  let query = applyTaskScope(
+    selectTasks(client, filters.extra, BOARD_TASK_COLUMNS, "exact")
       .eq("status", status)
       .is("parent_task_id", null)
       .order("updated_at", { ascending: false })
@@ -431,6 +458,10 @@ export async function fetchFinishedPage(
       .range(offset, offset + FINISHED_PAGE_SIZE - 1),
     scope,
   );
+  if (filters.priority) query = query.eq("priority", filters.priority);
+  query = applyExtraFilters(query, filters.extra);
+
+  const { data, count, error } = await query;
   if (error) await read(Promise.resolve({ data: null, error }));
   return { cards: (data ?? []) as unknown as BoardTask[], total: count ?? 0 };
 }

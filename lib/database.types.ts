@@ -2626,6 +2626,10 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: Json;
       };
+      vizserve_pms_tasks_for_person: {
+        Args: { p_user: string; p_role?: string };
+        Returns: Database["public"]["Tables"]["vizserve_pms_tasks"]["Row"][];
+      };
       vizserve_pms_submit_request: {
         Args: {
           p_slug: string;

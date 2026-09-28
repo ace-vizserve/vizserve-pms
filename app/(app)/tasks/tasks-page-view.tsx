@@ -21,6 +21,7 @@ import {
 } from "@/lib/query/fetchers/task";
 import { qk } from "@/lib/query/keys";
 import { TASK_PRIORITIES, type TaskPriority } from "@/lib/schemas/tasks";
+import { readExtraFilters } from "@/lib/task-extra-filters";
 import type { TaskKind, TaskView } from "@/lib/task-scope";
 
 import { TaskFilters } from "./filters";
@@ -90,6 +91,9 @@ export function TasksPageView() {
   const inPersonalList = Boolean(lists.data?.some((list) => list.id === listId && list.owner_id !== null));
   const filterReady = lists.data && groups.data && (!listId || fields.data);
 
+  // P12 — search, person and due date. `?person=me` resolves to the viewer.
+  const extra = readExtraFilters((key) => search.get(key), auth.userId);
+
   const fieldFilters = Object.fromEntries(
     [...search.entries()].filter(([key]) => key.startsWith("cf:")),
   ) as Record<string, string>;
@@ -155,6 +159,7 @@ export function TasksPageView() {
               sort: search.get("sort"),
               dir: search.get("dir"),
               fieldFilters,
+              extra,
             }}
             viewer={{
               userId: auth.userId,
@@ -170,7 +175,11 @@ export function TasksPageView() {
               primaryDepartmentId: auth.primaryDepartmentId,
             }}
             today={todayInAppZone()}
-            baseFiltered={Boolean(status || listId || group || priority) || view !== "all" || kind !== "all"}
+            baseFiltered={
+              Boolean(status || listId || group || priority || extra.q || extra.person || extra.due) ||
+              view !== "all" ||
+              kind !== "all"
+            }
           />
         </TaskSelectionProvider>
       </TaskColumnsProvider>

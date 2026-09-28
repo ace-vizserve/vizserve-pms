@@ -14,10 +14,17 @@ import {
 } from "@/components/status-badge";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
-import type { VizservePmsTaskStatus } from "@/lib/database.types";
+import type { Json, VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
-import { fetchBoardView, fetchFinishedPage, FINISHED_PAGE_SIZE } from "@/lib/query/fetchers/task-list";
+import {
+  fetchBoardView,
+  fetchFinishedPage,
+  FINISHED_PAGE_SIZE,
+  type BoardFilters,
+} from "@/lib/query/fetchers/task-list";
+import { fieldKey, matchesFieldFilter, parseFieldFilter, readFieldValue, type ListField } from "@/lib/schemas/list-fields";
+import { extraFiltersKey } from "@/lib/task-extra-filters";
 import { qk } from "@/lib/query/keys";
 import { useRefetchOnServerRender } from "@/lib/query/use-refetch-on-server-render";
 import { isRichTextEmpty } from "@/lib/rich-text";
@@ -70,10 +77,18 @@ function initials(name: string): string {
 function useFinishedColumn(
   status: VizservePmsTaskStatus,
   scope: { listId: string | null; view: TaskView; kind: TaskKind; userId: string },
+  filters: BoardFilters,
 ) {
   return useInfiniteQuery({
-    queryKey: qk.taskBoardFinished({ list: scope.listId ?? undefined, view: scope.view, kind: scope.kind, status }),
-    queryFn: ({ pageParam }) => fetchFinishedPage(browserClient(), scope, status, pageParam),
+    queryKey: qk.taskBoardFinished({
+      list: scope.listId ?? undefined,
+      view: scope.view,
+      kind: scope.kind,
+      status,
+      priority: filters.priority ?? undefined,
+      ...extraFiltersKey(filters.extra),
+    }),
+    queryFn: ({ pageParam }) => fetchFinishedPage(browserClient(), scope, status, pageParam, filters),
     initialPageParam: 0,
     getNextPageParam: (last, pages) => {
       const loaded = pages.length * FINISHED_PAGE_SIZE;
@@ -97,20 +112,33 @@ export function BoardColumns({
   kind,
   scope,
   today,
+  filters,
+  customFields,
+  fieldFilters,
 }: {
   viewer: BoardViewer;
   listId: string | null;
   kind: TaskKind;
   scope: TaskView;
   today: string;
+  /** P12 — search, person, due date and priority, applied in the query. */
+  filters: BoardFilters;
+  /** P7-73 / P12 — the list's custom fields, and `cf:<id>` → raw filter, applied in memory. */
+  customFields: ListField[];
+  fieldFilters: Record<string, string>;
 }) {
   // Writes that only revalidate the path (composer, copy) still land.
   useRefetchOnServerRender([qk.tasks(), ["requests", "pending"]]);
 
   const query = useQuery({
-    queryKey: qk.taskBoardView({ list: listId ?? undefined, view: scope, kind }),
-    queryFn: () =>
-      fetchBoardView(browserClient(), { listId, view: scope, kind, userId: viewer.userId }),
+    queryKey: qk.taskBoardView({
+      list: listId ?? undefined,
+      view: scope,
+      kind,
+      priority: filters.priority ?? undefined,
+      ...extraFiltersKey(filters.extra),
+    }),
+    queryFn: () => fetchBoardView(browserClient(), { listId, view: scope, kind, userId: viewer.userId }, filters),
   });
 
   /*
@@ -119,13 +147,9 @@ export function BoardColumns({
    * column is scrolled (infinite scroll). One hook per finished status — the
    * set is fixed (`FINISHED_COLUMNS`), so the hook order never changes.
    */
-  const completedQuery = useFinishedColumn("COMPLETED", { listId, view: scope, kind, userId: viewer.userId });
-  const noResponseQuery = useFinishedColumn("COMPLETED_NO_RESPONSE", {
-    listId,
-    view: scope,
-    kind,
-    userId: viewer.userId,
-  });
+  const finishedScope = { listId, view: scope, kind, userId: viewer.userId };
+  const completedQuery = useFinishedColumn("COMPLETED", finishedScope, filters);
+  const noResponseQuery = useFinishedColumn("COMPLETED_NO_RESPONSE", finishedScope, filters);
   const finishedQueries: Partial<Record<VizservePmsTaskStatus, typeof completedQuery>> = {
     COMPLETED: completedQuery,
     COMPLETED_NO_RESPONSE: noResponseQuery,
@@ -151,7 +175,22 @@ export function BoardColumns({
   }
 
   const data = query.data;
-  const tasks = data.tasks;
+
+  /*
+   * P12 — custom-field filters on the board, the same rule the list applies:
+   * in memory, because a field's value lives in `custom_fields` jsonb and its
+   * filter shapes (ranges, options) are the list's `matchesFieldFilter`.
+   */
+  const activeFieldFilters = customFields.flatMap((field) => {
+    const filter = parseFieldFilter(field, fieldFilters[fieldKey(field.id)]);
+    return filter ? [{ field, filter }] : [];
+  });
+  const passesFields = (task: { custom_fields: Json | null }) =>
+    activeFieldFilters.every(({ field, filter }) =>
+      matchesFieldFilter(field, filter, readFieldValue(field, task.custom_fields)),
+    );
+
+  const tasks = activeFieldFilters.length ? data.tasks.filter(passesFields) : data.tasks;
   const people = data.people;
   const joinedTaskIdSet = new Set(data.joinedTaskIds);
   const BOARD_COLUMNS = TASK_STATUSES;
@@ -310,8 +349,12 @@ export function BoardColumns({
 
   for (const status of FINISHED_COLUMNS) {
     const pages = finishedQueries[status]?.data?.pages ?? [];
-    byStatus.set(status, pages.flatMap((page) => page.cards) as typeof topLevel);
-    totals.set(status, pages[0]?.total ?? 0);
+    const cards = pages.flatMap((page) => page.cards) as typeof topLevel;
+    const shown = activeFieldFilters.length ? cards.filter(passesFields) : cards;
+    byStatus.set(status, shown);
+    // With a custom-field filter the server's count is of the UNfiltered column,
+    // so the heading shows what has matched so far instead of a wrong total.
+    totals.set(status, activeFieldFilters.length ? shown.length : (pages[0]?.total ?? 0));
   }
 
   const totalOf = (status: VizservePmsTaskStatus) => totals.get(status) ?? (byStatus.get(status) ?? []).length;

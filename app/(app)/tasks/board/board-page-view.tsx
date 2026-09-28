@@ -10,13 +10,16 @@ import { useAuth } from "@/lib/auth/client-auth";
 import { realtimeDepartmentFilter } from "@/lib/auth/rules";
 import { todayInAppZone } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
-import { fetchVisibleLists } from "@/lib/query/fetchers/task";
+import { fetchListFields, fetchVisibleLists } from "@/lib/query/fetchers/task";
 import { fetchPendingRequests } from "@/lib/query/fetchers/task-list";
 import { qk } from "@/lib/query/keys";
+import { TASK_PRIORITIES, type TaskPriority } from "@/lib/schemas/tasks";
+import { readExtraFilters } from "@/lib/task-extra-filters";
 
 import { PendingRequestColumn } from "../pending-requests";
 import { TaskToolbar } from "../toolbar";
 import { BoardColumns } from "./board-columns";
+import { BoardFilters } from "./board-filters";
 import { BoardDnd } from "./board-dnd";
 
 
@@ -127,6 +130,21 @@ export function BoardPageView() {
     queryFn: () => fetchPendingRequests(browserClient(), { listId, kind, scope }),
   });
 
+  // P12 — the board's filters: search, person, due date, priority, custom fields.
+  const extra = readExtraFilters((key) => search.get(key), auth.userId);
+  const priorityParam = search.get("priority");
+  const priority = (TASK_PRIORITIES as readonly string[]).includes(priorityParam ?? "")
+    ? (priorityParam as TaskPriority)
+    : null;
+  const fieldFilters = Object.fromEntries(
+    [...search.entries()].filter(([key]) => key.startsWith("cf:")),
+  ) as Record<string, string>;
+  const fields = useQuery({
+    queryKey: qk.listFields(listId ?? ""),
+    queryFn: () => fetchListFields(browserClient(), listId!),
+    enabled: Boolean(listId),
+  });
+
   return (
     <PageShell className="h-[calc(100svh-3.5rem)] min-h-0 gap-3 overflow-hidden">
       {/*
@@ -169,6 +187,8 @@ export function BoardPageView() {
           gates.
         </p>
       </div>
+
+      <BoardFilters customFields={fields.data ?? []} />
 
       {/*
         The sideways scroller. `min-w-0` is what stops a flex item sizing itself
@@ -264,6 +284,9 @@ export function BoardPageView() {
                   kind={kind}
                   scope={scope}
                   today={todayInAppZone()}
+                  filters={{ extra, priority }}
+                  customFields={fields.data ?? []}
+                  fieldFilters={fieldFilters}
                 />
             </div>
           </div>

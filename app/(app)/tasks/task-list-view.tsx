@@ -20,6 +20,7 @@ import {
 } from "@/lib/query/fetchers/task-list";
 import { qk } from "@/lib/query/keys";
 import { isTerminal, TASK_STATUSES } from "@/lib/schemas/tasks";
+import { extraFiltersKey } from "@/lib/task-extra-filters";
 import { QA_STAGES } from "@/lib/task-scope";
 
 import { PendingRequestList } from "./pending-requests";
@@ -93,6 +94,7 @@ export function TaskListView({
       sort: filters.sort ?? undefined,
       dir: filters.dir ?? undefined,
       ...filters.fieldFilters,
+      ...extraFiltersKey(filters.extra),
     }),
     queryFn: () => fetchTaskListView(browserClient(), filters, viewer.userId),
   });

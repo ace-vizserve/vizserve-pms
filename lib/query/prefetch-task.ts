@@ -17,6 +17,7 @@ import {
   fetchVisibleLists,
 } from "./fetchers/task";
 import { qk } from "./keys";
+import { NO_EXTRA_FILTERS } from "@/lib/task-extra-filters";
 import { fetchBoardView, fetchPendingRequests, fetchTaskListView } from "./fetchers/task-list";
 
 /**
@@ -105,7 +106,8 @@ export function prefetchTaskListView(
   if (shape === "board") {
     void queryClient.prefetchQuery({
       queryKey: qk.taskBoardView({ list: listId, view: "all", kind: "all" }),
-      queryFn: () => fetchBoardView(client, { listId, view: "all", kind: "all", userId }),
+      queryFn: () =>
+        fetchBoardView(client, { listId, view: "all", kind: "all", userId }, { extra: NO_EXTRA_FILTERS, priority: null }),
     });
     return;
   }
@@ -125,6 +127,7 @@ export function prefetchTaskListView(
           sort: null,
           dir: null,
           fieldFilters: {},
+          extra: NO_EXTRA_FILTERS,
         },
         userId,
       ),
