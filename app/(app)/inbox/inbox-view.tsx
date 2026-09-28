@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Bell, SearchX } from "lucide-react";
 
@@ -69,7 +70,23 @@ export type InboxSearchParams = {
   dir?: string;
 };
 
-export function InboxView({ params }: { params: InboxSearchParams }) {
+export function InboxView() {
+  /*
+   * P12 Phase A — the URL is read HERE, in the browser, not awaited by the page.
+   * On a client navigation the router already holds the params, so this
+   * resolves synchronously and the page switches without a server render.
+   */
+  const search = useSearchParams();
+  const params: InboxSearchParams = {
+    q: search.get("q") ?? undefined,
+    page: search.get("page") ?? undefined,
+    size: search.get("size") ?? undefined,
+    type: search.get("type") ?? undefined,
+    read: search.get("read") ?? undefined,
+    sort: search.get("sort") ?? undefined,
+    dir: search.get("dir") ?? undefined,
+  };
+
   const term = params.q?.trim() ?? "";
   // Both clamped in components/pagination.tsx. `size` in particular is not
   // decoration: .range() takes what it is given, so an unvalidated ?size=100000

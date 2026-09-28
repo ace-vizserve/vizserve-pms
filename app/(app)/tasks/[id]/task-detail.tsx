@@ -14,19 +14,23 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { RichTextClient } from "@/components/ui/rich-text-client";
 import type { Json } from "@/lib/database.types";
-import { formatDate, formatDateTime } from "@/lib/dates";
+import { useAuth } from "@/lib/auth/client-auth";
+import { roleAtLeast } from "@/lib/auth/roles";
+import { canAdminDepartment, isCollaborationSpace, realtimeDepartmentFilter } from "@/lib/auth/rules";
+import { formatDate, formatDateTime, todayInAppZone } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
 import {
   fetchCollaborators,
   fetchDirectory,
-  fetchListFields,
   fetchSubtasks,
   fetchTaskAttachments,
   fetchTaskChecklist,
   fetchTaskComments,
   fetchTaskDetail,
+  fetchTaskFields,
   fetchTaskHistory,
-  fetchTaskRequest,
+  fetchTaskJoined,
+  fetchTaskRequestByTask,
   fetchTaskTimeTracked,
   fetchVisibleLists,
 } from "@/lib/query/fetchers/task";
@@ -85,43 +89,18 @@ import { TaskSurface } from "./task-surface";
 /** How many Activity entries the card shows before handing over to the sheet. */
 const ACTIVITY_PREVIEW = 2;
 
-export type TaskSeat = {
-  userId: string;
-  /** Holds a row in `vizserve_pms_task_assignees` for this task. */
-  joined: boolean;
-  leadsDepartment: boolean;
-  isAdmin: boolean;
-  /** P11-05 / P13-01 — a member of this task's department, or its collaboration space. */
-  inDepartment: boolean;
-  /** P8-01c — holds the Admin tick on THIS task's department. */
-  administersDepartment: boolean;
-  /** P13-01 — the task lives in the space every department shares. */
-  collaboration: boolean;
-};
+export function TaskDetail({ taskId }: { taskId: string }) {
+  /*
+   * P12 Phase A — NO SERVER STEP BEFORE THIS. The viewer comes from the layout's
+   * auth context, today from `todayInAppZone()` (explicitly Manila), and every
+   * read below is keyed on the task id alone, so they all start in ONE wave the
+   * moment the page mounts — usually already warm from a hover on the list.
+   */
+  const auth = useAuth();
+  const today = todayInAppZone();
 
-export function TaskDetail({
-  taskId,
-  seat,
-  realtimeFilter,
-  today,
-  serverRenderedAt,
-  initialListId,
-  initialRequestId,
-}: {
-  taskId: string;
-  seat: TaskSeat;
-  /** `realtimeDepartmentFilter(context)`, computed on the server. */
-  realtimeFilter: string | null;
-  /** The request's date in the app zone, from the server — so overdue agrees with it. */
-  today: string;
-  /** When the server last rendered the page. See `useRefetchOnServerRender`. */
-  serverRenderedAt: number;
-  /** The task's list and request, from the row `page.tsx` read. See `listId` below. */
-  initialListId: string | null;
-  initialRequestId: string | null;
-}) {
   // Any write that only revalidates the path still reaches the cached task.
-  useRefetchOnServerRender(serverRenderedAt, [qk.task(taskId)]);
+  useRefetchOnServerRender([qk.task(taskId)]);
 
   const taskQuery = useQuery({
     queryKey: qk.task(taskId),
@@ -130,22 +109,9 @@ export function TaskDetail({
 
   const task = taskQuery.data?.task;
 
-  /*
-   * ⚠️ THE LIST AND REQUEST IDS COME FROM THE SERVER'S ROW UNTIL THE CACHED ONE
-   * LANDS. History, custom fields and the request row each need one of them;
-   * waiting for `taskQuery` to supply it put two more browser → database round
-   * trips IN SERIES behind it, and the page shows nothing until the last read
-   * is in. `page.tsx` has already read the row to decide the seat, so these
-   * reads now start in the same wave as the rest. Once the cached row arrives it
-   * wins, so a task moved to another list re-keys and refetches.
-   */
-  const listId = task ? task.list_id : initialListId;
-  const requestId = task ? task.request_id : initialRequestId;
-  const hasRequest = Boolean(requestId);
-
   const historyQuery = useQuery({
     queryKey: qk.taskPart(taskId, "history"),
-    queryFn: () => fetchTaskHistory(browserClient(), taskId, { hasRequest }),
+    queryFn: () => fetchTaskHistory(browserClient(), taskId),
   });
   const commentsQuery = useQuery({
     queryKey: qk.taskPart(taskId, "comments"),
@@ -167,6 +133,18 @@ export function TaskDetail({
     queryKey: qk.taskPart(taskId, "time"),
     queryFn: () => fetchTaskTimeTracked(browserClient(), taskId),
   });
+  const fieldsQuery = useQuery({
+    queryKey: qk.taskPart(taskId, "fields"),
+    queryFn: () => fetchTaskFields(browserClient(), taskId),
+  });
+  const requestQuery = useQuery({
+    queryKey: qk.taskPart(taskId, "request"),
+    queryFn: () => fetchTaskRequestByTask(browserClient(), taskId),
+  });
+  const joinedQuery = useQuery({
+    queryKey: qk.taskPart(taskId, "joined"),
+    queryFn: () => fetchTaskJoined(browserClient(), taskId, auth.userId),
+  });
   const peopleQuery = useQuery({
     queryKey: qk.ref("users"),
     queryFn: () => fetchDirectory(browserClient()),
@@ -175,20 +153,11 @@ export function TaskDetail({
     queryKey: qk.listsVisible(),
     queryFn: () => fetchVisibleLists(browserClient()),
   });
-  const fieldsQuery = useQuery({
-    queryKey: qk.listFields(listId ?? ""),
-    queryFn: () => fetchListFields(browserClient(), listId!),
-    enabled: Boolean(listId),
-  });
+  // Reference data (10-minute stale time): read up front rather than after the
+  // task row says it is in the collaboration space, which would be a second wave.
   const collaboratorsQuery = useQuery({
     queryKey: qk.ref("collaborators"),
     queryFn: () => fetchCollaborators(browserClient()),
-    enabled: seat.collaboration,
-  });
-  const requestQuery = useQuery({
-    queryKey: qk.request(requestId ?? ""),
-    queryFn: () => fetchTaskRequest(browserClient(), requestId!),
-    enabled: hasRequest,
   });
 
   // Required reads: the page is not drawn until every one of them is in.
@@ -199,10 +168,11 @@ export function TaskDetail({
     subtasksQuery,
     attachmentsQuery,
     checklistQuery,
+    fieldsQuery,
+    joinedQuery,
     peopleQuery,
     listsQuery,
-    ...(listId ? [fieldsQuery] : []),
-    ...(seat.collaboration ? [collaboratorsQuery] : []),
+    collaboratorsQuery,
   ];
 
   const failed = required.find((query) => query.isError);
@@ -294,13 +264,18 @@ export function TaskDetail({
 
   for (const entry of activity) entry.live = entry.id === live;
 
+  /*
+   * The seat, from the same rules the server page used (`lib/auth/rules.ts`).
+   * It draws controls; RLS and the database functions decide every write.
+   */
+  const collaboration = isCollaborationSpace(auth, task.department_id);
   const viewer = {
-    isAssignee: task.assignee_id === seat.userId || seat.joined,
-    isQa: task.qa_assignee_id === seat.userId,
-    leadsDepartment: seat.leadsDepartment,
-    isAdmin: seat.isAdmin,
-    inDepartment: seat.inDepartment,
-    administersDepartment: seat.administersDepartment,
+    isAssignee: task.assignee_id === auth.userId || joinedQuery.data === true,
+    isQa: task.qa_assignee_id === auth.userId,
+    leadsDepartment: roleAtLeast(auth.role, "owner") || auth.managedDepartmentIds.includes(task.department_id),
+    isAdmin: roleAtLeast(auth.role, "owner"),
+    inDepartment: auth.primaryDepartmentId === task.department_id || collaboration,
+    administersDepartment: canAdminDepartment(auth, task.department_id),
   };
 
   const listName = lists.find((list) => list.id === task.list_id)?.name ?? null;
@@ -311,7 +286,7 @@ export function TaskDetail({
 
   // Who the task can be handed to. The collaboration space draws from everybody
   // who may collaborate; any other department from its own ACTIVE members.
-  const departmentPeople = seat.collaboration
+  const departmentPeople = collaboration
     ? (collaboratorsQuery.data ?? [])
     : people
         .filter((person) => person.is_active && person.primary_department_id === task.department_id)
@@ -346,7 +321,7 @@ export function TaskDetail({
         inside that page's tree, so the refresh the page performs re-runs this
         component with it.
       */}
-      <RealtimeTasks filter={realtimeFilter} />
+      <RealtimeTasks filter={realtimeDepartmentFilter(auth)} />
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={task.title} />
@@ -816,7 +791,7 @@ export function TaskDetail({
                   composerFirst
                   newestFirst
                   taskId={task.id}
-                  viewerId={seat.userId}
+                  viewerId={auth.userId}
                   events={activity}
                   comments={(commentRows ?? []).map((row) => ({
                     id: row.id,
@@ -853,7 +828,7 @@ export function TaskDetail({
                     className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-3 w-full")}
                     taskId={task.id}
                     taskTitle={task.title}
-                    viewerId={seat.userId}
+                    viewerId={auth.userId}
                     events={activity}
                     comments={(commentRows ?? []).map((row) => ({
                       id: row.id,

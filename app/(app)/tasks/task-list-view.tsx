@@ -54,17 +54,15 @@ export function TaskListView({
   today,
   /** Any toolbar or URL filter besides a custom field's. */
   baseFiltered,
-  serverRenderedAt,
 }: {
   filters: TaskListFilters;
   viewer: Viewer;
   seat: TaskListSeat;
   today: string;
   baseFiltered: boolean;
-  /** When the server last rendered the page. See `useRefetchOnServerRender`. */
-  serverRenderedAt: number;
 }) {
-  useRefetchOnServerRender(serverRenderedAt, [qk.tasks(), ["requests", "pending"]]);
+  // Writes that only revalidate the path (new task, copy, bulk edit) still land.
+  useRefetchOnServerRender([qk.tasks(), ["requests", "pending"], ["lists"]]);
 
   const hasTaskOnlyFilter = Boolean(filters.status || filters.priority || filters.group);
 

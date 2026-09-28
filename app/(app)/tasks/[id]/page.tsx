@@ -1,80 +1,25 @@
 import type { Metadata } from "next";
-import { notFound } from "next/navigation";
+import { Suspense } from "react";
 
-import {
-  canAdminDepartment,
-  isCollaborationSpace,
-  realtimeDepartmentFilter,
-  requireAuthContext,
-} from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
-import { requestToday } from "@/lib/dates-server";
-import { fetchJoinedTaskIdSet } from "@/lib/tasks-server";
-import { createClient } from "@/utils/supabase/server";
-
-import { TaskDetail, type TaskSeat } from "./task-detail";
+import Loading from "./loading";
+import { TaskDetailRoute } from "./task-detail-route";
 
 export const metadata: Metadata = { title: "Task" };
 
 /**
- * P12-06 — THE SERVER DECIDES WHO YOU ARE ON THIS TASK, AND NOTHING ELSE.
+ * P12 Phase A — NO SERVER WORK, so opening a task switches at once.
  *
- * This page used to read everything the task shows in one server batch — a
- * task row, then fifteen reads in one wave — before a single pixel moved. That
- * batch lives in the browser now (`task-detail.tsx`, from the query cache), so
- * a task you have opened before paints at once and the server's part of a
- * navigation is two small reads.
- *
- * ⚠️ WHAT STAYS HERE IS AUTHORIZATION OUTPUT. `AuthContext` never reaches the
- * browser, so the seat — do you lead this department, are you an admin on it,
- * is it the collaboration space — is decided here and handed over as plain
- * booleans. Every rule is the one the old page applied, unchanged.
- *
- * ⚠️ `notFound()` STAYS A SERVER DECISION. The task read below is policy-scoped,
- * so a task you cannot see is a 404 before any client code runs, exactly as it
- * was.
+ * This page used to read the task row and the viewer's seat on the server
+ * before a pixel moved — a round trip on every click. The seat is now decided
+ * in the browser from the layout's auth context with the same rules, and the
+ * task's reads start in one wave there (usually warm from a hover on the list).
+ * RLS still decides which task anybody can read: a task you cannot see comes
+ * back as nothing, and the page says so.
  */
-export default async function TaskDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const context = await requireAuthContext();
-  const supabase = await createClient();
-
-  const [{ data: task }, joinedTaskIdSet, today] = await Promise.all([
-    supabase
-      .from("vizserve_pms_tasks")
-      .select("id, department_id, list_id, request_id")
-      .eq("id", id)
-      .maybeSingle(),
-    fetchJoinedTaskIdSet(context.userId),
-    requestToday(),
-  ]);
-
-  if (!task) notFound();
-
-  const collaboration = isCollaborationSpace(context, task.department_id);
-
-  const seat: TaskSeat = {
-    userId: context.userId,
-    joined: joinedTaskIdSet.has(task.id),
-    leadsDepartment: roleAtLeast(context.role, "owner") || context.managedDepartmentIds.includes(task.department_id),
-    isAdmin: roleAtLeast(context.role, "owner"),
-    inDepartment: context.primaryDepartmentId === task.department_id || collaboration,
-    administersDepartment: canAdminDepartment(context, task.department_id),
-    collaboration,
-  };
-
+export default function TaskDetailPage() {
   return (
-    <TaskDetail
-      taskId={task.id}
-      seat={seat}
-      realtimeFilter={realtimeDepartmentFilter(context)}
-      today={today}
-      // Once per request on the server, so the fact reported rather than an
-      // impure render. See `useRefetchOnServerRender`.
-      // eslint-disable-next-line react-hooks/purity -- see the note above
-      serverRenderedAt={Date.now()}
-      initialListId={task.list_id}
-      initialRequestId={task.request_id}
-    />
+    <Suspense fallback={<Loading />}>
+      <TaskDetailRoute />
+    </Suspense>
   );
 }

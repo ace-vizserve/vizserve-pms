@@ -81,16 +81,15 @@ export function BoardColumns({
   kind,
   scope,
   today,
-  serverRenderedAt,
 }: {
   viewer: BoardViewer;
   listId: string | null;
   kind: TaskKind;
   scope: TaskView;
   today: string;
-  serverRenderedAt: number;
 }) {
-  useRefetchOnServerRender(serverRenderedAt, [qk.tasks()]);
+  // Writes that only revalidate the path (composer, copy) still land.
+  useRefetchOnServerRender([qk.tasks(), ["requests", "pending"]]);
 
   const query = useQuery({
     queryKey: qk.taskBoardView({ list: listId ?? undefined, view: scope, kind }),

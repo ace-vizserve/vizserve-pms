@@ -3,7 +3,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import { browserClient } from "./browser-client";
 import {
   fetchDirectory,
-  fetchListFields,
+  fetchTaskFields,
+  fetchTaskRequestByTask,
   fetchSubtasks,
   fetchTaskAttachments,
   fetchTaskChecklist,
@@ -12,7 +13,6 @@ import {
   fetchTaskHistory,
   fetchTaskTimeTracked,
   fetchVisibleLists,
-  type TaskDetail,
 } from "./fetchers/task";
 import { qk } from "./keys";
 
@@ -25,34 +25,28 @@ import { qk } from "./keys";
  * keys — the page then finds them in the cache and draws at once instead of
  * starting eleven reads after the click.
  *
- * History and the list's custom fields depend on the task row (whether it came
- * from a request, which list it is in), so they follow it rather than racing it.
- * Collaborators and the request row are left to the page: both apply to few
- * tasks and cost one small read when they do.
+ * The viewer's own seat (`joined`) and the collaborators are left to the page:
+ * the first needs the viewer's id, the second is reference data that is almost
+ * always warm already.
  */
 export function prefetchTask(queryClient: QueryClient, taskId: string): void {
   const client = browserClient();
 
-  void queryClient
-    .prefetchQuery({ queryKey: qk.task(taskId), queryFn: () => fetchTaskDetail(client, taskId) })
-    .then(() => {
-      const detail = queryClient.getQueryData<TaskDetail>(qk.task(taskId));
-      if (!detail) return;
-
-      void queryClient.prefetchQuery({
-        queryKey: qk.taskPart(taskId, "history"),
-        queryFn: () => fetchTaskHistory(client, taskId, { hasRequest: Boolean(detail.task.request_id) }),
-      });
-
-      const listId = detail.task.list_id;
-      if (listId) {
-        void queryClient.prefetchQuery({
-          queryKey: qk.listFields(listId),
-          queryFn: () => fetchListFields(client, listId),
-        });
-      }
-    });
-
+  // P12 Phase A — every read is keyed on the task id alone, so all of them go
+  // out together; nothing waits on the task row.
+  void queryClient.prefetchQuery({ queryKey: qk.task(taskId), queryFn: () => fetchTaskDetail(client, taskId) });
+  void queryClient.prefetchQuery({
+    queryKey: qk.taskPart(taskId, "history"),
+    queryFn: () => fetchTaskHistory(client, taskId),
+  });
+  void queryClient.prefetchQuery({
+    queryKey: qk.taskPart(taskId, "fields"),
+    queryFn: () => fetchTaskFields(client, taskId),
+  });
+  void queryClient.prefetchQuery({
+    queryKey: qk.taskPart(taskId, "request"),
+    queryFn: () => fetchTaskRequestByTask(client, taskId),
+  });
   void queryClient.prefetchQuery({
     queryKey: qk.taskPart(taskId, "comments"),
     queryFn: () => fetchTaskComments(client, taskId),

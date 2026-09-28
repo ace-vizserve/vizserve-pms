@@ -1,265 +1,170 @@
-import { loadPersonalTaskOptions } from "@/lib/personal-task-server";
-import { loadActiveDepartments, loadCollaborators } from "@/lib/departments-server";
-import { isCollaborationSpace, requireAuthContext } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
-import { createClient } from "@/utils/supabase/server";
+"use client";
 
-import { NewCompanyTaskDialog } from "./new-company-task-dialog";
+import { useQuery } from "@tanstack/react-query";
+
+import { useAuth } from "@/lib/auth/client-auth";
+import { roleAtLeast } from "@/lib/auth/roles";
+import { isCollaborationSpace } from "@/lib/auth/rules";
+import { browserClient } from "@/lib/query/browser-client";
+import {
+  fetchActiveDepartments,
+  fetchCollaborators,
+  fetchDirectory,
+  fetchVisibleLists,
+} from "@/lib/query/fetchers/task";
+import { qk } from "@/lib/query/keys";
+
 import { NewPersonalTaskDialog } from "./new-personal-task-dialog";
 import { NewTaskDialog } from "./new-task-dialog";
 
 /**
- * P3-12 — the entry point for a task with no request behind it.
+ * "New task", in the three shapes a person can be offered it.
  *
- * A server component so the department, people and list options are fetched
- * once with the page rather than by the dialog on every open.
+ * P12 Phase A — a client component now. It was an async server component with
+ * three reads of its own, which kept `/tasks` rendering on the server per click;
+ * it reads the same data from the query cache (all reference entries, usually
+ * warm) and decides the same three branches from the layout's auth context:
  *
- * TWO DIALOGS, ONE BUTTON (P7-01). Until P7-01 this component returned null for
- * a member and the entire personal-task path was unreachable from the UI.
+ *   1. Inside one of your OWN lists → a personal task, filed in that list.
+ *   2. A member (below team leader) → your own work; in the collaboration space
+ *      the company-task dialog instead.
+ *   3. A lead → the full dialog, for the departments you lead plus the
+ *      collaboration space (an owner: every department).
  *
- * P7-14 MOVED THE LINE, and it is worth being exact about where it now sits.
- * Creating work for a colleague is no longer a Team Leader decision — a member
- * may do it inside their own department. What a lead still has that a member does
- * not is the CHOICE OF DEPARTMENT (any they lead) and the appointment of a QA
- * reviewer. That is the whole difference between the two dialogs now, and it is
- * why they are still two.
+ * ⚠️ WHO MAY CREATE WHAT IS STILL THE DATABASE'S CALL. `vizserve_pms_create_task`
+ * refuses anything outside these rules; this only decides which dialog to show.
  *
- * The branch is on role, and the two dialogs post to two different functions
- * with two different parameter lists. A member cannot reach the TL one by
- * changing anything client-side, because `vizserve_pms_create_task` reads their
- * department off their own row and checks `vizserve_pms_manages_department`
- * itself.
- *
- * `trigger` is the SHAPE, never the permission. The board column and the list
- * group ask for their own quiet in-place version; the role check above still
- * decides whether any of them renders at all, so a new call site cannot acquire
- * a button by asking for a different look.
+ * Renders nothing until its reads are in — a button that changes shape under
+ * the cursor is worse than one that appears a beat late.
  */
-export async function NewTaskButton({
+export function NewTaskButton({
   trigger = "toolbar",
   listId = null,
 }: {
   trigger?: "toolbar" | "column" | "row";
-  /**
-   * The list the reader is ALREADY looking at, from `?list=` on /tasks and
-   * /tasks/board.
-   *
-   * ⚠️ WITHOUT THIS THE DIALOG DEFAULTS TO "No list" AND THE TASK VANISHES.
-   * Somebody filtered to a list, pressed New task, typed a title and pressed
-   * save — and the task was filed with `list_id = NULL`, so it could not appear
-   * in the list they were staring at. It looked exactly like the save had
-   * failed. It had not; the task was in the unfiled pile.
-   *
-   * Passed down as a DEFAULT, not a lock: the picker still renders and the list
-   * is still changeable, because "new task in the list I am reading" is the
-   * common case and not the only one.
-   */
   listId?: string | null;
 } = {}) {
-  const context = await requireAuthContext();
-  const supabase = await createClient();
+  const auth = useAuth();
 
-  /*
-   * P11-06 — ⚠️ INSIDE A PERSONAL LIST, THE LIST DECIDES AND NOT THE RANK, WHICH
-   * IS WHY THIS BRANCH COMES FIRST.
-   *
-   * Everything below this point branches on role: a member gets the personal
-   * dialog, a team leader gets the one with a department and a QA reviewer. That
-   * was complete while every list belonged to a department. It is not any more.
-   *
-   * A personal list holds ONLY its owner's own personal tasks — that is
-   * `vizserve_pms_tasks_personal_list_guard`, and it is not negotiable. So a
-   * team leader standing in their own personal list and pressing New task would
-   * otherwise get `NewTaskDialog`, which posts to `vizserve_pms_create_task`,
-   * which makes a non-personal task, which the trigger refuses. The rule would
-   * be met as an error message after the form had been filled in.
-   *
-   * `colleagues` is deliberately EMPTY rather than omitted: the dialog offers
-   * the assignee picker only when it has somebody to offer, so an empty array is
-   * how "this can only be your own work" is expressed — which is exactly true
-   * here.
-   *
-   * Scoped by `owner_id = context.userId` rather than by RLS alone, because the
-   * question is not "may I see this list" but "is this list MINE".
-   */
-  if (listId) {
-    const { data: personalList } = await supabase
-      .from("vizserve_pms_lists")
-      .select("id, name, department_id")
-      .eq("id", listId)
-      .eq("owner_id", context.userId)
-      .maybeSingle();
+  const lists = useQuery({ queryKey: qk.listsVisible(), queryFn: () => fetchVisibleLists(browserClient()) });
+  const people = useQuery({ queryKey: qk.ref("users"), queryFn: () => fetchDirectory(browserClient()) });
+  const departments = useQuery({
+    queryKey: qk.ref("departments"),
+    queryFn: () => fetchActiveDepartments(browserClient()),
+  });
+  const collaborators = useQuery({
+    queryKey: qk.ref("collaborators"),
+    queryFn: () => fetchCollaborators(browserClient()),
+  });
 
-    if (personalList) {
-      const dialog = (
-        <NewPersonalTaskDialog
-          lists={[personalList]}
-          /* Empty is how "this can only be your own work" is expressed — a
-             personal list holds only its owner's own personal tasks. */
-          colleagues={[]}
-          departmentId={context.primaryDepartmentId}
-          selfId={context.userId}
-          trigger={trigger}
-          defaultListId={personalList.id}
-        />
-      );
+  if (!lists.data || !people.data || !departments.data || !collaborators.data) return null;
 
-      if (trigger === "column") return <div className="shrink-0 px-2 pb-2">{dialog}</div>;
-      if (trigger === "row") return <div className="border-t px-2 py-1.5">{dialog}</div>;
-      return dialog;
-    }
-  }
-
-  /*
-   * The member path, and it returns BEFORE the team-leader fetch below.
-   *
-   * Both of that fetch's early returns — the role gate and
-   * `allowed.length === 0` — used to swallow this case. Putting the branch
-   * after either of them is how "members can create their own tasks" ships as
-   * a button that never appears.
-   *
-   * P7-14 CHANGED WHAT THIS BRANCH NEEDS. It used to fetch only lists, because
-   * department and assignee were both resolved server-side and neither was the
-   * member's to choose. A member may now assign work to a colleague in their own
-   * department, so the dialog needs that department and the people in it.
-   *
-   * THE DEPARTMENT IS READ HERE, ON THE SERVER, from the caller's own row — never
-   * sent up as something the browser picked. `vizserve_pms_create_task` re-reads
-   * it and refuses any other, so this is the convenient copy rather than the
-   * enforcement.
-   */
-  if (!roleAtLeast(context.role, "team_leader")) {
-    // ⚠️ SHARED WITH `app/_home/new-task-action.tsx`, WHICH WAS A COPY OF THIS
-    // BLOCK — three queries and their comments, in two route groups. "Who may I
-    // assign to" had two homes; now it has one.
-    const { departmentId: myDepartment, lists: myLists, colleagues } =
-      await loadPersonalTaskOptions(context.userId);
-
-    /*
-     * ⚠️ P13-03 — WHICH OF THE TWO FORMS, DECIDED HERE AND NOWHERE ELSE.
-     *
-     * Amier asked for two: "new task 1 is the current we are using" for a
-     * department, and a second one for company-wide. This is the only place
-     * that chooses between them, and it chooses from the LIST — which is the
-     * thing that actually decides where the task is filed and therefore who may
-     * hold it.
-     *
-     * ⚠️ READ FROM THE LIST'S OWN DEPARTMENT ROW, NOT FROM
-     * `context.sharedDepartmentIds`. That field comes from a third query in
-     * `resolveAuth` which degrades to `[]` on any failure — and an empty array
-     * means "no collaboration space", so every failure silently selects the
-     * DEPARTMENT form. That is exactly how this shipped broken three times.
-     * Asking the department row directly has no such failure mode: it either
-     * answers or the whole page has already failed.
-     */
-    const listRow = listId ? myLists.find((list) => list.id === listId) : undefined;
-
-    const { data: listDepartment } = listRow
-      ? await supabase
-          .from("vizserve_pms_departments")
-          .select("is_shared")
-          .eq("id", listRow.department_id)
-          .maybeSingle()
-      : { data: null };
-
-    const dialog = listDepartment?.is_shared ? (
-      // NEW TASK 2 — the company-wide form. Its own component, its own roster.
-      <NewCompanyTaskDialog
-        lists={myLists}
-        departmentId={myDepartment}
-        selfId={context.userId}
-        trigger={trigger}
-        defaultListId={listId}
-      />
-    ) : (
-      // NEW TASK 1 — the department form, unchanged. `colleagues` is the
-      // reader's own department and is the ONLY roster it can draw.
-      <NewPersonalTaskDialog
-        lists={myLists}
-        colleagues={colleagues}
-        departmentId={myDepartment}
-        selfId={context.userId}
-        trigger={trigger}
-        defaultListId={listId}
-      />
-    );
-
+  const wrap = (dialog: React.ReactNode) => {
     if (trigger === "column") return <div className="shrink-0 px-2 pb-2">{dialog}</div>;
     if (trigger === "row") return <div className="border-t px-2 py-1.5">{dialog}</div>;
     return dialog;
+  };
+
+  const allLists = lists.data.map((list) => ({ id: list.id, name: list.name, department_id: list.department_id }));
+
+  // 1. One of the viewer's own lists: its only possible contents are their own work.
+  const personalList = listId
+    ? lists.data.find((list) => list.id === listId && list.owner_id === auth.userId)
+    : undefined;
+
+  if (personalList) {
+    return wrap(
+      <NewPersonalTaskDialog
+        lists={[{ id: personalList.id, name: personalList.name, department_id: personalList.department_id }]}
+        colleagues={[]}
+        departmentId={auth.primaryDepartmentId}
+        selfId={auth.userId}
+        trigger={trigger}
+        defaultListId={personalList.id}
+      />,
+    );
   }
 
-  // RLS scopes all three: a TL sees the departments they lead, the people in
-  // them, and those departments' lists. No `.in(...)` needed here.
-  const [departments, { data: people }, { data: lists }, collaborators] = await Promise.all([
-    loadActiveDepartments(),
-    supabase
-      .from("vizserve_pms_users")
-      .select("id, full_name, primary_department_id")
-      .eq("is_active", true)
-      .order("full_name"),
-    // P11-06. `NewTaskDialog` always posts to `vizserve_pms_create_task`, which
-    // makes a NON-personal task — and a personal list refuses one. Offering the
-    // reader's own lists here would be offering the one destination this dialog
-    // can never file into. The branch at the top of this function is what handles
-    // "I am actually standing in my personal list".
-    supabase
-      .from("vizserve_pms_lists")
-      .select("id, name, department_id")
-      .is("owner_id", null)
-      .eq("is_active", true)
-      .order("name"),
-    /*
-     * P13-02 — the company roster, for when the department picker is set to a
-     * collaboration space.
-     *
-     * ⚠️ THE `people` READ ABOVE CANNOT SERVE THAT. Its comment says "RLS
-     * scopes all three: a TL sees the departments they lead" — which is correct
-     * and is exactly the problem: a lead of VizBytes filing into the shared
-     * space would be offered VizBytes, under a heading that says everybody.
-     */
-    loadCollaborators(),
-  ]);
+  // 2. A member.
+  if (!roleAtLeast(auth.role, "team_leader")) {
+    const colleagues = people.data
+      .filter(
+        (person) =>
+          person.is_active &&
+          person.id !== auth.userId &&
+          auth.primaryDepartmentId !== null &&
+          person.primary_department_id === auth.primaryDepartmentId,
+      )
+      .map((person) => ({ id: person.id, full_name: person.full_name }));
 
-  // An admin sees every department; a TL should only be offered the ones they
-  // actually lead, or the create call fails after they have filled in the form.
-  //
-  // ⚠️ P13-01 — PLUS THE COLLABORATION SPACES, FOR EVERYONE. A lead does not
-  // lead the shared space and nobody does, so the filter below drops it — which
-  // would leave the one department every person may file into missing from the
-  // only picker that offers a choice of department. `vizserve_pms_create_task`
-  // admits any active user there, so this offers exactly what it accepts.
-  const allowed = roleAtLeast(context.role, "owner")
-      ? departments
-      : departments.filter(
+    const listRow = listId ? allLists.find((list) => list.id === listId) : undefined;
+    const inShared = listRow
+      ? (departments.data.find((department) => department.id === listRow.department_id)?.is_shared ?? false)
+      : false;
+
+    return wrap(
+      inShared ? (
+        /*
+         * P13-03 — the company-wide form: `NewCompanyTaskDialog`'s body, with
+         * the roster it read on the server taken from the cache instead
+         * (`vizserve_pms_collaborators`, which reads past RLS on purpose —
+         * see that file). Self excluded: "Myself" is the form's default and
+         * calls a different create function.
+         */
+        <NewPersonalTaskDialog
+          lists={allLists}
+          colleagues={collaborators.data.filter((person) => person.id !== auth.userId)}
+          scope="company"
+          departmentId={auth.primaryDepartmentId}
+          selfId={auth.userId}
+          trigger={trigger}
+          defaultListId={listId}
+        />
+      ) : (
+        <NewPersonalTaskDialog
+          lists={allLists}
+          colleagues={colleagues}
+          departmentId={auth.primaryDepartmentId}
+          selfId={auth.userId}
+          trigger={trigger}
+          defaultListId={listId}
+        />
+      ),
+    );
+  }
+
+  // 3. A lead.
+  const allowed = (
+    roleAtLeast(auth.role, "owner")
+      ? departments.data
+      : departments.data.filter(
           (department) =>
-            context.managedDepartmentIds.includes(department.id) ||
-            isCollaborationSpace(context, department.id),
-        );
+            auth.managedDepartmentIds.includes(department.id) || isCollaborationSpace(auth, department.id),
+        )
+  ).map((department) => ({ id: department.id, name: department.name }));
 
   if (allowed.length === 0) return null;
 
-  const dialog = (
+  return wrap(
     <NewTaskDialog
       departments={allowed}
-      people={people ?? []}
+      people={people.data
+        .filter((person) => person.is_active)
+        .map((person) => ({
+          id: person.id,
+          full_name: person.full_name,
+          primary_department_id: person.primary_department_id,
+        }))}
       /* P13-02. Used by the dialog ONLY while the chosen department is a
          collaboration space — see the note on `candidates` there. */
-      collaborators={collaborators}
-      lists={lists ?? []}
-      sharedDepartmentIds={context.sharedDepartmentIds}
+      collaborators={collaborators.data}
+      lists={lists.data
+        .filter((list) => list.owner_id === null)
+        .map((list) => ({ id: list.id, name: list.name, department_id: list.department_id }))}
+      sharedDepartmentIds={auth.sharedDepartmentIds}
       defaultDepartmentId={allowed[0]!.id}
       defaultListId={listId}
       trigger={trigger}
-    />
+    />,
   );
-
-  // The wrapper belongs to the button, not to the call site. This component
-  // returns null for a member, and a <div className="border-t …"> around a null
-  // is a stray rule with padding under it — which is what every board column and
-  // every list group grew the first time this was wrapped from outside.
-  if (trigger === "column") return <div className="shrink-0 px-2 pb-2">{dialog}</div>;
-  if (trigger === "row") return <div className="border-t px-2 py-1.5">{dialog}</div>;
-
-  return dialog;
 }

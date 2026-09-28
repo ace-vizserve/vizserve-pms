@@ -3,6 +3,8 @@ import Link from "next/link";
 import { ScrollText } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
+import { AuthProvider } from "@/lib/auth/client-auth";
+import { ServerRenderStamp } from "@/lib/query/use-refetch-on-server-render";
 import { AppSidebarSkeleton } from "@/components/app-shell/app-sidebar-skeleton";
 import {
   BreadcrumbLabelProvider,
@@ -23,6 +25,11 @@ import { SidebarPanel } from "./sidebar-panel";
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const context = await requireAuthContext();
   return (
+    <AuthProvider value={context}>
+    {/* See `useRefetchOnServerRender`: once per server render of the shell, the
+        fact being reported rather than an impure render. */}
+    {/* eslint-disable-next-line react-hooks/purity -- see the note above */}
+    <ServerRenderStamp at={Date.now()}>
     <TooltipProvider>
       {/*
         P7-67 — ONE LIGHTBOX FOR THE WHOLE AUTHENTICATED AREA, and it is mounted
@@ -146,5 +153,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
       </BreadcrumbLabelProvider>
       </TaskImageLightboxProvider>
     </TooltipProvider>
+    </ServerRenderStamp>
+    </AuthProvider>
   );
 }

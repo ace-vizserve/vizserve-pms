@@ -53,7 +53,12 @@ export type TaskPart =
   | "attachments"
   | "time"
   /** P7-68 — the checklist, in position order. */
-  | "checklist";
+  | "checklist"
+  /** P12 Phase A — read through the task, so no list/request id is needed first. */
+  | "fields"
+  | "request"
+  /** P12 Phase A — whether the viewer holds a join-table seat on the task. */
+  | "joined";
 
 /**
  * Reference data — admin-managed, changes rarely, read by pickers everywhere.
@@ -191,6 +196,8 @@ export const qk = {
   listsVisible: () => ["lists", "visible"] as const,
   /** P7-73 — one list's active custom fields. Under `["lists"]`, so a list write sweeps it. */
   listFields: (listId: string) => ["lists", "fields", listId] as const,
+  /** P7-73 — the field manager's view: archived fields too, and the manage right. */
+  listFieldManager: (listId: string) => ["lists", "fields", "manager", listId] as const,
 
   /**
    * P12-16 — THE LIST MANAGEMENT SCREEN'S ROW SET. `/tasks/lists`, and only it.

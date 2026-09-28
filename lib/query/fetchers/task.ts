@@ -118,11 +118,7 @@ export type TaskHistory = {
 };
 
 /** `qk.taskPart(id, "history")` — the audit trail and, on client work, the decisions. */
-export async function fetchTaskHistory(
-  client: TaskReadClient,
-  taskId: string,
-  options: { hasRequest: boolean },
-): Promise<TaskHistory> {
+export async function fetchTaskHistory(client: TaskReadClient, taskId: string): Promise<TaskHistory> {
   const [historyRows, decisionRows] = await Promise.all([
     read<unknown[]>(
       client
@@ -132,15 +128,19 @@ export async function fetchTaskHistory(
         .order("created_at", { ascending: false }),
     ),
 
-    options.hasRequest
-      ? read<unknown[]>(
-          client
-            .from("vizserve_pms_client_decisions")
-            .select("id, decision, comment, approver_name, created_at")
-            .eq("task_id", taskId)
-            .order("created_at", { ascending: false }),
-        )
-      : Promise.resolve([]),
+    /*
+     * P12 Phase A — ALWAYS READ, EMPTY ON INTERNAL WORK. It used to wait on the
+     * task row to learn whether a request was behind it, which put a second
+     * round trip in series before the page could draw. An internal task has no
+     * decisions, so the read simply returns nothing.
+     */
+    read<unknown[]>(
+      client
+        .from("vizserve_pms_client_decisions")
+        .select("id, decision, comment, approver_name, created_at")
+        .eq("task_id", taskId)
+        .order("created_at", { ascending: false }),
+    ),
   ]);
 
   return {
@@ -296,3 +296,116 @@ export async function fetchTaskRequest(
 
   return row === null ? null : parse(taskRequestRowSchema, row, "request");
 }
+
+/*
+ * P12 Phase A — THREE READS KEYED ON THE TASK ID ALONE, so a task page's reads
+ * all start in one wave with no server step before them. Each used to need the
+ * task row first (its list, its request, the viewer's seat on it).
+ */
+
+type FieldRow = Parameters<typeof toListField>[0];
+
+/**
+ * `qk.taskPart(id, "fields")` — P7-73, the task's list's ACTIVE custom fields,
+ * read THROUGH the task (task → list → fields) so it needs no list id first.
+ * Same shape and order as `fetchListFields`.
+ */
+export async function fetchTaskFields(client: TaskReadClient, taskId: string): Promise<ListField[]> {
+  const row = await read<unknown>(
+    client
+      .from("vizserve_pms_tasks")
+      .select(
+        "vizserve_pms_lists(vizserve_pms_list_fields(id, list_id, name, field_type, options, decimals, sort_order, is_active, created_at))",
+      )
+      .eq("id", taskId)
+      .maybeSingle(),
+  );
+
+  const fields =
+    ((row as { vizserve_pms_lists: { vizserve_pms_list_fields: (FieldRow & { created_at: string })[] } | null } | null)
+      ?.vizserve_pms_lists?.vizserve_pms_list_fields ?? []);
+
+  return fields
+    .filter((field) => field.is_active)
+    .sort((a, b) => a.sort_order - b.sort_order || a.created_at.localeCompare(b.created_at))
+    .map(toListField);
+}
+
+/**
+ * `qk.taskPart(id, "request")` — P7-59, the request row, read through the task.
+ * The embed is policy-scoped like the table: lead-only, so `null` is the
+ * ordinary answer for everybody else.
+ */
+export async function fetchTaskRequestByTask(
+  client: TaskReadClient,
+  taskId: string,
+): Promise<TaskRequestRow | null> {
+  const row = await read<unknown>(
+    client
+      .from("vizserve_pms_tasks")
+      .select(
+        "vizserve_pms_requests(id, reference_no, requester_name, requester_email, requester_org, description, target_date, submitted_at, reviewed_by, reviewed_at, form_id)",
+      )
+      .eq("id", taskId)
+      .maybeSingle(),
+  );
+
+  const request = (row as { vizserve_pms_requests: unknown } | null)?.vizserve_pms_requests ?? null;
+  return request === null ? null : parse(taskRequestRowSchema, request, "request");
+}
+
+/**
+ * `qk.taskPart(id, "joined")` — P7-43, whether the viewer holds a join-table
+ * seat on this task. Draws controls only; the database decides the write.
+ */
+export async function fetchTaskJoined(client: TaskReadClient, taskId: string, userId: string): Promise<boolean> {
+  const rows = await read<unknown[]>(
+    client.from("vizserve_pms_task_assignees").select("task_id").eq("task_id", taskId).eq("user_id", userId),
+  );
+  return rows.length > 0;
+}
+
+/**
+ * `qk.ref("departments")` — the ACTIVE departments the reader may see, with the
+ * collaboration flag. Policy-scoped, as `loadActiveDepartments` is.
+ */
+export async function fetchActiveDepartments(
+  client: TaskReadClient,
+): Promise<{ id: string; name: string; is_shared: boolean }[]> {
+  const rows = await read(
+    client.from("vizserve_pms_departments").select("id, name, is_shared").eq("is_active", true).order("name"),
+  );
+  return rows ?? [];
+}
+
+/** `qk.ref("task-groups")` — P7-18, the active folders, in the tree's order. */
+export async function fetchTaskGroups(client: TaskReadClient): Promise<{ id: string; name: string }[]> {
+  const rows = await read(
+    client.from("vizserve_pms_task_groups").select("id, name").eq("is_active", true).order("sort_order").order("name"),
+  );
+  return rows ?? [];
+}
+
+/**
+ * `qk.listFieldsManaged(listId)` — P7-73, a list's fields INCLUDING archived
+ * ones, and whether the viewer may manage them. For the field manager only; the
+ * columns menu shows the active ones.
+ */
+export async function fetchListFieldManager(
+  client: TaskReadClient,
+  listId: string,
+): Promise<{ fields: ListField[]; canManage: boolean }> {
+  const [rows, canManage] = await Promise.all([
+    read(
+      client
+        .from("vizserve_pms_list_fields")
+        .select("id, list_id, name, field_type, options, decimals, sort_order, is_active")
+        .eq("list_id", listId)
+        .order("sort_order")
+        .order("created_at"),
+    ),
+    read(client.rpc("vizserve_pms_can_manage_list", { p_list_id: listId })),
+  ]);
+  return { fields: (rows ?? []).map(toListField), canManage: canManage === true };
+}
+

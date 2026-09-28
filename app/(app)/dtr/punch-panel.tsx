@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
 import { formatAppTime, formatDate, formatDuration, workedMinutes } from "@/lib/dates";
 import {
   deviation as computeDeviation,
@@ -52,7 +53,46 @@ export type PunchState = {
  * never on the button press, for the same reason — a prompt about a punch that
  * was not captured would be a prompt about nothing.
  */
+/**
+ * P12 Phase A — the panel with or without a server seed.
+ *
+ * `/` and `/dashboard` still read the punch state on the server and pass it as
+ * `initial`. `/dtr` no longer renders on the server per click, so it passes
+ * nothing and this reads `qk.punchState()` itself — usually already warm,
+ * because the shell's clock reminder observes the same key on every page. Until
+ * the first read lands there is nothing honest to draw, so a placeholder holds
+ * the panel's space; a panel guessing "not timed in" would be worse than none.
+ */
 export function PunchPanel({
+  initial,
+  viewerId,
+  compact = false,
+}: {
+  initial?: PunchState;
+  viewerId: string;
+  compact?: boolean;
+}) {
+  const punchQuery = useQuery({
+    queryKey: qk.punchState(),
+    queryFn: () => fetchPunchState(browserClient(), viewerId),
+    initialData: initial,
+  });
+
+  const state = punchQuery.data ?? initial;
+
+  if (!state) {
+    return (
+      <div role="status" aria-busy="true" className={compact ? "h-16" : "h-28"}>
+        <span className="sr-only">Loading your time record…</span>
+        <Skeleton className="h-full w-full rounded-lg" />
+      </div>
+    );
+  }
+
+  return <PunchPanelBody initial={state} viewerId={viewerId} compact={compact} />;
+}
+
+function PunchPanelBody({
   initial,
   viewerId,
   compact = false,
