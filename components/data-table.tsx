@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   flexRender,
@@ -17,6 +17,7 @@ import { useWindowVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDown, ArrowUp, ChevronsUpDown } from "lucide-react";
 
 import { DataTableColumns } from "@/components/data-table-columns";
+import { RowArmedContext } from "@/lib/row-arm";
 import { cn } from "@/lib/utils";
 import {
   Table,
@@ -188,6 +189,7 @@ export function DataTable<T>({
   columnVisibility,
   onColumnVisibilityChange,
   virtualize = false,
+  armRows = false,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -309,6 +311,11 @@ export function DataTable<T>({
    * data, not the DOM, and is unaffected.
    */
   virtualize?: boolean;
+  /**
+   * P12 — rows start UNARMED and build their interactive controls only on
+   * intent (pointer, focus) or idle time. See `lib/row-arm.tsx`.
+   */
+  armRows?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -568,34 +575,43 @@ export function DataTable<T>({
       ? virtualizer.getTotalSize() - (virtualItems[virtualItems.length - 1]!.end - scrollMargin)
       : 0;
 
-  const renderRow = (row: (typeof modelRows)[number], virtualIndex?: number) => (
-    <TableRow
-      key={row.id}
-      data-index={virtualIndex}
-      ref={virtualIndex === undefined ? undefined : virtualizer.measureElement}
-      className={cn(
-        "align-top",
-        onRowHref?.(row.original) && "cursor-pointer",
-        rowClassName?.(row.original),
-      )}
-    >
-      {row.getVisibleCells().map((cell) => {
-        const column = (cell.column.columnDef.meta as { column: Column<T> }).column;
-        return (
-          <TableCell
-            key={cell.id}
-            className={cn(
-              column.align === "end" && "text-right",
-              column.key === pinnedKey && pinnedCell,
-              column.className,
-            )}
-          >
-            {flexRender(cell.column.columnDef.cell, cell.getContext())}
-          </TableCell>
-        );
-      })}
-    </TableRow>
-  );
+  const renderRow = (row: (typeof modelRows)[number], virtualIndex?: number) => {
+    const className = cn(
+      "align-top",
+      onRowHref?.(row.original) && "cursor-pointer",
+      rowClassName?.(row.original),
+    );
+    const cells = row.getVisibleCells().map((cell) => {
+      const column = (cell.column.columnDef.meta as { column: Column<T> }).column;
+      return (
+        <TableCell
+          key={cell.id}
+          className={cn(
+            column.align === "end" && "text-right",
+            column.key === pinnedKey && pinnedCell,
+            column.className,
+          )}
+        >
+          {flexRender(cell.column.columnDef.cell, cell.getContext())}
+        </TableCell>
+      );
+    });
+    const measure = virtualIndex === undefined ? undefined : virtualizer.measureElement;
+
+    if (armRows) {
+      return (
+        <ArmableRow key={row.id} index={virtualIndex} measure={measure} className={className}>
+          {cells}
+        </ArmableRow>
+      );
+    }
+
+    return (
+      <TableRow key={row.id} data-index={virtualIndex} ref={measure} className={className}>
+        {cells}
+      </TableRow>
+    );
+  };
 
   const body = (
     <Table>
@@ -772,6 +788,68 @@ export function DataTable<T>({
  */
 function keyOf<T>(columns: Column<T>[], sortKey: string): string {
   return columns.find((column) => column.sortKey === sortKey)?.key ?? sortKey;
+}
+
+/**
+ * P12 — a row that builds its interactive controls on intent. See
+ * `lib/row-arm.tsx`. Arms on pointer entry, on focus (then hands focus to the
+ * real control in the same `data-arm-slot`), or during idle time after mount.
+ */
+function ArmableRow({
+  index,
+  measure,
+  className,
+  children,
+}: {
+  index: number | undefined;
+  measure: ((node: Element | null) => void) | undefined;
+  className: string;
+  children: React.ReactNode;
+}) {
+  const [armed, setArmed] = useState(false);
+  const rowRef = useRef<HTMLTableRowElement | null>(null);
+  const pendingFocus = useRef<string | null>(null);
+
+  // Idle arming: rows become fully interactive shortly after the page settles,
+  // in small pieces that never block a click.
+  useEffect(() => {
+    if (armed) return;
+    const idle = window.requestIdleCallback ?? ((cb: () => void) => window.setTimeout(cb, 200));
+    const cancel = window.cancelIdleCallback ?? window.clearTimeout;
+    const handle = idle(() => setArmed(true), { timeout: 2500 });
+    return () => cancel(handle);
+  }, [armed]);
+
+  // Keyboard: the plain button that had focus is gone; focus its real twin.
+  useLayoutEffect(() => {
+    if (!armed || !pendingFocus.current) return;
+    const slot = pendingFocus.current;
+    pendingFocus.current = null;
+    rowRef.current?.querySelector<HTMLElement>(`[data-arm-slot="${slot}"]`)?.focus({ preventScroll: true });
+  }, [armed]);
+
+  return (
+    <TableRow
+      data-index={index}
+      ref={(node) => {
+        rowRef.current = node;
+        measure?.(node);
+      }}
+      className={className}
+      onPointerEnter={armed ? undefined : () => setArmed(true)}
+      onFocusCapture={
+        armed
+          ? undefined
+          : (event) => {
+              pendingFocus.current =
+                (event.target as HTMLElement).closest<HTMLElement>("[data-arm-slot]")?.dataset.armSlot ?? null;
+              setArmed(true);
+            }
+      }
+    >
+      <RowArmedContext value={armed}>{children}</RowArmedContext>
+    </TableRow>
+  );
 }
 
 /** Below this many rows a virtualised table renders whole: no benefit, and no measuring. */

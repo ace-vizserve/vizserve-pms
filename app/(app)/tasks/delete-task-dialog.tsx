@@ -19,6 +19,7 @@ import { formatDuration } from "@/lib/dates";
 
 import { deleteTask, taskDeleteImpact, type TaskDeleteImpact } from "./actions";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
+import { useRowArmed } from "@/lib/row-arm";
 
 /**
  * P7-19 — deleting an internal task, with the damage named first.
@@ -51,6 +52,7 @@ export function DeleteTaskDialog({
   /** A custom trigger. Defaults to a ghost trash button. */
   render?: (open: () => void) => React.ReactNode;
 }) {
+  const armed = useRowArmed();
   const [open, setOpen] = useState(false);
   const [impact, setImpact] = useState<TaskDeleteImpact | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -124,21 +126,25 @@ export function DeleteTaskDialog({
       ].filter(Boolean)
     : [];
 
+  const trashButton = (
+    <Button
+      data-arm-slot="delete"
+      variant="ghost"
+      size="icon-sm"
+      aria-label={`Delete ${title}`}
+      onClick={show}
+      className="text-muted-foreground hover:text-destructive"
+    >
+      <Trash2 />
+    </Button>
+  );
+
+  // P12 — an unarmed row draws the button alone, without the dialog behind it.
+  if (!armed && !render) return trashButton;
+
   return (
     <>
-      {render ? (
-        render(show)
-      ) : (
-        <Button
-          variant="ghost"
-          size="icon-sm"
-          aria-label={`Delete ${title}`}
-          onClick={show}
-          className="text-muted-foreground hover:text-destructive"
-        >
-          <Trash2 />
-        </Button>
-      )}
+      {render ? render(show) : trashButton}
 
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="sm:max-w-md">

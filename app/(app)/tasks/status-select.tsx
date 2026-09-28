@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 
 import { TransitionCommentDialog, useTaskTransition } from "./transition";
 import { focusWithoutScroll } from "@/lib/focus";
+import { useRowArmed } from "@/lib/row-arm";
 
 /**
  * K3 — THE status control. One component, used everywhere a task's status is
@@ -149,6 +150,7 @@ export function TaskStatusSelect({
    */
   beforeMove?: () => Promise<void>;
 }) {
+  const armed = useRowArmed();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
 
@@ -224,6 +226,105 @@ export function TaskStatusSelect({
     );
   }
 
+  // P12 — an unarmed row draws the trigger alone, without the popover or the
+  // comment dialog behind it. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <button
+        type="button"
+        data-arm-slot="status"
+        title={
+          variant === "compact" || variant === "glyph"
+            ? `Move — currently ${TASK_STATUS_LABELS[move.shownStatus]}`
+            : undefined
+        }
+        aria-label={`Status: ${TASK_STATUS_LABELS[move.shownStatus]}. Change it.`}
+        className={cn(
+          variant === "compact"
+            ? cn(
+                "inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground",
+                "hover:bg-accent hover:text-foreground",
+              )
+            : variant === "glyph"
+              ? /*
+                 THE BADGE IS THE BUTTON, so this adds no box of its own — a
+                 24px circle inside a 24px square shell would be two borders
+                 on one control. What it adds is the affordance: a ring on
+                 hover, which reads on every tone because it is drawn OUTSIDE
+                 the circle rather than tinting it.
+
+                 `rounded-full` matches the glyph so the focus ring and the
+                 hover ring follow its edge; the glyph is already 24px, which
+                 is the target floor (§5.8).
+              */
+                cn(
+                  "inline-flex shrink-0 cursor-pointer rounded-full",
+                  "hover:ring-2 hover:ring-ring/50 focus-visible:ring-offset-1",
+                )
+              : variant === "control"
+              ? /*
+                 THE PRIMARY BUTTON'S OWN CLASSES, not a hand-rolled copy of
+                 them. It is the page's one action now (P7-60), so it is the
+                 page's primary control — and `buttonVariants` carries the
+                 brand fill, the grade, the lift, the press, the focus ring and
+                 the disabled state together. Rebuilding that from tokens here
+                 is how the two drift the next time the button changes.
+              */
+                cn(buttonVariants({ variant: "default" }), "gap-2")
+              : "inline-flex shrink-0 items-center gap-1 rounded-md hover:opacity-90",
+          "focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+          "disabled:cursor-not-allowed disabled:opacity-60",
+          className,
+        )}>
+        {variant === "compact" ? (
+          <ArrowRightLeft className="size-3.5" aria-hidden />
+        ) : variant === "glyph" ? (
+          /* `decorative`, because the trigger's own `aria-label` already says
+             the status and that it can be changed — the glyph's built-in
+             `title` and `sr-only` label would say it a second time, and a
+             tooltip fighting the trigger's tooltip is the visible half of
+             that. `move.shownStatus`, so the badge repaints the instant
+             somebody picks rather than a round trip later. */
+          <TaskStatusGlyph status={move.shownStatus} decorative />
+        ) : variant === "control" ? (
+          <>
+            {/*
+            ⚠️ THE LABEL, NOT THE CHIP, AND THAT IS DELIBERATE.
+
+            A tone-coloured chip inside a brand-filled button is two fills
+            fighting on one control, and the inner one would have to hold 4.5:1
+            against `--primary` rather than against its own subtle — which
+            `--warning-subtle` on blue does not.
+
+            Nothing is lost: §5.5 asks that state never rest on colour alone,
+            and the state is the WORD here. The tone still reads on every chip
+            elsewhere on the page — the track above says where the work is, and
+            `status-badge.tsx` stays the only place a status maps to a colour.
+          */}
+            {TASK_STATUS_LABELS[move.shownStatus]}
+            <ChevronDown className="size-3.5 shrink-0 opacity-80" aria-hidden />
+          </>
+        ) : (
+          <>
+            {/* ⚠️ `move.shownStatus`, NOT `status`. This is the one thing on
+                the page that repaints the instant somebody picks, rather than
+                a round trip later — see `useOptimistic` in `transition.tsx`.
+
+                ⚠️ THE LIST BELOW STAYS ON THE REAL `status`, deliberately.
+                `availableTransitions` decides which moves are LEGAL, and
+                guessing at legality is how a control offers a move the server
+                then refuses. Optimism belongs on what is displayed, never on
+                what is permitted. */}
+            <TaskStatusBadge status={move.shownStatus} />
+            {/* The chip alone looks like every other read-only pill in the app.
+              The chevron is the only thing marking this one as a control. */}
+            <ChevronDown className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          </>
+        )}
+      </button>
+    );
+  }
+
   return (
     <>
       <Popover
@@ -239,6 +340,7 @@ export function TaskStatusSelect({
             at all. The optimistic value is already the answer; there is nothing
             left to protect. */}
         <PopoverTrigger
+          data-arm-slot="status"
           title={
             variant === "compact" || variant === "glyph"
               ? `Move — currently ${TASK_STATUS_LABELS[move.shownStatus]}`

@@ -917,6 +917,10 @@ export function TaskGroupTable({
       /* P12 — a stage can hold hundreds of tasks and each row mounts about ten
          interactive widgets; only the rows near the viewport are built. */
       virtualize
+      /* P12 — and each visible row builds its dozen popovers only on intent
+         (hover, focus) or idle time; until then its controls are plain buttons
+         that look identical. See `lib/row-arm.tsx`. */
+      armRows
       columns={rendered}
       rows={group}
       getRowKey={(task) => task.id}

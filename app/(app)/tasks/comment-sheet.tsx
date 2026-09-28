@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/sheet";
 
 import { CommentThread, type TaskActivityEvent, type TaskComment } from "./comment-thread";
+import { useRowArmed } from "@/lib/row-arm";
 
 /**
  * P12-19 — the whole conversation, in a panel, from anywhere.
@@ -55,13 +56,25 @@ export function CommentSheet({
   className?: string;
   children: ReactNode;
 }) {
+  const armed = useRowArmed();
   const [open, setOpen] = useState(false);
 
   const total = comments.length + events.length;
 
+  // P12 — an unarmed row draws the trigger alone. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <button type="button" data-arm-slot="comments" className={className}>
+        {children}
+      </button>
+    );
+  }
+
   return (
     <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger className={className}>{children}</SheetTrigger>
+      <SheetTrigger data-arm-slot="comments" className={className}>
+        {children}
+      </SheetTrigger>
 
       {/*
         42rem rather than the primitive's 24rem: wide enough that a landscape

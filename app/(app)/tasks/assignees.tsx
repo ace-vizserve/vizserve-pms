@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 
 import { addTaskAssignee, removeTaskAssignee } from "./writes";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
+import { useRowArmed } from "@/lib/row-arm";
 
 /**
  * P7-13 / K1 — several people on one task.
@@ -66,19 +67,26 @@ export function Monogram({
   label?: string;
   className?: string;
 }) {
+  const armed = useRowArmed();
+  const chip = cn(
+    "flex size-6 shrink-0 items-center justify-center rounded-full border text-2xs font-semibold grade-chip shadow-raised",
+    TINTS[tintFor(id)],
+    className,
+  );
+
+  // P12 — an unarmed row draws the chip without its tooltip. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <span className={chip}>
+        {initials(name)}
+        <span className="sr-only">{label ?? name}</span>
+      </span>
+    );
+  }
+
   return (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <span
-            className={cn(
-              "flex size-6 shrink-0 items-center justify-center rounded-full border text-2xs font-semibold grade-chip shadow-raised",
-              TINTS[tintFor(id)],
-              className,
-            )}
-          />
-        }
-      >
+      <TooltipTrigger render={<span className={chip} />}>
         {initials(name)}
         {/* Read out instead of the initials, which are meaningless spoken. */}
         <span className="sr-only">{label ?? name}</span>
@@ -146,6 +154,7 @@ export function AssigneePicker({
   showPic?: boolean;
   align?: "start" | "center" | "end";
 }) {
+  const armedRow = useRowArmed();
   const refresh = useTaskRefresh();
   const [pending, startTransition] = useTransition();
   const [open, setOpen] = useState(false);
@@ -324,6 +333,25 @@ export function AssigneePicker({
 
   if (!canEdit) return trigger;
 
+  const pickerTrigger = {
+    "data-arm-slot": "assignees",
+    "aria-busy": pending,
+    "aria-label":
+      picOnTask || stack.length
+        ? `Assignees: ${[picOnTask ? pic?.full_name : null, ...stack.map((p) => p.full_name)].filter(Boolean).join(", ")}. Change them.`
+        : "Unassigned. Add somebody.",
+    className: "rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+  };
+
+  // P12 — an unarmed row draws the trigger alone. See `lib/row-arm.tsx`.
+  if (!armedRow) {
+    return (
+      <button type="button" {...pickerTrigger}>
+        {trigger}
+      </button>
+    );
+  }
+
   return (
     <Popover
       open={open}
@@ -337,17 +365,7 @@ export function AssigneePicker({
           picker vanished mid-click and the page jumped back to the restored
           focus. `aria-busy` says the same thing without taking the control
           away. */}
-      <PopoverTrigger
-        aria-busy={pending}
-        aria-label={
-          picOnTask || stack.length
-            ? `Assignees: ${[picOnTask ? pic?.full_name : null, ...stack.map((p) => p.full_name)].filter(Boolean).join(", ")}. Change them.`
-            : "Unassigned. Add somebody."
-        }
-        className="rounded-full focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
-      >
-        {trigger}
-      </PopoverTrigger>
+      <PopoverTrigger {...pickerTrigger}>{trigger}</PopoverTrigger>
 
       {/* ⚠️ `initialFocus={false}` — WE FOCUS THE SEARCH BOX, BASE UI MUST NOT.
           Its default resolves to the first tabbable element in the popup, which

@@ -29,6 +29,7 @@ import { DeleteTaskDialog } from "./delete-task-dialog";
 import { updateTaskField } from "./writes";
 import { ComposerCard, type Assignable } from "./task-composer";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
+import { useRowArmed } from "@/lib/row-arm";
 
 /**
  * K3 — editing a task without opening it.
@@ -179,6 +180,7 @@ export function TaskRowActions({
 
 /** Rename in place. The pen opens a one-field popover; Enter commits. */
 export function InlineTitle({ taskId, title }: { taskId: string; title: string }) {
+  const armed = useRowArmed();
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -197,6 +199,15 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
     setOpen(false);
   }
 
+  // P12 — an unarmed row draws the trigger alone. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <button type="button" data-arm-slot="rename" aria-label={`Rename ${title}`} title="Rename" className={ICON_BUTTON}>
+        <Pencil className="size-3.5" aria-hidden />
+      </button>
+    );
+  }
+
   return (
     <Popover
       open={open}
@@ -204,7 +215,7 @@ export function InlineTitle({ taskId, title }: { taskId: string; title: string }
         setOpen(next);
         if (next) setDraft(title);
       }}>
-      <PopoverTrigger aria-label={`Rename ${title}`} title="Rename" className={ICON_BUTTON}>
+      <PopoverTrigger data-arm-slot="rename" aria-label={`Rename ${title}`} title="Rename" className={ICON_BUTTON}>
         <Pencil className="size-3.5" aria-hidden />
       </PopoverTrigger>
 
@@ -252,6 +263,7 @@ export function InlinePriority({
   value: TaskPriority | null;
   iconOnly?: boolean;
 }) {
+  const armed = useRowArmed();
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   /*
@@ -280,15 +292,38 @@ export function InlinePriority({
     );
   }
 
+  const priorityTrigger = {
+    "data-arm-slot": iconOnly ? "priority-icon" : "priority",
+    "aria-label": shown ? `Priority: ${TASK_PRIORITY_LABELS[shown]}. Change it.` : "Set a priority",
+    title: "Priority",
+    className: cn(
+      iconOnly ? ICON_BUTTON : "rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+      "disabled:cursor-not-allowed disabled:opacity-60",
+    ),
+  };
+  const priorityFace = iconOnly ? (
+    <Flag className={cn("size-3.5", shown ? FLAG_TONE[shown] : undefined)} aria-hidden />
+  ) : shown ? (
+    <TaskPriorityBadge priority={shown} className="h-5 px-1.5" />
+  ) : (
+    <span className="inline-flex items-center gap-1 text-2xs text-muted-foreground">
+      <Flag className="size-3.5" aria-hidden />
+      Set
+    </span>
+  );
+
+  // P12 — an unarmed row draws the trigger alone. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <button type="button" {...priorityTrigger}>
+        {priorityFace}
+      </button>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        aria-label={shown ? `Priority: ${TASK_PRIORITY_LABELS[shown]}. Change it.` : "Set a priority"}
-        title="Priority"
-        className={cn(
-          iconOnly ? ICON_BUTTON : "rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          "disabled:cursor-not-allowed disabled:opacity-60",
-        )}>
+      <PopoverTrigger {...priorityTrigger}>
         {iconOnly ? (
           <Flag className={cn("size-3.5", shown ? FLAG_TONE[shown] : undefined)} aria-hidden />
         ) : shown ? (
@@ -362,6 +397,7 @@ export function InlineDate({
   /** Overdue styling, decided by the caller — it knows whether the task is live. */
   emphasis?: boolean;
 }) {
+  const armed = useRowArmed();
   const { patch } = usePatch(taskId);
   const [open, setOpen] = useState(false);
   /*
@@ -378,18 +414,30 @@ export function InlineDate({
     await patch({ [field]: next }, { success: next ? `${label} ${formatDate(next)}` : `${label} cleared` });
   }
 
+  const dateTrigger = {
+    "data-arm-slot": `date-${field}`,
+    "aria-label": shown ? `${label} ${formatDate(shown)}. Change it.` : `Set a ${label.toLowerCase()}`,
+    className: cn(
+      "rounded-sm px-1 py-0.5 text-left tabular-nums",
+      "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+      "disabled:cursor-not-allowed disabled:opacity-60",
+      emphasis ? "font-medium text-destructive" : "text-muted-foreground",
+    ),
+  };
+  const dateFace = shown ? formatDate(shown) : <span className="text-foreground-faint">—</span>;
+
+  // P12 — an unarmed row draws the trigger alone. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <button type="button" {...dateTrigger}>
+        {dateFace}
+      </button>
+    );
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger
-        aria-label={shown ? `${label} ${formatDate(shown)}. Change it.` : `Set a ${label.toLowerCase()}`}
-        className={cn(
-          "rounded-sm px-1 py-0.5 text-left tabular-nums",
-          "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          "disabled:cursor-not-allowed disabled:opacity-60",
-          emphasis ? "font-medium text-destructive" : "text-muted-foreground",
-        )}>
-        {shown ? formatDate(shown) : <span className="text-foreground-faint">—</span>}
-      </PopoverTrigger>
+      <PopoverTrigger {...dateTrigger}>{dateFace}</PopoverTrigger>
 
       <PopoverContent align="start" className="w-auto p-2">
         <div className="flex items-center gap-1.5">
@@ -622,11 +670,28 @@ export function AddSubtask({
    */
   className?: string;
 }) {
+  const armed = useRowArmed();
   const [open, setOpen] = useState(false);
+
+  // P12 — an unarmed row draws the trigger alone. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <button
+        type="button"
+        data-arm-slot="add-subtask"
+        aria-label="Add a subtask"
+        title="Add a subtask"
+        className={cn(className ?? (label ? buttonVariants({ variant: "outline", size: "sm" }) : ICON_BUTTON))}>
+        <Plus className={label && !className ? undefined : "size-3.5"} aria-hidden />
+        {label}
+      </button>
+    );
+  }
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
+        data-arm-slot="add-subtask"
         aria-label="Add a subtask"
         title="Add a subtask"
         className={cn(className ?? (label ? buttonVariants({ variant: "outline", size: "sm" }) : ICON_BUTTON))}>
