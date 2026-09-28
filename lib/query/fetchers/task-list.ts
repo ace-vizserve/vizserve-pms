@@ -346,15 +346,13 @@ export type BoardTask = {
   resolution: string | null;
 };
 
-/** How many finished cards a terminal column shows before it stops. */
-export const FINISHED_PER_COLUMN = 12;
+/** How many finished cards a terminal column loads per page as it is scrolled. */
+export const FINISHED_PAGE_SIZE = 20;
 
 export type BoardView = {
   /** Every LIVE task in scope, subtasks included. */
   tasks: BoardTask[];
   people: TaskListPerson[];
-  /** Per terminal status, in `finishedStatuses` order: the newest cards and the true total. */
-  finished: { data: BoardTask[]; count: number | null }[];
   childRows: { id: string; parent_task_id: string | null; status: TaskStatus }[];
   /** Tasks the viewer holds a join-table seat on (P7-43). */
   joinedTaskIds: string[];
@@ -369,7 +367,6 @@ export type BoardView = {
 export async function fetchBoardView(
   client: TaskReadClient,
   scope: { listId: string | null; view: TaskView; kind: TaskKind; userId: string },
-  finishedStatuses: readonly TaskStatus[],
 ): Promise<BoardView> {
   const live = applyTaskScope(
     client
@@ -380,26 +377,10 @@ export async function fetchBoardView(
     scope,
   );
 
-  const [joined, tasks, people, finished] = await Promise.all([
+  const [joined, tasks, people] = await Promise.all([
     read(client.from("vizserve_pms_task_assignees").select("task_id").eq("user_id", scope.userId)),
     read(live),
     read(client.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active")),
-    Promise.all(
-      finishedStatuses.map(async (status) => {
-        const { data, count, error } = await applyTaskScope(
-          client
-            .from("vizserve_pms_tasks")
-            .select(BOARD_TASK_COLUMNS, { count: "exact" })
-            .eq("status", status)
-            .is("parent_task_id", null)
-            .order("updated_at", { ascending: false })
-            .limit(FINISHED_PER_COLUMN),
-          scope,
-        );
-        if (error) await read(Promise.resolve({ data: null, error }));
-        return { data: (data ?? []) as unknown as BoardTask[], count };
-      }),
-    ),
   ]);
 
   const liveTasks = (tasks ?? []) as unknown as BoardTask[];
@@ -414,8 +395,43 @@ export async function fetchBoardView(
   return {
     tasks: liveTasks,
     people: (people ?? []) as TaskListPerson[],
-    finished,
     childRows: (childRows ?? []) as BoardView["childRows"],
     joinedTaskIds: (joined ?? []).map((row) => row.task_id),
   };
 }
+
+export type FinishedPage = {
+  cards: BoardTask[];
+  /** Every finished card of this status in scope — the column heading's number. */
+  total: number;
+};
+
+/**
+ * `qk.taskBoardFinished(filters)` — one page of a FINISHED column (P12).
+ *
+ * The finished columns used to stop at 12 cards with a link to the list. They
+ * load page by page now as the column is scrolled (infinite scroll), newest
+ * first, top-level cards only — the same filters as before, the same exact
+ * count for the heading.
+ */
+export async function fetchFinishedPage(
+  client: TaskReadClient,
+  scope: { listId: string | null; view: TaskView; kind: TaskKind; userId: string },
+  status: TaskStatus,
+  offset: number,
+): Promise<FinishedPage> {
+  const { data, count, error } = await applyTaskScope(
+    client
+      .from("vizserve_pms_tasks")
+      .select(BOARD_TASK_COLUMNS, { count: "exact" })
+      .eq("status", status)
+      .is("parent_task_id", null)
+      .order("updated_at", { ascending: false })
+      .order("id")
+      .range(offset, offset + FINISHED_PAGE_SIZE - 1),
+    scope,
+  );
+  if (error) await read(Promise.resolve({ data: null, error }));
+  return { cards: (data ?? []) as unknown as BoardTask[], total: count ?? 0 };
+}
+

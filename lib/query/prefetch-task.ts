@@ -18,7 +18,6 @@ import {
 } from "./fetchers/task";
 import { qk } from "./keys";
 import { fetchBoardView, fetchPendingRequests, fetchTaskListView } from "./fetchers/task-list";
-import { isTerminal, TASK_STATUSES } from "@/lib/schemas/tasks";
 
 /**
  * P12-06 — warm a task's cache entries before its page is opened.
@@ -106,8 +105,7 @@ export function prefetchTaskListView(
   if (shape === "board") {
     void queryClient.prefetchQuery({
       queryKey: qk.taskBoardView({ list: listId, view: "all", kind: "all" }),
-      queryFn: () =>
-        fetchBoardView(client, { listId, view: "all", kind: "all", userId }, TASK_STATUSES.filter(isTerminal)),
+      queryFn: () => fetchBoardView(client, { listId, view: "all", kind: "all", userId }),
     });
     return;
   }

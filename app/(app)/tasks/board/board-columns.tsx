@@ -1,8 +1,7 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { CalendarDays, Link2, ListTree } from "lucide-react";
-import Link from "next/link";
 
 import { QueryError } from "@/components/query-error";
 import { BoardColumnSkeleton } from "@/components/skeletons";
@@ -18,7 +17,7 @@ import { roleAtLeast, type Role } from "@/lib/auth/roles";
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
-import { fetchBoardView } from "@/lib/query/fetchers/task-list";
+import { fetchBoardView, fetchFinishedPage, FINISHED_PAGE_SIZE } from "@/lib/query/fetchers/task-list";
 import { qk } from "@/lib/query/keys";
 import { useRefetchOnServerRender } from "@/lib/query/use-refetch-on-server-render";
 import { isRichTextEmpty } from "@/lib/rich-text";
@@ -39,6 +38,7 @@ import { BoardComposer } from "../add-task";
 import { SubtaskProgress, TaskRowActions } from "../inline";
 import { TaskStatusSelect } from "../status-select";
 import { BoardCard, BoardColumn, BoardTaskGroup } from "./board-dnd";
+import { VirtualCardList } from "./virtual-card-list";
 
 /**
  * P12-08 — the board's columns and cards, read from the query cache.
@@ -64,6 +64,22 @@ function initials(name: string): string {
       .map((part) => part[0]?.toUpperCase() ?? "")
       .join("") || "?"
   );
+}
+
+/** One finished column's pages. See `completedQuery` below. */
+function useFinishedColumn(
+  status: VizservePmsTaskStatus,
+  scope: { listId: string | null; view: TaskView; kind: TaskKind; userId: string },
+) {
+  return useInfiniteQuery({
+    queryKey: qk.taskBoardFinished({ list: scope.listId ?? undefined, view: scope.view, kind: scope.kind, status }),
+    queryFn: ({ pageParam }) => fetchFinishedPage(browserClient(), scope, status, pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => {
+      const loaded = pages.length * FINISHED_PAGE_SIZE;
+      return loaded < last.total ? loaded : undefined;
+    },
+  });
 }
 
 export type BoardViewer = {
@@ -94,8 +110,26 @@ export function BoardColumns({
   const query = useQuery({
     queryKey: qk.taskBoardView({ list: listId ?? undefined, view: scope, kind }),
     queryFn: () =>
-      fetchBoardView(browserClient(), { listId, view: scope, kind, userId: viewer.userId }, FINISHED_COLUMNS),
+      fetchBoardView(browserClient(), { listId, view: scope, kind, userId: viewer.userId }),
   });
+
+  /*
+   * P12 — THE FINISHED COLUMNS SCROLL FOR MORE. They stopped at 12 cards with a
+   * link to the list; now each loads `FINISHED_PAGE_SIZE` at a time as its own
+   * column is scrolled (infinite scroll). One hook per finished status — the
+   * set is fixed (`FINISHED_COLUMNS`), so the hook order never changes.
+   */
+  const completedQuery = useFinishedColumn("COMPLETED", { listId, view: scope, kind, userId: viewer.userId });
+  const noResponseQuery = useFinishedColumn("COMPLETED_NO_RESPONSE", {
+    listId,
+    view: scope,
+    kind,
+    userId: viewer.userId,
+  });
+  const finishedQueries: Partial<Record<VizservePmsTaskStatus, typeof completedQuery>> = {
+    COMPLETED: completedQuery,
+    COMPLETED_NO_RESPONSE: noResponseQuery,
+  };
 
   if (query.isError) {
     return (
@@ -274,22 +308,12 @@ export function BoardColumns({
    */
   const totals = new Map<VizservePmsTaskStatus, number>();
 
-  FINISHED_COLUMNS.forEach((status, index) => {
-    const result = data.finished[index];
-    const rows = (result?.data ?? []) as typeof topLevel;
+  for (const status of FINISHED_COLUMNS) {
+    const pages = finishedQueries[status]?.data?.pages ?? [];
+    byStatus.set(status, pages.flatMap((page) => page.cards) as typeof topLevel);
+    totals.set(status, pages[0]?.total ?? 0);
+  }
 
-    byStatus.set(status, rows);
-    // `count` is null only if the read failed; the rows in hand are then the
-    // most honest number available.
-    totals.set(status, result?.count ?? rows.length);
-  });
-
-  /**
-   * What the heading says.
-   *
-   * Live columns are unbounded, so the rows in hand ARE the total. Finished
-   * columns are capped, so they carry a count of their own.
-   */
   const totalOf = (status: VizservePmsTaskStatus) => totals.get(status) ?? (byStatus.get(status) ?? []).length;
 
   return (
@@ -336,8 +360,28 @@ export function BoardColumns({
               hatch again: without it the list refuses to shrink below its
               content and the overflow never engages.
             */}
-            <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2">
-              {column.length === 0 ? (
+            <VirtualCardList
+              items={column}
+              getKey={(task) => task.id}
+              onReachEnd={
+                finishedQueries[status]?.hasNextPage
+                  ? () => void finishedQueries[status]?.fetchNextPage()
+                  : undefined
+              }
+              loadingMore={finishedQueries[status]?.isFetchingNextPage ?? false}
+              empty={
+                /* A finished column still loading, or whose read failed, is not
+                   an empty one — "Nothing finished this way yet" would be a
+                   claim about the list that nobody checked. */
+                finishedQueries[status]?.isPending ? (
+                  <p role="status" className="px-1 py-6 text-center text-xs text-muted-foreground">
+                    Loading…
+                  </p>
+                ) : finishedQueries[status]?.isError ? (
+                  <p role="alert" className="px-1 py-6 text-center text-xs text-destructive">
+                    These could not be loaded. {finishedQueries[status]?.error?.message}
+                  </p>
+                ) : (
                 <p className="px-1 py-6 text-center text-xs text-muted-foreground">
                   {status === INITIAL_TASK_STATUS
                     ? "Nothing waiting to be picked up."
@@ -349,8 +393,9 @@ export function BoardColumns({
                         "Nothing finished this way yet."
                       : "Nothing here yet. Work reaches this stage from the one before it."}
                 </p>
-              ) : (
-                column.map((task) => {
+                )
+              }
+              renderItem={(task) => {
                   /*
                    * ⚠️ THE STATUS IS PART OF THIS QUESTION, and on THIS screen
                    * more than any other. The board is the one place that
@@ -636,28 +681,10 @@ export function BoardColumns({
                       })}
                     </BoardTaskGroup>
                   );
-                })
-              )}
-            </div>
+              }}
+            />
 
-            {/*
-              ⚠️ THE CAP, STATED, IN BOTH NUMBERS. A finished column draws the
-              most recent `FINISHED_PER_COLUMN` and no more, and a column that
-              quietly shows twelve of a hundred and seventy-one is one somebody
-              counts off once and then stops trusting. The heading already
-              carries the true total; this says which part of it is on screen.
 
-              Driven off the exact count rather than off whether the fetch
-              overflowed — the old test compared two columns’ shared budget and
-              stayed false exactly when it mattered most.
-            */}
-            {totalOf(status) > column.length ? (
-              <Link
-                href={`/tasks?list=${column[0].list_id}&status=${status}`}
-                className="block border-t px-2.5 py-2 text-center text-2xs text-muted-foreground hover:text-foreground">
-                Showing the {column.length} most recent of {totalOf(status)} — see all in the list
-              </Link>
-            ) : null}
 
             {/* Renders nothing at all for a member — creating work for other
                 people is a Team Leader decision, and the button settles that
