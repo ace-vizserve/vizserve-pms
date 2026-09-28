@@ -1,20 +1,21 @@
-import type { Metadata } from "next";
+"use client";
+
 import { Suspense } from "react";
 
 import Loading from "./loading";
 import { TaskDetailRoute } from "./task-detail-route";
 
-export const metadata: Metadata = { title: "Task" };
-
 /**
- * P12 Phase A — NO SERVER WORK, so opening a task switches at once.
+ * P12 Phase A — A CLIENT PAGE, so a click here is a single-page-app transition
+ * with no server render at navigation time (Next's "Client Component Pages").
+ * A server page — even one that computed nothing — still made the router ask
+ * the server for it on every visit, which is what drew the skeleton on a quick
+ * revisit. The auth gate still runs in `app/(app)/layout.tsx`; the data comes
+ * from the query cache; RLS scopes every read. Metadata lives in `layout.tsx`
+ * beside this file, because a client page cannot export it.
  *
- * This page used to read the task row and the viewer's seat on the server
- * before a pixel moved — a round trip on every click. The seat is now decided
- * in the browser from the layout's auth context with the same rules, and the
- * task's reads start in one wave there (usually warm from a hover on the list).
- * RLS still decides which task anybody can read: a task you cannot see comes
- * back as nothing, and the page says so.
+ * The boundary is what `useSearchParams`/`useParams` need to prerender the
+ * shell on a page load; on a client navigation it never suspends.
  */
 export default function TaskDetailPage() {
   return (

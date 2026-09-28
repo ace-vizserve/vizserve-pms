@@ -1,19 +1,21 @@
-import type { Metadata } from "next";
+"use client";
+
 import { Suspense } from "react";
 
 import Loading from "./loading";
 import { InboxView } from "./inbox-view";
 
-export const metadata: Metadata = { title: "Inbox" };
-
 /**
- * P12 Phase A — NO SERVER WORK, so a click here switches at once.
+ * P12 Phase A — A CLIENT PAGE, so a click here is a single-page-app transition
+ * with no server render at navigation time (Next's "Client Component Pages").
+ * A server page — even one that computed nothing — still made the router ask
+ * the server for it on every visit, which is what drew the skeleton on a quick
+ * revisit. The auth gate still runs in `app/(app)/layout.tsx`; the data comes
+ * from the query cache; RLS scopes every read. Metadata lives in `layout.tsx`
+ * beside this file, because a client page cannot export it.
  *
- * The layout above has already run the auth gate for this session; the rows
- * come from the query cache (`inbox-view.tsx`), scoped by RLS. The boundary is
- * what `useSearchParams` needs to prerender the shell: on a page load it shows
- * the same skeleton `loading.tsx` draws, and on a client navigation the params
- * are already known and it never suspends.
+ * The boundary is what `useSearchParams`/`useParams` need to prerender the
+ * shell on a page load; on a client navigation it never suspends.
  */
 export default function InboxPage() {
   return (
