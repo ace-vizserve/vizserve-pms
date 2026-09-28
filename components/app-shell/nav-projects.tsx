@@ -34,6 +34,7 @@ import {
   useSortableTreeItem,
   type SortableTreeItem,
 } from "./tree-dnd";
+import { useWarmList } from "@/lib/query/use-warm-list";
 
 /**
  * The project tree — Department → Folder → List, collapsing at every level.
@@ -630,6 +631,7 @@ function ListRow({
    */
   const base =
     pathname === "/tasks/board" || pathname === "/tasks/gantt" ? pathname : "/tasks";
+  const warm = useWarmList();
 
   return (
     <SidebarMenuSubItem
@@ -653,7 +655,15 @@ function ListRow({
       */}
       <SidebarMenuSubButton
         isActive={list.id === activeList}
-        render={<Link href={`${base}?list=${list.id}`} prefetch />}
+        render={
+          <Link
+            href={`${base}?list=${list.id}`}
+            prefetch
+            // P12 — the page is prefetched above; this warms its DATA too.
+            onMouseEnter={() => warm(list.id, base)}
+            onFocus={() => warm(list.id, base)}
+          />
+        }
         // Room for the grip, so it never sits on the counts.
         className={cn(sortable && "pr-7")}
       >

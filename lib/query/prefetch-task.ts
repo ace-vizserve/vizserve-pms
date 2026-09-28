@@ -3,6 +3,8 @@ import type { QueryClient } from "@tanstack/react-query";
 import { browserClient } from "./browser-client";
 import {
   fetchDirectory,
+  fetchListFieldManager,
+  fetchListFields,
   fetchTaskFields,
   fetchTaskRequestByTask,
   fetchSubtasks,
@@ -15,6 +17,8 @@ import {
   fetchVisibleLists,
 } from "./fetchers/task";
 import { qk } from "./keys";
+import { fetchBoardView, fetchPendingRequests, fetchTaskListView } from "./fetchers/task-list";
+import { isTerminal, TASK_STATUSES } from "@/lib/schemas/tasks";
 
 /**
  * P12-06 — warm a task's cache entries before its page is opened.
@@ -71,3 +75,66 @@ export function prefetchTask(queryClient: QueryClient, taskId: string): void {
   void queryClient.prefetchQuery({ queryKey: qk.ref("users"), queryFn: () => fetchDirectory(client) });
   void queryClient.prefetchQuery({ queryKey: qk.listsVisible(), queryFn: () => fetchVisibleLists(client) });
 }
+
+/**
+ * P12 — warm a list's view before it is opened from the sidebar.
+ *
+ * The sidebar link already prefetches the PAGE for its URL; this warms the
+ * DATA the page will ask for, under exactly the keys `TaskListView` and
+ * `BoardColumns` build for an unfiltered view of that list — so the click lands
+ * on warm entries instead of starting the reads. Fresh entries are not read
+ * again, so pointing at the same list twice costs nothing.
+ */
+export function prefetchTaskListView(
+  queryClient: QueryClient,
+  listId: string,
+  userId: string,
+  shape: "list" | "board",
+): void {
+  const client = browserClient();
+
+  void queryClient.prefetchQuery({ queryKey: qk.listsVisible(), queryFn: () => fetchVisibleLists(client) });
+  void queryClient.prefetchQuery({
+    queryKey: qk.pendingRequests(
+      shape === "list"
+        ? { listId, kind: "all", scope: "all", taskOnly: undefined }
+        : { listId, kind: "all", scope: "all" },
+    ),
+    queryFn: () => fetchPendingRequests(client, { listId, kind: "all", scope: "all", hasTaskOnlyFilter: false }),
+  });
+
+  if (shape === "board") {
+    void queryClient.prefetchQuery({
+      queryKey: qk.taskBoardView({ list: listId, view: "all", kind: "all" }),
+      queryFn: () =>
+        fetchBoardView(client, { listId, view: "all", kind: "all", userId }, TASK_STATUSES.filter(isTerminal)),
+    });
+    return;
+  }
+
+  void queryClient.prefetchQuery({
+    queryKey: qk.taskListView({ list: listId, view: "all", kind: "all" }),
+    queryFn: () =>
+      fetchTaskListView(
+        client,
+        {
+          listId,
+          view: "all",
+          kind: "all",
+          status: null,
+          group: null,
+          priority: null,
+          sort: null,
+          dir: null,
+          fieldFilters: {},
+        },
+        userId,
+      ),
+  });
+  void queryClient.prefetchQuery({ queryKey: qk.listFields(listId), queryFn: () => fetchListFields(client, listId) });
+  void queryClient.prefetchQuery({
+    queryKey: qk.listFieldManager(listId),
+    queryFn: () => fetchListFieldManager(client, listId),
+  });
+}
+

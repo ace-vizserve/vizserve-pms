@@ -40,6 +40,7 @@ import {
 import { savePersonalList } from "@/app/(app)/tasks/actions";
 import { LinkPending } from "./link-pending";
 import { focusWithoutScroll } from "@/lib/focus";
+import { useWarmList } from "@/lib/query/use-warm-list";
 
 /**
  * P11-06 — the reader's own lists, and nobody else's.
@@ -398,6 +399,8 @@ function PersonalRow({
   isActive: boolean;
   onEdit: (list: PersonalList) => void;
 }) {
+  const warm = useWarmList();
+
   return (
     <SidebarMenuSubItem>
       {/*
@@ -411,7 +414,15 @@ function PersonalRow({
       <SidebarMenuSubButton
         isActive={isActive}
         className={list.isActive ? "pr-9" : "pr-9 opacity-60"}
-        render={<Link href={href} prefetch={list.isActive} />}
+        render={
+          <Link
+            href={href}
+            prefetch={list.isActive}
+            // P12 — warm the list's data on intent, as the project tree does.
+            onMouseEnter={() => warm(list.id, href.split("?")[0]!)}
+            onFocus={() => warm(list.id, href.split("?")[0]!)}
+          />
+        }
       >
         <ListChecks className="size-3.5 shrink-0 text-muted-foreground" />
         <span className="truncate">{list.name}</span>
