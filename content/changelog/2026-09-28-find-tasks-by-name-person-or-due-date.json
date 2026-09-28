@@ -1,0 +1,17 @@
+{
+  "date": "2026-09-28",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Find tasks by name, by person, or by when they are due",
+  "description": "The list and the board both have a search box, a person filter and a due-date filter now, and the board gained the priority and custom-field filters the list already had. Filters stay in the address, so switching between List and Board keeps them and a filtered view can be sent to somebody.",
+  "items": [
+    "Search matches the task name across the whole list, including rows you have not scrolled to",
+    "Pick a person — or Me — and choose whether they are the PIC, the QA reviewer, an assignee, or any of those",
+    "Due: overdue, this week, next week, or no due date",
+    "Clear on the list now keeps you in the list you were looking at"
+  ],
+  "refs": [
+    "P12-07",
+    "P12-08"
+  ]
+}
