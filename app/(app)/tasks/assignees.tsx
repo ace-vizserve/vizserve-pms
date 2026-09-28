@@ -9,7 +9,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
-import { addTaskAssignee, removeTaskAssignee } from "./actions";
+import { addTaskAssignee, removeTaskAssignee } from "./writes";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**

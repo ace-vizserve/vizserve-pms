@@ -13,13 +13,8 @@ import { isRichTextEmpty } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
 import { CommentBody } from "./comment-body";
 
-import {
-  addTaskComment,
-  deleteTaskComment,
-  editTaskComment,
-  mentionableForTask,
-  uploadCommentImage,
-} from "./actions";
+import { deleteTaskComment, editTaskComment, uploadCommentImage } from "./actions";
+import { addTaskComment, mentionableForTask } from "./writes";
 import { Monogram, initials } from "./assignees";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 

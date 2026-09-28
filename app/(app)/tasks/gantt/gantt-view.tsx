@@ -37,7 +37,7 @@ import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { parseDateOnly, toAppDateString } from "@/lib/dates";
 import { TASK_STATUSES, TASK_STATUS_LABELS } from "@/lib/schemas/tasks";
 
-import { updateTaskField } from "../actions";
+import { updateTaskField } from "../writes";
 
 /** The columns the page hands down. A narrower read than the list view's. */
 export type GanttTask = {

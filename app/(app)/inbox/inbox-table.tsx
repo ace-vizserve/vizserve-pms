@@ -20,7 +20,7 @@ import type { SidebarSnapshot } from "@/lib/schemas/sidebar";
 import { richTextToPlainText } from "@/lib/rich-text";
 import { cn } from "@/lib/utils";
 
-import { markAllNotificationsRead, markNotificationRead } from "./actions";
+import { markAllNotificationsRead, markNotificationRead } from "./writes";
 
 /**
  * P7-64 / P12-17 — the columns and the two writes.

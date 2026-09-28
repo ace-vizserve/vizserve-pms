@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 import { focusWithoutScroll } from "@/lib/focus";
 import { DeleteTaskDialog } from "./delete-task-dialog";
 
-import { updateTaskField } from "./actions";
+import { updateTaskField } from "./writes";
 import { ComposerCard, type Assignable } from "./task-composer";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 

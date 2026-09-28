@@ -26,6 +26,17 @@ export function makeQueryClient() {
         staleTime: 30_000,
 
         /*
+         * P12 — HOW LONG A PAGE'S DATA SURVIVES AFTER YOU LEAVE IT. TanStack's
+         * default is 5 minutes, after which an unobserved entry is dropped — so
+         * coming back to a task opened ten minutes ago drew the skeleton again,
+         * which is the opposite of what the cache is for. 30 minutes keeps a
+         * working session's pages warm; `staleTime` above still decides when a
+         * kept entry is re-read in the background, so nothing shows older data
+         * without refreshing it.
+         */
+        gcTime: 30 * 60_000,
+
+        /*
          * ⚠️ ON, AND IT IS NOT THE DEFAULT-BY-ACCIDENT KIND OF ON. An SPA is left
          * open overnight in a way a server-rendered page never was — this app
          * re-rendered from the server on every navigation, so nothing

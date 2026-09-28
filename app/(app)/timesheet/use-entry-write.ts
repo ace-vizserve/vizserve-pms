@@ -15,7 +15,7 @@ import {
   rollbackTimesheetWrite,
 } from "@/lib/query/timesheet-cache";
 
-import { deleteTimeEntry, logTime, updateTimeEntry } from "./actions";
+import { deleteTimeEntry, logTime, updateTimeEntry } from "./writes";
 
 /**
  * P12-23 — WRITING AN HOUR, ONCE, FOR EVERY CONTROL THAT WRITES ONE.

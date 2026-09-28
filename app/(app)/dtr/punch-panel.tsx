@@ -19,7 +19,7 @@ import { invalidatePunch } from "@/lib/query/invalidate";
 import { qk } from "@/lib/query/keys";
 import { fromAction } from "@/lib/query/mutate";
 import { OffScheduleDialog } from "./off-schedule-dialog";
-import { punch } from "./actions";
+import { punch } from "./writes";
 
 /** The Server Action, as a promise TanStack can drive `onError` off. */
 const capturePunch = fromAction(punch);

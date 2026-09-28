@@ -10,7 +10,7 @@ import {
   removeChecklistItem,
   renameChecklistItem,
   setChecklistItemDone,
-} from "../actions";
+} from "../writes";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";

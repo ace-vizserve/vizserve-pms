@@ -33,7 +33,7 @@ import {
   rollbackTimesheetWrite,
 } from "@/lib/query/timesheet-cache";
 
-import { decideTimesheetWeek } from "../actions";
+import { decideTimesheetWeek } from "../writes";
 
 /** The Server Action, as a promise TanStack can drive `onError` off. */
 const decideWeek = fromAction(decideTimesheetWeek);

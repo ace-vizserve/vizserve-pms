@@ -68,7 +68,7 @@ import type { TimesheetEntryRow } from "@/lib/schemas/time-records";
 import type { NamedRow } from "@/lib/schemas/time-records";
 import { cn } from "@/lib/utils";
 
-import { searchLoggableTasks } from "./actions";
+import { searchLoggableTasks } from "./writes";
 
 import { CellDetail } from "./cell-detail";
 import { useLayoutAutosave } from "./use-layout-autosave";

@@ -34,12 +34,8 @@ import { focusWithoutScroll } from "@/lib/focus";
 
 import { outputLinkSchema } from "@/lib/schemas/tasks";
 
-import {
-  getTaskAttachmentUrl,
-  removeTaskAttachment,
-  updateTaskField,
-  uploadTaskOutput,
-} from "../actions";
+import { getTaskAttachmentUrl, removeTaskAttachment, uploadTaskOutput } from "../actions";
+import { updateTaskField } from "../writes";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
 /**

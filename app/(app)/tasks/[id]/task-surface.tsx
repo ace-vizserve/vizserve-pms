@@ -42,7 +42,7 @@ import { CustomFieldDisplay, CustomFieldEditor } from "../custom-field-value";
 
 import { TaskSection } from "./task-section";
 
-import { overrideTaskStatus, reassignTask } from "../actions";
+import { overrideTaskStatus, reassignTask } from "../writes";
 import { InlineDate, InlineEstimate, InlineList, InlinePriority } from "../inline";
 import { ACTION_LINK } from "./grid";
 import { useTaskGate } from "./task-gate";

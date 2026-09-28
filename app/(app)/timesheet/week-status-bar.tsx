@@ -33,7 +33,7 @@ import {
 } from "@/lib/query/timesheet-cache";
 import { cn } from "@/lib/utils";
 
-import { submitTimesheetWeek, withdrawTimesheetWeek } from "./actions";
+import { submitTimesheetWeek, withdrawTimesheetWeek } from "./writes";
 
 /** The Server Action, as a promise TanStack can drive `onError` off. */
 const handIn = fromAction(submitTimesheetWeek);
