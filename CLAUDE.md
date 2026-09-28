@@ -122,6 +122,20 @@ Phases are strictly ordered 0→6, no dates, binary exit criteria. If a phase ru
 
 Use backlog IDs (`P2-04`) in commit messages.
 
+## Releases and rollback
+
+**`staging` is tested first; `main` is prod.** Work lands on `staging` (Vercel preview at `portal-vizserve-staging.vercel.app`, same Supabase project as prod), and is promoted with a fast-forward: `git push origin staging:main`. Never cherry-pick or merge between them.
+
+**28 Sep 2026 — the SPA release (P12).** `main` went from `acfea98` (P7-80, the last pre-SPA build) to `2ee3da3`: cache-driven client pages, direct-to-Supabase writes, functions in Tokyo (`hnd1`), virtualised task list and board, search/person/due filters.
+
+**"Roll back the staging changes on main"** means:
+
+```bash
+git push origin acfea98:main --force-with-lease
+```
+
+That redeploys prod on the pre-SPA build; `staging` keeps the work. Leave the two migrations the release added (`20260925090000_p12_01_sidebar_snapshot`, `20260928090000_p12_person_filter`) applied — both are additive functions the old build simply does not call. Confirm with the user before running it: it rewrites `main`.
+
 <!-- BEGIN:nextjs-agent-rules -->
 
 # This is NOT the Next.js you know
