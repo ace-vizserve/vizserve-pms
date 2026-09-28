@@ -24,7 +24,7 @@
 -- defined them, with only the marked P7-77 blocks changed:
 --
 --   vizserve_pms_approve_request   20260819170000_p7_23_approval_needs_a_list.sql
---   vizserve_pms_submit_request    20260921090000_p8_17_notification_titles_lead_with_the_title.sql
+--   vizserve_pms_submit_request    20260921090100_p8_17_notification_titles_lead_with_the_title.sql
 --
 -- Signatures unchanged, so grants survive `create or replace`. approve_request's
 -- is restated anyway, as P7-23 did.
