@@ -54,7 +54,7 @@ const SAMPLES: Record<string, EmailBody> = {
       label: "What we did",
       text: "Reworked the masthead to the new palette and rebuilt the two-column spread so it holds at A4.\nSwapped the cover photograph for the one you sent on Tuesday.",
     },
-    button: { label: "Review and approve", path: "/approve/sample-token" },
+    button: { label: "Review", path: "/approve/sample-token" },
     footnote:
       "If we do not hear from you by 5 Aug 2026, this request will be closed as completed without a response.",
   },

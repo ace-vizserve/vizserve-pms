@@ -37,7 +37,7 @@ export function ApprovalForm({
   deadline: string;
 }) {
   const [pending, startTransition] = useTransition();
-  const [mode, setMode] = useState<"idle" | "revision">("idle");
+  const [mode, setMode] = useState<"idle" | "approve" | "revision">("idle");
   const [comment, setComment] = useState("");
   const [name, setName] = useState(requesterName);
   const [error, setError] = useState<string | null>(null);
@@ -131,45 +131,75 @@ export function ApprovalForm({
 
   return (
     <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 sm:p-8">
+      {/* ⚠️ A FORM ACTION MATTERS MOST HERE. The reader is a CLIENT: no
+          account, one shot, often a phone on a bad connection, and this
+          button carries the whole value of Gate 3. A form action still
+          submits while the page's JavaScript is loading; an onClick
+          handler does not exist until it has.
+
+          ⚠️ OUTSIDE THE MODE SWITCH. These used to render only in idle mode,
+          so the moment the client opened "Request changes" the form that
+          "Send back for changes" points at was unmounted and the button did
+          nothing — Approve was the only decision that could be sent. */}
+      <form id="approve-deliverable" action={() => submit("APPROVED")} className="hidden" />
+      <form id="request-changes" action={() => submit("REVISION_REQUESTED")} className="hidden" />
+
       {mode === "idle" ? (
         <>
           <h2 className="text-sm font-semibold">Is this what you needed?</h2>
 
-          <div className="mt-2 space-y-2">
-            <Label htmlFor="approver_name" className="text-xs text-muted-foreground">
-              Your name
-            </Label>
-            <Input
-              id="approver_name"
-              value={name}
-              onChange={(event) => setName(event.target.value)}
-              className="max-w-xs"
-            />
-            {/* Q7 option (c). Weak as security, decent as accountability — the
-                honest limit is that email forwarding defeats email identity, and
-                a typed name at least records who actually clicked. */}
-            <p className="text-xs text-muted-foreground">Recorded with your decision.</p>
-          </div>
-
-          <div className="mt-5 flex flex-wrap gap-2">
-            {/* ⚠️ A FORM ACTION MATTERS MOST HERE. The reader is a CLIENT: no
-                account, one shot, often a phone on a bad connection, and this
-                button carries the whole value of Gate 3. A form action still
-                submits while the page's JavaScript is loading; an onClick
-                handler does not exist until it has. */}
-            <form id="approve-deliverable" action={() => submit("APPROVED")} className="hidden" />
-            <form
-              id="request-changes"
-              action={() => submit("REVISION_REQUESTED")}
-              className="hidden"
-            />
-            <Button type="submit" form="approve-deliverable" loading={pending}>
+          {/* ⚠️ NEITHER BUTTON DECIDES ANYTHING. Each opens its own step.
+              Gmail's link scanner opens every link in an incoming email in
+              headless Chrome and clicks what it finds: on 23 and 29 Sep it
+              approved two tasks ~80 seconds after the email went out, from
+              Google IPs, with the pre-filled name. One click on page load
+              must never be a decision. */}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button onClick={() => setMode("approve")} disabled={pending}>
               <Check />
               Approve
             </Button>
             <Button variant="outline" onClick={() => setMode("revision")} disabled={pending}>
               <MessageSquare />
               Request changes
+            </Button>
+          </div>
+        </>
+      ) : mode === "approve" ? (
+        <>
+          <h2 className="text-sm font-semibold">Approve this work?</h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This marks the request as complete.
+          </p>
+
+          <div className="mt-3 space-y-2">
+            <Label htmlFor="approver_name" className="text-xs text-muted-foreground">
+              Your name
+            </Label>
+            {/* Q7 option (c). Pre-filled from the request; editable for
+                whoever is actually approving. */}
+            <Input
+              id="approver_name"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              autoComplete="name"
+              className="max-w-xs"
+            />
+            <p className="text-xs text-muted-foreground">Recorded with your decision.</p>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            <Button
+              type="submit"
+              form="approve-deliverable"
+              loading={pending}
+              disabled={name.trim().length < 2}
+            >
+              <Check />
+              Confirm approval
+            </Button>
+            <Button variant="ghost" onClick={() => setMode("idle")} disabled={pending}>
+              Cancel
             </Button>
           </div>
         </>

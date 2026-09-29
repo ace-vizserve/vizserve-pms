@@ -392,7 +392,10 @@ export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<Send
       quote: input.resolution
         ? { label: "What was done", text: richTextToPlainText(input.resolution) }
         : undefined,
-      button: { label: "Review and approve", path: `/approve/${input.token}` },
+      // "Review", not "Review and approve": the page offers approve AND request
+      // changes, and a button naming only one reads as if sending it back is
+      // not an option.
+      button: { label: "Review", path: `/approve/${input.token}` },
       // Stated a second time, in the sentence right under the button, because
       // this is the line a dispute turns on.
       footnote: `If we do not hear from you by ${input.deadline}, this request will be closed as completed without a response. You can approve or ask for changes any time before then.`,
@@ -437,7 +440,7 @@ export function sendApprovalReminderEmail(
         { label: "Closes on", value: input.deadline },
       ],
       factsNote: `Reference ${input.referenceNo}`,
-      button: { label: "Review and approve", path: `/approve/${input.token}` },
+      button: { label: "Review", path: `/approve/${input.token}` },
       footnote: `If we do not hear from you by ${input.deadline}, this request will be closed as completed without a response.`,
     },
   });
