@@ -280,6 +280,8 @@ export type Database = {
            * over every department without carrying the flag.
            */
           is_dept_admin: boolean;
+          /** P14-01. Company-wide read-only monitoring tick. Approves nothing. */
+          is_business_manager: boolean;
           /**
            * P7-36. `HH:MM:SS` Manila wall-clock, both or neither. NULL means no
            * schedule is recorded, so nothing computes lateness for this person —
@@ -321,6 +323,8 @@ export type Database = {
           is_hr?: boolean;
           /** P8-01. Department-scoped admin tick. See the Row comment. */
           is_dept_admin?: boolean;
+          /** P14-01. See the Row comment. */
+          is_business_manager?: boolean;
           work_start?: string | null;
           work_end?: string | null;
           /** P8-05. NULL means inherit the company break, never zero. */
@@ -342,6 +346,8 @@ export type Database = {
           is_hr?: boolean;
           /** P8-01. Department-scoped admin tick. See the Row comment. */
           is_dept_admin?: boolean;
+          /** P14-01. See the Row comment. */
+          is_business_manager?: boolean;
           work_start?: string | null;
           work_end?: string | null;
           /** P8-05. NULL means inherit the company break, never zero. */
@@ -2428,6 +2434,11 @@ export type Database = {
        */
       vizserve_pms_is_dept_admin: {
         Args: { p_department_id: string };
+        Returns: boolean;
+      };
+      /** P14-01. True for a Business Manager and for any owner. Read-only oversight. */
+      vizserve_pms_is_business_manager: {
+        Args: Record<PropertyKey, never>;
         Returns: boolean;
       };
       /**

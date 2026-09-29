@@ -293,6 +293,6 @@ describe("ROLE_LABELS — the picker must not offer the dead rung", () => {
 
   it("marks `admin` as retired and gives `owner` the top billing", () => {
     expect(ROLE_LABELS.admin.label).toMatch(/retired/i);
-    expect(ROLE_LABELS.owner.label).toBe("Owner");
+    expect(ROLE_LABELS.owner.label).toBe("CEO");
   });
 });

@@ -82,6 +82,8 @@ export type EditableUser = {
   is_hr: boolean;
   /** P8-01. The department-admin tick, orthogonal to `role` — see D33. */
   is_dept_admin: boolean;
+  /** P14-01. Company-wide monitoring tick, orthogonal to `role`. */
+  is_business_manager: boolean;
   primary_department_id: string | null;
   is_active: boolean;
   /** Which HFSE applications they may enter. See the access toggle below. */
@@ -266,6 +268,7 @@ function UserForm({
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
   const [isHr, setIsHr] = useState(user?.is_hr ?? false);
   const [isDeptAdmin, setIsDeptAdmin] = useState(user?.is_dept_admin ?? false);
+  const [isBusinessManager, setIsBusinessManager] = useState(user?.is_business_manager ?? false);
   const [hasAppAccess, setHasAppAccess] = useState(
     user ? user.app_access.includes(APP_ACCESS_KEY) : true,
   );
@@ -412,6 +415,8 @@ function UserForm({
       // can be created for somebody joining to administer their department, and
       // making an owner save twice to say so would be pointless.
       is_dept_admin: isDeptAdmin,
+      // P14-01. Shared payload, same reason as the two above.
+      is_business_manager: isBusinessManager,
       // The empty string is how a cleared time input reports itself. The schema
       // turns it into null — "no fixed schedule" — rather than a parse error.
       work_start: workStart,
@@ -772,7 +777,7 @@ function UserForm({
                       {implied
                         ? `Included in ${ROLE_LABELS[role].label}.`
                         : ownerBlocked
-                          ? "Only an owner can grant this."
+                          ? "Only a CEO can grant this."
                           : ROLE_LABELS[rank].hint}
                     </span>
                   </span>
@@ -995,7 +1000,7 @@ function UserForm({
             <Label htmlFor="is_dept_admin">Admin</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {!viewerIsOwner
-                ? "Only an owner can grant this."
+                ? "Only a CEO can grant this."
                 : /* ⚠️ THE TICK IS SCOPED TO A DEPARTMENT, SO IT NEEDS ONE.
                      `vizserve_pms_is_dept_admin` compares its argument with the
                      holder's `primary_department_id`; with none set the tick
@@ -1007,7 +1012,7 @@ function UserForm({
                   ? "Choose the department this person belongs to first — this tick only covers their own department."
                   : isDeptAdmin
                     ? "Administrative capability over their own department — the one under “Belongs to” above, not the ones they lead. Their rank is unchanged, so they still report to their Team Leader and approve nothing."
-                    : "Not a department admin. Every owner already administers every department regardless of this switch."}
+                    : "Not a department admin. Every CEO already administers every department regardless of this switch."}
             </p>
           </div>
           <Switch
@@ -1026,10 +1031,10 @@ function UserForm({
             <Label htmlFor="is_hr">HR</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
               {!viewerIsOwner
-                ? "Only an owner can grant this."
+                ? "Only a CEO can grant this."
                 : isHr
                   ? "Can set leave balances, edit leave types and holidays, and run the leave report for everyone. Cannot manage users."
-                  : "Not an HR user. Every owner already has these abilities regardless of this switch."}
+                  : "Not an HR user. Every CEO already has these abilities regardless of this switch."}
             </p>
           </div>
           <Switch
@@ -1037,6 +1042,25 @@ function UserForm({
             checked={isHr}
             disabled={!viewerIsOwner}
             onCheckedChange={setIsHr}
+          />
+        </div>
+
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div>
+            <Label htmlFor="is_business_manager">Business Manager</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {!viewerIsOwner
+                ? "Only a CEO can grant this."
+                : isBusinessManager
+                  ? "Monitors every department and is emailed when any approval ends. Approves nothing — their rank above is unchanged."
+                  : "Not a Business Manager. Every CEO already sees everything regardless of this switch."}
+            </p>
+          </div>
+          <Switch
+            id="is_business_manager"
+            checked={isBusinessManager}
+            disabled={!viewerIsOwner}
+            onCheckedChange={setIsBusinessManager}
           />
         </div>
 

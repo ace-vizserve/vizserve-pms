@@ -254,6 +254,20 @@ export function UsersTable({
         ),
     },
     {
+      key: "business_manager",
+      header: "Business Manager",
+      hideable: true,
+      defaultHidden: true,
+      className: "hidden xl:table-cell",
+      // P14-01. A capability like HR, so it is invisible in the Role column too.
+      cell: (user) =>
+        user.is_business_manager ? (
+          <Chip tone="brand" label="Business Manager" />
+        ) : (
+          <span className="text-foreground-faint">—</span>
+        ),
+    },
+    {
       key: "schedule",
       header: "Schedule",
       hideable: true,

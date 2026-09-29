@@ -47,7 +47,7 @@ export default async function UsersPage() {
     supabase
       .from("vizserve_pms_users")
       .select(
-        "id, email, full_name, gender, role, is_hr, is_dept_admin, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
+        "id, email, full_name, gender, role, is_hr, is_dept_admin, is_business_manager, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
       )
       // Deactivated accounts sink to the bottom; the rest read alphabetically.
       .order("is_active", { ascending: false })

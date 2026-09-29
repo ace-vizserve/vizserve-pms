@@ -42,6 +42,8 @@ type AuditableProfile = {
   is_hr: boolean;
   /** P8-01. The department-admin tick. Audited exactly as `is_hr` is. */
   is_dept_admin: boolean;
+  /** P14-01. The Business Manager tick. Audited exactly as `is_hr` is. */
+  is_business_manager: boolean;
   primary_department_id: string | null;
   is_active: boolean;
   app_access: string[];
@@ -55,7 +57,7 @@ async function readProfileForAudit(
   const { data: profile } = await admin
     .from("vizserve_pms_users")
     .select(
-      "email, full_name, gender, role, is_hr, is_dept_admin, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
+      "email, full_name, gender, role, is_hr, is_dept_admin, is_business_manager, primary_department_id, is_active, app_access, work_start, work_end, break_minutes",
     )
     .eq("id", userId)
     .maybeSingle();
@@ -199,6 +201,9 @@ export async function createUser(
       // P8-01. Same story as is_hr: settable only from this screen, which is
       // owner-gated, and that is what stops the tick appointing more of itself.
       is_dept_admin: values.is_dept_admin,
+      // P14-01. Owner-gated like the two above: a Business Manager cannot reach
+      // this screen, so it cannot appoint another.
+      is_business_manager: values.is_business_manager,
       primary_department_id: values.primary_department_id,
       is_active: true,
       app_access: [APP_ACCESS_KEY],
@@ -272,7 +277,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
   // now `owner` and never `admin` again. Same for the last-active check below.
   if (userId === context.userId) {
     if (values.role !== "owner") {
-      return { ok: false, error: "You cannot change your own role. Ask another owner." };
+      return { ok: false, error: "You cannot change your own role. Ask another CEO." };
     }
     if (!values.is_active) {
       return { ok: false, error: "You cannot deactivate your own account." };
@@ -294,7 +299,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
     if ((count ?? 0) <= 1) {
       return {
         ok: false,
-        error: "This is the last active owner. Promote someone else first.",
+        error: "This is the last active CEO. Promote someone else first.",
       };
     }
   }
@@ -316,6 +321,9 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
       // this screen, so it cannot make another department admin or promote
       // itself out of its own department.
       is_dept_admin: values.is_dept_admin,
+      // P14-01. Owner-gated like the two above: a Business Manager cannot reach
+      // this screen, so it cannot appoint another.
+      is_business_manager: values.is_business_manager,
       primary_department_id: values.primary_department_id,
       is_active: values.is_active,
       // Revoking this closes every table at once — vizserve_pms_current_role()

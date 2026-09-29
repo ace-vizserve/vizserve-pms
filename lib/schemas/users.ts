@@ -192,6 +192,12 @@ export const createUserSchema = withWorkHourRules(
      * itself.
      */
     is_dept_admin: z.boolean().default(false),
+    /**
+     * P14-01. Company-wide monitoring — sees every department, is emailed when
+     * an approval ends, and DECIDES NOTHING. A tick, not a rung, so a Team
+     * Leader can hold it (D33). Owner-only to set, enforced in the action.
+     */
+    is_business_manager: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
     work_start: workClockSchema,
@@ -233,6 +239,12 @@ export const updateUserSchema = withWorkHourRules(
      * itself.
      */
     is_dept_admin: z.boolean().default(false),
+    /**
+     * P14-01. Company-wide monitoring — sees every department, is emailed when
+     * an approval ends, and DECIDES NOTHING. A tick, not a rung, so a Team
+     * Leader can hold it (D33). Owner-only to set, enforced in the action.
+     */
+    is_business_manager: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
     is_active: z.boolean().default(true),
@@ -293,13 +305,15 @@ export function normaliseManagedDepartments(
  * `>= owner`.
  */
 export const ROLE_LABELS: Record<z.infer<typeof roleSchema>, { label: string; hint: string }> = {
+  // P14-01. Shown as "CEO"; the enum value stays `owner` — every policy and
+  // `>=` compares the value, and only this label is what anybody reads.
   owner: {
-    label: "Owner",
+    label: "CEO",
     hint: "Everything, every department. Manages users, roles and settings.",
   },
   admin: {
     label: "Admin (retired)",
-    hint: "The old name for Owner. Nobody holds it; kept so legacy records still read.",
+    hint: "The old name for CEO. Nobody holds it; kept so legacy records still read.",
   },
   manager: {
     label: "Manager",
