@@ -388,12 +388,13 @@ begin
      and (lt.applies_to_gender is null or lt.applies_to_gender = u.gender)
    limit 1;
 
-  -- A task Kurt is on, to hand over: the client task above, or any open one.
-  v_handover := coalesce(v_task, (
-    select t.id from vizserve_pms_tasks t
-     where vizserve_pms_is_on_task(t.id, v_kurt)
-       and t.status not in ('COMPLETED', 'COMPLETED_NO_RESPONSE')
-     limit 1));
+  -- A task Kurt is on that is still open, to hand over. (The client test task
+  -- above is completed by now, and a finished task needs no reliever.)
+  select t.id into v_handover
+    from vizserve_pms_tasks t
+   where vizserve_pms_is_on_task(t.id, v_kurt)
+     and t.status not in ('COMPLETED', 'COMPLETED_NO_RESPONSE')
+   limit 1;
 
   if v_leave_type is null or v_handover is null then
     v_out := v_out || text '⚠️ Skipped leave with relievers: no reliever leave type or no open task for Kurt';
