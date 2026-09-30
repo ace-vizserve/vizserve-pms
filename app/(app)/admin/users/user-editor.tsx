@@ -25,7 +25,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { TimePicker } from "@/components/ui/time-picker";
 import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
-import { type Role } from "@/lib/auth/roles";
+import { roleAtLeast, type Role } from "@/lib/auth/roles";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { formatDays, leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { GENDER_LABELS, type Gender, normaliseHeldRoles, ROLE_LABELS } from "@/lib/schemas/users";
@@ -261,8 +261,12 @@ function UserForm({
   );
   const [isActive, setIsActive] = useState(user?.is_active ?? true);
   const [isHr, setIsHr] = useState(user?.is_hr ?? false);
-  const [isDeptAdmin, setIsDeptAdmin] = useState(user?.is_dept_admin ?? false);
-  const [isBusinessManager, setIsBusinessManager] = useState(user?.is_business_manager ?? false);
+  // P14-05. Department admin is retired: Team Leader and above already manage
+  // their departments' forms, lists and folders. Always saved as off.
+  const isDeptAdmin = false;
+  // P14-05. Business Manager is a role now; the old P14-01 tick has no switch and
+  // is passed through unchanged so saving a record never silently flips it.
+  const isBusinessManager = user?.is_business_manager ?? false;
   const [hasAppAccess, setHasAppAccess] = useState(
     user ? user.app_access.includes(APP_ACCESS_KEY) : true,
   );
@@ -349,7 +353,13 @@ function UserForm({
 
   // A member holds scope over nothing by definition, so the checkboxes are not
   // merely hidden — the values are dropped, and the server drops them again.
-  const scopeApplies = roles.some((held) => held !== "member");
+  // P14-05. Led departments only mean anything for a Team Leader — every role
+  // above already sees every department — so the section shows only for one.
+  const scopeApplies = roles.includes("team_leader");
+  // P14-05. HR comes with Manager and above — for EVERY role held, since they may
+  // switch to any of them. `roles` is in ladder order, so the first is the least
+  // senior.
+  const hrImplied = roleAtLeast(roles[0] ?? "member", "manager");
 
   function toggleRole(rank: Role, checked: boolean) {
     const next = checked
@@ -724,6 +734,26 @@ function UserForm({
                 </label>
               );
             })}
+            {/* HR: a job held alongside any role, not one you switch into — so it
+                is always on for its holder, and implied for Manager and above. */}
+            <label
+              className="flex items-start gap-3 text-sm data-[disabled=true]:opacity-50"
+              data-disabled={hrImplied}>
+              <Checkbox
+                className="mt-0.5"
+                checked={isHr || hrImplied}
+                disabled={hrImplied}
+                onCheckedChange={(checked) => setIsHr(checked === true)}
+              />
+              <span>
+                <span className="font-medium">HR</span>
+                <span className="block text-xs text-muted-foreground">
+                  {hrImplied
+                    ? "Included — Manager and above already see the HR screens."
+                    : "Leave balances, leave types, holidays and leave reports for everyone. Stays on whichever role they act as."}
+                </span>
+              </span>
+            </label>
             <label className="flex items-start gap-3 text-sm opacity-50" data-disabled>
               <Checkbox className="mt-0.5" checked disabled />
               <span>
@@ -743,16 +773,6 @@ function UserForm({
               onValueChange={(value) => {
                 const next = value === NO_DEPARTMENT ? null : value;
                 setPrimaryDepartmentId(next);
-                /* ⚠️ CLEAR THE ADMIN TICK WITH IT, or the two diverge and the
-                   record cannot be saved OR corrected. The switch below draws
-                   from `isDeptAdmin && primaryDepartmentId` and is DISABLED
-                   without a department, so leaving the raw state set gives an
-                   owner a control that already looks off, cannot be toggled,
-                   and still submits `true` — which the schema then refuses,
-                   with the explanation landing in a `fieldErrors` key this
-                   block does not render. Resetting here is what keeps what is
-                   on screen and what gets sent the same value. */
-                if (!next) setIsDeptAdmin(false);
               }}
             >
               <SelectTrigger id="primary_department">
@@ -773,35 +793,32 @@ function UserForm({
           </div>
         </div>
 
-        <div className="space-y-3 rounded-lg border p-4">
-          <div>
-            <Label>Leads these departments</Label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {scopeApplies
-                ? "This — not the role — decides which requests, forms and queues they can reach. A Team Leader with nothing ticked leads nothing."
-                : "Members have no department scope. Choose Team Leader or above to assign one."}
-            </p>
-          </div>
+        {/* P14-05. Team Leaders only — every role above sees every department. */}
+        {scopeApplies ? (
+          <div className="space-y-3 rounded-lg border p-4">
+            <div>
+              <Label>Leads these departments</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Which departments this Team Leader approves for and can see. A Team Leader with
+                nothing ticked leads nothing.
+              </p>
+            </div>
 
-          <div className="grid gap-2 sm:grid-cols-2">
-            {departments.map((department) => (
-              <label
-                key={department.id}
-                className="flex items-center gap-2 text-sm data-[disabled=true]:opacity-50"
-                data-disabled={!scopeApplies}
-              >
-                <Checkbox
-                  checked={managed.includes(department.id)}
-                  disabled={!scopeApplies}
-                  onCheckedChange={(checked) =>
-                    toggleDepartment(department.id, checked === true)
-                  }
-                />
-                {department.name}
-              </label>
-            ))}
+            <div className="grid gap-2 sm:grid-cols-2">
+              {departments.map((department) => (
+                <label key={department.id} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={managed.includes(department.id)}
+                    onCheckedChange={(checked) =>
+                      toggleDepartment(department.id, checked === true)
+                    }
+                  />
+                  {department.name}
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
+        ) : null}
 
         {/*
           P7-33 — LEAVE ALLOCATION, per type, for one year.
@@ -920,96 +937,7 @@ function UserForm({
           </div>
         ) : null}
 
-        {/*
-          P7-52 and P8-01 — THE CAPABILITY SWITCHES, which sit below the rank
-          ladder because they are a different kind of statement. The ladder says
-          where somebody sits; these say what job they hold while sitting there.
 
-          ⚠️ NEITHER IS A RUNG, and that is the whole design (D33). The role enum
-          is a total order compared with `>=` in SQL and `indexOf` in TS, so
-          every value must sit somewhere on member→owner. "HR" and "department
-          admin" sit nowhere on it — a member can hold either — and wedging one
-          in would silently grant or revoke everything above or below the slot.
-
-          ⚠️ ONLY AN OWNER MAY GRANT EITHER, and this screen is
-          `requireRole("owner")`, which is what makes that true. It is the only
-          place these can be set, and that is precisely what stops a capability
-          escalating itself: an HR person cannot appoint another HR person, and a
-          department admin cannot appoint another department admin or widen their
-          own scope. The `disabled` below only makes the form agree with the gate.
-
-          Rendered for a NEW user too, unlike Active below — an account can be
-          created for somebody joining to do one of these jobs, and making an
-          owner save twice to say so would be pointless.
-        */}
-        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-          <div>
-            <Label htmlFor="is_dept_admin">Admin</Label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {!viewerIsOwner
-                ? "Only a CEO can grant this."
-                : /* ⚠️ THE TICK IS SCOPED TO A DEPARTMENT, SO IT NEEDS ONE.
-                     `vizserve_pms_is_dept_admin` compares its argument with the
-                     holder's `primary_department_id`; with none set the tick
-                     saves and grants nothing, and this copy would be claiming a
-                     capability nobody has. The schema refuses the combination
-                     too — that half is the enforcement, this half is the
-                     explanation. */
-                  !primaryDepartmentId
-                  ? "Choose the department this person belongs to first — this tick only covers their own department."
-                  : isDeptAdmin
-                    ? "Administrative capability over their own department — the one under “Belongs to” above, not the ones they lead. Their rank is unchanged, so they still report to their Team Leader and approve nothing."
-                    : "Not a department admin. Every CEO already administers every department regardless of this switch."}
-            </p>
-          </div>
-          <Switch
-            id="is_dept_admin"
-            /* `isDeptAdmin` alone: the reset above guarantees it is already
-               false whenever there is no department, so a second guard here
-               would only hide a divergence rather than prevent one. */
-            checked={isDeptAdmin}
-            disabled={!viewerIsOwner || !primaryDepartmentId}
-            onCheckedChange={setIsDeptAdmin}
-          />
-        </div>
-
-        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-          <div>
-            <Label htmlFor="is_hr">HR</Label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {!viewerIsOwner
-                ? "Only a CEO can grant this."
-                : isHr
-                  ? "Can set leave balances, edit leave types and holidays, and run the leave report for everyone. Cannot manage users."
-                  : "Not an HR user. Every CEO already has these abilities regardless of this switch."}
-            </p>
-          </div>
-          <Switch
-            id="is_hr"
-            checked={isHr}
-            disabled={!viewerIsOwner}
-            onCheckedChange={setIsHr}
-          />
-        </div>
-
-        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
-          <div>
-            <Label htmlFor="is_business_manager">Business Manager</Label>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              {!viewerIsOwner
-                ? "Only a CEO can grant this."
-                : isBusinessManager
-                  ? "Monitors every department and is emailed when any approval ends. Approves nothing — their rank above is unchanged."
-                  : "Not a Business Manager. Every CEO already sees everything regardless of this switch."}
-            </p>
-          </div>
-          <Switch
-            id="is_business_manager"
-            checked={isBusinessManager}
-            disabled={!viewerIsOwner}
-            onCheckedChange={setIsBusinessManager}
-          />
-        </div>
 
         {user ? (
           <div className="flex items-start justify-between gap-4 rounded-lg border p-4">

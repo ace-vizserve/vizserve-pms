@@ -2359,6 +2359,11 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
       };
+      /** P14-08. Counts of work waiting under each role the caller holds. */
+      vizserve_pms_pending_by_role: {
+        Args: Record<PropertyKey, never>;
+        Returns: { role: VizservePmsUserRole; pending: number }[];
+      };
       /** P14-05. Switch the caller's active role to one they hold. */
       vizserve_pms_switch_role: {
         Args: { p_role: VizservePmsUserRole };

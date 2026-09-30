@@ -72,6 +72,9 @@ export function RealtimeNotifications({ userId }: { userId: string }) {
       void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
       void queryClient.invalidateQueries({ queryKey: ["inbox"] });
       void queryClient.invalidateQueries({ queryKey: qk.unread() });
+      // P14-08. Every "waiting on you" notification also moves the per-role
+      // counts in the top bar — see `usePendingByRole` in role-switcher.tsx.
+      void queryClient.invalidateQueries({ queryKey: ["pending-by-role"] });
 
       /*
        * ⚠️ GENERIC TEXT, AND IT MUST STAY GENERIC. The notification's own title

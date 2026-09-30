@@ -136,9 +136,13 @@ async function replaceHeldRoles(
   return upsertError?.message ?? null;
 }
 
-/** The highest held role — what decides whether a managed set applies at all. */
-function highestRole(roles: Role[]): Role {
-  return roles[roles.length - 1] ?? "member";
+/**
+ * P14-05. Led departments are kept only for somebody who holds Team Leader —
+ * every role above sees every department already. Anyone else's set is
+ * cleared on save, so a leftover tick cannot linger.
+ */
+function ledScope(roles: Role[]): Role {
+  return roles.includes("team_leader") ? "team_leader" : "member";
 }
 
 /**
@@ -182,7 +186,7 @@ export async function createUser(
 
   const values = parsed.data;
   const held = normaliseHeldRoles(values.role, values.roles);
-  const managed = normaliseManagedDepartments(highestRole(held), values.managed_department_ids);
+  const managed = normaliseManagedDepartments(ledScope(held), values.managed_department_ids);
   const admin = createAdminClient();
 
   // The database trigger on auth.users creates the profile row, so this is the
@@ -357,7 +361,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
     }
   }
 
-  const managed = normaliseManagedDepartments(highestRole(held), values.managed_department_ids);
+  const managed = normaliseManagedDepartments(ledScope(held), values.managed_department_ids);
 
   // Note the absent email field — see lib/schemas/users.ts. Email is the
   // identity that links SSO and password login to one profile.

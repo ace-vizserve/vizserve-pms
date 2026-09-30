@@ -11,7 +11,7 @@ import {
   DynamicBreadcrumb,
 } from "@/components/app-shell/dynamic-breadcrumb";
 import { RealtimeNotifications } from "@/components/realtime-refresh";
-import { RoleSwitcher } from "@/components/app-shell/role-switcher";
+import { RolePendingNotice, RoleSwitcher } from "@/components/app-shell/role-switcher";
 import { TaskImageLightboxProvider } from "@/components/task-image-lightbox";
 import { ShiftReminder } from "@/components/shift-reminder";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -148,6 +148,10 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 <ThemeToggle />
               </div>
             </header>
+
+            {/* P14-08. "N items are waiting on you as <other role> — Switch".
+                Nothing for anybody with one role or nothing pending elsewhere. */}
+            <RolePendingNotice />
 
             {/* The one gradient in the product UI: a broad, very low-contrast wash so
                 panels have something to cast onto instead of sitting on a flat slab. */}
