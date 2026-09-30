@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-30",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Drag a task into another stage",
+  "description": "On the task list, dragging a task into a different stage now changes its status and puts it where you dropped it. Before, a drag could only reorder within a stage or make a subtask.",
+  "items": [
+    "Drop between two rows of a stage to put it there",
+    "Drop on a stage's heading to put it at the top — the way into an empty or collapsed stage",
+    "Stages a task cannot move to are dimmed while you drag it",
+    "A subtask dropped into another stage becomes its own task",
+    "Moves that need a note, such as sending client work back, still go through the status menu"
+  ],
+  "refs": ["P7-82"]
+}
