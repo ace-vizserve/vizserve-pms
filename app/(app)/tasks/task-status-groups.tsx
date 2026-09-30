@@ -7,13 +7,21 @@ import { toast } from "@/components/ui/toast";
 import { planTaskDrop, type DropTarget } from "@/lib/task-drop";
 
 import type { VizservePmsTaskStatus } from "@/lib/database.types";
+import { useTaskRefresh } from "@/lib/query/use-task-refresh";
+import { TASK_STATUS_LABELS, availableTransitions } from "@/lib/schemas/tasks";
 
 import { OptimisticMoveContext, placeholderId, type OptimisticMove } from "./optimistic-move";
 
 import { TaskStatusGroup } from "./status-group";
-import { reorderTasks, setTaskParent } from "./actions";
-import { TaskGroupSortable, TaskListDnd } from "./task-dnd";
-import { TaskGroupTable, type ListRow, type TaskLookups, type Viewer } from "./tasks-table";
+import { reorderTasks, setTaskParent, transitionTask } from "./actions";
+import { StageDrop, TaskGroupSortable, TaskListDnd } from "./task-dnd";
+import {
+  TaskGroupTable,
+  viewerSeat,
+  type ListRow,
+  type TaskLookups,
+  type Viewer,
+} from "./tasks-table";
 
 /**
  * P11-05 — THE ROW MOVES WHEN YOU PICK, NOT TWO SECONDS LATER.
@@ -133,6 +141,21 @@ export function TaskStatusGroups({
   });
 
   const router = useRouter();
+  const refresh = useTaskRefresh();
+
+  /*
+   * The stages a task may be dropped into: `availableTransitions`, the status
+   * dropdown's own rule, so the drag cannot offer a move the dropdown would
+   * not. A move that needs a note is left out — a drop has nowhere to type
+   * one; the dropdown is still the way to make it.
+   */
+  const allowedFor = useCallback(
+    (row: ListRow) =>
+      availableTransitions(row.status, viewerSeat(viewer, lookups, row), row)
+        .filter((transition) => transition.requires !== "comment")
+        .map((transition) => transition.to as string),
+    [viewer, lookups],
+  );
 
   /* P7-82 — what the drag layer needs to label a row it picks up. */
   const info = useCallback(
@@ -147,16 +170,26 @@ export function TaskStatusGroups({
             // it is still a subtask and still cannot take any.
             isChild: row.parent_task_id !== null,
             parentId: row.parent_task_id,
+            status: row.status,
+            allowed: allowedFor(row),
           };
         }
         const child = row.subRows?.find((one) => one.id === id);
         if (child) {
-          return { id, title: child.title, hasChildren: false, isChild: true, parentId: row.id };
+          return {
+            id,
+            title: child.title,
+            hasChildren: false,
+            isChild: true,
+            parentId: row.id,
+            status: child.status,
+            allowed: allowedFor(child),
+          };
         }
       }
       return null;
     },
-    [rows],
+    [rows, allowedFor],
   );
 
   /*
@@ -175,8 +208,38 @@ export function TaskStatusGroups({
       return;
     }
 
+    // The stage dimmed and its heading refused, but a drop between the rows of
+    // a blocked stage still arrives here — so it is refused here too.
+    const moving = plan.status ? info(plan.status.id) : null;
+    if (plan.status && !moving?.allowed.includes(plan.status.to)) {
+      const to = TASK_STATUS_LABELS[plan.status.to as VizservePmsTaskStatus];
+      toast.error(`“${moving?.title ?? "This task"}” cannot be moved to ${to} by dragging.`);
+      return;
+    }
+
     startTransition(async () => {
+      /*
+       * THE STATUS GOES FIRST. The reorder and the parent change are both
+       * about where it sits in the stage it lands in, and neither means
+       * anything if the state machine refuses the move.
+       */
+      if (plan.status) {
+        applyMove({
+          kind: "move",
+          id: plan.status.id,
+          status: plan.status.to as VizservePmsTaskStatus,
+        });
+      }
       if (plan.order && !plan.parent) applyMove({ kind: "order", ...plan.order });
+
+      if (plan.status) {
+        // `comment` omitted, not null — see `board-dnd.tsx`.
+        const result = await transitionTask(plan.status.id, { to_status: plan.status.to });
+        if (!result.ok) {
+          toast.error(result.error);
+          return;
+        }
+      }
 
       if (plan.parent) {
         const result = await setTaskParent(plan.parent.id, {
@@ -206,6 +269,14 @@ export function TaskStatusGroups({
           toast.success("Sorted by Manual — your order is kept");
         }
       }
+
+      if (plan.status) {
+        /* Keeps the transition pending until the fresh rows land, so the
+           optimistic stage holds instead of snapping back — as in
+           `transition.tsx`. */
+        await refresh();
+        toast.success(`Moved to ${TASK_STATUS_LABELS[plan.status.to as VizservePmsTaskStatus]}`);
+      }
     });
   }
 
@@ -224,37 +295,52 @@ export function TaskStatusGroups({
         {visibleStatuses.map((status) => {
           const group = grouped.get(status) ?? [];
 
+          /*
+            THE TABLE IS ALWAYS RENDERED, even for an empty stage, because
+            the composer is a `<tr>` inside it — a stage with nothing in it
+            is exactly where somebody wants to add the first task, and a
+            paragraph cannot hold a row. The empty sentence moves into the
+            table as its `empty` state.
+
+            Built HERE, once per render of the list, so `StageDrop` — which
+            re-renders on every change of drop target — hands React the same
+            element and the table inside never re-renders mid-drag.
+          */
+          const body = (
+            <TaskGroupSortable
+              id={`group-${status}`}
+              itemIds={group.flatMap((row) => [
+                row.id,
+                ...(row.subRows ?? []).map((child) => child.id),
+              ])}>
+              <TaskGroupTable
+                group={group}
+                status={status}
+                viewer={viewer}
+                lookups={lookups}
+                assignable={assignable}
+              />
+            </TaskGroupSortable>
+          );
+
           return (
-            <TaskStatusGroup
+            <StageDrop
               key={status}
               status={status}
-              count={group.length}
-              // A stage with nothing in it opens to one line. Closing it by
-              // default would hide the only thing it has to say.
-              defaultOpen
-            >
-              {/*
-                THE TABLE IS ALWAYS RENDERED, even for an empty stage, because
-                the composer is a `<tr>` inside it — a stage with nothing in it
-                is exactly where somebody wants to add the first task, and a
-                paragraph cannot hold a row. The empty sentence moves into the
-                table as its `empty` state.
-              */}
-              <TaskGroupSortable
-                id={`group-${status}`}
-                itemIds={group.flatMap((row) => [
-                  row.id,
-                  ...(row.subRows ?? []).map((child) => child.id),
-                ])}>
-                <TaskGroupTable
-                  group={group}
+              render={({ headingRef, state }) => (
+                <TaskStatusGroup
                   status={status}
-                  viewer={viewer}
-                  lookups={lookups}
-                  assignable={assignable}
-                />
-              </TaskGroupSortable>
-            </TaskStatusGroup>
+                  count={group.length}
+                  // A stage with nothing in it opens to one line. Closing it by
+                  // default would hide the only thing it has to say.
+                  defaultOpen
+                  headingRef={headingRef}
+                  dropState={state}
+                >
+                  {body}
+                </TaskStatusGroup>
+              )}
+            />
           );
         })}
       </div>

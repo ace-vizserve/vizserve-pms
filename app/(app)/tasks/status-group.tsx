@@ -42,11 +42,17 @@ export function TaskStatusGroup({
   count,
   defaultOpen = true,
   action,
+  headingRef,
+  dropState = null,
   children,
 }: {
   status: VizservePmsTaskStatus;
   count: number;
   defaultOpen?: boolean;
+  /** P7-82 — the heading as a drop target, on the task list. */
+  headingRef?: (node: HTMLElement | null) => void;
+  /** While a task is carried: `lit` — a drop here lands it; `blocked` — it may not move here. */
+  dropState?: "lit" | "blocked" | null;
   /** The group's own "add a task", where that is a true statement. */
   action?: React.ReactNode;
   children: React.ReactNode;
@@ -57,18 +63,21 @@ export function TaskStatusGroup({
       className={cn(
         // The spine is the 4px left edge; `taskStatusEdge` supplies only its
         // colour, so the width stays here with the rest of the panel shape.
-        "overflow-hidden rounded-lg border border-l-4 bg-card grade-surface shadow-raised-lg",
+        "overflow-hidden rounded-lg border border-l-4 bg-card grade-surface shadow-raised-lg transition-opacity",
         taskStatusEdge(status),
+        dropState === "blocked" && "opacity-40",
       )}
     >
       {/* `border-b-2` in the stage's own solid, not the hairline. The rows below
           now wear the same fill this bar does, so this line is the only thing
           left dividing heading from body — see `taskStatusRule`. */}
       <div
+        ref={headingRef}
         className={cn(
           "flex items-center gap-2 border-b-2 px-2 py-2",
           taskStatusHeading(status),
           taskStatusRule(status),
+          dropState === "lit" && "ring-2 ring-primary ring-inset",
         )}
       >
         <CollapsibleTrigger className="group flex min-w-0 items-center gap-2 rounded-sm px-0.5 py-0.5 text-left">
@@ -87,6 +96,13 @@ export function TaskStatusGroup({
             {count}
           </span>
         </CollapsibleTrigger>
+
+        {/* Never the ring alone — the heading says what the drop will do. */}
+        {dropState === "lit" ? (
+          <span className="shrink-0 rounded-sm bg-primary px-1.5 py-0.5 text-2xs font-medium text-primary-foreground">
+            Move to top
+          </span>
+        ) : null}
 
         {action ? <div className="ml-auto shrink-0">{action}</div> : null}
       </div>

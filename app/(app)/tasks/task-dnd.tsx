@@ -57,6 +57,13 @@ type DragInfo = {
   /** Under a parent, on screen or not — so it cannot take subtasks (P7-09). */
   isChild: boolean;
   parentId: string | null;
+  /** Its own status — the stage it leaves when it lands in another. */
+  status: string;
+  /**
+   * The statuses it may move to — `availableTransitions`, the dropdown's own
+   * rule. Stages outside it dim while it is carried and refuse the drop.
+   */
+  allowed: string[];
 };
 
 const EnabledContext = createContext(false);
@@ -71,6 +78,8 @@ export function useTaskDndEnabled() {
 }
 
 const NEST = "nest:";
+/** A stage heading — the top of that stage, and the way into an empty one. */
+const GROUP = "group:";
 
 /**
  * The share of a row's height, top and bottom, that means "put it here". The
@@ -97,11 +106,23 @@ function makeCollision(
 ): CollisionDetection {
   return (args) => {
     const rows = args.droppableContainers.filter(
-      (container) => !String(container.id).startsWith(NEST),
+      (container) =>
+        !String(container.id).startsWith(NEST) && !String(container.id).startsWith(GROUP),
     );
 
     const point = args.pointerCoordinates;
     if (point) {
+      // A heading wins while the pointer is ON it, and only then — as a
+      // closest-centre candidate it would steal drops meant for the rows
+      // beneath it.
+      const heading = pointerWithin({
+        ...args,
+        droppableContainers: args.droppableContainers.filter((container) =>
+          String(container.id).startsWith(GROUP),
+        ),
+      })[0];
+      if (heading) return [heading];
+
       const under = pointerWithin({ ...args, droppableContainers: rows })[0];
       const rect = under ? args.droppableRects.get(under.id) : undefined;
       const moving = info(String(args.active.id));
@@ -134,6 +155,7 @@ function targetOf(active: Active, over: Over | null): DropTarget | null {
 
   const id = String(over.id);
   if (id.startsWith(NEST)) return { kind: "nest", id: id.slice(NEST.length) };
+  if (id.startsWith(GROUP)) return { kind: "group", status: id.slice(GROUP.length) };
   if (id === String(active.id)) return null;
 
   // In one group, the sortable's own indices say which way it is going.
@@ -207,7 +229,9 @@ export function TaskListDnd({
               onDragStart: ({ active: a }) => `Picked up ${title(a.id)}.`,
               onDragOver: ({ over }) =>
                 over
-                  ? String(over.id).startsWith(NEST)
+                  ? String(over.id).startsWith(GROUP)
+                    ? `Over the ${String(over.id).slice(GROUP.length).toLowerCase().replaceAll("_", " ")} heading. Drop to move it to the top of that stage.`
+                    : String(over.id).startsWith(NEST)
                     ? `Over ${title(over.id)}. Drop to make it a subtask.`
                     : `Over ${title(over.id)}.`
                   : "Not over a task.",
@@ -234,6 +258,33 @@ export function TaskListDnd({
       </LiveContext>
     </EnabledContext>
   );
+}
+
+/**
+ * A stage heading as a drop target, and the stage's state while something is
+ * carried: `blocked` when the dragged task may not move to it (dimmed, as on the
+ * board), `lit` while a drop on the heading would land it there.
+ *
+ * ⚠️ `children` IS THE FINISHED STAGE, built by the caller from this hook's
+ * answer via `render`. The hook reads `LiveContext`, which changes constantly
+ * mid-drag, so only this small component re-renders — never the table inside.
+ */
+export function StageDrop({
+  status,
+  render,
+}: {
+  status: string;
+  render: (drop: {
+    headingRef: (node: HTMLElement | null) => void;
+    state: "lit" | "blocked" | null;
+  }) => ReactNode;
+}) {
+  const { active, target } = useContext(LiveContext);
+  const blocked = !!active && active.status !== status && !active.allowed.includes(status);
+  const { setNodeRef } = useDroppable({ id: `${GROUP}${status}`, disabled: blocked });
+  const lit = !blocked && target?.kind === "group" && target.status === status;
+
+  return render({ headingRef: setNodeRef, state: blocked ? "blocked" : lit ? "lit" : null });
 }
 
 /** One status group's rows, top to bottom, subtasks after their parent. */
@@ -329,7 +380,7 @@ export function TaskGrip({ title }: { title: string }) {
     <button
       type="button"
       {...handle}
-      aria-label={`Move ${title}. Drop on another task's title to make it a subtask.`}
+      aria-label={`Move ${title}. Drop on another task's title to make it a subtask, or into another stage to change its status.`}
       className="flex size-6 shrink-0 cursor-grab touch-none items-center justify-center rounded-sm text-foreground-faint opacity-60 group-hover/row:opacity-100 hover:text-foreground focus-visible:opacity-100 active:cursor-grabbing">
       <GripVertical className="size-4" aria-hidden />
     </button>

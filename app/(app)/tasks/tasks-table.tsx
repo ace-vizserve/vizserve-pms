@@ -239,6 +239,27 @@ export function TaskColumnsMenu({ customFields = [] }: { customFields?: ListFiel
   );
 }
 
+/**
+ * Where the viewer sits on a task — see `seat` in `TaskGroupTable`. Exported
+ * because the list's drag layer asks the same question (which stages may this
+ * task be dropped into) and must get the dropdown's answer.
+ */
+export function viewerSeat(viewer: Viewer, lookups: TaskLookups, task: TaskRow) {
+  return {
+    isAssignee:
+      task.assignee_id === viewer.userId ||
+      (get(lookups.extraAssignees, task.id) ?? []).some((person) => person.id === viewer.userId),
+    isQa: task.qa_assignee_id === viewer.userId,
+    leadsDepartment:
+      roleAtLeast(viewer.role, "owner") || viewer.managedDepartmentIds.includes(task.department_id),
+    /* P11-05. Mirrors `v_in_dept`: `primary_department_id` is what this
+       schema means by "a member of a department" everywhere else. The
+       server re-checks it — this only decides what is on screen. */
+    inDepartment: viewer.primaryDepartmentId === task.department_id,
+    isAdmin: roleAtLeast(viewer.role, "owner"),
+  };
+}
+
 export function TaskGroupTable({
   group,
   status,
@@ -260,7 +281,6 @@ export function TaskGroupTable({
      drop target, rather than handles that do nothing. A boolean that never
      changes mid-drag, so dragging does not re-render the table. */
   const dnd = useTaskDndEnabled();
-  const isAdmin = roleAtLeast(viewer.role, "owner");
   /**
    * P7-19 — whether to offer the trash on this row.
    *
@@ -305,22 +325,7 @@ export function TaskGroupTable({
    * this flag is asking about.
    */
   function seat(task: TaskRow) {
-    return {
-      isAssignee:
-        task.assignee_id === viewer.userId ||
-        (get(lookups.extraAssignees, task.id) ?? []).some(
-          (person) => person.id === viewer.userId,
-        ),
-      isQa: task.qa_assignee_id === viewer.userId,
-      leadsDepartment:
-        roleAtLeast(viewer.role, "owner") ||
-        viewer.managedDepartmentIds.includes(task.department_id),
-      /* P11-05. Mirrors `v_in_dept`: `primary_department_id` is what this
-         schema means by "a member of a department" everywhere else. The
-         server re-checks it — this only decides what is on screen. */
-      inDepartment: viewer.primaryDepartmentId === task.department_id,
-      isAdmin,
-    };
+    return viewerSeat(viewer, lookups, task);
   }
 
   /*

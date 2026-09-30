@@ -61,15 +61,51 @@ describe("planTaskDrop — between rows", () => {
     });
   });
 
-  it("refuses a drag into another status group", () => {
-    expect(planTaskDrop(rows, "a", { kind: "row", id: "d", placement: "before" }).kind).toBe(
-      "error",
-    );
+  it("changes the status when it lands in another group", () => {
+    expect(planTaskDrop(rows, "a", { kind: "row", id: "d", placement: "before" })).toEqual({
+      kind: "apply",
+      status: { id: "a", to: "ONGOING" },
+      order: { parentId: null, status: "ONGOING", ids: ["a", "d"] },
+    });
+  });
+
+  it("lifts a subtask out AND changes its status in one drop", () => {
+    expect(planTaskDrop(rows, "b1", { kind: "row", id: "d", placement: "after" })).toEqual({
+      kind: "apply",
+      status: { id: "b1", to: "ONGOING" },
+      parent: { id: "b1", parentId: null },
+      order: { parentId: null, status: "ONGOING", ids: ["d", "b1"] },
+    });
   });
 
   it("does nothing on itself", () => {
     expect(planTaskDrop(rows, "a", { kind: "row", id: "a", placement: "after" })).toEqual({
       kind: "none",
+    });
+  });
+});
+
+describe("planTaskDrop — on a stage heading", () => {
+  it("puts it at the top of another stage, with that status", () => {
+    expect(planTaskDrop(rows, "c", { kind: "group", status: "ONGOING" })).toEqual({
+      kind: "apply",
+      status: { id: "c", to: "ONGOING" },
+      order: { parentId: null, status: "ONGOING", ids: ["c", "d"] },
+    });
+  });
+
+  it("reaches an empty stage", () => {
+    expect(planTaskDrop(rows, "a", { kind: "group", status: "FOR_QA" })).toEqual({
+      kind: "apply",
+      status: { id: "a", to: "FOR_QA" },
+      order: { parentId: null, status: "FOR_QA", ids: ["a"] },
+    });
+  });
+
+  it("moves to the top of its own stage without a status change", () => {
+    expect(planTaskDrop(rows, "c", { kind: "group", status: "OPEN" })).toEqual({
+      kind: "apply",
+      order: { parentId: null, status: "OPEN", ids: ["c", "a", "b"] },
     });
   });
 });
