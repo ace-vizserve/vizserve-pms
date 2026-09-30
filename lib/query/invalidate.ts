@@ -195,11 +195,17 @@ export function markTaskStale(client: Invalidator, taskId: string): void {
  * has to arrive in time to protect. Awaiting it is what used to make a status
  * change on the tasks surface feel like a page load; `invalidateTaskWrite` above
  * carries the full argument.
+ *
+ * `["tasks", "list-view"]` carries the Time tracked column, which an hour
+ * moves — and which is now also where an hour can be logged from
+ * (`tasks/log-time-popover.tsx`). Inactive entries are only marked stale.
  */
 export function invalidateTimesheetWrite(client: Invalidator): void {
   fire(client, [
     ["timesheet", "week"],
     ["timesheet", "team"],
+    ["timesheet", "task-entries"],
+    ["tasks", "list-view"],
   ]);
 }
 

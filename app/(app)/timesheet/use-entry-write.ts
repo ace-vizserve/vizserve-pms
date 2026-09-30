@@ -12,6 +12,7 @@ import {
   cancelTimesheetRefetches,
   patchEntry,
   removeEntry,
+  removeTaskEntry,
   rollbackTimesheetWrite,
 } from "@/lib/query/timesheet-cache";
 
@@ -134,6 +135,7 @@ export function useEntryWrite(weekKey: QueryKey) {
         patchEntry(queryClient, weekKey, id, fields);
       } else {
         removeEntry(queryClient, weekKey, write.id);
+        removeTaskEntry(queryClient, write.id);
       }
 
       cancelTimesheetRefetches(queryClient);

@@ -310,6 +310,9 @@ export const qk = {
     ["timesheet", "week", userId, weekStart] as const,
   teamWeek: (departmentId: string, weekStart: string) =>
     ["timesheet", "team", departmentId, weekStart] as const,
+  /** One person's entries on one task, every day — the task list's log-time popover. */
+  taskEntries: (userId: string, taskId: string) =>
+    ["timesheet", "task-entries", userId, taskId] as const,
 
   /**
    * P12-23 — EVERY WEEK THE VIEWER MAY REVIEW, for one week start.

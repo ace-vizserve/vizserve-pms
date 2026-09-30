@@ -122,13 +122,16 @@ function editWeek(
   weekKey: QueryKey,
   edit: (entries: unknown[]) => unknown[],
 ): void {
-  client.setQueryData(weekKey, (data: unknown) => {
-    if (!isRecord(data) || !Array.isArray((data as WeekEntry).entries)) return data;
+  client.setQueryData(weekKey, (data: unknown) => editEntries(data, edit));
+}
 
-    const entries = (data as { entries: unknown[] }).entries;
-    const next = edit(entries);
-    return next === entries ? data : { ...data, entries: next };
-  });
+/** The `entries` array of any cached `{ entries, ... }` — a week, or a task's list. */
+function editEntries(data: unknown, edit: (entries: unknown[]) => unknown[]): unknown {
+  if (!isRecord(data) || !Array.isArray((data as WeekEntry).entries)) return data;
+
+  const entries = (data as { entries: unknown[] }).entries;
+  const next = edit(entries);
+  return next === entries ? data : { ...data, entries: next };
 }
 
 /**
@@ -195,6 +198,22 @@ export function removeEntry(client: QueryClient, weekKey: QueryKey, entryId: str
     const next = entries.filter((entry) => !isRecord(entry) || entry.id !== entryId);
     return next.length === entries.length ? entries : next;
   });
+}
+
+/**
+ * The task list's per-task entry lists (`qk.taskEntries`), all of them.
+ *
+ * Scanned rather than keyed: the delete does not know which task's list is
+ * open, and an entry id appears in at most one. Covered by the same
+ * `["timesheet"]` snapshot, so a refused delete puts the row back.
+ */
+export function removeTaskEntry(client: QueryClient, entryId: string): void {
+  client.setQueriesData<unknown>({ queryKey: ["timesheet", "task-entries"] }, (old: unknown) =>
+    editEntries(old, (entries) => {
+      const next = entries.filter((entry) => !isRecord(entry) || entry.id !== entryId);
+      return next.length === entries.length ? entries : next;
+    }),
+  );
 }
 
 /**

@@ -41,6 +41,7 @@ import {
   TaskRowActions,
 } from "./inline";
 import { LatestCommentCell } from "./latest-comment-cell";
+import { LogTimePopover } from "./log-time-popover";
 import { TaskSelectAll, TaskSelectCheckbox } from "./task-selection";
 import { TaskStatusSelect } from "./status-select";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
@@ -886,25 +887,44 @@ export function TaskGroupTable({
         const over =
           task.estimate_minutes !== null && minutes > task.estimate_minutes;
 
-        if (minutes === 0)
-          return <span className="text-foreground-faint">—</span>;
-
+        // Clicking it logs time — the timesheet's own popover, with a date.
         return (
-          <span
-            className={cn(
-              "tabular-nums",
-              over ? "font-medium text-warning" : "text-muted-foreground",
-            )}
-            title={
-              over
-                ? `Over the estimate — ${formatCellDuration(minutes)} against ${formatCellDuration(task.estimate_minutes!)}`
-                : `${formatCellDuration(minutes)} logged`
+          <LogTimePopover
+            taskId={task.id}
+            taskTitle={task.title}
+            userId={viewer.userId}
+            today={lookups.today}
+            label={
+              minutes === 0
+                ? `Log time on ${task.title}`
+                : `${formatCellDuration(minutes)} logged on ${task.title}. Log time.`
             }
+            className={cn(
+              "rounded-sm px-1 py-0.5 tabular-nums",
+              "hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+              minutes === 0
+                ? "text-foreground-faint"
+                : over
+                  ? "font-medium text-warning"
+                  : "text-muted-foreground",
+            )}
           >
-            {formatCellDuration(minutes)}
-            {/* Never colour alone. */}
-            {over ? <span className="ml-0.5 text-2xs">over</span> : null}
-          </span>
+            {minutes === 0 ? (
+              "—"
+            ) : (
+              <span
+                title={
+                  over
+                    ? `Over the estimate — ${formatCellDuration(minutes)} against ${formatCellDuration(task.estimate_minutes!)}`
+                    : `${formatCellDuration(minutes)} logged`
+                }
+              >
+                {formatCellDuration(minutes)}
+                {/* Never colour alone. */}
+                {over ? <span className="ml-0.5 text-2xs">over</span> : null}
+              </span>
+            )}
+          </LogTimePopover>
         );
       },
     },

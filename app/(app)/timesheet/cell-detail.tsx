@@ -1,7 +1,8 @@
 "use client";
 
 import { AlignLeft, Clock, MessageSquareText, Plus, Trash2 } from "lucide-react";
-import { useRef, useState } from "react";
+import type * as React from "react";
+import { useEffect, useRef, useState } from "react";
 import type { QueryKey } from "@tanstack/react-query";
 import { toast } from "@/components/ui/toast";
 
@@ -216,15 +217,21 @@ export function CellDetail({
  * No inputs. This row's job is to say what is already recorded and to hand it
  * to the form; a row that edits itself is the second form this popover used to
  * carry, and it is why a one-entry cell had two length fields in it.
+ *
+ * Exported for the task list's log-time popover, whose list crosses days —
+ * hence `date`.
  */
-function EntryRow({
+export function EntryRow({
   entry,
+  date,
   locked,
   weekKey,
   selected,
   onEdit,
 }: {
   entry: CellEntry;
+  /** Drawn in front of the length when the list crosses days. */
+  date?: string;
   locked: boolean;
   weekKey: QueryKey;
   selected: boolean;
@@ -247,6 +254,9 @@ function EntryRow({
 
   const body = (
     <>
+      {date ? (
+        <span className="w-20 shrink-0 text-left text-xs text-muted-foreground tabular-nums">{formatDate(date)}</span>
+      ) : null}
       <span className="w-14 shrink-0 text-left font-medium tabular-nums">{formatCellDuration(entry.minutes)}</span>
       <span className={cn("flex-1 truncate text-left", entry.note ? "text-foreground-muted" : "text-muted-foreground")}>
         {entry.note ?? "No note"}
@@ -354,14 +364,19 @@ function describeDuration(raw: string): string | null {
  * at this afternoon's clock time. Times are optional in the schema (both or
  * neither) and a blank pair still saves as a plain duration, which is what
  * every entry was before P7-21.
+ *
+ * Exported for the task list's log-time popover, which passes a date picker as
+ * `dateControl` (a task row has no day of its own) and closes on `onSaved`.
  */
-function EntryForm({
+export function EntryForm({
   entry,
   taskId,
   day,
   weekKey,
   canCancel,
   onDone,
+  onSaved,
+  dateControl,
 }: {
   entry: CellEntry | null;
   taskId: string;
@@ -377,10 +392,23 @@ function EntryForm({
    */
   canCancel: boolean;
   onDone: () => void;
+  /** Fired after `onDone` on a save that landed — never on Cancel. */
+  onSaved?: () => void;
+  /** Replaces the date statement when the caller lets the day be chosen. */
+  dateControl?: React.ReactNode;
 }) {
   const write = useEntryWrite(weekKey);
   const pending = write.isPending;
   const durationRef = useRef<HTMLInputElement>(null);
+
+  /*
+   * ⚠️ NOT `autoFocus`. That focuses on mount, BEFORE the popover has been
+   * positioned, so the browser scrolls to wherever the popup sat for that frame
+   * — in a long task list, a visible jump. `preventScroll` focuses it in place.
+   */
+  useEffect(() => {
+    durationRef.current?.focus({ preventScroll: true });
+  }, []);
 
   const [draft, setDraft] = useState<EntryDraft>(() => ({
     duration: entry ? formatCellDuration(entry.minutes) : "",
@@ -434,7 +462,10 @@ function EntryForm({
      * them before a refusal would take away the text somebody has to retype.
      */
     write.mutate(entry ? { kind: "update", input: { id: entry.id, ...payload } } : insertWrite(payload), {
-      onSuccess: () => onDone(),
+      onSuccess: () => {
+        onDone();
+        onSaved?.();
+      },
     });
   }
 
@@ -453,7 +484,6 @@ function EntryForm({
           ref={durationRef}
           value={duration}
           disabled={pending}
-          autoFocus
           placeholder="Enter time (ex: 3h 20m)"
           aria-label={entry ? "Length" : "Length of the new entry"}
           aria-invalid={problem ? true : undefined}
@@ -500,9 +530,11 @@ function EntryForm({
       */}
       <div className="flex items-center gap-2.5 px-3 py-2 text-sm">
         <Clock className="size-4 shrink-0 text-foreground-faint" aria-hidden />
-        <span className="shrink-0 text-foreground-muted">
-          {formatWeekday(day)}, {formatDate(day)}
-        </span>
+        {dateControl ?? (
+          <span className="shrink-0 text-foreground-muted">
+            {formatWeekday(day)}, {formatDate(day)}
+          </span>
+        )}
         <ClockSelect
           label="Start time"
           value={start}
