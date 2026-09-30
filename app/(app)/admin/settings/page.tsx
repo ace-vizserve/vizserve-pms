@@ -41,7 +41,8 @@ export default async function SettingsPage() {
     loadAppSettings(),
     supabase
       .from("vizserve_pms_notification_events")
-      .select("key, flow, flow_label, flow_sort, stage_label, sort, ends_flow, description"),
+      // `*` so the page still loads before P14-12 adds `stage_kind`.
+      .select("*"),
     supabase
       .from("vizserve_pms_notification_rules")
       .select("id, event_key, audience_kind, audience, user_id, in_app, email, locked"),

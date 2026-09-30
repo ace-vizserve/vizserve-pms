@@ -160,10 +160,6 @@ export async function updateNotificationRule(input: unknown): Promise<ActionResu
     .maybeSingle();
 
   if (!before) return { ok: false, error: "That recipient no longer exists." };
-  if (before.locked && !parsed.data.in_app) {
-    return { ok: false, error: "This person has to act on it, so they are always told in the app." };
-  }
-
   const { data, error } = await admin
     .from("vizserve_pms_notification_rules")
     .update({ in_app: parsed.data.in_app, email: parsed.data.email })

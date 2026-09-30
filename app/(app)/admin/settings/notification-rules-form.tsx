@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import { Lock, Plus, X } from "lucide-react";
+import { Plus, X } from "lucide-react";
 
 import { Chip } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
@@ -16,13 +16,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "@/components/ui/toast";
 import type { Role } from "@/lib/auth/roles";
 import { relationshipLabel } from "@/lib/schemas/notification-rules";
 import { ROLE_LABELS } from "@/lib/schemas/users";
+import { cn } from "@/lib/utils";
 
 import { addNotificationRule, removeNotificationRule, updateNotificationRule } from "./actions";
+import { FlowDiagram } from "./flow-diagram";
 
 export type NotificationEvent = {
   key: string;
@@ -33,6 +34,12 @@ export type NotificationEvent = {
   sort: number;
   ends_flow: boolean;
   description: string;
+  /** P14-12. Absent until that migration is applied — see `shapeOf`. */
+  stage_kind?: "step" | "outcome" | "side" | "event";
+  /** P14-12. The step a side event leaves from; null = at any step. */
+  branch_from?: string | null;
+  /** P14-12. Where the work goes next; null = the process ends. */
+  returns_to?: string | null;
 };
 
 export type NotificationRule = {
@@ -59,15 +66,37 @@ const KIND_LABEL: Record<NotificationRule["audience_kind"], string> = {
   user: "Person",
 };
 
+/** An outcome's chip: what the process ended as, in its own words. */
+function outcomeTone(event: NotificationEvent): "success" | "danger" | "neutral" {
+  if (/\.approved$/.test(event.key)) return "success";
+  if (/\.rejected$/.test(event.key)) return "danger";
+  return "neutral";
+}
+
 /**
- * P14-09 — WHO IS TOLD, PER STAGE, PER PROCESS.
+ * Splits a process's stages into what the flow draws: numbered STEPS, the
+ * OUTCOMES it ends in, and SIDE events on a branch. Driven by `stage_kind`
+ * (P14-12); before that is applied, outcomes are the ending stages and
+ * everything else is a step.
+ */
+function shapeOf(events: NotificationEvent[]) {
+  const kind = (event: NotificationEvent) => event.stage_kind ?? (event.ends_flow ? "outcome" : "step");
+  return {
+    path: events.filter((event) => kind(event) === "step"),
+    outcomes: events.filter((event) => kind(event) === "outcome"),
+    along: events.filter((event) => kind(event) === "side" || kind(event) === "event"),
+  };
+}
+
+/**
+ * P14-09 — THE PROCESS, DRAWN AS A FLOW.
  *
- * Processes down the left, their stages on the right. Each stage lists its
- * recipients with an In-app and an Email switch; every change saves on its own.
- * Process recipients can be switched off but not removed; roles and named
- * people can be added and removed. A LOCKED recipient is somebody the step is
- * waiting on — their in-app switch stays on, because unticking it would stall
- * the approval silently.
+ * Pick a process; its stages are drawn left to right as connected boxes —
+ * numbered steps, then the outcomes it can end in — with side events (sent
+ * back, cancelled…) on a branch underneath. Click a box and its notification
+ * settings open below: who needs to act (fixed by the approval routing) and who
+ * is also told (switchable; add a role or a person). Adding somebody never
+ * changes who approves.
  */
 export function NotificationRulesForm({
   events,
@@ -92,47 +121,120 @@ export function NotificationRulesForm({
       .sort((a, b) => a.sort - b.sort);
   }, [events]);
 
-  const [active, setActive] = useState(flows[0]?.key ?? "");
+  const [activeFlow, setActiveFlow] = useState(flows[0]?.key ?? "");
+  const flow = flows.find((candidate) => candidate.key === activeFlow) ?? flows[0];
+  const [selected, setSelected] = useState<string | null>(flow?.events[0]?.key ?? null);
+
+  const shape = flow ? shapeOf(flow.events) : { path: [], outcomes: [], along: [] };
+  const selectedEvent = flow?.events.find((event) => event.key === selected) ?? flow?.events[0] ?? null;
+
+  /** Who acts at a stage, for the line under its box. */
+  const actsOn = (eventKey: string) =>
+    rules
+      .filter((rule) => rule.event_key === eventKey && rule.locked)
+      .map((rule) => recipientLabel(rule, nameOf))
+      .join(", ");
+
+  // Branches whose start (and, for a loop, end) are known steps are drawn;
+  // anything else is listed plainly rather than drawn from a guess.
+  const stepIndex = (key: string | null | undefined) => shape.path.findIndex((event) => event.key === key);
+  const drawnBranches = shape.along
+    .filter((side) => stepIndex(side.branch_from) !== -1 && (!side.returns_to || stepIndex(side.returns_to) !== -1))
+    .map((side) => ({
+      key: side.key,
+      label: side.stage_label,
+      from: stepIndex(side.branch_from),
+      to: side.returns_to ? stepIndex(side.returns_to) : null,
+    }));
+  const drawnKeys = new Set(drawnBranches.map((branch) => branch.key));
+  const unplaced = shape.along.filter((side) => !drawnKeys.has(side.key));
+
+  /** "The Manager acts", for a box's second line. */
+  const actsLine = (eventKey: string) => {
+    const acts = actsOn(eventKey);
+    return acts ? `${acts} acts` : undefined;
+  };
 
   return (
     <section className="w-full rounded-lg border bg-card grade-surface shadow-raised-lg">
-      <div className="space-y-1 border-b px-5 py-4">
-        <h2 className="text-lg font-medium">Notifications</h2>
-        <p className="text-xs text-muted-foreground">
-          Who is told at each stage, in the app and by email. Changes save straight away and apply to notifications
-          sent from now on.
-        </p>
+      <div className="space-y-3 border-b px-5 py-4">
+        <div className="space-y-1">
+          <h2 className="text-lg font-medium">Notifications</h2>
+          <p className="text-xs text-muted-foreground">
+            Pick a process, then a stage, to choose who is told — in the app and by email. Who approves each step is
+            set by the approval routing; adding someone here only means they are told as well.
+          </p>
+        </div>
+
+        <div role="tablist" aria-label="Process" className="flex flex-wrap gap-1.5">
+          {flows.map((candidate) => (
+            <Button
+              key={candidate.key}
+              type="button"
+              role="tab"
+              size="sm"
+              aria-selected={candidate.key === flow?.key}
+              variant={candidate.key === flow?.key ? "default" : "outline"}
+              onClick={() => {
+                setActiveFlow(candidate.key);
+                setSelected(candidate.events[0]?.key ?? null);
+              }}
+            >
+              {candidate.label}
+            </Button>
+          ))}
+        </div>
       </div>
 
-      <Tabs
-        orientation="vertical"
-        value={active}
-        onValueChange={(value) => setActive(String(value))}
-        className="flex flex-col gap-5 p-5 lg:flex-row lg:items-start"
-      >
-        <TabsList className="w-full shrink-0 items-stretch lg:sticky lg:top-20 lg:w-64">
-          {flows.map((flow) => (
-            <TabsTrigger key={flow.key} value={flow.key} className="h-9 justify-between px-3 text-left">
-              <span className="truncate">{flow.label}</span>
-              <span className="text-2xs tabular-nums text-muted-foreground">{flow.events.length}</span>
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      {flow ? (
+        <div className="space-y-5 p-5">
+          {/* THE FLOW, as a flowchart — see flow-diagram.tsx. */}
+          {shape.path.length > 0 ? (
+            <FlowDiagram
+              steps={shape.path.map((event) => ({ key: event.key, label: event.stage_label, acts: actsLine(event.key) }))}
+              outcomes={shape.outcomes.map((event) => ({
+                key: event.key,
+                label: event.stage_label,
+                acts: actsLine(event.key),
+                tone: outcomeTone(event),
+              }))}
+              branches={drawnBranches}
+              selected={selectedEvent?.key ?? null}
+              onSelect={setSelected}
+            />
+          ) : null}
 
-        {flows.map((flow) => (
-          <TabsContent key={flow.key} value={flow.key} className="min-w-0 flex-1 space-y-4">
-            {flow.events.map((event) => (
-              <StageCard
-                key={event.key}
-                event={event}
-                rules={rules.filter((rule) => rule.event_key === event.key)}
-                people={people}
-                nameOf={nameOf}
-              />
-            ))}
-          </TabsContent>
-        ))}
-      </Tabs>
+          {/* Side events with no known branch point (before P14-12 is applied),
+              and every event of a process that is not a sequence (Tasks):
+              plain buttons, never arrows drawn from a guess. */}
+          {unplaced.length > 0 ? (
+            <div className="flex flex-wrap gap-2">
+              {unplaced.map((event) => (
+                <Button
+                  key={event.key}
+                  type="button"
+                  size="sm"
+                  variant={event.key === selectedEvent?.key ? "default" : "outline"}
+                  onClick={() => setSelected(event.key)}
+                >
+                  {event.stage_label}
+                </Button>
+              ))}
+            </div>
+          ) : null}
+
+          {/* THE SELECTED STAGE'S SETTINGS. */}
+          {selectedEvent ? (
+            <StageCard
+              key={selectedEvent.key}
+              event={selectedEvent}
+              rules={rules.filter((rule) => rule.event_key === selectedEvent.key)}
+              people={people}
+              nameOf={nameOf}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -159,11 +261,13 @@ function StageCard({
 }) {
   const [pending, startTransition] = useTransition();
 
-  const ordered = [...rules].sort(
-    (a, b) =>
-      KIND_ORDER.indexOf(a.audience_kind) - KIND_ORDER.indexOf(b.audience_kind) ||
-      recipientLabel(a, nameOf).localeCompare(recipientLabel(b, nameOf)),
-  );
+  const byLabel = (a: NotificationRule, b: NotificationRule) =>
+    KIND_ORDER.indexOf(a.audience_kind) - KIND_ORDER.indexOf(b.audience_kind) ||
+    recipientLabel(a, nameOf).localeCompare(recipientLabel(b, nameOf));
+
+  // Locked rows are the people the step waits on — its approvers.
+  const approvers = rules.filter((rule) => rule.locked).sort(byLabel);
+  const alsoTold = rules.filter((rule) => !rule.locked).sort(byLabel);
 
   const taken = new Set(rules.map((rule) => `${rule.audience_kind}:${rule.audience ?? rule.user_id}`));
   const roleOptions = ADDABLE_ROLES.filter((role) => !taken.has(`role:${role}`));
@@ -191,97 +295,94 @@ function StageCard({
     );
   }
 
+  const row = (rule: NotificationRule) => {
+    const label = recipientLabel(rule, nameOf);
+    return (
+      <li key={rule.id} className={cn(ROW_GRID, "px-4 py-2.5")}>
+        <div className="min-w-0">
+          <p className="truncate text-sm" title={label}>
+            {label}
+          </p>
+          <p className="text-2xs text-muted-foreground">{KIND_LABEL[rule.audience_kind]}</p>
+        </div>
+        <div className="flex justify-center">
+          <Switch
+            aria-label={`In-app for ${label}`}
+            checked={rule.in_app}
+            disabled={pending}
+            onCheckedChange={(checked) =>
+              run(() => updateNotificationRule({ id: rule.id, in_app: checked, email: rule.email }))
+            }
+          />
+        </div>
+        <div className="flex justify-center">
+          <Switch
+            aria-label={`Email for ${label}`}
+            checked={rule.email}
+            disabled={pending}
+            onCheckedChange={(checked) =>
+              run(() => updateNotificationRule({ id: rule.id, in_app: rule.in_app, email: checked }))
+            }
+          />
+        </div>
+        <div className="flex justify-center">
+          {rule.audience_kind === "relationship" ? null : (
+            <Button
+              type="button"
+              size="icon-xs"
+              variant="ghost"
+              aria-label={`Stop telling ${label}`}
+              disabled={pending}
+              onClick={() => run(() => removeNotificationRule({ id: rule.id }))}
+            >
+              <X />
+            </Button>
+          )}
+        </div>
+      </li>
+    );
+  };
+
+  const groupHeading = (text: string) => (
+    <div className={cn(ROW_GRID, "border-y bg-muted px-4 py-1.5 text-2xs font-medium text-muted-foreground")}>
+      <span>{text}</span>
+      <span className="text-center">In-app</span>
+      <span className="text-center">Email</span>
+      <span className="sr-only">Remove</span>
+    </div>
+  );
+
   return (
     <div className="overflow-hidden rounded-lg border bg-card">
       <div className="flex flex-wrap items-start justify-between gap-2 px-4 pt-3 pb-2">
         <div className="min-w-0 space-y-0.5">
-          <h3 className="text-sm font-semibold">{event.stage_label}</h3>
+          <h4 className="text-sm font-semibold">{event.stage_label}</h4>
           {event.description ? <p className="text-xs text-muted-foreground">{event.description}</p> : null}
         </div>
-        {event.ends_flow ? <Chip tone="neutral" label="Ends the process" /> : null}
+        {event.ends_flow ? <Chip tone={outcomeTone(event)} label="Ends the process" /> : null}
       </div>
 
-      <div className={`${ROW_GRID} border-y bg-muted px-4 py-1.5 text-2xs font-medium text-muted-foreground`}>
-        <span>Recipient</span>
-        <span className="text-center">In-app</span>
-        <span className="text-center">Email</span>
-        <span className="sr-only">Remove</span>
-      </div>
+      {approvers.length > 0 ? (
+        <>
+          {groupHeading("Needs to act")}
+          <ul className="divide-y">{approvers.map(row)}</ul>
+        </>
+      ) : null}
 
+      {groupHeading(approvers.length > 0 ? "Also told" : "Told")}
       <ul className="divide-y">
-        {ordered.length === 0 ? (
-          <li className="px-4 py-3 text-xs text-muted-foreground">
-            Nobody is told at this stage. Add a role or a person below.
-          </li>
+        {alsoTold.length === 0 ? (
+          <li className="px-4 py-2.5 text-xs text-muted-foreground">Nobody else.</li>
         ) : null}
-        {ordered.map((rule) => {
-          const label = recipientLabel(rule, nameOf);
-          return (
-            <li key={rule.id} className={`${ROW_GRID} px-4 py-2.5`}>
-              <div className="min-w-0">
-                <p className="truncate text-sm" title={label}>
-                  {label}
-                </p>
-                <p className="flex items-center gap-1 text-2xs text-muted-foreground">
-                  {rule.locked ? (
-                    <>
-                      <Lock aria-hidden className="size-3" />
-                      Approves this step — always told in the app
-                    </>
-                  ) : (
-                    KIND_LABEL[rule.audience_kind]
-                  )}
-                </p>
-              </div>
-              <div className="flex justify-center">
-                <Switch
-                  aria-label={`In-app for ${label}`}
-                  checked={rule.in_app}
-                  disabled={pending || rule.locked}
-                  onCheckedChange={(checked) =>
-                    run(() => updateNotificationRule({ id: rule.id, in_app: checked, email: rule.email }))
-                  }
-                />
-              </div>
-              <div className="flex justify-center">
-                <Switch
-                  aria-label={`Email for ${label}`}
-                  checked={rule.email}
-                  disabled={pending}
-                  onCheckedChange={(checked) =>
-                    run(() => updateNotificationRule({ id: rule.id, in_app: rule.in_app, email: checked }))
-                  }
-                />
-              </div>
-              <div className="flex justify-center">
-                {rule.audience_kind === "relationship" ? null : (
-                  <Button
-                    type="button"
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={`Remove ${label}`}
-                    disabled={pending}
-                    onClick={() => run(() => removeNotificationRule({ id: rule.id }))}
-                  >
-                    <X />
-                  </Button>
-                )}
-              </div>
-            </li>
-          );
-        })}
+        {alsoTold.map(row)}
       </ul>
 
       {roleOptions.length + personOptions.length > 0 ? (
         <div className="border-t bg-muted/50 px-4 py-2">
           <Select items={addItems} value={null} onValueChange={(value) => value && add(String(value))}>
-            <SelectTrigger
-              size="sm"
-              className="w-full sm:w-72"
-              aria-label={`Add a recipient to ${event.stage_label}`}
-            >
+            <SelectTrigger size="sm" className="w-full sm:w-72" aria-label={`Also tell someone at ${event.stage_label}`}>
               <Plus aria-hidden className="size-3.5 text-muted-foreground" />
-              <SelectValue placeholder="Add a role or a person" />
+              <SelectValue placeholder="Also tell a role or person" />
             </SelectTrigger>
             <SelectContent>
               {roleOptions.length > 0 ? (
