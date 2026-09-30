@@ -1,7 +1,7 @@
 import { loadAllDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
-import { requireAdmin } from "@/lib/auth/authorization";
+import { requireHr } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { holidayYearSchema } from "@/lib/schemas/holidays";
 import { createClient } from "@/utils/supabase/server";
@@ -35,7 +35,8 @@ export default async function EventsPage({
 }: {
   searchParams: Promise<{ year?: string | string[] }>;
 }) {
-  await requireAdmin();
+  // P14-13. HR, Manager and above — the people who keep the calendar.
+  await requireHr();
   const supabase = await createClient();
 
   const params = await searchParams;

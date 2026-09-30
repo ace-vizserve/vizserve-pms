@@ -303,8 +303,9 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Events",
     href: "/admin/events",
-    minRole: "admin",
-    adminOnly: true,
+    // P14-13. HR's, beside Holidays: the HR tick, or Manager and above.
+    minRole: "member",
+    requiresHr: true,
     // P7-46. Sits directly under Holidays because the two are the halves of
     // "what is on the calendar that is not leave" — and because the difference
     // between them matters: a holiday is a day off and changes leave
@@ -547,6 +548,8 @@ export const NAV_GROUPS: NavGroup[] = [
       // Lives at /admin/holidays and always has. Grouped here because that is
       // whose job it is now, not because of where the file sits.
       "/admin/holidays",
+      // P14-13. Events sit with Holidays — the two halves of the calendar.
+      "/admin/events",
       "/hr/reports",
       "/hr/attendance",
     ],
@@ -555,7 +558,6 @@ export const NAV_GROUPS: NavGroup[] = [
     label: "Admin",
     hrefs: [
       "/admin/users",
-      "/admin/events",
       "/admin/settings",
       "/admin/audit",
     ],
