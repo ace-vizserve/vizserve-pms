@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-30",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "Setting someone's roles is simpler",
+  "description": "The user editor now ticks roles independently instead of a ranked ladder, and only shows the settings that change something for that person.",
+  "items": [
+    "Tick every role a person holds; HR is one of the ticks",
+    "The departments someone leads only appear for a team leader — every role above already sees every department",
+    "The department admin switch is gone: managing a department's forms and lists is for team leaders and up",
+    "The old business manager switch is gone; business manager is a role"
+  ],
+  "refs": ["P14-05", "P14-06"]
+}

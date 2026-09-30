@@ -1,0 +1,8 @@
+{
+  "date": "2026-09-30",
+  "kind": "fixed",
+  "area": "Tasks",
+  "title": "Filtering tasks by person works again",
+  "description": "Choosing a person in the task filters showed an error on the list and the board instead of their tasks. It now shows their tasks.",
+  "refs": ["P12"]
+}

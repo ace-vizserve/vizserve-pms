@@ -1,0 +1,14 @@
+{
+  "date": "2026-09-30",
+  "kind": "changed",
+  "area": "Tasks",
+  "title": "A breadcrumb and one filter bar on tasks",
+  "description": "The top bar now shows where a task lives — department, folder, list — and the task list's search and filters sit together in one row.",
+  "items": [
+    "The breadcrumb reads Department › Folder › List on the list and task pages; click the list to jump to a sibling list",
+    "On a phone only the last two steps of the breadcrumb show",
+    "The task page's back link is gone — the breadcrumb replaces it",
+    "Search, Filter, Me and Sort share one row; applied filters show as chips you can remove, with Clear all",
+    "The text you search for is highlighted in task titles on the list and the board"
+  ]
+}

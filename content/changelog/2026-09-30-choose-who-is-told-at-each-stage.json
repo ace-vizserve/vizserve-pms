@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-30",
+  "kind": "added",
+  "area": "Platform",
+  "title": "Choose who is told at each stage of every process",
+  "description": "Notifications in Admin settings now show each process as a flow — its steps, how it can end, and where work goes back — and each stage lists who is told, in the app and by email.",
+  "items": [
+    "Client requests, leave, overtime and corrections, timesheets and tasks each have their own flow",
+    "Click a stage to switch the app or email on or off for each person told",
+    "Add a role or a named person to any stage; it never changes who approves",
+    "The CEO and business manager are told in the app whenever a process ends; their email starts off",
+    "The client request flow now includes PIC and QA assignment, the hand-off to QA, QA sending work back and the send to the client",
+    "Replaces the old per-type email switches"
+  ],
+  "refs": ["P14-09", "P14-10", "P14-11", "P14-12"]
+}
