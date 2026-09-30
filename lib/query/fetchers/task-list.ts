@@ -122,8 +122,16 @@ const ORDER_COLUMN: Record<TaskListSort, string> = {
   manual: "position",
 };
 
+/*
+ * ⚠️ EVERY COLUMN AN `.order()` BELOW NAMES MUST BE IN HERE — `created_at` and
+ * `position` included, though no row reads them. With a person filter the base
+ * is the `vizserve_pms_tasks_for_person` RPC, and PostgREST can only order an
+ * RPC's result by columns the select projects: ordering by anything else fails
+ * with "column vizserve_pms_tasks.<col> does not exist". The table path never
+ * noticed, which is how the list shipped broken for every `?person=`.
+ */
 const TASK_COLUMNS =
-  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields";
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields, position, created_at";
 
 /**
  * P12 — the base of a task query: the table, or, with a person filter set, the
@@ -347,8 +355,9 @@ export function subtaskProgress(childRows: TaskListView["childRows"]) {
 /* The board.                                                                  */
 /* -------------------------------------------------------------------------- */
 
+/** `updated_at` for the closed column's order — see the note on `TASK_COLUMNS`. */
 const BOARD_TASK_COLUMNS =
-  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution, custom_fields";
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution, custom_fields, updated_at";
 
 /** One card's row — the columns `BOARD_TASK_COLUMNS` selects. */
 export type BoardTask = {
