@@ -2,7 +2,7 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import { DatePicker } from "@/components/ui/date-picker";
 import {
@@ -136,6 +136,12 @@ function LogTimeBody({
   /** Bumped by Cancel — remounting the form on its key is the reset. */
   const [nonce, setNonce] = useState(0);
   const [listOpen, setListOpen] = useState(true);
+  /*
+   * The list sits INSIDE the form, which remounts on its key whenever an entry
+   * is picked — so its scroll position is kept here, or picking an entry low in
+   * the list would throw it back to the top.
+   */
+  const listScroll = useRef(0);
 
   const query = useQuery(taskEntriesQuery(userId, taskId));
 
@@ -174,68 +180,82 @@ function LogTimeBody({
     />
   );
 
+  /*
+   * Your entries, between the form's fields and its Log time button.
+   *
+   * ⚠️ THE HEADER ROW IS ALWAYS DRAWN, loading or not, at one fixed height. A
+   * header that arrived with the data would push the button down under the
+   * pointer.
+   */
+  const history = (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        aria-expanded={listOpen}
+        disabled={query.isPending || entries.length === 0}
+        onClick={() => setListOpen(!listOpen)}
+        className={cn(
+          "flex h-6 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground",
+          "enabled:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+        )}>
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "size-3.5 shrink-0 transition-transform",
+            listOpen && "rotate-90",
+            entries.length === 0 && "invisible",
+          )}
+        />
+        {query.isPending ? (
+          "Loading your entries…"
+        ) : entries.length === 0 ? (
+          "You have not logged time on this task yet"
+        ) : (
+          <>
+            Your entries · {entries.length} ·{" "}
+            <span className="tabular-nums">{formatCellDuration(total)}</span>
+          </>
+        )}
+      </button>
+
+      {listOpen && entries.length > 0 ? (
+        <ul
+          ref={(node) => {
+            if (node) node.scrollTop = listScroll.current;
+          }}
+          onScroll={(event) => {
+            listScroll.current = event.currentTarget.scrollTop;
+          }}
+          className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
+          {entries.map((entry) => (
+            <li key={entry.id}>
+              {/* A handed-in week is shown, never offered: no edit, no bin.
+                  The database refuses those writes regardless. */}
+              <EntryRow
+                entry={entry}
+                date={entry.work_date}
+                locked={query.data!.lockedWeeks.includes(weekOf(entry.work_date))}
+                weekKey={qk.week(userId, weekOf(entry.work_date))}
+                selected={editing?.id === entry.id}
+                onEdit={() => pick(entry)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+
   return (
     <>
       <PopoverHeader>
         <PopoverTitle className="truncate text-sm">{taskTitle}</PopoverTitle>
       </PopoverHeader>
 
-      {/* ⚠️ THE HEADER ROW IS ALWAYS DRAWN, loading or not, at one fixed
-          height. A header that arrived with the data would push the form down
-          under the pointer. */}
-      <div className="flex flex-col gap-1">
-        <button
-          type="button"
-          aria-expanded={listOpen}
-          disabled={query.isPending || entries.length === 0}
-          onClick={() => setListOpen(!listOpen)}
-          className={cn(
-            "flex h-6 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground",
-            "enabled:hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
-          )}>
-          <ChevronRight
-            aria-hidden
-            className={cn(
-              "size-3.5 shrink-0 transition-transform",
-              listOpen && "rotate-90",
-              entries.length === 0 && "invisible",
-            )}
-          />
-          {query.isPending ? (
-            "Loading your entries…"
-          ) : entries.length === 0 ? (
-            "You have not logged time on this task yet"
-          ) : (
-            <>
-              Your entries · {entries.length} ·{" "}
-              <span className="tabular-nums">{formatCellDuration(total)}</span>
-            </>
-          )}
-        </button>
-
-        {listOpen && entries.length > 0 ? (
-          <ul className="flex max-h-48 flex-col gap-0.5 overflow-y-auto">
-            {entries.map((entry) => (
-              <li key={entry.id}>
-                {/* A handed-in week is shown, never offered: no edit, no bin.
-                    The database refuses those writes regardless. */}
-                <EntryRow
-                  entry={entry}
-                  date={entry.work_date}
-                  locked={query.data!.lockedWeeks.includes(weekOf(entry.work_date))}
-                  weekKey={qk.week(userId, weekOf(entry.work_date))}
-                  selected={editing?.id === entry.id}
-                  onEdit={() => pick(entry)}
-                />
-              </li>
-            ))}
-          </ul>
-        ) : null}
-      </div>
-
       {dayLocked ? (
-        <div className="flex flex-col gap-2 border-t pt-2">
-          {dateControl}
+        <div className="flex flex-col gap-2">
+          {history}
+          <div className="border-t pt-2">{dateControl}</div>
           <p className="text-2xs text-muted-foreground">
             {formatWeekday(day)}, {formatDate(day)} is in a handed-in week — read-only until your
             lead decides.
@@ -250,6 +270,7 @@ function LogTimeBody({
           weekKey={weekKey}
           canCancel={editing !== null}
           dateControl={dateControl}
+          beforeActions={<div className="border-t px-3 py-2">{history}</div>}
           onSaved={onSaved}
           onDone={() => {
             setEditing(null);

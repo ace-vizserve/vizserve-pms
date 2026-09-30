@@ -377,6 +377,7 @@ export function EntryForm({
   onDone,
   onSaved,
   dateControl,
+  beforeActions,
 }: {
   entry: CellEntry | null;
   taskId: string;
@@ -396,6 +397,8 @@ export function EntryForm({
   onSaved?: () => void;
   /** Replaces the date statement when the caller lets the day be chosen. */
   dateControl?: React.ReactNode;
+  /** Drawn between the fields and the buttons — the task list's entry list. */
+  beforeActions?: React.ReactNode;
 }) {
   const write = useEntryWrite(weekKey);
   const pending = write.isPending;
@@ -552,6 +555,8 @@ export function EntryForm({
           onChange={(next) => setDraft(withEnd(draft, next))}
         />
       </div>
+
+      {beforeActions}
 
       <div className="flex items-center justify-end gap-2 border-t bg-muted/40 px-3 py-2">
         {canCancel ? (
