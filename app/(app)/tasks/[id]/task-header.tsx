@@ -1,6 +1,10 @@
 "use client";
 
+import { Link2 } from "lucide-react";
+
 import { Chip } from "@/components/status-badge";
+import { Button } from "@/components/ui/button";
+import { toast } from "@/components/ui/toast";
 import { formatDate } from "@/lib/dates";
 import { availableTransitions, type TaskCategory, type TaskStatus, type TaskViewer } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
@@ -49,7 +53,6 @@ export function TaskHeader({
   viewer,
   task,
   canEdit,
-  listName,
   dueDate,
   late,
 }: {
@@ -62,7 +65,6 @@ export function TaskHeader({
   task: { request_id: string | null; is_personal: boolean };
   /** On the task, or leading it — the same test the surface uses. */
   canEdit: boolean;
-  listName: string | null;
   dueDate: string | null;
   late: boolean;
 }) {
@@ -77,38 +79,48 @@ export function TaskHeader({
         ? { tone: "neutral" as const, label: "Your own task" }
         : { tone: "brand" as const, label: "Internal work" };
 
+  async function copyLink() {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/tasks/${taskId}`);
+      toast.success("Link copied");
+    } catch {
+      toast.error("Could not copy the link. Copy it from the address bar instead.");
+    }
+  }
+
   return (
     <div className="min-w-0 space-y-2">
-      <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2">
-        <div className="min-w-0 flex-1">
-          {/* Editable in place. The same `updateTaskField` the list row's rename
-              calls — a second path to the same column would be a second set of
-              rules to keep in step. */}
-          <EditableTitle taskId={taskId} title={title} canEdit={canEdit} />
+      {/*
+        THE KIND AND THE CONTROLS SIT ABOVE THE TITLE, the way ClickUp lays a
+        task out: a long title wraps under them instead of pushing the one
+        button that moves the task off the right edge. On a phone the controls
+        drop to their own line (`ml-auto` inside a wrapping row).
+      */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {/*
+            ⚠️ THE KIND COMES FROM `category`, NEVER FROM WHETHER THE REQUEST
+            ROW CAME BACK. The requests policy is not the tasks policy, so a
+            PIC can hold a client task whose originating request they cannot
+            open — and deciding the KIND from a null row calls that task
+            internal, hides Gate 3, and contradicts the track above it.
+          */}
+          <Chip tone={kind.tone} label={kind.label} />
 
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            {/*
-              ⚠️ THE KIND COMES FROM `category`, NEVER FROM WHETHER THE REQUEST
-              ROW CAME BACK. The requests policy is not the tasks policy, so a
-              PIC can hold a client task whose originating request they cannot
-              open — and deciding the KIND from a null row calls that task
-              internal, hides Gate 3, and contradicts the track above it.
-            */}
-            <Chip tone={kind.tone} label={kind.label} />
-
-            {listName ? <span className="min-w-0 truncate">{listName}</span> : null}
-
-            {dueDate ? (
-              <span className={cn("tabular-nums", late ? "font-medium text-destructive" : null)}>
-                due {formatDate(dueDate)}
-                {/* Never colour alone — the state is named, not just tinted. */}
-                {late ? " · overdue" : null}
-              </span>
-            ) : null}
-          </div>
+          {dueDate ? (
+            <span className={cn("tabular-nums", late ? "font-medium text-destructive" : null)}>
+              due {formatDate(dueDate)}
+              {/* Never colour alone — the state is named, not just tinted. */}
+              {late ? " · overdue" : null}
+            </span>
+          ) : null}
         </div>
 
-        <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+          <Button variant="outline" size="sm" aria-label="Copy link" onClick={copyLink}>
+            <Link2 />
+            <span className="hidden sm:inline">Copy link</span>
+          </Button>
           {/*
             ⚠️ P7-61 — TWO SHAPES, AND THE SPLIT IS THE LENGTH OF THE LIST.
 
@@ -160,6 +172,11 @@ export function TaskHeader({
           )}
         </div>
       </div>
+
+      {/* Editable in place. The same `updateTaskField` the list row's rename
+          calls — a second path to the same column would be a second set of
+          rules to keep in step. */}
+      <EditableTitle taskId={taskId} title={title} canEdit={canEdit} />
 
       {/*
         THE GATE'S SENTENCE IS NOT HERE ANY MORE (P7-60).

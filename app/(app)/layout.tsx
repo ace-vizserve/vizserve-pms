@@ -112,7 +112,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               theme switch with it.
             */}
             <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b bg-panel shadow-chrome backdrop-blur-md backdrop-saturate-150">
-              <div className="flex items-center gap-2 px-4.5">
+              <div className="flex min-w-0 items-center gap-2 px-4.5">
                 <SidebarTrigger className="-ml-1" />
                 <Separator
                   orientation="vertical"

@@ -67,7 +67,7 @@ export function FieldFilters({
   );
 }
 
-function FieldFilter({
+export function FieldFilter({
   field,
   value,
   onChange,

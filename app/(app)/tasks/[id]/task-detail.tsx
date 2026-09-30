@@ -1,8 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ArrowRight, ChevronRight, MessagesSquare } from "lucide-react";
-import Link from "next/link";
+import { ArrowRight, ChevronRight, MessagesSquare } from "lucide-react";
 
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
@@ -58,6 +57,7 @@ import { TASK_DETAIL_GRID } from "./grid";
 import { GateTrack } from "./lifecycle-rail";
 import { SubtaskList } from "./subtask-list";
 import { TaskGateProvider } from "./task-gate";
+import { TaskLocation } from "../task-location";
 import { TaskHeader } from "./task-header";
 import { TaskOutputs } from "./task-outputs";
 import { TaskSection } from "./task-section";
@@ -278,8 +278,6 @@ export function TaskDetail({ taskId }: { taskId: string }) {
     administersDepartment: canAdminDepartment(auth, task.department_id),
   };
 
-  const listName = lists.find((list) => list.id === task.list_id)?.name ?? null;
-
   const late = isTaskOverdue(task, today);
 
   const canWork = viewer.isAssignee || viewer.isQa || viewer.leadsDepartment || viewer.inDepartment;
@@ -325,29 +323,11 @@ export function TaskDetail({ taskId }: { taskId: string }) {
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={task.title} />
-      {/*
-          BACK TO THE LIST THIS TASK IS IN, not to `/tasks`.
-
-          ⚠️ `/tasks` ON ITS OWN IS NOT A PAGE. With no `?list=` and no
-          `?view=mine|qa` it redirects to `/tasks/lists` (see the guard at the
-          top of `../page.tsx`), so a bare "All tasks" link always landed
-          somewhere other than where the reader came from — and a link whose
-          destination redirects reads as a bug even when the redirect is
-          deliberate.
-
-          ⚠️ AND THE PARAMETER IS `?list=<id>`, WHICH IS EASY TO MISTYPE INTO
-          SOMETHING THAT STILL LOOKS RIGHT. `?=list<id>` parses cleanly, carries
-          no `list` at all, and lands in that same redirect.
-
-          A task with no list falls back to the index, which is the honest
-          destination when there is no list to go back to.
-      */}
-      <Link
-        href={task.list_id ? `/tasks?list=${task.list_id}` : "/tasks/lists"}
-        className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="size-3.5" />
-        {listName ?? "All lists"}
-      </Link>
+      {/* Department › Folder › List › Task in the shell breadcrumb — it
+          replaced the "← List" back link that sat here, and the list crumb is
+          that same way back. Falls back to the label above for a task with no
+          list. */}
+      <TaskLocation listId={task.list_id} title={task.title} />
       {/*
         P7-57 — THE GATE STATE IS SHARED, and this is the reason for the wrapper.
 
@@ -375,7 +355,6 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           // task you can rename from the list but not from its own page is the
           // kind of difference nobody reports and everybody works around.
           canEdit={canWork}
-          listName={listName}
           dueDate={task.due_date}
           late={late}
         />

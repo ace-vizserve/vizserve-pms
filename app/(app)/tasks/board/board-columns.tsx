@@ -12,6 +12,7 @@ import {
   taskCategoryEdge,
   taskStatusSurface,
 } from "@/components/status-badge";
+import { SearchHighlight } from "@/components/search-highlight";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
 import type { Json, VizservePmsTaskStatus } from "@/lib/database.types";
@@ -504,7 +505,7 @@ export function BoardColumns({
                               // fixed width, so a word too long for one line still
                               // breaks rather than running out of the card.
                               className="min-w-0 flex-1 text-sm leading-snug font-medium wrap-break-word hover:underline">
-                              {task.title}
+                              <SearchHighlight text={task.title} />
                             </HoverPrefetchLink>
 
                           </div>
@@ -664,7 +665,7 @@ export function BoardColumns({
                                 href={`/tasks/${child.id}`}
                                 // Same rule as the parent card above.
                                 className="min-w-0 flex-1 text-2xs leading-snug wrap-break-word hover:underline">
-                                {child.title}
+                                <SearchHighlight text={child.title} />
                               </HoverPrefetchLink>
                             </div>
 

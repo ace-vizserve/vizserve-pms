@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAuth } from "@/lib/auth/client-auth";
+import { cn } from "@/lib/utils";
 import { browserClient } from "@/lib/query/browser-client";
 import { fetchDirectory } from "@/lib/query/fetchers/task";
 import { qk } from "@/lib/query/keys";
@@ -32,21 +33,39 @@ const ANY = "__any__";
  * key, so each keystroke is not a navigation.
  */
 export function TaskExtraFilters() {
+  return (
+    <>
+      <TaskSearch />
+      <TaskPersonDueFilters />
+    </>
+  );
+}
+
+/** Push a set of param changes to whichever view is open. */
+function useSetParams() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useSearchParams();
-  const auth = useAuth();
 
-  function setParams(changes: Record<string, string | null>) {
+  return (changes: Record<string, string | null>) => {
     const next = new URLSearchParams(params.toString());
     for (const [key, value] of Object.entries(changes)) {
       if (!value || value === ANY) next.delete(key);
       else next.set(key, value);
     }
     router.push(`${pathname}?${next.toString()}`);
-  }
+  };
+}
 
-  // ── search ──────────────────────────────────────────────────────────────────
+/**
+ * The title search. `bare` drops the visible label for a toolbar where the
+ * placeholder and the icon already say what the box is — the label stays for
+ * assistive tech.
+ */
+export function TaskSearch({ bare = false, className }: { bare?: boolean; className?: string }) {
+  const params = useSearchParams();
+  const setParams = useSetParams();
+
   const urlQuery = params.get("q") ?? "";
   const [draft, setDraft] = useState(urlQuery);
   const lastPushed = useRef(urlQuery);
@@ -71,7 +90,36 @@ export function TaskExtraFilters() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft]);
 
-  // ── person ──────────────────────────────────────────────────────────────────
+  return (
+    <div className={cn(!bare && "space-y-1.5", className)}>
+      <Label htmlFor="task-search" className={cn("text-xs text-muted-foreground", bare && "sr-only")}>
+        Search
+      </Label>
+      <div className="relative">
+        <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          id="task-search"
+          type="search"
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          placeholder={bare ? "Search tasks" : "Task name"}
+          className={cn("pl-8", bare ? "h-9 w-full" : "w-52")}
+        />
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Person, role and due date. `stacked` lays each as a label/control pair in a
+ * parent two-column grid (the filter popover) instead of a labelled column in
+ * a wrapping bar (the board).
+ */
+export function TaskPersonDueFilters({ stacked = false }: { stacked?: boolean }) {
+  const params = useSearchParams();
+  const auth = useAuth();
+  const setParams = useSetParams();
+
   const people = useQuery({ queryKey: qk.ref("users"), queryFn: () => fetchDirectory(browserClient()) });
   const person = params.get("person");
   const personItems: Record<string, string> = {
@@ -93,36 +141,18 @@ export function TaskExtraFilters() {
     ...Object.fromEntries(DUE_FILTERS.map((due) => [due, DUE_FILTER_LABELS[due]])),
   };
 
+  const Field = stacked ? StackedField : InlineField;
+
   return (
     <>
-      <div className="space-y-1.5">
-        <Label htmlFor="task-search" className="text-xs text-muted-foreground">
-          Search
-        </Label>
-        <div className="relative">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            id="task-search"
-            type="search"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            placeholder="Task name"
-            className="w-52 pl-8"
-          />
-        </div>
-      </div>
-
-      <div className="space-y-1.5">
-        <Label htmlFor="task-person" className="text-xs text-muted-foreground">
-          Person
-        </Label>
+      <Field id="task-person" label="Person">
         <Select
           items={personItems}
           value={person ?? ANY}
           // Choosing nobody drops the role too — it only means something with a person.
           onValueChange={(value) => setParams({ person: value, ...(value === ANY || !value ? { role: null } : {}) })}
         >
-          <SelectTrigger id="task-person" className="w-48">
+          <SelectTrigger id="task-person" className={stacked ? "w-full" : "w-48"}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -133,19 +163,16 @@ export function TaskExtraFilters() {
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </Field>
 
       {person ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="task-role" className="text-xs text-muted-foreground">
-            As
-          </Label>
+        <Field id="task-role" label="As">
           <Select
             items={roleItems}
             value={params.get("role") ?? "any"}
             onValueChange={(value) => setParams({ role: value === "any" ? null : value })}
           >
-            <SelectTrigger id="task-role" className="w-44">
+            <SelectTrigger id="task-role" className={stacked ? "w-full" : "w-44"}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -156,19 +183,16 @@ export function TaskExtraFilters() {
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </Field>
       ) : null}
 
-      <div className="space-y-1.5">
-        <Label htmlFor="task-due" className="text-xs text-muted-foreground">
-          Due
-        </Label>
+      <Field id="task-due" label="Due">
         <Select
           items={dueItems}
           value={params.get("due") ?? ANY}
           onValueChange={(value) => setParams({ due: value })}
         >
-          <SelectTrigger id="task-due" className="w-40">
+          <SelectTrigger id="task-due" className={stacked ? "w-full" : "w-40"}>
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -179,7 +203,32 @@ export function TaskExtraFilters() {
             ))}
           </SelectContent>
         </Select>
-      </div>
+      </Field>
+    </>
+  );
+}
+
+type FieldProps = { id: string; label: string; children: ReactNode };
+
+function InlineField({ id, label, children }: FieldProps) {
+  return (
+    <div className="space-y-1.5">
+      <Label htmlFor={id} className="text-xs text-muted-foreground">
+        {label}
+      </Label>
+      {children}
+    </div>
+  );
+}
+
+/** Two cells of the popover's label/control grid. */
+export function StackedField({ id, label, children }: FieldProps) {
+  return (
+    <>
+      <Label htmlFor={id} className="text-xs text-muted-foreground">
+        {label}
+      </Label>
+      <div className="min-w-0">{children}</div>
     </>
   );
 }

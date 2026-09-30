@@ -44,6 +44,7 @@ import { LatestCommentCell } from "./latest-comment-cell";
 import { LogTimePopover } from "./log-time-popover";
 import { TaskSelectAll, TaskSelectCheckbox } from "./task-selection";
 import { TaskStatusSelect } from "./status-select";
+import { SearchHighlight } from "@/components/search-highlight";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 import { isPlaceholder } from "./optimistic-move";
 import { DraggableTaskRow, NestTarget, TaskGrip, useTaskDndEnabled } from "./task-dnd";
@@ -635,7 +636,7 @@ export function TaskGroupTable({
                   isChild ? "text-sm font-normal" : "font-medium",
                 )}
               >
-                {task.title}
+                <SearchHighlight text={task.title} />
               </HoverPrefetchLink>
               </NestTargetIf>
 

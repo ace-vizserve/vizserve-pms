@@ -4,7 +4,6 @@ import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 
-import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
 import { isTaskStatus } from "@/components/status-badge";
@@ -28,6 +27,7 @@ import { TaskFilters } from "./filters";
 import { ListFieldsSheet } from "./list-fields-sheet";
 import { NewTaskButton } from "./new-task-button";
 import { TaskListView } from "./task-list-view";
+import { TaskLocation } from "./task-location";
 import { TaskSelectionProvider } from "./task-selection";
 import { TaskColumnsMenu, TaskColumnsProvider } from "./tasks-table";
 import { TaskToolbar } from "./toolbar";
@@ -87,7 +87,6 @@ export function TasksPageView() {
 
   if (orphan) return null;
 
-  const listName = listId ? lists.data?.find((list) => list.id === listId)?.name : undefined;
   const inPersonalList = Boolean(lists.data?.some((list) => list.id === listId && list.owner_id !== null));
   const filterReady = lists.data && groups.data && (!listId || fields.data);
 
@@ -106,8 +105,9 @@ export function TasksPageView() {
       {/* Spans the toolbar AND the groups: the menu is in the filter row and the
           tables it controls are further down. */}
       <TaskColumnsProvider>
-        {/* Which list you are in, once its name is known. */}
-        {listName ? <BreadcrumbLabel value={listName} /> : null}
+        {/* Department › Folder › List in the shell breadcrumb. `BreadcrumbLabel`
+            was here and never showed: `/tasks` has no id segment for it to name. */}
+        <TaskLocation listId={listId} />
 
         <div className="flex flex-wrap items-center gap-2">
           <TaskToolbar view="list" />
@@ -117,33 +117,30 @@ export function TasksPageView() {
           </div>
         </div>
 
-        <div className="flex flex-wrap items-end gap-3">
-          {filterReady ? (
-            inPersonalList ? (
-              <TaskFilters lists={[]} groups={[]} customFields={fields.data ?? []} />
-            ) : (
-              <TaskFilters
-                lists={lists.data!.filter((list) => list.owner_id === null)}
-                groups={groups.data!}
-                customFields={fields.data ?? []}
-              />
-            )
-          ) : (
-            <div role="status" aria-busy="true">
-              <span className="sr-only">Loading filters…</span>
-              <FilterBarSkeleton fields={2} />
-            </div>
-          )}
-
-          {/* P7-73 — with a list open, its custom fields join the column menu and
-              its field manager sits beside it for whoever may manage it. */}
-          <div className="ml-auto flex items-center gap-2">
-            <TaskColumnsMenu customFields={listId ? (manager.data?.fields.filter((field) => field.is_active) ?? []) : []} />
-            {listId && manager.data?.canManage ? (
-              <ListFieldsSheet listId={listId} fields={manager.data.fields} />
-            ) : null}
+        {/* P7-73 — with a list open, its custom fields join the column menu and
+            its field manager sits beside it for whoever may manage it. */}
+        {filterReady ? (
+          <TaskFilters
+            lists={inPersonalList ? [] : lists.data!.filter((list) => list.owner_id === null)}
+            groups={inPersonalList ? [] : groups.data!}
+            customFields={fields.data ?? []}
+            trailing={
+              <>
+                <TaskColumnsMenu
+                  customFields={listId ? (manager.data?.fields.filter((field) => field.is_active) ?? []) : []}
+                />
+                {listId && manager.data?.canManage ? (
+                  <ListFieldsSheet listId={listId} fields={manager.data.fields} />
+                ) : null}
+              </>
+            }
+          />
+        ) : (
+          <div role="status" aria-busy="true">
+            <span className="sr-only">Loading filters…</span>
+            <FilterBarSkeleton fields={2} />
           </div>
-        </div>
+        )}
 
         {/* Outside the rows so the fallback-to-content swap cannot clear which
             rows are ticked. */}

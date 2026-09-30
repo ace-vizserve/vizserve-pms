@@ -118,6 +118,7 @@
   --color-warning: var(--warning);
   --color-warning-subtle: var(--warning-subtle);
   --color-warning-border: var(--warning-border);
+  --color-highlight: var(--highlight);
   --color-info: var(--info);
   --color-info-subtle: var(--info-subtle);
   --color-info-border: var(--info-border);
@@ -469,6 +470,9 @@
   --warning: #8a6206;
   --warning-subtle: #fbf2e0;
   --warning-border: #e8d6ac;
+  /* Search-match highlight — a surface, always under --foreground (14.1:1).
+     Not a state colour: it marks the text you typed, nothing about the task. */
+  --highlight: #fde68a;
   /* Darkened from the canvas #2A7F9C, which measured 3.99:1 on --info-subtle
      and failed 4.5:1 as chip text. This is 4.57:1 there and 5.21:1 on --card. */
   --info: #277590;
@@ -641,6 +645,8 @@
   --warning: #d8a94a;
   --warning-subtle: #2a2213;
   --warning-border: #463a1f;
+  /* Under dark --foreground: 7.4:1. */
+  --highlight: #5c4b0b;
   --info: #5fb6d2;
   --info-subtle: #182931;
   --info-border: #2c4653;

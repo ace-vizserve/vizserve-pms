@@ -1,10 +1,13 @@
 "use client";
 
+import type { ReactNode } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowUpDown, ListFilter, User, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -13,13 +16,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { TASK_STATUS_OPTIONS } from "@/components/status-badge";
+import { browserClient } from "@/lib/query/browser-client";
+import { fetchDirectory } from "@/lib/query/fetchers/task";
+import { qk } from "@/lib/query/keys";
 import { TASK_PRIORITIES, TASK_PRIORITY_LABELS } from "@/lib/schemas/tasks";
 import { FIELD_KEY_PREFIX, fieldKey, type ListField } from "@/lib/schemas/list-fields";
+import { DUE_FILTER_LABELS, PERSON_ROLE_LABELS, type DueFilter, type PersonRole } from "@/lib/task-extra-filters";
 
-import { EXTRA_FILTER_KEYS } from "@/lib/task-extra-filters";
-
-import { TaskExtraFilters } from "./extra-filters";
-import { FieldFilters } from "./field-filters";
+import { StackedField, TaskPersonDueFilters, TaskSearch } from "./extra-filters";
+import { FieldFilter } from "./field-filters";
 
 const ALL = "__all__";
 
@@ -33,16 +38,26 @@ const ALL = "__all__";
  * What is left here is the pair of filters that genuinely only narrow a LIST:
  * status is a grouping on the board, and a list filter is a column it does not
  * draw.
+ *
+ * ONE TOOLBAR ROW, THE WAY CLICKUP DOES IT. This was a card of up to nine
+ * labelled selects, always open, wrapping to three rows on a laptop. Search,
+ * "Me" and sort stay in the bar; everything else is behind one Filter button
+ * that counts what is applied, and each applied filter shows as a removable
+ * chip underneath — so a narrowed list never reads as the whole list with the
+ * popover closed.
  */
 export function TaskFilters({
   lists,
   groups,
   customFields = [],
+  trailing,
 }: {
   lists: { id: string; name: string; group_id: string | null }[];
   groups: { id: string; name: string }[];
   /** P7-73. The selected list's active custom fields; empty without a list. */
   customFields?: ListField[];
+  /** Right-aligned in the same row — the column menu and field manager. */
+  trailing?: ReactNode;
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -111,10 +126,6 @@ export function TaskFilters({
     router.push(`/tasks?${next.toString()}`);
   }
 
-  const hasFilters =
-    ["status", "view", "group", "priority", "sort", ...EXTRA_FILTER_KEYS].some((key) => params.get(key)) ||
-    [...params.keys()].some((key) => key.startsWith(FIELD_KEY_PREFIX));
-
   /*
    * J — the priority filter, and the sort that stops the column being decoration.
    *
@@ -171,120 +182,223 @@ export function TaskFilters({
     ...Object.fromEntries(groups.map((group) => [group.id, group.name])),
   };
 
+  // ── what is applied ──────────────────────────────────────────────────────
+  const people = useQuery({ queryKey: qk.ref("users"), queryFn: () => fetchDirectory(browserClient()) });
+  const person = params.get("person");
+  const personName =
+    person === "me" ? "Me" : (people.data?.find((row) => row.id === person)?.full_name ?? "Someone");
+  const role = params.get("role") as PersonRole | null;
+  const activeFields = customFields.filter((field) => params.get(fieldKey(field.id)));
+
+  /*
+   * One chip per applied filter, each naming what it clears. The open list is
+   * the PLACE, not a filter — it is in the breadcrumb — so it never gets one.
+   */
+  const chips: { key: string; label: string; clears: string[] }[] = [];
+  const statusParam = params.get("status");
+  if (statusParam) {
+    chips.push({ key: "status", label: `Status: ${statusItems[statusParam] ?? statusParam}`, clears: ["status"] });
+  }
+  if (activeGroup) {
+    chips.push({ key: "group", label: `Folder: ${groupItems[activeGroup] ?? "Unknown"}`, clears: ["group"] });
+  }
+  const priorityParam = params.get("priority");
+  if (priorityParam) {
+    chips.push({
+      key: "priority",
+      label: `Priority: ${priorityItems[priorityParam] ?? priorityParam}`,
+      clears: ["priority"],
+    });
+  }
+  if (person) {
+    const as = role && role !== "any" ? ` (${PERSON_ROLE_LABELS[role] ?? role})` : "";
+    chips.push({ key: "person", label: `Person: ${personName}${as}`, clears: ["person", "role"] });
+  }
+  const dueParam = params.get("due") as DueFilter | null;
+  if (dueParam) chips.push({ key: "due", label: DUE_FILTER_LABELS[dueParam] ?? dueParam, clears: ["due"] });
+  for (const field of activeFields) {
+    chips.push({ key: fieldKey(field.id), label: `${field.name}: filtered`, clears: [fieldKey(field.id)] });
+  }
+
+  const hasFilters = chips.length > 0 || Boolean(params.get("q"));
+
+  function clearKeys(keys: string[]) {
+    const next = new URLSearchParams(params.toString());
+    for (const key of keys) next.delete(key);
+    router.push(`/tasks?${next.toString()}`);
+  }
+
+  // Clears the filters, not the place: the open list, scope, kind and sort stay.
+  function clearAll() {
+    clearKeys(["q", ...chips.flatMap((chip) => chip.clears)]);
+  }
+
+  const meOn = person === "me";
+
   return (
-    <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
-      {/* P12 — search, person and due date; shared with the board. */}
-      <TaskExtraFilters />
+    <div className="flex w-full min-w-0 flex-col gap-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <TaskSearch bare className="w-full sm:w-64" />
 
-      <div className="space-y-1.5">
-        <Label htmlFor="status" className="text-xs text-muted-foreground">
-          Status
-        </Label>
-        <Select
-          items={statusItems}
-          value={params.get("status") ?? ALL}
-          onValueChange={(value) => setParam("status", value)}
-        >
-          <SelectTrigger id="status" className="w-56">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>All statuses</SelectItem>
-            {TASK_STATUS_OPTIONS.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {groups.length > 0 ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="group" className="text-xs text-muted-foreground">
-            Folder
-          </Label>
-          {/* `items` AND the children below. Base UI renders the raw value in
-              SelectValue without the map, which here would put the literal
-              "__all__" on screen. */}
-          <Select
-            items={groupItems}
-            value={activeGroup ?? ALL}
-            onValueChange={(value) => setParam("group", value)}
+        <Popover>
+          <PopoverTrigger render={<Button variant={chips.length > 0 ? "secondary" : "outline"} size="sm" />}>
+            <ListFilter />
+            Filter
+            {chips.length > 0 ? (
+              <span className="rounded-sm bg-primary px-1.5 text-2xs font-medium text-primary-foreground tabular-nums">
+                {chips.length}
+                <span className="sr-only"> applied</span>
+              </span>
+            ) : null}
+          </PopoverTrigger>
+          <PopoverContent
+            align="start"
+            className="max-h-[min(36rem,var(--available-height))] w-[min(26rem,calc(100vw-2rem))] gap-0 overflow-y-auto p-0"
           >
-            <SelectTrigger id="group" className="w-52">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All folders</SelectItem>
-              {groups.map((group) => (
-                <SelectItem key={group.id} value={group.id}>
-                  {group.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
+            <div className="flex items-center justify-between border-b px-3 py-2">
+              <span className="text-sm font-medium">Filters</span>
+              {chips.length > 0 ? (
+                <Button variant="link" size="xs" onClick={clearAll}>
+                  Clear all
+                </Button>
+              ) : null}
+            </div>
 
-      {listsInScope.length > 0 ? (
-        <div className="space-y-1.5">
-          <Label htmlFor="list" className="text-xs text-muted-foreground">
-            List
-          </Label>
-          <Select
-            items={listItems}
-            value={params.get("list") ?? ALL}
-            onValueChange={(value) => setParam("list", value)}
-          >
-            <SelectTrigger id="list" className="w-52">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL}>All lists</SelectItem>
-              {listsInScope.map((list) => (
-                <SelectItem key={list.id} value={list.id}>
-                  {list.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-      ) : null}
+            <div className="grid grid-cols-[5rem_minmax(0,1fr)] items-center gap-x-3 gap-y-2 p-3">
+              <StackedField id="status" label="Status">
+                <Select
+                  items={statusItems}
+                  value={params.get("status") ?? ALL}
+                  onValueChange={(value) => setParam("status", value)}
+                >
+                  <SelectTrigger id="status" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>All statuses</SelectItem>
+                    {TASK_STATUS_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </StackedField>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="priority" className="text-xs text-muted-foreground">
-          Priority
-        </Label>
-        <Select
-          items={priorityItems}
-          value={params.get("priority") ?? ALL}
-          onValueChange={(value) => setParam("priority", value)}
+              <StackedField id="priority" label="Priority">
+                <Select
+                  items={priorityItems}
+                  value={params.get("priority") ?? ALL}
+                  onValueChange={(value) => setParam("priority", value)}
+                >
+                  <SelectTrigger id="priority" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL}>Any priority</SelectItem>
+                    {[...TASK_PRIORITIES].reverse().map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {TASK_PRIORITY_LABELS[value]}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </StackedField>
+
+              <TaskPersonDueFilters stacked />
+
+              {groups.length > 0 ? (
+                <StackedField id="group" label="Folder">
+                  {/* `items` AND the children below. Base UI renders the raw value in
+                      SelectValue without the map, which here would put the literal
+                      "__all__" on screen. */}
+                  <Select
+                    items={groupItems}
+                    value={activeGroup ?? ALL}
+                    onValueChange={(value) => setParam("group", value)}
+                  >
+                    <SelectTrigger id="group" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL}>All folders</SelectItem>
+                      {groups.map((group) => (
+                        <SelectItem key={group.id} value={group.id}>
+                          {group.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </StackedField>
+              ) : null}
+
+              {listsInScope.length > 0 ? (
+                <StackedField id="list" label="List">
+                  <Select
+                    items={listItems}
+                    value={params.get("list") ?? ALL}
+                    onValueChange={(value) => setParam("list", value)}
+                  >
+                    <SelectTrigger id="list" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL}>All lists</SelectItem>
+                      {listsInScope.map((list) => (
+                        <SelectItem key={list.id} value={list.id}>
+                          {list.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </StackedField>
+              ) : null}
+            </div>
+
+            {/* P7-73 — the open list's custom fields, under their own heading
+                rather than in a second popover. */}
+            {customFields.length > 0 ? (
+              <div className="space-y-3 border-t p-3">
+                <span className="block text-xs font-medium text-muted-foreground">Custom fields</span>
+                {customFields.map((field) => (
+                  <FieldFilter
+                    key={field.id}
+                    field={field}
+                    value={params.get(fieldKey(field.id))}
+                    onChange={(next) => setParam(fieldKey(field.id), next)}
+                  />
+                ))}
+              </div>
+            ) : null}
+          </PopoverContent>
+        </Popover>
+
+        {/* The filter people reach for all day, one click instead of three. */}
+        <Button
+          variant={meOn ? "secondary" : "outline"}
+          size="sm"
+          aria-pressed={meOn}
+          onClick={() => {
+            const next = new URLSearchParams(params.toString());
+            if (meOn) {
+              next.delete("person");
+              next.delete("role");
+            } else {
+              next.set("person", "me");
+            }
+            router.push(`/tasks?${next.toString()}`);
+          }}
         >
-          <SelectTrigger id="priority" className="w-40">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value={ALL}>Any priority</SelectItem>
-            {[...TASK_PRIORITIES].reverse().map((value) => (
-              <SelectItem key={value} value={value}>
-                {TASK_PRIORITY_LABELS[value]}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
+          <User />
+          Me
+        </Button>
 
-      <div className="space-y-1.5">
-        <Label htmlFor="sort" className="text-xs text-muted-foreground">
+        <Label htmlFor="sort" className="sr-only">
           Sort by
         </Label>
-        <Select
-          items={sortItems}
-          value={params.get("sort") ?? "due"}
-          onValueChange={setSort}
-        >
-          <SelectTrigger id="sort" className="w-36">
+        <Select items={sortItems} value={params.get("sort") ?? "due"} onValueChange={setSort}>
+          <SelectTrigger id="sort" size="sm" className="w-auto gap-1.5">
+            <ArrowUpDown className="size-3.5 text-muted-foreground" aria-hidden />
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -297,24 +411,34 @@ export function TaskFilters({
             ))}
           </SelectContent>
         </Select>
+
+        {trailing ? <div className="ml-auto flex items-center gap-2">{trailing}</div> : null}
       </div>
 
-      <FieldFilters fields={customFields} params={params as unknown as URLSearchParams} setParam={setParam} />
-
       {hasFilters ? (
-        <Button
-          variant="ghost"
-          size="sm"
-          // Clears the filters, not the place: staying inside the open list.
-          // A bare `/tasks` redirects to the list index.
-          onClick={() => {
-            const list = params.get("list");
-            router.push(list ? `/tasks?list=${list}` : "/tasks");
-          }}
-        >
-          <X />
-          Clear
-        </Button>
+        <ul className="flex flex-wrap items-center gap-1.5" aria-label="Applied filters">
+          {chips.map((chip) => (
+            <li
+              key={chip.key}
+              className="inline-flex h-7 max-w-full items-center gap-1 rounded-sm border bg-card pr-0.5 pl-2 text-xs shadow-raised"
+            >
+              <span className="truncate">{chip.label}</span>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                aria-label={`Remove ${chip.label}`}
+                onClick={() => clearKeys(chip.clears)}
+              >
+                <X />
+              </Button>
+            </li>
+          ))}
+          <li>
+            <Button variant="link" size="xs" onClick={clearAll}>
+              Clear all
+            </Button>
+          </li>
+        </ul>
       ) : null}
     </div>
   );
