@@ -33,7 +33,7 @@ const STORED_ROLES: readonly Role[] = ROLE_ORDER;
 
 describe("RANK_LADDER — what the form offers", () => {
   it("is the enum most-senior-first, with the dead rung removed", () => {
-    expect([...RANK_LADDER]).toEqual(["owner", "manager", "team_leader", "member"]);
+    expect([...RANK_LADDER]).toEqual(["owner", "business_manager", "manager", "team_leader", "member"]);
   });
 
   it("does not offer `admin`, which grants nothing", () => {
@@ -100,7 +100,8 @@ describe("⚠️ FIX 4 — a stored `admin` row is demotable, and shows what it 
 
   it("unticking Manager lands on Team Leader, not on the dead rung", () => {
     expect(rankBelow("manager")).toBe("team_leader");
-    expect(rankBelow("owner")).toBe("manager");
+    expect(rankBelow("owner")).toBe("business_manager");
+    expect(rankBelow("business_manager")).toBe("manager");
     expect(rankBelow("team_leader")).toBe("member");
   });
 

@@ -224,7 +224,8 @@ describe("the count and the list agree about what is waiting", () => {
       vizserve_pms_internal_requests: { count: 2 },
       [WEEKS]: { count: 3 },
     });
-    await countWaitingOnYou(counted.supabase, leadCtx, true);
+    // P14-04. The manager — the only person with a weeks queue.
+    await countWaitingOnYou(counted.supabase, managerCtx, true);
 
     const listed = fakeSupabase({ [WEEKS]: { data: [] } });
     await listPendingTimesheetWeeks(listed.supabase, "me", true);
@@ -281,8 +282,10 @@ describe("the count and the list agree about what is waiting", () => {
     });
     const waiting = await countWaitingOnYou(supabase, leadCtx, true);
 
-    expect(waiting.total).toBe(7);
-    expect(waiting.breakdown).toBe("4 internal · 3 weeks");
+    // P14-04. Weeks go straight to the manager, so a lead's weeks queue is empty
+    // and the tile does not mention it.
+    expect(waiting.total).toBe(4);
+    expect(waiting.breakdown).toBe("4 internal");
   });
 
   /**
@@ -328,7 +331,7 @@ describe("listWaitingOnYou — the rows behind the count", () => {
       [RELIEVERS]: { data: [] },
     });
 
-    const rows = await listWaitingOnYou(supabase, leadCtx, true);
+    const rows = await listWaitingOnYou(supabase, managerCtx, true);
     expect(rows).toHaveLength(1);
     expect(rows[0]).toMatchObject({
       id: "wk-week-1",
@@ -392,6 +395,15 @@ describe("waitingOnMe — whose turn is it", () => {
     // it. The decide function refuses them a second signature outright.
     expect(waitingOnMe(pending(3), leadCtx, none)).toBe(false);
     expect(waitingOnMe(pending(3), memberCtx, none)).toBe(false);
+  });
+
+  it("gives nothing to CEO, Business Manager or Admin — approval is a job, not a rank (P14-04)", () => {
+    for (const role of ["owner", "business_manager", "admin"] as const) {
+      const top = { ...leadCtx, role };
+      for (const stage of [0, 2, 3]) {
+        expect(waitingOnMe(pending(stage), top, none)).toBe(false);
+      }
+    }
   });
 
   it("treats a null stage as the unchained path, not as stage zero by accident", () => {

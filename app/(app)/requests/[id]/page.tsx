@@ -12,7 +12,7 @@ import {
 } from "@/components/status-badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { RichText } from "@/components/ui/rich-text";
-import { requireRole } from "@/lib/auth/authorization";
+import { canApproveClientRequest, requireRole } from "@/lib/auth/authorization";
 import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
 import { createClient } from "@/utils/supabase/server";
 
@@ -333,7 +333,8 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         </CardContent>
       </Card>
 
-      {awaitingDecision ? (
+      {/* P14-04. Gate 1 is a Team Leader of the form's department, or the Manager — not CEO, Business Manager or Admin. */}
+      {awaitingDecision && canApproveClientRequest(context, form?.department_id ?? null) ? (
         <ReviewPanel
           requestId={request.id}
           requestTitle={request.title}

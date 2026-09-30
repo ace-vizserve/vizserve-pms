@@ -23,6 +23,8 @@ import {
   punchComparison,
 } from "@/lib/schemas/timesheet";
 import { cn } from "@/lib/utils";
+import { approvesTimesheets } from "@/lib/auth/rules";
+import { useAuth } from "@/lib/auth/client-auth";
 
 import { invalidateTimesheetWrite } from "@/lib/query/invalidate";
 import { fromAction } from "@/lib/query/mutate";
@@ -906,6 +908,8 @@ function WeekDecision({
 }) {
   const [returning, setReturning] = useState(false);
   const [reason, setReason] = useState("");
+  // P14-04. Weeks go straight to the Manager; a Team Leader sees the status only.
+  const canDecide = approvesTimesheets(useAuth());
 
   const queryClient = useQueryClient();
 
@@ -998,7 +1002,7 @@ function WeekDecision({
         <p className="text-2xs text-muted-foreground">Sent back: {row.decisionReason}</p>
       ) : null}
 
-      {row.status === "SUBMITTED" ? (
+      {row.status === "SUBMITTED" && canDecide ? (
         returning ? (
           <div className="space-y-1.5">
             <Textarea

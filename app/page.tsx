@@ -5,7 +5,7 @@ import { ArrowRight, Clock, LayoutDashboard, LogOut, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { DayHalf } from "@/lib/leave";
-import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import { isApprover as holdsApprovalQueue, requireAuthContext } from "@/lib/auth/authorization";
 import { listWaitingOnYou } from "@/lib/approvals-queue-server";
 import { countMyOpenTasks, countMyQaQueue, countUnreadNotifications } from "@/lib/counts-server";
 import { loadPunchState } from "@/lib/dtr-server";
@@ -673,7 +673,8 @@ export default async function DashboardPage({
   const params = await searchParams;
   const supabase = await createClient();
 
-  const isApprover = roleAtLeast(context.role, "team_leader");
+  // P14-04. Team Leaders and the Manager — CEO, Business Manager and Admin approve nothing.
+  const isApprover = holdsApprovalQueue(context);
   const firstName = context.fullName.trim().split(" ")[0] || "there";
   const today = todayInAppZone();
 

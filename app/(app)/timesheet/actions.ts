@@ -67,7 +67,7 @@ function readableError(error: { message?: string; code?: string } | null): strin
  * gone). Naming the likely one is more use than describing both.
  */
 const LOCKED_OR_GONE =
-  "That week has been submitted, so its entries are read-only. Ask your lead to send it back.";
+  "That week has been submitted, so its entries are read-only. Ask the manager to send it back.";
 
 /**
  * Both the week view and the dashboard read this table, and an entry logged

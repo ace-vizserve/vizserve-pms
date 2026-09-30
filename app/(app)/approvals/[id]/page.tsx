@@ -346,6 +346,11 @@ export default async function InternalRequestPage({ params }: { params: Promise<
           meta: metaLine("Rejected", metaDate(row?.created_at), decidedBy(row)),
         };
       }
+      // P14-04. A Team Leader's own request, or a department with no other Team
+      // Leader, goes straight to the Manager — the step passed with no signature.
+      if (past && !row && stage === 2) {
+        return { label, state: "done", meta: "Skipped — went to the manager" };
+      }
       if (past) {
         return { label, state: "done", meta: metaLine(metaDate(row?.created_at), decidedBy(row)) };
       }

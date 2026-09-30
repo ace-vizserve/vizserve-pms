@@ -7,7 +7,7 @@ import {
   listPendingTimesheetWeeks,
   waitingOnMe,
 } from "@/lib/approvals-queue-server";
-import { requireAuthContext } from "@/lib/auth/authorization";
+import { approvesTimesheets, requireAuthContext } from "@/lib/auth/authorization";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
@@ -155,7 +155,8 @@ export default async function ApprovalsPage({
    * is where INTERNAL work is settled. Weeks are here because they had no screen
    * of their own at all.
    */
-  const isApprover = roleAtLeast(context.role, "team_leader");
+  // P14-04. Weeks are the Manager's alone.
+  const approvesWeeks = approvesTimesheets(context);
 
   const [
     { data: mineData, error: requestsError, count: mineCount },
@@ -233,7 +234,7 @@ export default async function ApprovalsPage({
      *
      * The same detectable cap as the queue above: one more than shown.
      */
-    listPendingTimesheetWeeks(supabase, context.userId, isApprover, APPROVALS_PAGE_SIZE + 1),
+    listPendingTimesheetWeeks(supabase, context.userId, approvesWeeks, APPROVALS_PAGE_SIZE + 1),
 
     /*
      * P11-11 — who this person may name as a reliever: ANY ACTIVE COLLEAGUE.
@@ -418,7 +419,7 @@ export default async function ApprovalsPage({
           be able to look like an empty one. Hidden entirely for a member, who
           approves nothing and would otherwise get a heading with a permanent
           empty table under it. */}
-      {isApprover && (pendingWeeks.length > 0 || weeksQueue.error) ? (
+      {approvesWeeks && (pendingWeeks.length > 0 || weeksQueue.error) ? (
         <>
           <TimesheetWeeksSection
             rows={pendingWeeks}

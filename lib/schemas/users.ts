@@ -311,6 +311,11 @@ export const ROLE_LABELS: Record<z.infer<typeof roleSchema>, { label: string; hi
     label: "CEO",
     hint: "Everything, every department. Manages users, roles and settings.",
   },
+  // P14-02. On par with CEO; one step below it only because a ladder has no ties.
+  business_manager: {
+    label: "Business Manager",
+    hint: "Everything, every department, alongside the CEO. Manages users, roles and settings.",
+  },
   admin: {
     label: "Admin (retired)",
     hint: "The old name for CEO. Nobody holds it; kept so legacy records still read.",

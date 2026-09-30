@@ -64,7 +64,20 @@ describe("roleAtLeast — roles are inclusive (D15)", () => {
     // Postgres enum still declares it, because dropping an enum value means
     // rebuilding the type on a live database. Remove it from the array alone
     // and every index shifts against a `>=` in SQL that did not move.
-    expect(ROLE_ORDER).toEqual(["member", "team_leader", "manager", "admin", "owner"]);
+    expect(ROLE_ORDER).toEqual(["member", "team_leader", "manager", "admin", "business_manager", "owner"]);
+  });
+
+  it("fails closed on a role missing from ROLE_ORDER", () => {
+    // indexOf -1 used to let every member past a floor nobody had declared.
+    expect(roleAtLeast("member", "ceo" as Role)).toBe(false);
+    expect(roleAtLeast("ceo" as Role, "member")).toBe(false);
+  });
+
+  it("business_manager is under owner and over everything else", () => {
+    expect(roleAtLeast("business_manager", "admin")).toBe(true);
+    expect(roleAtLeast("owner", "business_manager")).toBe(true);
+    expect(roleAtLeast("business_manager", "owner")).toBe(false);
+    expect(roleAtLeast("member", "business_manager")).toBe(false);
   });
 
   it("owner satisfies every floor", () => {
@@ -130,11 +143,11 @@ describe("canAccessDepartment", () => {
     expect(canAccessDepartment(tl, null)).toBe(false);
   });
 
-  it("gives a manager exactly the departments they manage", () => {
-    const manager = context({ role: "manager", managedDepartmentIds: [DEPT_A, DEPT_B] });
+  it("gives the manager every department — managers oversee them all (P14-04)", () => {
+    const manager = context({ role: "manager", managedDepartmentIds: [] });
     expect(canAccessDepartment(manager, DEPT_A)).toBe(true);
-    expect(canAccessDepartment(manager, DEPT_B)).toBe(true);
-    expect(canAccessDepartment(manager, DEPT_C)).toBe(false);
+    expect(canAccessDepartment(manager, DEPT_C)).toBe(true);
+    expect(departmentScopeFilter(manager)).toBeNull();
   });
 });
 

@@ -32,6 +32,7 @@ import {
   rollbackTimesheetWrite,
 } from "@/lib/query/timesheet-cache";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/lib/auth/client-auth";
 
 import { submitTimesheetWeek, withdrawTimesheetWeek } from "./writes";
 
@@ -108,6 +109,9 @@ export function WeekStatusBar({
 }) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
+  // P14-04. The manager's own weeks approve themselves (nobody sits above them),
+  // so they may also take an approved week back to revise it.
+  const skipsApproval = useAuth().role === "manager";
 
   /*
    * P12-23 — SUBMITTING LOCKS THE GRID NOW, RATHER THAN AFTER A ROUND TRIP.
@@ -149,7 +153,7 @@ export function WeekStatusBar({
     },
 
     onSuccess: () => {
-      toast.success("Week sent to your department lead.");
+      toast.success(skipsApproval ? "Week approved." : "Week sent to the manager.");
     },
 
     /* Fired, never awaited. The lead's grid moves too — see
@@ -349,7 +353,7 @@ export function WeekStatusBar({
       {/* SUBMITTED → cancel it to revise (P7-05b). APPROVED → nothing: reopening
           a signed week is the lead's call, and a greyed button would only
           invite the question. Anything else → submit. */}
-      {status === "SUBMITTED" ? (
+      {status === "SUBMITTED" || (status === "APPROVED" && skipsApproval) ? (
         <Button variant="outline" onClick={() => withdrawWeek.mutate()} loading={pending}>
           <Undo2 />
           Cancel submission
@@ -370,7 +374,7 @@ export function WeekStatusBar({
               <DialogDescription>
                 You logged {formatCellDuration(weekTotalMinutes)} of the{" "}
                 {formatCellDuration(short.minimumMinutes)} expected this week —{" "}
-                {formatCellDuration(short.minutes)} short. Your team leader will see that this week
+                {formatCellDuration(short.minutes)} short. The manager will see that this week
                 is short of your working hours.
               </DialogDescription>
             </DialogHeader>

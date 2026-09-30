@@ -165,10 +165,41 @@ export function canAdminDepartment(context: AuthContext, departmentId: string | 
  */
 export function canAccessDepartment(context: AuthContext, departmentId: string | null): boolean {
   if (roleAtLeast(context.role, "owner")) return true;
+  // P14-04. The manager oversees every department — `vizserve_pms_manages_department` says so.
+  if (context.role === "manager") return true;
   if (!departmentId) return false;
   return (
     roleAtLeast(context.role, "team_leader") && context.managedDepartmentIds.includes(departmentId)
   );
+}
+
+/*
+ * P14-04 — WHO APPROVES. Approval is a job, not a rank: these are EQUALITY tests
+ * on purpose, so CEO (owner), Business Manager and Admin approve nothing even
+ * though they outrank the Manager. Mirrors `vizserve_pms_can_approve`,
+ * `vizserve_pms_team_leaders_of` and `vizserve_pms_managers`
+ * (20260930100000_p14_04_approval_routing.sql). For display only — the
+ * database functions are the authority.
+ */
+
+/** Has any approval queue at all: Team Leaders and the Manager. */
+export function isApprover(context: Pick<AuthContext, "role">): boolean {
+  return context.role === "team_leader" || context.role === "manager";
+}
+
+/** Timesheets go straight to the Manager. */
+export function approvesTimesheets(context: Pick<AuthContext, "role">): boolean {
+  return context.role === "manager";
+}
+
+/** Client Gate 1: a Team Leader of that department, or the Manager. */
+export function canApproveClientRequest(
+  context: Pick<AuthContext, "role" | "managedDepartmentIds">,
+  departmentId: string | null,
+): boolean {
+  if (context.role === "manager") return true;
+  if (context.role !== "team_leader" || !departmentId) return false;
+  return context.managedDepartmentIds.includes(departmentId);
 }
 
 

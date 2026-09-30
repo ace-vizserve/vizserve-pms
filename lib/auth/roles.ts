@@ -29,7 +29,7 @@ import type { VizservePmsUserRole } from "@/lib/database.types";
  * disagreement the comment above warns produces a security bug rather than a
  * type error.
  */
-export const ROLE_ORDER = ["member", "team_leader", "manager", "admin", "owner"] as const;
+export const ROLE_ORDER = ["member", "team_leader", "manager", "admin", "business_manager", "owner"] as const;
 
 export type Role = VizservePmsUserRole;
 
@@ -45,5 +45,10 @@ export type Role = VizservePmsUserRole;
  */
 export function roleAtLeast(role: Role | null | undefined, required: Role): boolean {
   if (!role) return false;
-  return ROLE_ORDER.indexOf(role) >= ROLE_ORDER.indexOf(required);
+  // FAIL CLOSED. An unknown `required` is indexOf -1, and every role is >= -1:
+  // a rung renamed in code but not in ROLE_ORDER opened /admin to members.
+  const held = ROLE_ORDER.indexOf(role);
+  const needed = ROLE_ORDER.indexOf(required);
+  if (held < 0 || needed < 0) return false;
+  return held >= needed;
 }

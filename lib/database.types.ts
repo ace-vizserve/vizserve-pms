@@ -16,7 +16,7 @@ export type Json = string | number | boolean | null | { [key: string]: Json | un
  * database. Order here is the LADDER — it must match the enum's declaration
  * order and `ROLE_ORDER` in `lib/auth/roles.ts` exactly.
  */
-export type VizservePmsUserRole = "member" | "team_leader" | "manager" | "admin" | "owner";
+export type VizservePmsUserRole = "member" | "team_leader" | "manager" | "admin" | "business_manager" | "owner";
 
 export type VizservePmsNotificationType =
   | "pending_approval"

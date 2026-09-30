@@ -4,7 +4,7 @@ import Link from "next/link";
 import { ArrowRight, Bell, ClipboardCheck, ListChecks, ShieldCheck, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { requireAuthContext, roleAtLeast } from "@/lib/auth/authorization";
+import { isApprover as holdsApprovalQueue, requireAuthContext } from "@/lib/auth/authorization";
 import { countWaitingOnYou, listWaitingOnYou } from "@/lib/approvals-queue-server";
 import { countMyOpenTasks, countMyQaQueue, countUnreadNotifications } from "@/lib/counts-server";
 import {
@@ -567,7 +567,8 @@ async function GreetingSubtitle({ needsYou }: { needsYou: ReturnType<typeof load
 export default async function DashboardPage() {
   const context = await requireAuthContext();
   const supabase = await createClient();
-  const isApprover = roleAtLeast(context.role, "team_leader");
+  // P14-04. Team Leaders and the Manager — CEO, Business Manager and Admin approve nothing.
+  const isApprover = holdsApprovalQueue(context);
   const firstName = context.fullName.trim().split(" ")[0] || "there";
 
   const today = todayInAppZone();

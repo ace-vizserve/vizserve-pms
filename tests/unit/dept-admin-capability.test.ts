@@ -52,12 +52,12 @@ describe("ROLE_ORDER — the ladder, with owner appended", () => {
   it("declares exactly the Postgres enum, in the enum's order", () => {
     // ⚠️ IF YOU ARE HERE BECAUSE THIS FAILED, DO NOT JUST UPDATE THE ARRAY.
     // This list must mirror `vizserve_pms_user_role`'s DECLARATION ORDER:
-    //   ('member', 'team_leader', 'manager', 'admin', 'owner')
-    // — p0_02:22 plus p8_01a. `roleAtLeast` compares with indexOf and
+    //   ('member', 'team_leader', 'manager', 'admin', 'business_manager', 'owner')
+    // — p0_02:22 plus p8_01a and p14_02a. `roleAtLeast` compares with indexOf and
     // `vizserve_pms_has_role` compares with `>=`, and the two must answer the
     // same question or a role check passes in the UI and fails in the database
     // (or, far worse, the reverse).
-    expect([...ROLE_ORDER]).toEqual(["member", "team_leader", "manager", "admin", "owner"]);
+    expect([...ROLE_ORDER]).toEqual(["member", "team_leader", "manager", "admin", "business_manager", "owner"]);
   });
 
   it("keeps `admin` as a DEAD RUNG rather than deleting it", () => {
@@ -67,7 +67,8 @@ describe("ROLE_ORDER — the ladder, with owner appended", () => {
     // would shift every index by one against a `>=` in SQL that did not move.
     expect(ROLE_ORDER).toContain("admin");
     expect(ROLE_ORDER.indexOf("admin")).toBe(ROLE_ORDER.indexOf("manager") + 1);
-    expect(ROLE_ORDER.indexOf("owner")).toBe(ROLE_ORDER.indexOf("admin") + 1);
+    expect(ROLE_ORDER.indexOf("business_manager")).toBe(ROLE_ORDER.indexOf("admin") + 1);
+    expect(ROLE_ORDER.indexOf("owner")).toBe(ROLE_ORDER.indexOf("business_manager") + 1);
   });
 
   it("puts owner at the top, and nothing above it", () => {

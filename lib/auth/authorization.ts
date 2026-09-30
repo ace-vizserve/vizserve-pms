@@ -46,9 +46,12 @@ export { APP_ACCESS_KEY };
  * imported from this one module on the server.
  */
 export {
+  approvesTimesheets,
   canAccessDepartment,
   canAdminDepartment,
+  canApproveClientRequest,
   canDoHr,
+  isApprover,
   canManageAnyDepartmentTree,
   canManageDepartmentTree,
   canShapeAnyDepartment,
@@ -472,6 +475,8 @@ export function assertDepartmentAccess(context: AuthContext, departmentId: strin
  */
 export function departmentScopeFilter(context: AuthContext): string[] | null {
   if (roleAtLeast(context.role, "owner")) return null;
+  // P14-04. The manager oversees every department — `vizserve_pms_manages_department` says so.
+  if (context.role === "manager") return null;
   if (!roleAtLeast(context.role, "team_leader")) return [];
   return context.managedDepartmentIds;
 }

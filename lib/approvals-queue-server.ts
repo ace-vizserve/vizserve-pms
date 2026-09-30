@@ -2,10 +2,9 @@ import { cache } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import {
-  canAccessDepartment,
+  approvesTimesheets,
   type AuthContext,
 } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
 import type { Database } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import {
@@ -95,15 +94,15 @@ export function waitingOnMe(
       return owedAsReliever.has(row.id);
     // Company-wide, and the one place in this app where approval authority is
     // not scoped to a managed department. Amier, 4 Sep.
+    // P14-04: the Manager only — CEO, Business Manager and Admin approve nothing.
     case 3:
-      return roleAtLeast(context.role, "manager");
-    // Stage 0 (every non-leave type) and stage 2 (the team leader) are the rule
-    // that has always applied: a lead of the department the request was routed
-    // to. `owner` passes through `canAccessDepartment` with no managed set.
+      return context.role === "manager";
+    // Stage 2 (and a legacy stage-0 row): a Team Leader assigned that
+    // department. Mirrors `vizserve_pms_team_leaders_of`.
     default:
       return (
-        roleAtLeast(context.role, "team_leader") &&
-        canAccessDepartment(context as AuthContext, row.department_id)
+        context.role === "team_leader" &&
+        context.managedDepartmentIds.includes(row.department_id)
       );
   }
 }
@@ -401,11 +400,14 @@ export async function countWaitingOnYou(
     // head count wants no columns and no embed back; the two filters are the
     // part that must not drift, and `tests/unit/approvals-queue.test.ts` pins
     // them saying the same thing.
-    supabase
-      .from("vizserve_pms_timesheet_weeks")
-      .select("id", { count: "exact", head: true })
-      .eq("status", WEEK_WAITING)
-      .neq("user_id", userId),
+    // P14-04. Only the Manager approves weeks; everybody else's count is zero.
+    approvesTimesheets(context)
+      ? supabase
+          .from("vizserve_pms_timesheet_weeks")
+          .select("id", { count: "exact", head: true })
+          .eq("status", WEEK_WAITING)
+          .neq("user_id", userId)
+      : { count: 0 },
   ]);
 
   const counts = {
@@ -531,7 +533,7 @@ export async function listWaitingOnYou(
     // that page needed the submitted total and the week's status, which a
     // `WaitingRow` has nowhere to put — and a second copy of "which weeks are
     // waiting on you" is exactly the divergence this file exists to stop.
-    listPendingTimesheetWeeks(supabase, userId, isApprover, perQueue),
+    listPendingTimesheetWeeks(supabase, userId, approvesTimesheets(context), perQueue),
 
     supabase.from("vizserve_pms_users").select("id, full_name"),
   ]);

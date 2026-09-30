@@ -48,7 +48,7 @@ function readableError(error: { message?: string; code?: string } | null): strin
 }
 
 const LOCKED_OR_GONE =
-  "That week has been submitted, so its entries are read-only. Ask your lead to send it back.";
+  "That week has been submitted, so its entries are read-only. Ask the manager to send it back.";
 
 /**
  * The signed-in user's id, from the session the browser already holds — no
