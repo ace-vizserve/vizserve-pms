@@ -2,10 +2,10 @@ import type { Metadata } from "next";
 
 import { PageShell } from "@/components/page-shell";
 import { requireAdmin } from "@/lib/auth/authorization";
-import { NOTIFICATION_TYPES } from "@/lib/notifications";
-import { loadAppSettings, loadNotificationEmailSettings } from "@/lib/settings-server";
+import { loadAppSettings } from "@/lib/settings-server";
+import { createClient } from "@/utils/supabase/server";
 
-import { NotificationEmailForm } from "./notification-email-form";
+import { NotificationRulesForm } from "./notification-rules-form";
 import { SettingsForm } from "./settings-form";
 
 export const metadata: Metadata = { title: "Settings" };
@@ -33,26 +33,22 @@ export const metadata: Metadata = { title: "Settings" };
 export default async function SettingsPage() {
   await requireAdmin();
 
-  const [settings, notificationEmails] = await Promise.all([loadAppSettings(), loadNotificationEmailSettings()]);
+  const supabase = await createClient();
 
-  /*
-   * P8-19 — ORDERED HERE, IN THE UI, RATHER THAN BY THE QUERY. The useful order
-   * is the one `NOTIFICATION_TYPES` already declares — roughly the lifecycle,
-   * gates first — and it is the same order the inbox filter lists. Postgres has
-   * no opinion that matches it: ordering by the enum would give declaration
-   * order, which is the order the types were BUILT in across five phases, and
-   * alphabetical would put "assigned" above "client decision" for no reason.
-   *
-   * Anything the database has and the mirror does not goes on the end rather
-   * than being dropped. The form renders it with its raw name and says why.
-   */
-  const orderedNotificationEmails = notificationEmails
-    ? [...notificationEmails].sort((a, b) => {
-        const left = (NOTIFICATION_TYPES as readonly string[]).indexOf(a.type);
-        const right = (NOTIFICATION_TYPES as readonly string[]).indexOf(b.type);
-        return (left === -1 ? Number.MAX_SAFE_INTEGER : left) - (right === -1 ? Number.MAX_SAFE_INTEGER : right);
-      })
-    : null;
+  // P14-09. The catalogue, its rules, and the people a rule can name — read
+  // through the Admin's own policies (the rules tables are Admin-only).
+  const [settings, events, rules, people] = await Promise.all([
+    loadAppSettings(),
+    supabase
+      .from("vizserve_pms_notification_events")
+      .select("key, flow, flow_label, flow_sort, stage_label, sort, ends_flow, description"),
+    supabase
+      .from("vizserve_pms_notification_rules")
+      .select("id, event_key, audience_kind, audience, user_id, in_app, email, locked"),
+    supabase.from("vizserve_pms_users").select("id, full_name").eq("is_active", true).order("full_name"),
+  ]);
+
+  const rulesFailed = events.error || rules.error || !events.data || events.data.length === 0;
 
   return (
     <PageShell>
@@ -63,25 +59,19 @@ export default async function SettingsPage() {
         recorded.
       </p>
 
-      <div className="grid w-full grid-cols-1 items-start gap-4 lg:grid-cols-3">
-        <SettingsForm graceMinutes={settings.graceMinutes} breakMinutes={settings.breakMinutes} />
+      <SettingsForm graceMinutes={settings.graceMinutes} breakMinutes={settings.breakMinutes} />
 
-        {/* ⚠️ NOT AN EMPTY STATE — a failed read. `loadNotificationEmailSettings`
-          returns null rather than falling back precisely so this branch exists:
-          eight switches drawn in the OFF position from a default would let an
-          owner "save" company-wide email off for every gate in the app. */}
-        <div className="lg:col-span-2">
-          {orderedNotificationEmails ? (
-            <NotificationEmailForm rows={orderedNotificationEmails} />
-          ) : (
-            <p className="rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
-              Could not read the email notification settings. The switches are hidden rather than shown at a guess,
-              because saving a guess would turn email off for everything. Reload, and if it persists the notification
-              types are missing from this database.
-            </p>
-          )}
-        </div>
-      </div>
+      {/* ⚠️ A FAILED READ, NOT AN EMPTY STATE — drawn as a message rather than
+          as switches at a guess. Before P14-09 is applied the tables do not
+          exist, and this is what shows. */}
+      {rulesFailed ? (
+        <p className="rounded-lg border bg-card grade-surface p-4 text-xs text-muted-foreground shadow-raised-lg">
+          Could not read the notification settings. If this persists, the P14-09 database change has not been
+          applied yet.
+        </p>
+      ) : (
+        <NotificationRulesForm events={events.data} rules={rules.data ?? []} people={people.data ?? []} />
+      )}
     </PageShell>
   );
 }

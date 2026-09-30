@@ -126,6 +126,8 @@ export async function fetchInbox(
     .select("id, type, title, body, link_path, read_at, created_at, send_email, emailed_at", {
       count: "exact",
     })
+    // P14-09. Email-only rows are for the outbox, not the inbox.
+    .eq("in_app", true)
     .order(ORDER_COLUMN[sort], { ascending })
     .range(from, from + params.pageSize - 1);
 
@@ -183,6 +185,7 @@ export async function fetchUnreadCount(client: InboxReadClient): Promise<number>
     client
       .from("vizserve_pms_notifications")
       .select("id", { count: "exact", head: true })
+      .eq("in_app", true)
       .is("read_at", null),
   );
 }

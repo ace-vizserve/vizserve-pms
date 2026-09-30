@@ -50,6 +50,8 @@ export const countUnreadNotifications = cache(async (): Promise<number> => {
   const { count } = await supabase
     .from("vizserve_pms_notifications")
     .select("id", { count: "exact", head: true })
+    // P14-09. Email-only rows never show in the inbox, so they never count.
+    .eq("in_app", true)
     .is("read_at", null);
 
   return count ?? 0;

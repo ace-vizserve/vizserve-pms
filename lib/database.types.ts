@@ -457,6 +457,93 @@ export type Database = {
           },
         ];
       };
+      /** P14-09. One row per stage of a process that can notify anybody. Migrations only. */
+      vizserve_pms_notification_events: {
+        Row: {
+          key: string;
+          flow: string;
+          flow_label: string;
+          flow_sort: number;
+          stage_label: string;
+          sort: number;
+          notification_type: VizservePmsNotificationType;
+          ends_flow: boolean;
+          description: string;
+        };
+        Insert: {
+          key: string;
+          flow: string;
+          flow_label: string;
+          flow_sort: number;
+          stage_label: string;
+          sort: number;
+          notification_type: VizservePmsNotificationType;
+          ends_flow?: boolean;
+          description?: string;
+        };
+        Update: {
+          key?: string;
+          flow?: string;
+          flow_label?: string;
+          flow_sort?: number;
+          stage_label?: string;
+          sort?: number;
+          notification_type?: VizservePmsNotificationType;
+          ends_flow?: boolean;
+          description?: string;
+        };
+        Relationships: [];
+      };
+      /** P14-09. Who is told at each notification event, in-app and by email. */
+      vizserve_pms_notification_rules: {
+        Row: {
+          id: string;
+          event_key: string;
+          audience_kind: "relationship" | "role" | "user";
+          audience: string | null;
+          user_id: string | null;
+          in_app: boolean;
+          email: boolean;
+          locked: boolean;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_key: string;
+          audience_kind: "relationship" | "role" | "user";
+          audience?: string | null;
+          user_id?: string | null;
+          in_app?: boolean;
+          email?: boolean;
+          locked?: boolean;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          event_key?: string;
+          audience_kind?: "relationship" | "role" | "user";
+          audience?: string | null;
+          user_id?: string | null;
+          in_app?: boolean;
+          email?: boolean;
+          locked?: boolean;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_notification_rules_event_key_fkey";
+            columns: ["event_key"];
+            referencedRelation: "vizserve_pms_notification_events";
+            referencedColumns: ["key"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_notification_rules_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       /** P14-05. Every role a person holds; `vizserve_pms_users.role` is the active one. */
       vizserve_pms_user_roles: {
         Row: {
@@ -559,6 +646,7 @@ export type Database = {
           read_at: string | null;
           emailed_at: string | null;
           created_at: string;
+          in_app: boolean;
         };
         Insert: {
           id?: string;
@@ -573,10 +661,12 @@ export type Database = {
           read_at?: string | null;
           emailed_at?: string | null;
           created_at?: string;
+          in_app?: boolean;
         };
         Update: {
           read_at?: string | null;
           emailed_at?: string | null;
+          in_app?: boolean;
         };
         Relationships: [
           {

@@ -3,8 +3,12 @@
 import { revalidatePath } from "next/cache";
 
 import { requireAdmin } from "@/lib/auth/authorization";
-import type { VizservePmsNotificationType } from "@/lib/database.types";
-import { appSettingsSchema, notificationEmailSettingsSchema } from "@/lib/schemas/settings";
+import {
+  addNotificationRuleSchema,
+  removeNotificationRuleSchema,
+  updateNotificationRuleSchema,
+} from "@/lib/schemas/notification-rules";
+import { appSettingsSchema } from "@/lib/schemas/settings";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { flattenIssues } from "@/lib/action-result";
 
@@ -130,127 +134,131 @@ export async function updateAppSettings(input: unknown): Promise<ActionResult> {
   return { ok: true, data: undefined };
 }
 
+// ---------------------------------------------------------------------------
+// P14-09 — per-stage notification rules
+// ---------------------------------------------------------------------------
+
 /**
- * P8-19 — flipping a notification type's email switch.
+ * One switch, one save: toggling a recipient's in-app or email writes that rule
+ * straight away. Admin-only (`requireAdmin`), service-role client, audited —
+ * the same shape as `updateAppSettings` above. The database refuses switching a
+ * locked recipient's in-app off, and changing who a process recipient is.
  *
- * ⚠️ WHAT THIS DOES NOT DO, AND THE SENTENCE THE FORM HAS TO CARRY BECAUSE OF
- * IT: turning a type on does not email the backlog. `vizserve_pms_notifications`
- * denormalises `send_email` at write time — "flipping the switch later must not
- * rewrite what already happened" (P0-10) — so this decides what future
- * notifications are owed an email and nothing else. The rows already sitting in
- * people's inboxes stay as they were written.
- *
- * Service-role client with `requireRole("owner")` above it, exactly as
- * `updateAppSettings` does. The table's own RLS says the same thing
- * (`vizserve_pms_is_admin()` on `for all`), and the service role bypasses it, so
- * the check here is the one actually doing the work.
+ * Applies to notifications written from now on; nothing already in an inbox
+ * changes.
  */
-const NOTIFICATION_SETTINGS_AUDIT_ID = "00000000-0000-0000-0000-000000000000";
-
-export async function updateNotificationEmailSettings(input: unknown): Promise<ActionResult> {
+export async function updateNotificationRule(input: unknown): Promise<ActionResult> {
   const context = await requireAdmin();
+  const parsed = updateNotificationRuleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Could not read that change." };
 
-  const parsed = notificationEmailSettingsSchema.safeParse(input);
-  if (!parsed.success) {
+  const admin = createAdminClient();
+  const { data: before } = await admin
+    .from("vizserve_pms_notification_rules")
+    .select("id, event_key, audience_kind, audience, user_id, in_app, email, locked")
+    .eq("id", parsed.data.id)
+    .maybeSingle();
+
+  if (!before) return { ok: false, error: "That recipient no longer exists." };
+  if (before.locked && !parsed.data.in_app) {
+    return { ok: false, error: "This person has to act on it, so they are always told in the app." };
+  }
+
+  const { data, error } = await admin
+    .from("vizserve_pms_notification_rules")
+    .update({ in_app: parsed.data.in_app, email: parsed.data.email })
+    .eq("id", parsed.data.id)
+    .select("id");
+
+  if (error) return { ok: false, error: error.message };
+  if (!data || data.length === 0) return { ok: false, error: "That recipient no longer exists." };
+
+  await admin.rpc("vizserve_pms_write_audit_log", {
+    p_entity_type: "notification_rule",
+    p_entity_id: parsed.data.id,
+    p_action: "updated",
+    p_actor_id: context.userId,
+    p_before: before,
+    p_after: { ...before, in_app: parsed.data.in_app, email: parsed.data.email },
+  });
+
+  revalidatePath("/admin/settings");
+  return { ok: true, data: undefined };
+}
+
+/** Adds a role or a named person to a stage. In-app on, email off, to start. */
+export async function addNotificationRule(input: unknown): Promise<ActionResult> {
+  const context = await requireAdmin();
+  const parsed = addNotificationRuleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Choose a role or a person to add." };
+
+  const values = parsed.data;
+  const row =
+    values.audience_kind === "role"
+      ? { event_key: values.event_key, audience_kind: "role" as const, audience: values.audience }
+      : { event_key: values.event_key, audience_kind: "user" as const, user_id: values.user_id };
+
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("vizserve_pms_notification_rules")
+    .insert({ ...row, in_app: true, email: false })
+    .select("id")
+    .maybeSingle();
+
+  if (error) {
     return {
       ok: false,
-      error: "Could not read those settings.",
-      fieldErrors: flattenIssues(parsed.error),
+      error: /duplicate key|one_per_audience/i.test(error.message)
+        ? "They are already told at this stage."
+        : error.message,
     };
   }
 
-  const admin = createAdminClient();
-
-  /*
-   * READ FIRST, AND THE READ IS ALSO THE ALLOWLIST. Every `type` from the form
-   * is checked against the rows that are actually in the table, so a
-   * hand-crafted payload cannot insert a type the enum does not have and a
-   * stale tab cannot resurrect one that was removed. It is what lets the schema
-   * take `type` as a plain string — the database, not a hand-maintained mirror
-   * of the enum, decides what is real.
-   */
-  const { data: before, error: readError } = await admin
-    .from("vizserve_pms_notification_type_settings")
-    .select("type, send_email");
-
-  if (readError) return { ok: false, error: readError.message };
-  if (!before || before.length === 0) {
-    return { ok: false, error: "The notification types are not set up in this database." };
-  }
-
-  const current = new Map(before.map((row) => [row.type as string, row.send_email]));
-
-  const changes = parsed.data.types.filter(
-    (row) => current.has(row.type) && current.get(row.type) !== row.send_email,
-  );
-
-  // Nothing moved. Not an error, and not worth an audit row either — a log full
-  // of no-op saves is a log nobody reads (see `updateAppSettings` above).
-  if (changes.length === 0) return { ok: true, data: undefined };
-
-  /*
-   * ⚠️ ONE UPDATE PER TYPE, AND `.select()` ON EACH. There is no single
-   * statement for "set these eight booleans to these eight values", and an
-   * upsert would need `description` — which this form does not own and would
-   * therefore blank. `.select()` because a policy-refused or key-missed UPDATE
-   * is success with zero rows, not an error.
-   *
-   * A failure part-way through leaves the earlier types changed. That is
-   * reported rather than hidden: the audit row records what DID land, the toast
-   * names the type that did not, and the page revalidates so the switches
-   * redraw from the database instead of from what the form hoped.
-   */
-  const applied: { type: string; send_email: boolean }[] = [];
-  let failure: string | null = null;
-
-  for (const change of changes) {
-    const { data, error } = await admin
-      .from("vizserve_pms_notification_type_settings")
-      .update({ send_email: change.send_email, updated_at: new Date().toISOString() })
-      /*
-       * Cast because the schema carries `type` as a plain string and the column
-       * is the Postgres enum. It is not a hole: `changes` was filtered against
-       * `current`, which came out of this very table a few lines up, so every
-       * value reaching here is one the enum already had.
-       */
-      .eq("type", change.type as VizservePmsNotificationType)
-      .select("type");
-
-    if (error) {
-      failure = error.message;
-      break;
-    }
-
-    if (!data || data.length === 0) {
-      failure = `"${change.type}" is no longer a notification type.`;
-      break;
-    }
-
-    applied.push(change);
-  }
-
-  if (applied.length > 0) {
-    /*
-     * ONE ROW FOR THE SAVE, NOT ONE PER TYPE. `entity_id` is `uuid NOT NULL`
-     * and a notification type's key is an enum label, so there is no uuid to
-     * give it — the nil UUID stands for the singleton set, exactly as
-     * `SETTINGS_AUDIT_ID` does above. The before/after payloads carry the type
-     * names, which is where the answer to "who turned client approvals off"
-     * actually lives.
-     */
+  if (data) {
     await admin.rpc("vizserve_pms_write_audit_log", {
-      p_entity_type: "notification_type_settings",
-      p_entity_id: NOTIFICATION_SETTINGS_AUDIT_ID,
-      p_action: "updated",
+      p_entity_type: "notification_rule",
+      p_entity_id: data.id,
+      p_action: "created",
       p_actor_id: context.userId,
-      p_before: Object.fromEntries(applied.map((row) => [row.type, current.get(row.type)])),
-      p_after: Object.fromEntries(applied.map((row) => [row.type, row.send_email])),
+      p_before: null,
+      p_after: row,
     });
   }
 
   revalidatePath("/admin/settings");
+  return { ok: true, data: undefined };
+}
 
-  if (failure) return { ok: false, error: failure };
+/** Removes a role or person recipient. Process recipients are switched off instead. */
+export async function removeNotificationRule(input: unknown): Promise<ActionResult> {
+  const context = await requireAdmin();
+  const parsed = removeNotificationRuleSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Could not read that change." };
 
+  const admin = createAdminClient();
+  const { data: before } = await admin
+    .from("vizserve_pms_notification_rules")
+    .select("id, event_key, audience_kind, audience, user_id, in_app, email")
+    .eq("id", parsed.data.id)
+    .maybeSingle();
+
+  if (!before) return { ok: true, data: undefined };
+  if (before.audience_kind === "relationship") {
+    return { ok: false, error: "Switch a process recipient off instead of removing it." };
+  }
+
+  const { error } = await admin.from("vizserve_pms_notification_rules").delete().eq("id", parsed.data.id);
+  if (error) return { ok: false, error: error.message };
+
+  await admin.rpc("vizserve_pms_write_audit_log", {
+    p_entity_type: "notification_rule",
+    p_entity_id: parsed.data.id,
+    p_action: "deleted",
+    p_actor_id: context.userId,
+    p_before: before,
+    p_after: null,
+  });
+
+  revalidatePath("/admin/settings");
   return { ok: true, data: undefined };
 }

@@ -66,9 +66,17 @@ export function SettingsForm({
 
   return (
     <form
-      className="w-full space-y-4 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+      className="w-full rounded-lg border bg-card grade-surface shadow-raised-lg"
       action={submit}
     >
+      <div className="space-y-1 border-b px-5 py-4">
+        <h2 className="text-lg font-medium">Timekeeping</h2>
+        <p className="text-xs text-muted-foreground">
+          Read on every punch and every timesheet week, for everybody with work hours set.
+        </p>
+      </div>
+
+      <div className="grid gap-6 px-5 py-4 md:grid-cols-2">
       <div className="space-y-2">
         <Label htmlFor="grace_minutes">Grace period</Label>
         <div className="flex items-center gap-2">
@@ -147,9 +155,13 @@ export function SettingsForm({
         </p>
       </div>
 
-      <Button type="submit" loading={pending}>
-        Save
-      </Button>
+      </div>
+
+      <div className="flex justify-end border-t px-5 py-3">
+        <Button type="submit" loading={pending}>
+          Save
+        </Button>
+      </div>
     </form>
   );
 }
