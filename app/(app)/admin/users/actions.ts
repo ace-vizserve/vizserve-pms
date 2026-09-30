@@ -2,14 +2,16 @@
 
 import { revalidatePath } from "next/cache";
 
-import { APP_ACCESS_KEY, requireRole } from "@/lib/auth/authorization";
+import { APP_ACCESS_KEY, requireAdmin } from "@/lib/auth/authorization";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { setLeaveAllocations as setHrLeaveAllocations } from "@/app/(app)/hr/balances/actions";
 import {
   createUserSchema,
+  normaliseHeldRoles,
   normaliseManagedDepartments,
   updateUserSchema,
 } from "@/lib/schemas/users";
+import type { Role } from "@/lib/auth/roles";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
 import { flattenIssues } from "@/lib/action-result";
@@ -103,6 +105,43 @@ async function replaceManagedDepartments(
 }
 
 /**
+ * P14-05 — the roles a person holds, replaced wholesale for the reason the
+ * managed set above is: a diff that drops a delete leaves somebody holding a
+ * role they were meant to lose.
+ *
+ * Written AFTER the profile, whose `role` update has already recorded the
+ * active role as held (the database trigger) — so the delete below never
+ * leaves the active role unheld.
+ */
+async function replaceHeldRoles(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  roles: Role[],
+): Promise<string | null> {
+  const { error: deleteError } = await admin
+    .from("vizserve_pms_user_roles")
+    .delete()
+    .eq("user_id", userId)
+    .not("role", "in", `(${roles.join(",")})`);
+
+  if (deleteError) return deleteError.message;
+
+  const { error: upsertError } = await admin
+    .from("vizserve_pms_user_roles")
+    .upsert(
+      roles.map((role) => ({ user_id: userId, role })),
+      { onConflict: "user_id,role", ignoreDuplicates: true },
+    );
+
+  return upsertError?.message ?? null;
+}
+
+/** The highest held role — what decides whether a managed set applies at all. */
+function highestRole(roles: Role[]): Role {
+  return roles[roles.length - 1] ?? "member";
+}
+
+/**
  * Every screen that reads a person's role, department or schedule.
  *
  * ⚠️ `/admin/users` ALONE IS NOT ENOUGH, and the gap was invisible until P7-36.
@@ -130,7 +169,7 @@ function revalidateProfileScreens(): void {
 export async function createUser(
   input: unknown,
 ): Promise<ActionResult<{ id: string; password: string; email: string }>> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const parsed = createUserSchema.safeParse(input);
   if (!parsed.success) {
@@ -142,7 +181,8 @@ export async function createUser(
   }
 
   const values = parsed.data;
-  const managed = normaliseManagedDepartments(values.role, values.managed_department_ids);
+  const held = normaliseHeldRoles(values.role, values.roles);
+  const managed = normaliseManagedDepartments(highestRole(held), values.managed_department_ids);
   const admin = createAdminClient();
 
   // The database trigger on auth.users creates the profile row, so this is the
@@ -228,6 +268,9 @@ export async function createUser(
   const managedError = await replaceManagedDepartments(admin, userId, managed);
   if (managedError) return { ok: false, error: managedError };
 
+  const rolesError = await replaceHeldRoles(admin, userId, held);
+  if (rolesError) return { ok: false, error: rolesError };
+
   // Phase 0 exit criterion: an audit row on user create/edit.
   await admin.rpc("vizserve_pms_write_audit_log", {
     p_entity_type: "user",
@@ -250,7 +293,7 @@ export async function createUser(
 // ---------------------------------------------------------------------------
 
 export async function updateUser(userId: string, input: unknown): Promise<ActionResult> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const parsed = updateUserSchema.safeParse(input);
   if (!parsed.success) {
@@ -275,9 +318,16 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
   // have refused an owner's own save with "You cannot change your own role"
   // even when they had changed nothing at all, because the role they submit is
   // now `owner` and never `admin` again. Same for the last-active check below.
+  const held = normaliseHeldRoles(values.role, values.roles);
+
+  // P14-05. An Admin who drops their own Admin role — or stops acting as it —
+  // loses this screen mid-save, and the recovery is a SQL console.
   if (userId === context.userId) {
-    if (values.role !== "owner") {
-      return { ok: false, error: "You cannot change your own role. Ask another CEO." };
+    if (values.role !== "admin" || !held.includes("admin")) {
+      return {
+        ok: false,
+        error: "You cannot remove or switch away from your own Admin role here. Ask another Admin.",
+      };
     }
     if (!values.is_active) {
       return { ok: false, error: "You cannot deactivate your own account." };
@@ -289,22 +339,25 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
     }
   }
 
-  if (before.role === "owner" && (values.role !== "owner" || !values.is_active)) {
-    const { count } = await admin
-      .from("vizserve_pms_users")
-      .select("id", { count: "exact", head: true })
-      .eq("role", "owner")
-      .eq("is_active", true);
+  // P14-05. The company must never be left without an active Admin: nobody else
+  // can reach this screen.
+  if (!held.includes("admin") || !values.is_active) {
+    const { data: admins } = await admin
+      .from("vizserve_pms_user_roles")
+      .select("user_id, vizserve_pms_users!inner(is_active)")
+      .eq("role", "admin")
+      .eq("vizserve_pms_users.is_active", true);
 
-    if ((count ?? 0) <= 1) {
+    const holders = new Set((admins ?? []).map((row) => row.user_id));
+    if (holders.has(userId) && holders.size <= 1) {
       return {
         ok: false,
-        error: "This is the last active CEO. Promote someone else first.",
+        error: "This is the last active Admin. Give someone else the Admin role first.",
       };
     }
   }
 
-  const managed = normaliseManagedDepartments(values.role, values.managed_department_ids);
+  const managed = normaliseManagedDepartments(highestRole(held), values.managed_department_ids);
 
   // Note the absent email field — see lib/schemas/users.ts. Email is the
   // identity that links SSO and password login to one profile.
@@ -346,6 +399,9 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
   const managedError = await replaceManagedDepartments(admin, userId, managed);
   if (managedError) return { ok: false, error: managedError };
 
+  const rolesError = await replaceHeldRoles(admin, userId, held);
+  if (rolesError) return { ok: false, error: rolesError };
+
   const after = await readProfileForAudit(admin, userId);
 
   // Only record a change that actually changed something. An audit trail full of
@@ -382,7 +438,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
  * screen calls it. The shared action gates on `requireHr()`, which admins pass.
  */
 export async function setLeaveAllocations(input: unknown): Promise<ActionResult> {
-  await requireRole("owner");
+  await requireAdmin();
   return setHrLeaveAllocations(input);
 }
 
@@ -404,7 +460,7 @@ export async function readLeaveBalances(
   userId: string,
   year: number,
 ): Promise<ActionResult<LeaveBalanceSummaryRow[]>> {
-  await requireRole("owner");
+  await requireAdmin();
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("vizserve_pms_leave_balance_summary", {
@@ -518,7 +574,7 @@ function generateTemporaryPassword(): string {
 export async function setTemporaryPassword(
   userId: string,
 ): Promise<ActionResult<{ password: string; email: string }>> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const admin = createAdminClient();
   const { data: profile } = await admin

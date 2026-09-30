@@ -74,6 +74,15 @@ export type AuthContext = {
    * "the space is not there yet", never "everyone is in everything".
    */
   sharedDepartmentIds: string[];
+  /**
+   * P14-05 — every role this person HOLDS. `role` above is the one they are
+   * acting as, always one of these, and what every check reads. More than one
+   * entry is what puts the role switcher in the top bar.
+   *
+   * Optional so a context built before the table exists (or in a test) reads
+   * as "holds only `role`".
+   */
+  heldRoles?: Role[];
 };
 
 
@@ -101,7 +110,18 @@ export type AuthContext = {
  * user, so by the time there is an `AuthContext` to pass in, both hold.
  */
 export function canDoHr(context: AuthContext): boolean {
-  return context.isHr || roleAtLeast(context.role, "owner");
+  // P14-05. Manager and above see the HR screens, as `vizserve_pms_is_hr()` does.
+  return context.isHr || roleAtLeast(context.role, "manager");
+}
+
+/**
+ * P14-05 — Admin is IT: the configuration screens (users and roles, settings,
+ * events, audit trail) are theirs ALONE. An equality test on purpose — CEO and
+ * Business Manager outrank `admin` on the ladder and must not inherit it.
+ * Mirrors `vizserve_pms_is_system_admin()`.
+ */
+export function isSystemAdmin(context: Pick<AuthContext, "role">): boolean {
+  return context.role === "admin";
 }
 
 
@@ -164,7 +184,8 @@ export function canAdminDepartment(context: AuthContext, departmentId: string | 
  * Same reasoning, same rung, as `canDoHr` — see the note there.
  */
 export function canAccessDepartment(context: AuthContext, departmentId: string | null): boolean {
-  if (roleAtLeast(context.role, "owner")) return true;
+  // P14-05. Admin, Business Manager and CEO see every department — `vizserve_pms_is_admin()`.
+  if (roleAtLeast(context.role, "admin")) return true;
   // P14-04. The manager oversees every department — `vizserve_pms_manages_department` says so.
   if (context.role === "manager") return true;
   if (!departmentId) return false;

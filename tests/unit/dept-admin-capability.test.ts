@@ -5,6 +5,7 @@ import {
   canAdminDepartment,
   canDoHr,
   departmentScopeFilter,
+  isSystemAdmin,
   ROLE_ORDER,
   roleAtLeast,
   type AuthContext,
@@ -104,64 +105,27 @@ describe("roleAtLeast — still agrees with the enum order", () => {
   });
 });
 
-describe("the dead `admin` rung grants NOTHING", () => {
-  /*
-   * ⚠️ THE GUARANTEE `p8_01b` MAKES, ASSERTED IN TYPESCRIPT.
-   *
-   * `admin` survives only because dropping an enum value means rebuilding the
-   * type on a live database. Its whole contract is that holding it confers no
-   * capability — every predicate in the database reads `>= owner`.
-   *
-   * The dangerous version of getting this wrong is not "the admin is locked
-   * out". It is the reverse: a `roleAtLeast(role, "admin")` left behind in the
-   * UI keeps working, because owner outranks admin, and a legacy or restored
-   * `admin` row then gets an admin-shaped SCREEN while every policy behind it
-   * refuses. The button is offered, the query returns zero rows, and nothing
-   * anywhere says why.
-   */
-  const legacyAdmin = context({ role: "admin" });
+describe("P14-05 — Admin is IT: sees everything, configures, approves nothing", () => {
+  const admin = context({ role: "admin" });
 
-  it("reaches NO department through canAccessDepartment", () => {
-    expect(canAccessDepartment(legacyAdmin, DEPT_A)).toBe(false);
-    expect(canAccessDepartment(legacyAdmin, DEPT_B)).toBe(false);
-    expect(canAccessDepartment(legacyAdmin, null)).toBe(false);
+  it("reaches every department, like Business Manager and CEO", () => {
+    for (const role of ["admin", "business_manager", "owner"] as const) {
+      const viewer = context({ role });
+      expect(canAccessDepartment(viewer, DEPT_A)).toBe(true);
+      expect(canAccessDepartment(viewer, DEPT_B)).toBe(true);
+      expect(departmentScopeFilter(viewer)).toBeNull();
+    }
   });
 
-  it("does not reach a department it LEADS any more than a manager would", () => {
-    // The one route back in is the managed set, which is a real grant and not
-    // the rung — a legacy admin who also leads VizBytes keeps VizBytes, and
-    // gains nothing else. If this ever returns true for DEPT_B, the rung is
-    // granting something again.
-    const leadsA = context({ role: "admin", managedDepartmentIds: [DEPT_A] });
-    expect(canAccessDepartment(leadsA, DEPT_A)).toBe(true);
-    expect(canAccessDepartment(leadsA, DEPT_B)).toBe(false);
+  it("is the only role the configuration screens admit", () => {
+    expect(isSystemAdmin(admin)).toBe(true);
+    for (const role of ["member", "team_leader", "manager", "business_manager", "owner"] as const) {
+      expect(isSystemAdmin(context({ role }))).toBe(false);
+    }
   });
 
-  it("is FILTERED by departmentScopeFilter rather than unfiltered", () => {
-    // ⚠️ `null` means "no filter, see everything". Returning it here would hand
-    // the whole company's rows to a rank that owns nothing — the single most
-    // expensive way to get this wrong, because it reads as a working screen.
-    expect(departmentScopeFilter(legacyAdmin)).not.toBeNull();
-    expect(departmentScopeFilter(legacyAdmin)).toEqual([]);
-
-    const leadsA = context({ role: "admin", managedDepartmentIds: [DEPT_A] });
-    expect(departmentScopeFilter(leadsA)).toEqual([DEPT_A]);
-  });
-
-  it("holds no HR and no department-admin capability either", () => {
-    expect(canDoHr(legacyAdmin)).toBe(false);
-    expect(canAdminDepartment(legacyAdmin, DEPT_A)).toBe(false);
-    expect(canAdminDepartment(legacyAdmin, null)).toBe(false);
-  });
-
-  it("grants strictly less than an owner, on every predicate", () => {
-    // The property rather than four cases: whatever the rung answers, owner
-    // must answer at least as much, and on the wide predicates strictly more.
-    const owner = context({ role: "owner" });
-    expect(canAccessDepartment(owner, DEPT_A)).toBe(true);
-    expect(departmentScopeFilter(owner)).toBeNull();
-    expect(canDoHr(owner)).toBe(true);
-    expect(canAdminDepartment(owner, DEPT_A)).toBe(true);
+  it("sees the HR screens, as Manager and above do", () => {
+    expect(canDoHr(admin)).toBe(true);
   });
 });
 
@@ -250,7 +214,7 @@ describe("canAdminDepartment — Admin is a tick, not a rung (D33)", () => {
   });
 });
 
-describe("canDoHr — moved from admin to owner, and nobody lost it", () => {
+describe("canDoHr — the HR tick, or Manager and above (P14-05)", () => {
   it("still grants it to the top rung without the flag", () => {
     // The P7-52 trap, restated for the rename. Section 1 of p8_01b promotes
     // every admin to owner; if `canDoHr` (or `vizserve_pms_is_hr`) had been
@@ -263,8 +227,9 @@ describe("canDoHr — moved from admin to owner, and nobody lost it", () => {
     expect(canDoHr(context({ role: "member", isHr: true }))).toBe(true);
   });
 
-  it("still refuses a manager without it", () => {
-    expect(canDoHr(context({ role: "manager", isHr: false }))).toBe(false);
+  it("grants it to a manager without the flag, and refuses a team leader", () => {
+    expect(canDoHr(context({ role: "manager", isHr: false }))).toBe(true);
+    expect(canDoHr(context({ role: "team_leader", isHr: false }))).toBe(false);
   });
 
   it("is orthogonal to the department-admin tick in both directions", () => {
@@ -283,7 +248,7 @@ describe("canDoHr — moved from admin to owner, and nobody lost it", () => {
   });
 });
 
-describe("ROLE_LABELS — the picker must not offer the dead rung", () => {
+describe("ROLE_LABELS", () => {
   it("labels every value in the enum, including the retired one", () => {
     // A `Record` over the whole union, so a legacy or restored `admin` row
     // still renders a name instead of a blank cell.
@@ -292,8 +257,8 @@ describe("ROLE_LABELS — the picker must not offer the dead rung", () => {
     }
   });
 
-  it("marks `admin` as retired and gives `owner` the top billing", () => {
-    expect(ROLE_LABELS.admin.label).toMatch(/retired/i);
+  it("names Admin as IT and shows owner as CEO", () => {
+    expect(ROLE_LABELS.admin.label).toMatch(/IT/);
     expect(ROLE_LABELS.owner.label).toBe("CEO");
   });
 });

@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { PageShell } from "@/components/page-shell";
-import { requireRole } from "@/lib/auth/authorization";
+import { requireAdmin } from "@/lib/auth/authorization";
 import { NOTIFICATION_TYPES } from "@/lib/notifications";
 import { loadAppSettings, loadNotificationEmailSettings } from "@/lib/settings-server";
 
@@ -31,7 +31,7 @@ export const metadata: Metadata = { title: "Settings" };
  * feature it configures.
  */
 export default async function SettingsPage() {
-  await requireRole("owner");
+  await requireAdmin();
 
   const [settings, notificationEmails] = await Promise.all([loadAppSettings(), loadNotificationEmailSettings()]);
 

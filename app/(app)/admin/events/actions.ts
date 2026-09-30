@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { requireAdmin } from "@/lib/auth/authorization";
 import {
   createEventSchema,
   deleteEventSchema,
@@ -63,7 +63,7 @@ function departmentFor(values: { category: string; department_id: string | null 
 // ---------------------------------------------------------------------------
 
 export async function createEvent(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const parsed = createEventSchema.safeParse(input);
   if (!parsed.success) {
@@ -119,7 +119,7 @@ export async function createEvent(input: unknown): Promise<ActionResult> {
  * edit and should not cost the admin a delete-and-retype.
  */
 export async function updateEvent(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const parsed = updateEventSchema.safeParse(input);
   if (!parsed.success) {
@@ -177,7 +177,7 @@ export async function updateEvent(input: unknown): Promise<ActionResult> {
 // ---------------------------------------------------------------------------
 
 export async function deleteEvent(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const parsed = deleteEventSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: "That is not a valid event." };

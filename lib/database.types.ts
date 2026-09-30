@@ -457,6 +457,32 @@ export type Database = {
           },
         ];
       };
+      /** P14-05. Every role a person holds; `vizserve_pms_users.role` is the active one. */
+      vizserve_pms_user_roles: {
+        Row: {
+          user_id: string;
+          role: VizservePmsUserRole;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          role: VizservePmsUserRole;
+          created_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          role?: VizservePmsUserRole;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_user_roles_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       /**
        * P7-66 Phase 5 — which departments an INTERNAL form is for.
        *
@@ -2332,6 +2358,11 @@ export type Database = {
       vizserve_pms_is_admin: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;
+      };
+      /** P14-05. Switch the caller's active role to one they hold. */
+      vizserve_pms_switch_role: {
+        Args: { p_role: VizservePmsUserRole };
+        Returns: VizservePmsUserRole;
       };
       /**
        * P7-52, re-pointed by P8-01. True for a user carrying `is_hr`, AND for

@@ -1,0 +1,15 @@
+{
+  "date": "2026-09-30",
+  "kind": "added",
+  "area": "Platform",
+  "title": "Hold more than one role and switch between them",
+  "description": "Someone who is, say, both a team leader and the business manager now switches roles from the top bar, and signs in next time as whichever they used last.",
+  "items": [
+    "The role switcher sits at the top of every page, and only appears for people with more than one role",
+    "Admin is IT: users and roles, company settings, events and the audit trail are theirs alone",
+    "The business manager and CEO see every department and report",
+    "HR screens are open to the manager and above, as well as to HR"
+  ],
+  "refs": ["P14-05"],
+  "pending": "Needs the P14-05 database change applied before this release goes live, or nobody can open user management."
+}

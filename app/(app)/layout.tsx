@@ -11,6 +11,7 @@ import {
   DynamicBreadcrumb,
 } from "@/components/app-shell/dynamic-breadcrumb";
 import { RealtimeNotifications } from "@/components/realtime-refresh";
+import { RoleSwitcher } from "@/components/app-shell/role-switcher";
 import { TaskImageLightboxProvider } from "@/components/task-image-lightbox";
 import { ShiftReminder } from "@/components/shift-reminder";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -122,6 +123,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
               </div>
 
               <div className="ml-auto flex items-center gap-2 pr-4.5">
+                {/* P14-05. First in the group so it is the obvious thing up here;
+                    renders nothing for somebody who holds one role. */}
+                <RoleSwitcher />
                 {/*
                   Changelog, beside the theme switch.
 

@@ -1,7 +1,7 @@
 import { loadAllDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { requireAdmin } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { holidayYearSchema } from "@/lib/schemas/holidays";
 import { createClient } from "@/utils/supabase/server";
@@ -35,7 +35,7 @@ export default async function EventsPage({
 }: {
   searchParams: Promise<{ year?: string | string[] }>;
 }) {
-  await requireRole("owner");
+  await requireAdmin();
   const supabase = await createClient();
 
   const params = await searchParams;

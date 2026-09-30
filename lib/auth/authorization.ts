@@ -52,6 +52,7 @@ export {
   canApproveClientRequest,
   canDoHr,
   isApprover,
+  isSystemAdmin,
   canManageAnyDepartmentTree,
   canManageDepartmentTree,
   canShapeAnyDepartment,
@@ -65,6 +66,7 @@ import {
   canAccessDepartment,
   canAdminDepartment,
   canDoHr,
+  isSystemAdmin,
   canShapeAnyDepartment,
   canShapeDepartment,
   type AuthContext,
@@ -232,7 +234,7 @@ export const resolveAuth = cache(
      * alone, returns no rows, and the collaboration space simply is not there
      * yet. Full account above `loadSharedDepartmentIds`.
      */
-    const [attempt, { data: managed }, { data: shared }] = await Promise.all([
+    const [attempt, { data: managed }, { data: shared }, { data: held }] = await Promise.all([
       supabase
         .from("vizserve_pms_users")
         .select(`${PROFILE_COLUMNS}, is_dept_admin`)
@@ -248,6 +250,9 @@ export const resolveAuth = cache(
         .eq("is_shared", true)
         .eq("is_active", true)
         .order("name"),
+      // P14-05. Its own query for the reason P13-01 gives above: before the
+      // table exists this fails alone and the person simply holds `role`.
+      supabase.from("vizserve_pms_user_roles").select("role").eq("user_id", userId),
     ]);
 
     let profile: (typeof attempt)["data"] = attempt.data;
@@ -323,6 +328,10 @@ export const resolveAuth = cache(
         // P13-01. `?? []` is the degrade AND the pre-migration truth — see the
         // note on the query above and on the field itself.
         sharedDepartmentIds: (shared ?? []).map((row) => row.id),
+        // P14-05. Ordered by the ladder, and always including the active role.
+        heldRoles: ROLE_ORDER.filter(
+          (rung) => rung === profile.role || (held ?? []).some((row) => row.role === rung),
+        ),
       },
     };
   },
@@ -415,6 +424,19 @@ export async function requireRole(required: Role): Promise<AuthContext> {
 
 
 /**
+ * P14-05 — for the configuration screens and their actions: Admin (IT) only.
+ * Not `requireRole("admin")`, which would admit Business Manager and CEO.
+ */
+export async function requireAdmin(): Promise<AuthContext> {
+  const context = await requireAuthContext();
+  if (!isSystemAdmin(context)) {
+    throw new ForbiddenError("This area is for the Admin (IT) role.");
+  }
+  return context;
+}
+
+
+/**
  * For pages and actions the HR capability guards.
  *
  * Deliberately NOT `requireRole`-shaped: HR is not a floor on the role ladder,
@@ -474,7 +496,8 @@ export function assertDepartmentAccess(context: AuthContext, departmentId: strin
  * See `canAccessDepartment` above for why the accident is worse than the bug.
  */
 export function departmentScopeFilter(context: AuthContext): string[] | null {
-  if (roleAtLeast(context.role, "owner")) return null;
+  // P14-05. Admin, Business Manager and CEO see every department.
+  if (roleAtLeast(context.role, "admin")) return null;
   // P14-04. The manager oversees every department — `vizserve_pms_manages_department` says so.
   if (context.role === "manager") return null;
   if (!roleAtLeast(context.role, "team_leader")) return [];

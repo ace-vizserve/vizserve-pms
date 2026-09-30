@@ -28,17 +28,16 @@ import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import { type Role } from "@/lib/auth/roles";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { formatDays, leaveTypeApplies } from "@/lib/schemas/leave-balances";
-import { GENDER_LABELS, type Gender, ROLE_LABELS } from "@/lib/schemas/users";
+import { GENDER_LABELS, type Gender, normaliseHeldRoles, ROLE_LABELS } from "@/lib/schemas/users";
 
 import { createUser, readLeaveBalances, setLeaveAllocations, updateUser } from "./actions";
-import {
-  offeredRank,
-  rankBelow,
-  rankImplied,
-  rankLocked,
-  rankTicked,
-  RANK_LADDER,
-} from "./rank-ladder";
+
+/**
+ * P14-05 — the roles an Admin can grant, most senior first. Independent ticks,
+ * not a ladder: a person HOLDS any combination and switches between them from
+ * the top bar. Member is implied and always held.
+ */
+const GRANTABLE_ROLES: Role[] = ["owner", "business_manager", "admin", "manager", "team_leader"];
 
 /**
  * P0-04 — the create/edit dialog.
@@ -78,6 +77,8 @@ export type EditableUser = {
   /** P7-32. NULL on accounts nobody has opened since the column landed. */
   gender: Gender | null;
   role: Role;
+  /** P14-05. Every role they hold; `role` is the one they are acting as. */
+  roles?: Role[];
   /** P7-52. The HR job, orthogonal to `role` — see D33. */
   is_hr: boolean;
   /** P8-01. The department-admin tick, orthogonal to `role` — see D33. */
@@ -204,21 +205,14 @@ function UserForm({
    * untouched record. The schema refuses null, so the admin has to choose.
    */
   const [gender, setGender] = useState<Gender | null>(user?.gender ?? null);
-  /*
-   * ⚠️ SEEDED THROUGH `offeredRank`, SO WHAT THE FORM SHOWS IS WHAT IT SAVES.
-   *
-   * A row still holding the dead `admin` rung opens as `manager` — which is
-   * already the rank the ticks displayed, because `roleAtLeast("admin",
-   * "manager")` is true. Without this the dialog showed "Manager", saved
-   * `admin`, and could only ever be promoted: every offered rank was strictly
-   * below the stored one, so every one of them was locked. Normalising here
-   * makes the record demotable AND stops an owner who opened it to change a
-   * phone number from silently re-confirming a rank that grants nothing.
-   *
-   * A no-op for every rank the form offers — `offeredRank(x) === x` for all
-   * four of them.
-   */
-  const [role, setRole] = useState<Role>(offeredRank(user?.role ?? "member"));
+  // The role they are acting as. P14-05: no longer normalised through the
+  // rank ladder, which treated `admin` as retired.
+  const [role, setRole] = useState<Role>(user?.role ?? "member");
+  // P14-05. Every role held. `role` above is the one they act as — kept while
+  // still held, otherwise the most senior role left.
+  const [roles, setRoles] = useState<Role[]>(
+    normaliseHeldRoles(user?.role ?? "member", user?.roles ?? []),
+  );
 
   /*
    * value → label maps for the Selects below.
@@ -355,38 +349,16 @@ function UserForm({
 
   // A member holds scope over nothing by definition, so the checkboxes are not
   // merely hidden — the values are dropped, and the server drops them again.
-  const scopeApplies = role !== "member";
+  const scopeApplies = roles.some((held) => held !== "member");
 
-  /**
-   * P8-01 — THE RANK LADDER, as ticks rather than a dropdown.
-   *
-   * The app has always enforced inclusion — `roleAtLeast` is `>=`, never `===`,
-   * and the Postgres enum's declaration order is the ladder — but a Select made
-   * it invisible: picking "Manager" said nothing about the fact that a manager
-   * IS a team leader and IS a member. Ticking a rank and watching every rank
-   * below it tick and lock is that same rule, shown.
-   *
-   * A rank is TICKED when the stored role is at least that rank, and LOCKED when
-   * it is strictly below it — unticking something the rank above already implies
-   * is not a decision anybody can make. Member is therefore always ticked and
-   * always locked: everyone is at least a member.
-   *
-   * The stored value is the HIGHEST ticked rank, which is what makes this a
-   * ladder rather than a set of independent flags. `owner` additionally needs
-   * `viewerIsOwner` — see the tick column in the JSX.
-   *
-   * The rules themselves live in `./rank-ladder`, which is plain TypeScript and
-   * therefore assertable. Both of the bugs they now carry warnings about — the
-   * always-enabled Member checkbox and the undemotable legacy `admin` row — were
-   * invisible in review and are one `expect` each in `tests/unit/rank-ladder`.
-   */
-  function toggleRank(rank: Role, checked: boolean) {
-    if (checked) {
-      setRole(rank);
-      return;
-    }
-
-    setRole(rankBelow(rank));
+  function toggleRole(rank: Role, checked: boolean) {
+    const next = checked
+      ? normaliseHeldRoles(role, [...roles, rank])
+      : roles.filter((held) => held !== rank);
+    const remaining = next.length > 0 ? next : (["member"] as Role[]);
+    setRoles(remaining);
+    // Unticking the role they act as moves them to the most senior one left.
+    if (!remaining.includes(role)) setRole(remaining[remaining.length - 1]);
   }
 
   function toggleDepartment(id: string, checked: boolean) {
@@ -405,6 +377,7 @@ function UserForm({
       full_name: fullName,
       gender,
       role,
+      roles,
       primary_department_id: primaryDepartmentId,
       managed_department_ids: scopeApplies ? managed : [],
       // In the SHARED payload, not beside `is_active` below: HR is settable on
@@ -715,75 +688,49 @@ function UserForm({
           )}
         </div>
 
-        {/*
-          P8-01 — THE RANK LADDER.
-
-          Was a dropdown, which hid the one thing about roles that is actually
-          confusing: they are INCLUSIVE. A manager is a team leader is a member
-          (D15), the enum's declaration order is that ladder, and every check in
-          the app and the database compares it with `>=`. A dropdown showing one
-          value said none of that. Ticking a rank and watching everything under
-          it tick and lock says all of it, in the control itself.
-
-          Senior first, so "everything below" is literally below.
-        */}
+        {/* P14-05 — the roles held, as independent ticks. See GRANTABLE_ROLES. */}
         <div className="space-y-3 rounded-lg border p-4">
           <div>
-            <Label>Rank</Label>
+            <Label>Roles</Label>
             <p className="mt-0.5 text-xs text-muted-foreground">
-              Ranks are inclusive — ticking one ticks everything under it, and
-              those stay ticked because they are not separate choices. What is
-              stored is the highest tick.
+              Tick every role this person holds. They switch between them from the top bar;
+              whichever they used last is the one they sign in as. Now acting as{" "}
+              <span className="font-medium text-foreground">{ROLE_LABELS[role].label}</span>.
             </p>
           </div>
 
           <div className="space-y-2">
-            {RANK_LADDER.map((rank) => {
-              const ticked = rankTicked(role, rank);
-              /*
-                ⚠️ ONLY AN OWNER MAY GRANT OWNER. The same rule the HR switch
-                below has carried since P7-52, and it is what stops the ladder
-                escalating itself. `/admin/users` is `requireRole("owner")` and
-                `updateUser` re-checks on every call — that is the real gate;
-                this only makes the form agree with it rather than offering a
-                control that can only be refused.
-              */
+            {GRANTABLE_ROLES.map((rank) => {
+              const ticked = roles.includes(rank);
               const ownerBlocked = rank === "owner" && !viewerIsOwner;
-              /*
-                Two different facts, deliberately not one. `rankImplied` is what
-                the "Included in …" hint asserts; `rankLocked` is what disables
-                the control, and it is WIDER — the bottom rung is locked without
-                being implied by anything above it, because everyone is at least
-                a member. Collapsing them is how the Member checkbox came to
-                render enabled and snap back when unticked.
-              */
-              const implied = rankImplied(role, rank);
-              const locked = rankLocked(role, rank) || ownerBlocked;
 
               return (
                 <label
                   key={rank}
                   className="flex items-start gap-3 text-sm data-[disabled=true]:opacity-50"
-                  data-disabled={locked}>
+                  data-disabled={ownerBlocked}>
                   <Checkbox
                     className="mt-0.5"
                     checked={ticked}
-                    disabled={locked}
-                    onCheckedChange={(checked) => toggleRank(rank, checked === true)}
+                    disabled={ownerBlocked}
+                    onCheckedChange={(checked) => toggleRole(rank, checked === true)}
                   />
                   <span>
                     <span className="font-medium">{ROLE_LABELS[rank].label}</span>
                     <span className="block text-xs text-muted-foreground">
-                      {implied
-                        ? `Included in ${ROLE_LABELS[role].label}.`
-                        : ownerBlocked
-                          ? "Only a CEO can grant this."
-                          : ROLE_LABELS[rank].hint}
+                      {ownerBlocked ? "Only an Admin can grant this." : ROLE_LABELS[rank].hint}
                     </span>
                   </span>
                 </label>
               );
             })}
+            <label className="flex items-start gap-3 text-sm opacity-50" data-disabled>
+              <Checkbox className="mt-0.5" checked disabled />
+              <span>
+                <span className="font-medium">{ROLE_LABELS.member.label}</span>
+                <span className="block text-xs text-muted-foreground">Everyone is a member.</span>
+              </span>
+            </label>
           </div>
         </div>
 

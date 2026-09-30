@@ -3,7 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { History, SearchX } from "lucide-react";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { requireAdmin } from "@/lib/auth/authorization";
 import {
   auditActionLabel,
   auditEntityLabel,
@@ -72,7 +72,7 @@ export default async function AuditPage({
     dir?: string;
   }>;
 }) {
-  await requireRole("owner");
+  await requireAdmin();
   const params = await searchParams;
   const supabase = await createClient();
 

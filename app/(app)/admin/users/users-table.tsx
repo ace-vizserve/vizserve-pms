@@ -167,7 +167,11 @@ export function UsersTable({
       key: "role",
       sortKey: "role",
       header: "Role",
-      cell: (user) => ROLE_LABELS[user.role].label,
+      // P14-05. Every role held; the one they are acting as comes first.
+      cell: (user) =>
+        [user.role, ...(user.roles ?? []).filter((held) => held !== user.role && held !== "member")]
+          .map((held) => ROLE_LABELS[held].label)
+          .join(" · "),
     },
     {
       key: "gender",

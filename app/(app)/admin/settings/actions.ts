@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireRole } from "@/lib/auth/authorization";
+import { requireAdmin } from "@/lib/auth/authorization";
 import type { VizservePmsNotificationType } from "@/lib/database.types";
 import { appSettingsSchema, notificationEmailSettingsSchema } from "@/lib/schemas/settings";
 import { createAdminClient } from "@/utils/supabase/admin";
@@ -43,7 +43,7 @@ export type { ActionResult };
 const SETTINGS_AUDIT_ID = "00000000-0000-0000-0000-000000000000";
 
 export async function updateAppSettings(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const parsed = appSettingsSchema.safeParse(input);
   if (!parsed.success) {
@@ -148,7 +148,7 @@ export async function updateAppSettings(input: unknown): Promise<ActionResult> {
 const NOTIFICATION_SETTINGS_AUDIT_ID = "00000000-0000-0000-0000-000000000000";
 
 export async function updateNotificationEmailSettings(input: unknown): Promise<ActionResult> {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
 
   const parsed = notificationEmailSettingsSchema.safeParse(input);
   if (!parsed.success) {

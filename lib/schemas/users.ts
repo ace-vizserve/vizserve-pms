@@ -171,7 +171,13 @@ export const createUserSchema = withWorkHourRules(
     email: z.email("Enter a valid email address.").transform((value) => value.trim().toLowerCase()),
     full_name: z.string().trim().min(1, "A full name is required."),
     gender: genderSchema,
+    /** The role they ACT AS — always one of `roles` (the action adds it if not). */
     role: roleSchema,
+    /**
+     * P14-05. Every role this person holds. The role switcher offers these.
+     * Empty means "only `role`".
+     */
+    roles: z.array(roleSchema).default([]),
     /**
      * P7-52. The HR job, and NOT a role — see D33. Orthogonal to `role` above,
      * so the two are set independently and neither implies the other.
@@ -218,7 +224,13 @@ export const updateUserSchema = withWorkHourRules(
      * change anything at all is asked for this before it saves.
      */
     gender: genderSchema,
+    /** The role they ACT AS — always one of `roles` (the action adds it if not). */
     role: roleSchema,
+    /**
+     * P14-05. Every role this person holds. The role switcher offers these.
+     * Empty means "only `role`".
+     */
+    roles: z.array(roleSchema).default([]),
     /**
      * P7-52. The HR job, and NOT a role — see D33. Orthogonal to `role` above,
      * so the two are set independently and neither implies the other.
@@ -293,36 +305,40 @@ export function normaliseManagedDepartments(
 }
 
 /**
- * How each role reads in the UI. Ordered most-privileged first for a select.
+ * P14-05. The held set, normalised: ladder order, no duplicates, and always
+ * including the active role — the database trigger guarantees the same.
+ */
+export function normaliseHeldRoles(
+  role: z.infer<typeof roleSchema>,
+  roles: z.infer<typeof roleSchema>[],
+): z.infer<typeof roleSchema>[] {
+  return ROLE_ORDER.filter((rung) => rung === role || roles.includes(rung));
+}
+
+/**
+ * How each role reads in the UI. Ordered most-privileged first.
  *
- * ⚠️ `admin` IS A DEAD RUNG AND THE PICKER MUST NOT OFFER IT. P8-01 moved what
- * it meant up to `owner` and promoted every row; the value survives only
- * because dropping it from the Postgres enum would mean rebuilding the type on
- * a live database. It still needs a LABEL — `Record` over the whole union, and
- * a legacy or restored row would otherwise render as a blank cell — but it is
- * excluded from `ROLE_OPTIONS` in the editor, which is what the picker reads.
- * Setting somebody to it would grant them nothing: every predicate now says
- * `>= owner`.
+ * P14-05 brought `admin` back: it is IT — sees everything, runs the
+ * configuration screens, approves nothing.
  */
 export const ROLE_LABELS: Record<z.infer<typeof roleSchema>, { label: string; hint: string }> = {
   // P14-01. Shown as "CEO"; the enum value stays `owner` — every policy and
   // `>=` compares the value, and only this label is what anybody reads.
   owner: {
     label: "CEO",
-    hint: "Everything, every department. Manages users, roles and settings.",
+    hint: "Oversight: sees every department, report and HR screen. Approves nothing.",
   },
-  // P14-02. On par with CEO; one step below it only because a ladder has no ties.
   business_manager: {
     label: "Business Manager",
-    hint: "Everything, every department, alongside the CEO. Manages users, roles and settings.",
+    hint: "Oversight alongside the CEO: sees every department, report and HR screen. Approves nothing.",
   },
   admin: {
-    label: "Admin (retired)",
-    hint: "The old name for CEO. Nobody holds it; kept so legacy records still read.",
+    label: "Admin (IT)",
+    hint: "Sees everything and runs the configuration screens: users and roles, settings, events, audit trail. Approves nothing.",
   },
   manager: {
     label: "Manager",
-    hint: "Oversees the departments ticked below. Inherits team leader.",
+    hint: "Sees every department. Approves the final step of every request and all timesheets.",
   },
   team_leader: {
     label: "Team Leader",

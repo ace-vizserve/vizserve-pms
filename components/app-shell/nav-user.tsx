@@ -19,7 +19,7 @@ const ROLE_LABELS: Record<string, string> = {
   member: "Member",
   team_leader: "Team Leader",
   manager: "Manager",
-  admin: "Admin",
+  admin: "Admin (IT)",
   // P8-01a added the top rung and this table was never updated, so an owner's
   // chip rendered the raw string "owner" — the one role whose holder is most
   // likely to be looking at it.

@@ -54,9 +54,8 @@ describe("canDoHr — HR is a job, not a rank (D33)", () => {
     // P8-01 renamed the rung this asks about (`admin` -> `owner`) on both sides
     // at once. Renaming it in only one place is EXACTLY the failure above.
     expect(canDoHr(context({ role: "owner", isHr: false }))).toBe(true);
-    // And the dead rung grants nothing any more. Nobody holds it, but a row
-    // restored from a backup might, and it must not inherit HR.
-    expect(canDoHr(context({ role: "admin", isHr: false }))).toBe(false);
+    // P14-05. Admin (IT) is above Manager, so it sees the HR screens too.
+    expect(canDoHr(context({ role: "admin", isHr: false }))).toBe(true);
   });
 
   it("refuses a plain member and a plain team leader", () => {
@@ -64,13 +63,9 @@ describe("canDoHr — HR is a job, not a rank (D33)", () => {
     expect(canDoHr(context({ role: "team_leader" }))).toBe(false);
   });
 
-  it("refuses a MANAGER, which is the near miss", () => {
-    // Manager is the rank most likely to be assumed into HR, and it is not: a
-    // manager runs departments, HR runs entitlement. If HR had been added to
-    // the enum instead of beside it, this is the case that would have silently
-    // flipped.
-    expect(canDoHr(context({ role: "manager", isHr: false }))).toBe(false);
-    expect(canDoHr(context({ role: "manager", isHr: true }))).toBe(true);
+  it("grants it to a MANAGER without the flag (P14-05: Manager and above see HR)", () => {
+    expect(canDoHr(context({ role: "manager", isHr: false }))).toBe(true);
+    expect(canDoHr(context({ role: "team_leader", isHr: false }))).toBe(false);
   });
 });
 
@@ -112,8 +107,15 @@ describe("nav gating — role and capability are ANDed, never substituted", () =
     expect(labels).not.toContain("Admin");
   });
 
-  it("renders both groups for an owner, HR before Admin", () => {
+  it("gives the CEO HR but not the Admin group — configuration is Admin's alone (P14-05)", () => {
     const labels = groupedNavItems("owner", { isHr: true }).map((s) => s.group.label);
+
+    expect(labels).toContain("HR");
+    expect(labels).not.toContain("Admin");
+  });
+
+  it("renders both groups for the Admin role, HR before Admin", () => {
+    const labels = groupedNavItems("admin", { isHr: true }).map((s) => s.group.label);
 
     expect(labels).toContain("HR");
     expect(labels).toContain("Admin");

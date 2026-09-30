@@ -1,10 +1,11 @@
 import { loadAllDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
-import { requireRole } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
+import { requireAdmin } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { currentBalanceYear } from "@/lib/schemas/leave-balances";
+import { normaliseHeldRoles } from "@/lib/schemas/users";
+import type { Role } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 
@@ -28,7 +29,7 @@ export const metadata: Metadata = { title: "Users" };
  * an auth identity genuinely requires it.
  */
 export default async function UsersPage() {
-  const context = await requireRole("owner");
+  const context = await requireAdmin();
   const supabase = await createClient();
 
   // P7-33. Manila's year, not the server's — see `currentBalanceYear`. On
@@ -43,6 +44,7 @@ export default async function UsersPage() {
     { data: managed },
     { data: leaveTypes },
     { data: allocations },
+    { data: heldRoles },
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_users")
@@ -82,6 +84,9 @@ export default async function UsersPage() {
       .from("vizserve_pms_leave_balances")
       .select("user_id, leave_type_id, days_allocated")
       .eq("balance_year", balanceYear),
+
+    // P14-05. Every role each person holds.
+    supabase.from("vizserve_pms_user_roles").select("user_id, role"),
   ]);
 
   // Grouped in one pass rather than a query per user — this table is the whole
@@ -102,22 +107,26 @@ export default async function UsersPage() {
     allocationsByUser.set(row.user_id, forUser);
   }
 
+  const rolesByUser = new Map<string, Role[]>();
+  for (const row of heldRoles ?? []) {
+    rolesByUser.set(row.user_id, [...(rolesByUser.get(row.user_id) ?? []), row.role]);
+  }
+
   const rows: EditableUser[] = (users ?? []).map((user) => ({
     ...user,
+    roles: normaliseHeldRoles(user.role, rolesByUser.get(user.id) ?? []),
     managed_department_ids: managedByUser.get(user.id) ?? [],
     leave_allocations: allocationsByUser.get(user.id) ?? {},
   }));
 
   return (
     <PageShell>
-      {/* No <h1> — the breadcrumb says "Admin / Users". This paragraph stays
-          because it is the one thing the screen cannot show: the role ladder is
-          inclusive, so the column reading "Manager" is a floor, not a set. */}
+      {/* No <h1> — the breadcrumb says "Admin / Users". */}
       <p className="text-xs text-muted-foreground">
-        Roles are inclusive — an owner can do everything a manager can, and so
-        on down. What a person can <em>reach</em> is decided by the departments
-        they lead, not by the role alone. Admin and HR are ticks rather than
-        rungs: they sit beside the ladder, not on it.
+        A person can hold several roles and switches between them from the top bar. Team
+        Leaders approve for the departments ticked for them; the Manager approves the final
+        step and timesheets; Admin, Business Manager and CEO see everything and approve
+        nothing.
       </p>
 
       {/* ⚠️ `.error` CHECKED, NOT `users ?? []`. This page was the last list in
@@ -143,7 +152,8 @@ export default async function UsersPage() {
           this screen widens to anyone below owner is the day a hard-coded
           `true` would silently let them appoint themselves.
         */
-        viewerIsOwner={roleAtLeast(context.role, "owner")}
+        // P14-05. Admin (IT) runs this screen and may grant any role, CEO included.
+        viewerIsOwner={context.role === "admin"}
       />
       )}
     </PageShell>

@@ -1,0 +1,16 @@
+{
+  "date": "2026-09-30",
+  "kind": "changed",
+  "area": "Approvals",
+  "title": "Who approves what has changed",
+  "description": "Every internal request now goes to the department's team leader and then the manager, and timesheets go straight to the manager. The CEO, business manager and admin no longer approve anything.",
+  "items": [
+    "Timesheets: the manager approves them",
+    "Leave: relievers, then the team leader, then the manager",
+    "Overtime, time corrections and reimbursements: the team leader, then the manager",
+    "A team leader's own request skips straight to the manager",
+    "The manager's own requests and timesheets are approved as soon as they are submitted",
+    "The manager now sees every department"
+  ],
+  "refs": ["P14-04"]
+}

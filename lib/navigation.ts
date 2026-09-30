@@ -88,6 +88,12 @@ export type NavItem = {
    * — see the note in `visibleNavItems`.
    */
   alsoDeptAdmin?: boolean;
+  /**
+   * P14-05. Admin (IT) ONLY — the configuration screens. An equality test, so
+   * CEO and Business Manager, who outrank `admin` on the ladder, do not see it.
+   * Overrides `minRole`.
+   */
+  adminOnly?: boolean;
   /** False until the phase that builds it lands. */
   enabled: boolean;
   /** Shown on the disabled state so the reason is obvious. */
@@ -259,18 +265,14 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "inbox",
   },
   // ---------------------------------------------------------------------------
-  // P8-01 — THE ADMIN GROUP IS `minRole: "owner"`, NOT `"admin"`.
-  //
-  // Every page below is `requireRole("owner")`. Leaving the floor at the dead
-  // `admin` rung would put these rows in the rail for a legacy or restored
-  // `admin` row and then throw ForbiddenError when they clicked one — a door
-  // offered to people it does not open for, which 13-implementation-status.md
-  // already records as the P7-14 failure. The nav must agree with the gate.
+  // P14-05 — THE ADMIN GROUP IS ADMIN (IT) ONLY: `adminOnly`, matching
+  // `requireAdmin()` on every page below. The nav must agree with the gate.
   // ---------------------------------------------------------------------------
   {
     label: "Users",
     href: "/admin/users",
-    minRole: "owner",
+    minRole: "admin",
+    adminOnly: true,
     // Re-enabled on merge. This was correctly disabled on main because the
     // route 404ed — P0-04 has since been built, so the screen it was waiting
     // for now exists.
@@ -301,7 +303,8 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Events",
     href: "/admin/events",
-    minRole: "owner",
+    minRole: "admin",
+    adminOnly: true,
     // P7-46. Sits directly under Holidays because the two are the halves of
     // "what is on the calendar that is not leave" — and because the difference
     // between them matters: a holiday is a day off and changes leave
@@ -312,7 +315,8 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Settings",
     href: "/admin/settings",
-    minRole: "owner",
+    minRole: "admin",
+    adminOnly: true,
     // P7-37. Company-wide rules, read by everybody and written by nobody else.
     // Sits with Holidays for the same reason: both are policy an admin sets
     // once and the whole app then obeys silently.
@@ -322,7 +326,8 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Audit trail",
     href: "/admin/audit",
-    minRole: "owner",
+    minRole: "admin",
+    adminOnly: true,
     // P0-09. The table has been written to since Phase 0 by every server action
     // and by a dozen SQL functions; this is the first thing that reads it.
     //
@@ -467,10 +472,17 @@ function capabilityAllows(
  * which is not a rule anybody has.
  */
 function navAllows(
-  item: { minRole?: Role; requiresHr?: boolean; requiresDeptAdmin?: boolean; alsoDeptAdmin?: boolean },
+  item: {
+    minRole?: Role;
+    requiresHr?: boolean;
+    requiresDeptAdmin?: boolean;
+    alsoDeptAdmin?: boolean;
+    adminOnly?: boolean;
+  },
   role: Role,
   viewer: NavViewer,
 ): boolean {
+  if (item.adminOnly) return role === "admin";
   if (item.alsoDeptAdmin && viewer.isDeptAdmin === true) return true;
   if (item.minRole && !roleAllows(role, item.minRole)) return false;
   return capabilityAllows(item, viewer);
