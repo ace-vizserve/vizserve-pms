@@ -1,0 +1,13 @@
+{
+  "date": "2026-09-30",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Log time from the task list",
+  "description": "Click a task's Time tracked figure to log time against it without opening the timesheet. It is the same form the timesheet uses, and the hour lands on your timesheet like any other.",
+  "items": [
+    "The date defaults to today; pick another from the calendar",
+    "Your earlier entries on the task are listed above the form — click one to edit it",
+    "Entries in a week you have handed in are shown but cannot be changed",
+    "The popover closes once the time is saved"
+  ]
+}
