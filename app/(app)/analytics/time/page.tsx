@@ -81,24 +81,24 @@ async function Body({ context, filters }: { context: AuthContext; filters: Perfo
           label="Hours logged"
           value={hours(now.time.minutes)}
           hint={`${hours(now.time.byKind.client)} client · ${hours(now.time.byKind.internal)} internal`}
-          delta={<Delta now={now.time.minutes / 60} before={before.time.minutes / 60} better="up" unit="h" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.time.minutes / 60} before={before.time.minutes / 60} better="up" unit="h" />}
         />
         <Figure
           label="Clocked-in time accounted for"
           value={pct(now.time.accounted)}
           hint={`${hours(now.time.accounted.hit)} logged of ${hours(now.time.clockedMinutes)} on the DTR, after breaks`}
-          delta={<Delta now={percent(now.time.accounted)} before={percent(before.time.accounted)} better="up" unit=" pts" />}
+          delta={<Delta unavailable={data.earlier.time} now={percent(now.time.accounted)} before={percent(before.time.accounted)} better="up" unit=" pts" />}
         />
         <Figure
           label="Overtime approved"
           value={hours(now.overtimeMinutes)}
-          delta={<Delta now={now.overtimeMinutes / 60} before={before.overtimeMinutes / 60} better="down" unit="h" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.overtimeMinutes / 60} before={before.overtimeMinutes / 60} better="down" unit="h" />}
         />
         <Figure
           label="Leave days"
           value={now.attendance.onLeave}
           hint="Approved leave on working days"
-          delta={<Delta now={now.attendance.onLeave} before={before.attendance.onLeave} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.attendance.onLeave} before={before.attendance.onLeave} better="down" />}
         />
       </div>
 
@@ -108,20 +108,20 @@ async function Body({ context, filters }: { context: AuthContext; filters: Perfo
           label="Submitted on time"
           value={pct(onTimeRate(now))}
           hint={`${now.compliance.onTime} of ${now.compliance.expected} weeks, by the Monday after`}
-          delta={<Delta now={percent(onTimeRate(now))} before={percent(onTimeRate(before))} better="up" unit=" pts" />}
+          delta={<Delta unavailable={data.earlier.time} now={percent(onTimeRate(now))} before={percent(onTimeRate(before))} better="up" unit=" pts" />}
         />
         <Figure
           label="Never submitted"
           value={now.compliance.missing}
           hint="Finished weeks with nothing filed"
           tone={now.compliance.missing > 0 ? "warning" : undefined}
-          delta={<Delta now={now.compliance.missing} before={before.compliance.missing} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.compliance.missing} before={before.compliance.missing} better="down" />}
         />
         <Figure
           label="Sent back"
           value={now.compliance.returned}
           hint="Weeks the manager returned"
-          delta={<Delta now={now.compliance.returned} before={before.compliance.returned} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.compliance.returned} before={before.compliance.returned} better="down" />}
         />
         <Figure label="Weeks expected" value={now.compliance.expected} hint="Ended, and not a full week of leave" />
       </div>
@@ -133,31 +133,31 @@ async function Body({ context, filters }: { context: AuthContext; filters: Perfo
           value={now.attendance.late}
           hint={`${hours(now.attendance.lateMinutes)} late in total · more than ${data.graceMinutes} min past the start`}
           tone={now.attendance.late > 0 ? "warning" : undefined}
-          delta={<Delta now={now.attendance.late} before={before.attendance.late} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.attendance.late} before={before.attendance.late} better="down" />}
         />
         <Figure
           label="Absent"
           value={now.attendance.absent}
           hint="Working days with no time-in and no leave"
           tone={now.attendance.absent > 0 ? "warning" : undefined}
-          delta={<Delta now={now.attendance.absent} before={before.attendance.absent} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.attendance.absent} before={before.attendance.absent} better="down" />}
         />
         <Figure
           label="Left early"
           value={now.attendance.undertime}
           hint="Clock-outs before the end, allowing for overtime"
-          delta={<Delta now={now.attendance.undertime} before={before.attendance.undertime} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.attendance.undertime} before={before.attendance.undertime} better="down" />}
         />
         <Figure
           label="Missing clock-outs"
           value={now.missingPunches}
           hint="Past days with a time-in and no time-out"
-          delta={<Delta now={now.missingPunches} before={before.missingPunches} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.missingPunches} before={before.missingPunches} better="down" />}
         />
         <Figure
           label="Time corrections asked"
           value={now.corrections}
-          delta={<Delta now={now.corrections} before={before.corrections} better="down" />}
+          delta={<Delta unavailable={data.earlier.time} now={now.corrections} before={before.corrections} better="down" />}
         />
       </div>
       <p className="text-2xs text-muted-foreground">

@@ -8,7 +8,9 @@ import type { VizservePmsTaskStatus } from "@/lib/database.types";
 import { addDays, startOfWeek, todayInAppZone } from "@/lib/dates";
 import { expandLeaveDays, leaveKey, type LeaveSpan } from "@/lib/leave";
 import {
+  RECORDS_START,
   compliance,
+  earlierNote,
   delivery,
   mean,
   previousPeriod,
@@ -83,6 +85,8 @@ export type PerformanceData = {
   listHours: { id: string; name: string; minutes: number }[];
   nameOf: Map<string, string>;
   errors: string[];
+  /** Null where the previous period can be compared; otherwise what to say instead. */
+  earlier: { tasks: string | null; time: string | null; client: string | null };
 };
 
 type UserRow = {
@@ -680,6 +684,11 @@ export async function loadPerformance(
     listHours,
     nameOf,
     errors,
+    earlier: {
+      tasks: earlierNote(previous, RECORDS_START.tasks),
+      time: earlierNote(previous, RECORDS_START.time),
+      client: earlierNote(previous, RECORDS_START.client),
+    },
   };
 }
 

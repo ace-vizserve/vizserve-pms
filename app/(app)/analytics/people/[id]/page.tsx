@@ -220,35 +220,35 @@ async function Performance({
           label="Completed"
           value={me.delivery.completed}
           hint={avg(average.completed, 1)}
-          delta={<Delta now={me.delivery.completed} before={before?.delivery.completed ?? null} better="up" />}
+          delta={<Delta unavailable={data.earlier.tasks} now={me.delivery.completed} before={before?.delivery.completed ?? null} better="up" />}
         />
         <Figure
           label="On time"
           value={pct(me.delivery.onTime)}
           hint={`${me.delivery.onTime.hit} of ${me.delivery.onTime.of} · ${avg(average.onTime, 0, "%")}`}
           delta={
-            <Delta now={percent(me.delivery.onTime)} before={before ? percent(before.delivery.onTime) : null} better="up" unit=" pts" />
+            <Delta unavailable={data.earlier.tasks} now={percent(me.delivery.onTime)} before={before ? percent(before.delivery.onTime) : null} better="up" unit=" pts" />
           }
         />
         <Figure
           label="Cycle time"
           value={days(me.delivery.cycleDays)}
           hint={`Median · ${avg(average.cycleDays, 1, "d")}`}
-          delta={<Delta now={me.delivery.cycleDays} before={before?.delivery.cycleDays ?? null} better="down" format={(value) => days(value)} />}
+          delta={<Delta unavailable={data.earlier.tasks} now={me.delivery.cycleDays} before={before?.delivery.cycleDays ?? null} better="down" format={(value) => days(value)} />}
         />
         <Figure
           label="Passed QA first time"
           value={pct(me.delivery.firstPass)}
           hint={`${me.delivery.firstPass.hit} of ${me.delivery.firstPass.of} · ${avg(average.firstPass, 0, "%")}`}
           delta={
-            <Delta now={percent(me.delivery.firstPass)} before={before ? percent(before.delivery.firstPass) : null} better="up" unit=" pts" />
+            <Delta unavailable={data.earlier.tasks} now={percent(me.delivery.firstPass)} before={before ? percent(before.delivery.firstPass) : null} better="up" unit=" pts" />
           }
         />
         <Figure
           label="QA reviews they did"
           value={me.reviews}
           hint={avg(average.reviews, 1)}
-          delta={<Delta now={me.reviews} before={before?.reviews ?? null} better="up" />}
+          delta={<Delta unavailable={data.earlier.tasks} now={me.reviews} before={before?.reviews ?? null} better="up" />}
         />
         <Figure
           label="Client rating"
@@ -263,7 +263,7 @@ async function Performance({
           label="Hours logged"
           value={hours(me.time.minutes)}
           hint={`${hours(me.time.byKind.client)} client · ${hours(me.time.byKind.internal)} internal`}
-          delta={<Delta now={me.time.minutes / 60} before={before ? before.time.minutes / 60 : null} better="up" unit="h" />}
+          delta={<Delta unavailable={data.earlier.time} now={me.time.minutes / 60} before={before ? before.time.minutes / 60 : null} better="up" unit="h" />}
         />
         <Figure
           label="Clocked time logged"
@@ -286,7 +286,7 @@ async function Performance({
           }
           delta={
             me.attendance && !me.attendance.unscheduled ? (
-              <Delta now={me.attendance.late} before={before?.attendance?.late ?? null} better="down" />
+              <Delta unavailable={data.earlier.time} now={me.attendance.late} before={before?.attendance?.late ?? null} better="down" />
             ) : undefined
           }
         />

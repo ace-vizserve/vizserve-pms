@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compliance,
   delivery,
+  earlierNote,
   isQaReturn,
   percent,
   previousPeriod,
@@ -218,5 +219,14 @@ describe("imported tasks", () => {
       period,
     );
     expect(result.completed).toBe(0);
+  });
+});
+
+describe("earlierNote", () => {
+  it("compares when the earlier period is on record", () => {
+    // September, against an earlier month starting 2 Aug — records from 3 Sep cover none of it.
+    expect(earlierNote({ from: "2026-08-02", to: "2026-08-31" }, "2026-09-03")).toBe("no records before 3 Sept to compare");
+    // October, against September — 28 of 30 days on record.
+    expect(earlierNote({ from: "2026-09-01", to: "2026-09-30" }, "2026-09-03")).toBeNull();
   });
 });

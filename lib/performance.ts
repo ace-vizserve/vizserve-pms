@@ -490,3 +490,38 @@ export function change(now: number | null, before: number | null): number | null
   if (now === null || before === null) return null;
   return now - before;
 }
+
+// ---------------------------------------------------------------------------
+// When the records start — so a comparison is not made against nothing
+// ---------------------------------------------------------------------------
+
+/**
+ * P15-02 — THE FIRST DAY EACH KIND OF RECORD EXISTS IN THIS APP, read from the
+ * live data on 1 Oct 2026. Before these dates there is nothing to compare with:
+ * the app went live on 24 Aug, ClickUp tasks were imported on 3 Sep without
+ * their history, and the first client request came through the form on 23 Sep.
+ * Comparing September with an August that holds no completions reads as a huge
+ * improvement that never happened.
+ */
+export const RECORDS_START = {
+  /** Task moves: completions, QA, cycle time. */
+  tasks: "2026-09-03",
+  /** Clock-ins, timesheets, leave, overtime, corrections. */
+  time: "2026-08-24",
+  /** Client requests, Gate 1, client answers and ratings. */
+  client: "2026-09-23",
+} as const;
+
+/**
+ * Null when the earlier period is mostly on record (80% of its days or more),
+ * otherwise the sentence to show instead of a comparison.
+ */
+export function earlierNote(previous: Period, start: string): string | null {
+  const length = (daysBetween(previous.from, previous.to) ?? 0) + 1;
+  const firstTracked = previous.from > start ? previous.from : start;
+  const tracked = firstTracked > previous.to ? 0 : (daysBetween(firstTracked, previous.to) ?? 0) + 1;
+  if (length > 0 && tracked / length >= 0.8) return null;
+  const [year, month, day] = start.split("-").map(Number);
+  const label = new Date(Date.UTC(year!, month! - 1, day!)).toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+  return `no records before ${label} to compare`;
+}

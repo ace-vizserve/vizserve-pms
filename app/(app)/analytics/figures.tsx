@@ -48,13 +48,19 @@ export function Delta({
   better,
   unit = "",
   format,
+  unavailable = null,
 }: {
   now: number | null;
   before: number | null;
   better: "up" | "down";
   unit?: string;
   format?: (value: number) => string;
+  /** P15-02 — set when the earlier period predates the records; said instead. */
+  unavailable?: string | null;
 }) {
+  if (unavailable) {
+    return <span className="text-2xs text-muted-foreground">{unavailable}</span>;
+  }
   if (now === null || before === null) {
     return <span className="text-2xs text-muted-foreground">no earlier figure</span>;
   }

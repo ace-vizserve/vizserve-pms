@@ -72,32 +72,32 @@ async function Body({ context, filters }: { context: AuthContext; filters: Perfo
           label="Completed"
           value={now.completed}
           hint="Tasks finished in the period"
-          delta={<Delta now={now.completed} before={before.completed} better="up" />}
+          delta={<Delta unavailable={data.earlier.tasks} now={now.completed} before={before.completed} better="up" />}
         />
         <Figure
           label="On time"
           value={pct(now.onTime)}
           hint={rateHint(now.onTime, "with a due date")}
-          delta={<Delta now={percent(now.onTime)} before={percent(before.onTime)} better="up" unit=" pts" />}
+          delta={<Delta unavailable={data.earlier.tasks} now={percent(now.onTime)} before={percent(before.onTime)} better="up" unit=" pts" />}
         />
         <Figure
           label="Cycle time"
           value={days(now.cycleDays)}
           hint="Median, created to completed"
-          delta={<Delta now={now.cycleDays} before={before.cycleDays} better="down" format={(value) => days(value)} />}
+          delta={<Delta unavailable={data.earlier.tasks} now={now.cycleDays} before={before.cycleDays} better="down" format={(value) => days(value)} />}
         />
         <Figure
           label="Passed QA first time"
           value={pct(now.firstPass)}
           hint={rateHint(now.firstPass, "that went through QA")}
-          delta={<Delta now={percent(now.firstPass)} before={percent(before.firstPass)} better="up" unit=" pts" />}
+          delta={<Delta unavailable={data.earlier.tasks} now={percent(now.firstPass)} before={percent(before.firstPass)} better="up" unit=" pts" />}
         />
         <Figure
           label="Sent back by QA"
           value={now.qaReturns}
           hint="Returns in the period"
           tone={now.qaReturns > 0 ? "warning" : undefined}
-          delta={<Delta now={now.qaReturns} before={before.qaReturns} better="down" />}
+          delta={<Delta unavailable={data.earlier.tasks} now={now.qaReturns} before={before.qaReturns} better="down" />}
         />
         <Figure
           label="Hours vs estimate"

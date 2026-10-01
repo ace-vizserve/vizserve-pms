@@ -8,7 +8,7 @@ import { departmentScopeFilter, requireRole } from "@/lib/auth/authorization";
 import { loadDepartmentOptions, type PerformanceFilters as PerformanceFilterValues } from "@/lib/performance-server";
 import type { VizservePmsRequestStatus } from "@/lib/database.types";
 import { addDays, todayInAppZone } from "@/lib/dates";
-import { previousPeriod } from "@/lib/performance";
+import { earlierNote, previousPeriod, RECORDS_START } from "@/lib/performance";
 import {
   loadClientEngagement,
   loadFeedback,
@@ -85,6 +85,7 @@ async function Body({
   const period = { from: filters.from, to: filters.to, departmentIds };
   const previous = { ...previousPeriod(period), departmentIds };
   const inverted = filters.from > filters.to;
+  const unavailable = earlierNote(previous, RECORDS_START.client);
 
   const [requests, gate, gateBefore, standard, standardBefore, turnaround, negotiation, engagement, feedback, ratings] =
     await Promise.all([
@@ -130,7 +131,7 @@ async function Body({
               label="Gate 1 answer time"
               value={hoursValue(gate.medianHours)}
               hint={`Median, submitted to decided · ${gate.reviewed} decided`}
-              delta={<Delta now={gate.medianHours} before={gateBefore.medianHours} better="down" format={hoursValue} />}
+              delta={<Delta unavailable={unavailable} now={gate.medianHours} before={gateBefore.medianHours} better="down" format={hoursValue} />}
             />
             <Figure
               label="Waiting at Gate 1 now"
@@ -155,7 +156,7 @@ async function Body({
                   ? "No client work finished in the period"
                   : `${standard.met} of ${standard.of}, in working days from submission`
               }
-              delta={<Delta now={standardRate} before={standardBeforeRate} better="up" unit=" pts" />}
+              delta={<Delta unavailable={unavailable} now={standardRate} before={standardBeforeRate} better="up" unit=" pts" />}
             />
             <Figure
               label="Client approval rate"
