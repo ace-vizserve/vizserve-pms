@@ -903,9 +903,14 @@ export async function fetchTeamWeek(
       const comparable = typeof breakOf.get(userId) === "number";
       const adjusted = punched.get(userId) ?? null;
 
+      const departmentId = departmentOf.get(userId) ?? null;
+
       return {
         userId,
         name: nameOf.get(userId) ?? "Someone no longer active",
+        // P15-01 — the grid groups and filters by this.
+        departmentId,
+        departmentName: departmentId ? (departmentName.get(departmentId) ?? null) : null,
         cells: cells.get(userId) ?? {},
         overtime: overtime.get(userId) ?? {},
         leaveDays: [...(leave.get(userId) ?? [])],
@@ -925,7 +930,13 @@ export async function fetchTeamWeek(
         decisionReason: week?.decision_reason ?? null,
       };
     })
-    .sort((a, b) => a.name.localeCompare(b.name));
+    // P15-01 — department first, so the grid's department sections are runs.
+    // No department sorts last.
+    .sort(
+      (a, b) =>
+        (a.departmentName ?? "￿").localeCompare(b.departmentName ?? "￿") ||
+        a.name.localeCompare(b.name),
+    );
 
   return {
     rows,

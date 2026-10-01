@@ -16,6 +16,14 @@ import {
 
 const ALL = "__all__";
 
+// P15-02 — the kind of work, the same three the task list tells apart.
+const KIND_ITEMS: Record<string, string> = {
+  [ALL]: "All work",
+  client: "Client work",
+  internal: "Internal work",
+  personal: "Personal tasks",
+};
+
 /**
  * P11-14 — the /analytics filter bar: which department, and over what period.
  *
@@ -30,7 +38,7 @@ const ALL = "__all__";
  * the current month because it asks about intake; this page asks who is
  * carrying what, and a period silently applied would hide a six-week-old task
  * still sitting on somebody's plate. So all-time is the default and the range
- * is opt-in — `RangePicker` on /reports is the same control with the opposite
+ * is opt-in — `PerformanceFilters` on the other tabs is the same control with the opposite
  * default, which is why this is a second component rather than that one reused.
  *
  * ⚠️ IT RANGES ON THE DUE DATE, where /reports ranges on `created_at`. That is
@@ -110,6 +118,33 @@ export function AnalyticsFilters({
           </Select>
         </div>
       ) : null}
+
+      <div className="space-y-1.5">
+        <Label htmlFor="kind" className="text-xs text-muted-foreground">
+          Kind of work
+        </Label>
+        <Select
+          items={KIND_ITEMS}
+          value={params.get("kind") ?? ALL}
+          onValueChange={(value) => {
+            const next = new URLSearchParams(params.toString());
+            if (!value || value === ALL) next.delete("kind");
+            else next.set("kind", value);
+            push(next);
+          }}
+        >
+          <SelectTrigger id="kind" className="w-44">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {Object.entries(KIND_ITEMS).map(([value, label]) => (
+              <SelectItem key={value} value={value}>
+                {label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
 
       <div className="space-y-1.5">
         <Label htmlFor="from" className="text-xs text-muted-foreground">

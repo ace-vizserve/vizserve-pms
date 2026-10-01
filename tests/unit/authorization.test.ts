@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { canEditUser, canManageUsers, grantableRoles } from "@/lib/auth/rules";
+
 import {
   ROLE_ORDER,
   canAccessDepartment,
@@ -330,5 +332,36 @@ describe("the collaboration space", () => {
     // Four teams typing into one list is the case this space exists for, and it
     // is the case where a page that does not repaint shows work already taken.
     expect(realtimeDepartmentScope(member)).toEqual([DEPT_A, SHARED]);
+  });
+});
+
+
+describe("P15-03 — who manages people", () => {
+  it("opens the Users page to Manager and above only", () => {
+    expect(canManageUsers({ role: "team_leader" })).toBe(false);
+    for (const role of ["manager", "admin", "business_manager", "owner"] as const) {
+      expect(canManageUsers({ role })).toBe(true);
+    }
+  });
+
+  it("lets each grant only roles below their own, and Admin only from the Admin", () => {
+    expect(grantableRoles("manager")).toEqual(["team_leader"]);
+    expect(grantableRoles("business_manager")).toEqual(["manager", "team_leader"]);
+    expect(grantableRoles("owner")).toEqual(["business_manager", "manager", "team_leader"]);
+    expect(grantableRoles("admin")).toContain("admin");
+    expect(grantableRoles("team_leader")).toEqual([]);
+  });
+
+  it("lets a Manager edit a Team Leader but not another Manager, a senior, or themselves", () => {
+    const manager = { role: "manager" as const, userId: "me" };
+    expect(canEditUser(manager, { id: "a", roles: ["member", "team_leader"] })).toBe(true);
+    expect(canEditUser(manager, { id: "b", roles: ["manager"] })).toBe(false);
+    expect(canEditUser(manager, { id: "c", roles: ["team_leader", "business_manager"] })).toBe(false);
+    expect(canEditUser(manager, { id: "d", roles: ["admin"] })).toBe(false);
+    expect(canEditUser(manager, { id: "me", roles: ["member"] })).toBe(false);
+  });
+
+  it("leaves the Admin able to edit anyone", () => {
+    expect(canEditUser({ role: "admin", userId: "me" }, { id: "x", roles: ["owner"] })).toBe(true);
   });
 });

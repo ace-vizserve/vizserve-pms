@@ -103,28 +103,35 @@ describe("nav gating — role and capability are ANDed, never substituted", () =
     const sections = groupedNavItems("member", { isHr: true });
     const labels = sections.map((section) => section.group.label);
 
-    expect(labels).toContain("HR");
+    expect(labels).toContain("People & HR");
     expect(labels).not.toContain("Admin");
   });
 
   it("gives the CEO HR but not the Admin group — configuration is Admin's alone (P14-05)", () => {
     const labels = groupedNavItems("owner", { isHr: true }).map((s) => s.group.label);
 
-    expect(labels).toContain("HR");
+    expect(labels).toContain("People & HR");
     expect(labels).not.toContain("Admin");
   });
 
   it("renders both groups for the Admin role, HR before Admin", () => {
     const labels = groupedNavItems("admin", { isHr: true }).map((s) => s.group.label);
 
-    expect(labels).toContain("HR");
+    expect(labels).toContain("People & HR");
     expect(labels).toContain("Admin");
-    expect(labels.indexOf("HR")).toBeLessThan(labels.indexOf("Admin"));
+    expect(labels.indexOf("People & HR")).toBeLessThan(labels.indexOf("Admin"));
   });
 
-  it("drops the HR group entirely rather than rendering it empty", () => {
-    const labels = groupedNavItems("owner", { isHr: false }).map((s) => s.group.label);
-    expect(labels).not.toContain("HR");
+  it("drops the People & HR group entirely rather than rendering it empty", () => {
+    const labels = groupedNavItems("team_leader", { isHr: false }).map((s) => s.group.label);
+    expect(labels).not.toContain("People & HR");
+  });
+
+  it("P15-03 — gives Manager and up the Users page, without the HR screens unless HR", () => {
+    const group = groupedNavItems("owner", { isHr: false }).find((s) => s.group.label === "People & HR");
+    expect(group?.items.map((item) => item.href)).toEqual(["/admin/users"]);
+    const lead = groupedNavItems("team_leader", { isHr: true }).flatMap((s) => s.items.map((item) => item.href));
+    expect(lead).not.toContain("/admin/users");
   });
 });
 

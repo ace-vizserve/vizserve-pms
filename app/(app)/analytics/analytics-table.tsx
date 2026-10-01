@@ -1,6 +1,7 @@
 "use client";
 
 import { ChartPie } from "lucide-react";
+import Link from "next/link";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { useColumnVisibility } from "@/components/data-table-columns";
@@ -46,7 +47,10 @@ export function AnalyticsTable({ rows }: { rows: AnalyticsRow[] }) {
         <span className="flex min-w-0 items-center gap-2.5">
           <Monogram id={row.id} name={row.name} />
           <span className="min-w-0">
-            <span className="block font-medium">{row.name}</span>
+            {/* P15-01 — the person's own page: their plate, their hours, their QA record. */}
+            <Link href={`/analytics/people/${row.id}`} className="block font-medium hover:underline">
+              {row.name}
+            </Link>
             {row.departmentName ? (
               <span className="block text-2xs text-muted-foreground">{row.departmentName}</span>
             ) : null}

@@ -73,6 +73,9 @@ export type TeamTaskRow = {
 export type TeamRow = {
   userId: string;
   name: string;
+  /** P15-01 — the person's home department, which the grid groups by. */
+  departmentId: string | null;
+  departmentName: string | null;
   /** `YYYY-MM-DD` → minutes logged. */
   cells: Record<string, number>;
   /**
@@ -180,6 +183,21 @@ export function TeamWeekGrid({
   const awaiting = rows.filter((row) => row.status === "SUBMITTED").length;
 
   /*
+   * P15-01 — DEPARTMENT SECTIONS, drawn only when the grid holds more than one
+   * department. Rows arrive sorted department-first (`fetchTeamWeek`), so a
+   * section is a run and a header goes wherever the department changes.
+   */
+  const sectioned = new Set(rows.map((row) => row.departmentId)).size > 1;
+  const sectionOf = (departmentId: string | null) => {
+    const members = rows.filter((row) => row.departmentId === departmentId);
+    return {
+      people: members.length,
+      minutes: members.reduce((total, row) => total + rowTotal(row), 0),
+      awaiting: members.filter((row) => row.status === "SUBMITTED").length,
+    };
+  };
+
+  /*
    * WHICH PEOPLE ARE SHOWING THEIR WORKING.
    *
    * ⚠️ LOCAL STATE, NEVER THE URL. `components/data-table.tsx:276-281` settles
@@ -269,7 +287,10 @@ export function TeamWeekGrid({
           </thead>
 
           <tbody>
-            {rows.map((row) => {
+            {rows.map((row, index) => {
+              const startsSection =
+                sectioned && (index === 0 || rows[index - 1]!.departmentId !== row.departmentId);
+              const section = startsSection ? sectionOf(row.departmentId) : null;
               const leave = new Set(row.leaveDays);
               const open = expanded.has(row.userId);
               const logged = rowTotal(row);
@@ -280,6 +301,22 @@ export function TeamWeekGrid({
 
               return (
                 <Fragment key={row.userId}>
+                  {section ? (
+                    <tr className="border-b bg-muted/60">
+                      <th
+                        scope="colgroup"
+                        colSpan={days.length + 3}
+                        className="sticky left-0 px-3 py-1.5 text-left text-xs font-semibold"
+                      >
+                        {row.departmentName ?? "No department"}
+                        <span className="ml-2 font-normal text-muted-foreground">
+                          {section.people} {section.people === 1 ? "person" : "people"} ·{" "}
+                          {section.minutes > 0 ? formatCellDuration(section.minutes) : "nothing"} logged
+                          {section.awaiting > 0 ? ` · ${section.awaiting} awaiting a decision` : ""}
+                        </span>
+                      </th>
+                    </tr>
+                  ) : null}
                   <tr className="border-b">
                     <th
                       scope="row"

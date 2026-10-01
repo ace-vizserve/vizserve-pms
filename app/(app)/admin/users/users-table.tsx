@@ -3,6 +3,8 @@
 import { useMemo, useState, useTransition } from "react";
 import { FileDown, KeyRound, Pencil, Plus, Search } from "lucide-react";
 import { toast } from "@/components/ui/toast";
+import { canEditUser } from "@/lib/auth/rules";
+import type { Role } from "@/lib/auth/roles";
 
 import { ReportBuilder } from "@/app/(app)/hr/reports/report-builder";
 
@@ -47,7 +49,7 @@ export function UsersTable({
   balanceYear,
   today,
   currentUserId,
-  viewerIsOwner,
+  viewer,
 }: {
   users: EditableUser[];
   departments: Department[];
@@ -63,7 +65,8 @@ export function UsersTable({
    * an owner may grant Owner, Admin or HR — the rule that stops a capability
    * tick from escalating itself. Passed straight through to the editor.
    */
-  viewerIsOwner: boolean;
+  /** P15-03 — who is looking, which decides whose rows they may change. */
+  viewer: { userId: string; role: Role };
 }) {
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState<EditableUser | undefined>();
@@ -318,7 +321,11 @@ export function UsersTable({
       key: "actions",
       header: <span className="sr-only">Actions</span>,
       align: "end",
-      cell: (user) => (
+      cell: (user) =>
+        // P15-03 — no controls on a row this viewer may not change.
+        !canEditUser(viewer, { id: user.id, roles: user.roles ?? [user.role] }) ? (
+          <span className="text-2xs text-muted-foreground">{user.id === viewer.userId ? "Ask someone senior" : "Senior to you"}</span>
+        ) : (
         <div className="flex justify-end gap-1">
           <Button
             variant="ghost"
@@ -334,7 +341,7 @@ export function UsersTable({
             <span className="sr-only">Edit {user.full_name || user.email}</span>
           </Button>
         </div>
-      ),
+        ),
     },
   ];
 
@@ -440,7 +447,7 @@ export function UsersTable({
         leaveTypes={leaveTypes}
         balanceYear={balanceYear}
         user={editing}
-        viewerIsOwner={viewerIsOwner}
+        viewer={viewer}
         open={editorOpen}
         onOpenChange={setEditorOpen}
         onIssued={(next) => setIssued({ ...next, created: true })}

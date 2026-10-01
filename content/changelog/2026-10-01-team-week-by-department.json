@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-01",
+  "kind": "changed",
+  "area": "Timesheet",
+  "title": "The team week is split by department and can be filtered",
+  "description": "For anyone who sees more than one department, the team week now groups people under their department with its hours and pending decisions, and can be narrowed to one department or one week status.",
+  "items": [
+    "A heading per department: people, hours logged, weeks awaiting a decision",
+    "Filter by department, and by awaiting a decision, not submitted, sent back or approved",
+    "Filters stay when you move between weeks"
+  ],
+  "refs": ["P15-01"]
+}

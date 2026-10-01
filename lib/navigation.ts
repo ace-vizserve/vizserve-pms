@@ -168,11 +168,20 @@ export const NAV_ITEMS: NavItem[] = [
     // matches the page's `requireRole("team_leader")` — the nav must agree with
     // the gate. A department admin tick does NOT reach it: the tick shapes
     // structure, it does not make somebody anyone's lead.
-    label: "Department analytics",
+    label: "Analytics",
     href: "/analytics",
     minRole: "team_leader",
     enabled: true,
     icon: "analytics",
+    // P15-02 — the five sections. Client results is what /reports was; that
+    // URL redirects here.
+    children: [
+      { label: "Workload", href: "/analytics" },
+      { label: "Delivery & quality", href: "/analytics/delivery" },
+      { label: "Time & attendance", href: "/analytics/time" },
+      { label: "Client results", href: "/analytics/client" },
+      { label: "People", href: "/analytics/people" },
+    ],
   },
   {
     /*
@@ -271,8 +280,8 @@ export const NAV_ITEMS: NavItem[] = [
   {
     label: "Users",
     href: "/admin/users",
-    minRole: "admin",
-    adminOnly: true,
+    // P15-03 — Manager and above. Each may change only people junior to them.
+    minRole: "manager",
     // Re-enabled on merge. This was correctly disabled on main because the
     // route 404ed — P0-04 has since been built, so the screen it was waiting
     // for now exists.
@@ -525,24 +534,26 @@ export function visibleNavItems(role: Role, viewer: NavViewer = {}): NavItem[] {
 export type NavGroup = { label: string; hrefs: string[]; pinBottom?: boolean };
 
 export const NAV_GROUPS: NavGroup[] = [
-  // `/tasks` is NOT here any more. Tasks are reached through the Projects tree,
-  // which is its own group rendered between the flow and the pinned sections —
-  // listing the route here as well is what put two task headings in the rail.
-  // `/respond` sits between the queue a lead works and the inbox everybody
-  // reads: it is a thing on your plate, which is what this group is.
-  { label: "Work", hrefs: ["/dashboard", "/requests", "/respond", "/inbox"] },
-  // `/timesheet/team` is NOT here any more — it is a child of `/timesheet` and
-  // is reached through it. Listing a child href beside its parent is what put
-  // them side by side in the rail in the first place.
-  { label: "Time", hrefs: ["/dtr", "/approvals", "/timesheet"] },
-  { label: "Manage", hrefs: ["/forms", "/analytics", "/reports"] },
-  // P7-52. Above Admin and below Manage: HR is a job somebody does daily, not
+  // P15-01 — GROUPED BY PROCESS, NOT BY WHO OPENS THEM. `/tasks` is reached
+  // through the Projects tree, and `/timesheet/team` through `/timesheet`, so
+  // neither is listed here.
+  { label: "Work", hrefs: ["/dashboard", "/inbox"] },
+  // One process end to end: a form is built, the client submits it, the request
+  // waits at Gate 1. `/respond` is the internal side of the same builder.
+  { label: "Forms & requests", hrefs: ["/requests", "/forms", "/respond"] },
+  // Where the day went, and the paperwork about it — leave, overtime and time
+  // corrections all live under Approvals.
+  { label: "Time & leave", hrefs: ["/dtr", "/timesheet", "/approvals"] },
+  { label: "Insights", hrefs: ["/analytics"] },
+  // P7-52. Above Admin and below Insights: HR is a job somebody does daily, not
   // an administration screen you open when something is wrong. Pinned only by
   // sitting here — `pinBottom` stays Admin's, so an HR person who is not an
   // admin sees this as their last section and nothing beneath it.
   {
-    label: "HR",
+    // P15-03 — "People & HR": Users joined it when the Manager got the page.
+    label: "People & HR",
     hrefs: [
+      "/admin/users",
       "/hr/balances",
       "/hr/leave-types",
       // Lives at /admin/holidays and always has. Grouped here because that is
@@ -557,7 +568,6 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Admin",
     hrefs: [
-      "/admin/users",
       "/admin/settings",
       "/admin/audit",
     ],

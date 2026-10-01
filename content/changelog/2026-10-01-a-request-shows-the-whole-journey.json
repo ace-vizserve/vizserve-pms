@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-01",
+  "kind": "changed",
+  "area": "Forms",
+  "title": "A request shows its whole journey",
+  "description": "A client request used to stop at \"Approved\", even when the work behind it was long finished. It now shows where the work is and everything that happened on the way.",
+  "items": [
+    "A progress line: submitted, team leader review, in progress, QA, client approval, completed",
+    "A timeline of every step, who took it, how long it waited, and any reason given",
+    "QA send-backs, the client's answer and their rating",
+    "Time logged, due date, list, turnaround, resolution and output link on the work"
+  ],
+  "refs": ["P15-01"]
+}

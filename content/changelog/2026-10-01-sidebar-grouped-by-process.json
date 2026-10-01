@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-01",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The sidebar is grouped by what the screens are for",
+  "description": "Forms and the requests they produce sat in different sections. The sidebar now groups screens by the process they belong to.",
+  "items": [
+    "Work: dashboard and inbox",
+    "Forms & requests: requests, the form builder, and filling in a form",
+    "Time & leave: DTR, timesheet and approvals",
+    "Insights: analytics and its five sections",
+    "People & HR: users and the HR screens"
+  ],
+  "refs": [
+    "P15-01"
+  ]
+}

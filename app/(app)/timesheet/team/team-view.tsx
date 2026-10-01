@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { useSearchParams } from "next/navigation";
 
 import { QueryError } from "@/components/query-error";
 import { TeamWeekGridSkeleton } from "@/components/skeletons";
@@ -10,6 +11,7 @@ import { browserClient } from "@/lib/query/browser-client";
 import { fetchTeamWeek } from "@/lib/query/fetchers/timesheet";
 import { qk } from "@/lib/query/keys";
 
+import { applyTeamFilters, readTeamFilters, TeamFilters } from "./team-filters";
 import { TeamWeekGrid } from "./team-week-grid";
 
 /**
@@ -47,6 +49,7 @@ export function TeamView({
   today: string;
 }) {
   const auth = useAuth();
+  const search = useSearchParams();
   const teamKey = qk.teamWeekVisible(monday);
 
   const weekQuery = useQuery({
@@ -71,10 +74,15 @@ export function TeamView({
      must not replace the grid a lead is reading with a skeleton. */
   if (weekQuery.isPending) return <TeamWeekGridSkeleton />;
 
-  const { rows, punchesLoaded, punchesError, settingsFellBack } = weekQuery.data;
+  const { rows: allRows, punchesLoaded, punchesError, settingsFellBack } = weekQuery.data;
+  // P15-01 — narrowed in memory: the cache entry stays the whole week, so a
+  // decision patched into it is not lost behind a filter.
+  const rows = applyTeamFilters(allRows, readTeamFilters(new URLSearchParams(search.toString())));
 
   return (
     <>
+      {allRows.length > 0 ? <TeamFilters rows={allRows} /> : null}
+
       {/* P8-07 — a dead DTR read must not read as "nobody punched". `?? []`
           would put an empty punch record beside a full week of logged hours,
           which is an accusation the page has no evidence for. Said out loud
@@ -117,6 +125,15 @@ export function TeamView({
         </p>
       ) : null}
 
+      {allRows.length > 0 && rows.length === 0 ? (
+        <div className="rounded-lg border bg-card grade-surface p-8 text-center shadow-raised-lg">
+          <p className="text-sm font-medium">Nobody matches these filters this week.</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {allRows.length} {allRows.length === 1 ? "person is" : "people are"} on this week&rsquo;s
+            grid. Change the department or the status above to see them.
+          </p>
+        </div>
+      ) : (
       <TeamWeekGrid
         monday={monday}
         days={days}
@@ -125,6 +142,7 @@ export function TeamView({
         teamKey={teamKey}
         punchesLoaded={punchesLoaded}
       />
+      )}
     </>
   );
 }

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { addDays } from "@/lib/dates";
+import { addBusinessDays, addDays, toAppDateString } from "@/lib/dates";
 import type { createClient } from "@/utils/supabase/server";
 
 /**
@@ -35,7 +35,22 @@ import type { createClient } from "@/utils/supabase/server";
 type Supabase = Awaited<ReturnType<typeof createClient>>;
 
 /** Both ends inclusive; `to` is widened to the day after so timestamps count. */
-export type Period = { from: string; to: string };
+export type Period = {
+  from: string;
+  to: string;
+  /**
+   * P15-01 — the departments the report is narrowed to, or absent for every
+   * department the viewer can read. Applied IN ADDITION to the policies, never
+   * instead of them: it can only narrow what RLS already returned.
+   */
+  departmentIds?: readonly string[];
+};
+
+/** P15-01 — true when a row's department passes the period's filter. */
+function inDepartments(period: Period, departmentId: string | null | undefined): boolean {
+  if (!period.departmentIds) return true;
+  return Boolean(departmentId && period.departmentIds.includes(departmentId));
+}
 
 function exclusiveEnd(to: string): string {
   return addDays(to, 1) ?? to;
@@ -107,9 +122,11 @@ export async function loadTurnaround(supabase: Supabase, period: Period): Promis
   const { data } = await supabase
     .from("vizserve_pms_task_status_history")
     .select(
-      "created_at, vizserve_pms_tasks!inner(title, vizserve_pms_requests!inner(reference_no, sla_started_at))",
+      "created_at, vizserve_pms_tasks!inner(title, department_id, vizserve_pms_requests!inner(reference_no, sla_started_at))",
     )
     .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
+    // P15-02 — moves only. Imported tasks were created already finished.
+    .not("from_status", "is", null)
     .gte("created_at", period.from)
     .lt("created_at", exclusiveEnd(period.to));
 
@@ -117,11 +134,13 @@ export async function loadTurnaround(supabase: Supabase, period: Period): Promis
     created_at: string;
     vizserve_pms_tasks: {
       title: string;
+      department_id: string;
       vizserve_pms_requests: { reference_no: string; sla_started_at: string | null } | null;
     } | null;
   };
 
   const finished = ((data ?? []) as unknown as Row[]).flatMap((row) => {
+    if (!inDepartments(period, row.vizserve_pms_tasks?.department_id)) return [];
     const request = row.vizserve_pms_tasks?.vizserve_pms_requests;
     if (!request?.sla_started_at) return [];
     return [
@@ -180,12 +199,18 @@ export type Negotiation = {
 export async function loadNegotiation(supabase: Supabase, period: Period): Promise<Negotiation> {
   const { data } = await supabase
     .from("vizserve_pms_requests")
-    .select("target_date, approved_target_date")
+    .select("target_date, approved_target_date, vizserve_pms_forms(department_id)")
     .not("reviewed_at", "is", null)
     .gte("reviewed_at", period.from)
     .lt("reviewed_at", exclusiveEnd(period.to));
 
-  const rows = (data ?? []) as { target_date: string | null; approved_target_date: string | null }[];
+  const rows = (
+    (data ?? []) as unknown as {
+      target_date: string | null;
+      approved_target_date: string | null;
+      vizserve_pms_forms: { department_id: string | null } | null;
+    }[]
+  ).filter((row) => inDepartments(period, row.vizserve_pms_forms?.department_id));
 
   const shifts: number[] = [];
   let asRequested = 0;
@@ -258,11 +283,16 @@ export async function loadClientEngagement(
 ): Promise<ClientEngagement> {
   const { data } = await supabase
     .from("vizserve_pms_client_decisions")
-    .select("decision")
+    .select("decision, vizserve_pms_tasks(department_id)")
     .gte("created_at", period.from)
     .lt("created_at", exclusiveEnd(period.to));
 
-  const rows = (data ?? []) as { decision: string }[];
+  const rows = (
+    (data ?? []) as unknown as {
+      decision: string;
+      vizserve_pms_tasks: { department_id: string } | null;
+    }[]
+  ).filter((row) => inDepartments(period, row.vizserve_pms_tasks?.department_id));
 
   const approved = rows.filter((row) => row.decision === "APPROVED").length;
   const revisionRequested = rows.filter((row) => row.decision === "REVISION_REQUESTED").length;
@@ -307,12 +337,19 @@ export type FeedbackReport = {
 export async function loadFeedback(supabase: Supabase, period: Period): Promise<FeedbackReport> {
   const { data } = await supabase
     .from("vizserve_pms_feedback")
-    .select("rating, comment, created_at")
+    .select("rating, comment, created_at, vizserve_pms_tasks(department_id)")
     .gte("created_at", period.from)
     .lt("created_at", exclusiveEnd(period.to))
     .order("created_at", { ascending: false });
 
-  const rows = (data ?? []) as { rating: number; comment: string | null; created_at: string }[];
+  const rows = (
+    (data ?? []) as unknown as {
+      rating: number;
+      comment: string | null;
+      created_at: string;
+      vizserve_pms_tasks: { department_id: string } | null;
+    }[]
+  ).filter((row) => inDepartments(period, row.vizserve_pms_tasks?.department_id));
 
   const distribution: [number, number, number, number, number] = [0, 0, 0, 0, 0];
   for (const row of rows) {
@@ -378,7 +415,7 @@ export async function loadRatingsByPerson(supabase: Supabase, period: Period): P
   const [{ data }, { data: people }] = await Promise.all([
     supabase
       .from("vizserve_pms_feedback")
-      .select("rating, vizserve_pms_tasks!inner(priority, assignee_id, qa_assignee_id)")
+      .select("rating, vizserve_pms_tasks!inner(priority, assignee_id, qa_assignee_id, department_id)")
       .gte("created_at", period.from)
       .lt("created_at", exclusiveEnd(period.to)),
     supabase.from("vizserve_pms_users").select("id, full_name"),
@@ -390,11 +427,14 @@ export async function loadRatingsByPerson(supabase: Supabase, period: Period): P
       priority: RatingPriority;
       assignee_id: string | null;
       qa_assignee_id: string | null;
+      department_id: string;
     } | null;
   };
 
   const rows = ((data ?? []) as unknown as Row[]).flatMap((row) =>
-    row.vizserve_pms_tasks ? [{ rating: row.rating, ...row.vizserve_pms_tasks }] : [],
+    row.vizserve_pms_tasks && inDepartments(period, row.vizserve_pms_tasks.department_id)
+      ? [{ rating: row.rating, ...row.vizserve_pms_tasks }]
+      : [],
   );
 
   const nameOf = new Map((people ?? []).map((person) => [person.id, person.full_name]));
@@ -421,4 +461,118 @@ export async function loadRatingsByPerson(supabase: Supabase, period: Period): P
       }))
       .sort((a, b) => b.average - a.average || b.count - a.count || a.name.localeCompare(b.name)),
   };
+}
+
+// ---------------------------------------------------------------------------
+// P15-02 — Gate 1 and the form's turnaround standard
+// ---------------------------------------------------------------------------
+
+export type GateOne = {
+  reviewed: number;
+  approved: number;
+  returned: number;
+  rejected: number;
+  /** Median hours from submission to the Gate 1 decision. */
+  medianHours: number | null;
+  /** Waiting at Gate 1 right now, and how long the oldest has waited. */
+  pendingNow: number;
+  oldestPendingDays: number | null;
+};
+
+/**
+ * How quickly, and how, Gate 1 answers. Decisions made in the period; the
+ * queue is as of now. Wall-clock hours — a request submitted on Friday evening
+ * and answered on Monday morning waited the weekend, and the client felt it.
+ */
+export async function loadGateOne(supabase: Supabase, period: Period): Promise<GateOne> {
+  const [{ data: reviewed }, { data: pending }] = await Promise.all([
+    supabase
+      .from("vizserve_pms_requests")
+      .select("status, submitted_at, reviewed_at, vizserve_pms_forms(department_id)")
+      .not("reviewed_at", "is", null)
+      .gte("reviewed_at", period.from)
+      .lt("reviewed_at", exclusiveEnd(period.to)),
+    supabase
+      .from("vizserve_pms_requests")
+      .select("submitted_at, vizserve_pms_forms(department_id)")
+      .eq("status", "PENDING_REVIEW"),
+  ]);
+
+  const rows = (
+    (reviewed ?? []) as unknown as {
+      status: string;
+      submitted_at: string | null;
+      reviewed_at: string;
+      vizserve_pms_forms: { department_id: string | null } | null;
+    }[]
+  ).filter((row) => inDepartments(period, row.vizserve_pms_forms?.department_id));
+
+  const waiting = (
+    (pending ?? []) as unknown as { submitted_at: string | null; vizserve_pms_forms: { department_id: string | null } | null }[]
+  ).filter((row) => inDepartments(period, row.vizserve_pms_forms?.department_id));
+
+  const hours = rows
+    .filter((row) => row.submitted_at)
+    .map((row) => (Date.parse(row.reviewed_at) - Date.parse(row.submitted_at!)) / 3_600_000);
+  const oldest = waiting
+    .map((row) => row.submitted_at)
+    .filter((value): value is string => Boolean(value))
+    .sort()[0];
+
+  return {
+    reviewed: rows.length,
+    approved: rows.filter((row) => row.status === "APPROVED").length,
+    returned: rows.filter((row) => row.status === "RETURNED").length,
+    rejected: rows.filter((row) => row.status === "REJECTED").length,
+    medianHours: median(hours),
+    pendingNow: waiting.length,
+    oldestPendingDays: oldest ? (Date.now() - Date.parse(oldest)) / 86_400_000 : null,
+  };
+}
+
+export type TurnaroundStandard = { met: number; of: number };
+
+/**
+ * Client work delivered within its form's turnaround standard. The standard is
+ * in working time (1d = 8 working hours), so it is read as WORKING DAYS from
+ * the day the request was submitted, weekends and holidays skipped.
+ */
+export async function loadTurnaroundStandard(supabase: Supabase, period: Period): Promise<TurnaroundStandard> {
+  const { data } = await supabase
+    .from("vizserve_pms_task_status_history")
+    .select(
+      "created_at, vizserve_pms_tasks!inner(department_id, vizserve_pms_requests!inner(sla_started_at, vizserve_pms_forms(sla_minutes)))",
+    )
+    .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
+    // P15-02 — moves only. Imported tasks were created already finished.
+    .not("from_status", "is", null)
+    .gte("created_at", period.from)
+    .lt("created_at", exclusiveEnd(period.to));
+
+  const rows = (
+    (data ?? []) as unknown as {
+      created_at: string;
+      vizserve_pms_tasks: {
+        department_id: string;
+        vizserve_pms_requests: {
+          sla_started_at: string | null;
+          vizserve_pms_forms: { sla_minutes: number | null } | null;
+        } | null;
+      } | null;
+    }[]
+  ).filter((row) => inDepartments(period, row.vizserve_pms_tasks?.department_id));
+
+  let met = 0;
+  let of = 0;
+  for (const row of rows) {
+    const request = row.vizserve_pms_tasks?.vizserve_pms_requests;
+    const minutes = request?.vizserve_pms_forms?.sla_minutes;
+    if (!request?.sla_started_at || !minutes) continue;
+    const started = toAppDateString(new Date(request.sla_started_at));
+    const deadline = addBusinessDays(started, Math.ceil(minutes / 480));
+    if (!deadline) continue;
+    of += 1;
+    if (toAppDateString(new Date(row.created_at)) <= deadline) met += 1;
+  }
+  return { met, of };
 }

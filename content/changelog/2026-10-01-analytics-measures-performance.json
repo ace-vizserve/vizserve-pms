@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-01",
+  "kind": "added",
+  "area": "Reporting",
+  "title": "Analytics shows how a department and each person are performing",
+  "description": "Analytics is now five sections for team leaders and up, every figure compared with the previous period and filterable by department, kind of work, priority and period. Reports is now its Client results section; old links still work.",
+  "items": [
+    "Workload: open, overdue and how late, due this week, open over 30 days, untouched for two weeks, nobody on it",
+    "Delivery & quality: completed, on-time rate, cycle time, where the time goes stage by stage, QA first-pass rate and returns, QA reviewers, hours against estimate",
+    "Time & attendance: hours split client and internal and by list, clocked time accounted for, timesheets on time or missing, late arrivals, absences, early clock-outs, missing clock-outs, overtime, leave",
+    "Client results: requests received, Gate 1 answer time and queue, delivered within the form's standard, approval and revision rates, turnaround, date changes, ratings",
+    "People: every person and every measure in one sortable table against the department average, with figures clearly below it marked",
+    "Departments side by side wherever you can see more than one"
+  ],
+  "refs": ["P15-02"]
+}

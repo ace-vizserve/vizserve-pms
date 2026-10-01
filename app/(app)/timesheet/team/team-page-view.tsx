@@ -19,7 +19,8 @@ import { TeamView } from "./team-view";
  */
 export function TeamPageView() {
   const auth = useAuth();
-  const params = { week: useSearchParams().get("week") ?? undefined };
+  const search = useSearchParams();
+  const params = { week: search.get("week") ?? undefined };
 
   if (!roleAtLeast(auth.role, "team_leader")) {
     return (
@@ -47,8 +48,13 @@ export function TeamPageView() {
   const nextWeek = addDays(monday, 7);
   const thisWeek = startOfWeek(today);
 
+  // P15-01 — the department and status filters ride along when the week moves.
   function weekHref(target: string | null) {
-    return target && target !== thisWeek ? `/timesheet/team?week=${target}` : "/timesheet/team";
+    const next = new URLSearchParams(search.toString());
+    if (target && target !== thisWeek) next.set("week", target);
+    else next.delete("week");
+    const query = next.toString();
+    return query ? `/timesheet/team?${query}` : "/timesheet/team";
   }
 
   return (
@@ -67,7 +73,7 @@ export function TeamPageView() {
           {monday === thisWeek ? (
             <p className="text-2xs text-muted-foreground">This week</p>
           ) : (
-            <Link href="/timesheet/team" className="text-2xs text-muted-foreground hover:underline">
+            <Link href={weekHref(thisWeek)} className="text-2xs text-muted-foreground hover:underline">
               Back to this week
             </Link>
           )}

@@ -26,6 +26,7 @@ import { Switch } from "@/components/ui/switch";
 import { TimePicker } from "@/components/ui/time-picker";
 import { APP_ACCESS_KEY } from "@/lib/auth/app-access";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
+import { grantableRoles } from "@/lib/auth/rules";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { formatDays, leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { GENDER_LABELS, type Gender, normaliseHeldRoles, ROLE_LABELS } from "@/lib/schemas/users";
@@ -115,7 +116,7 @@ export function UserEditor({
   leaveTypes,
   balanceYear,
   user,
-  viewerIsOwner,
+  viewer,
   open,
   onOpenChange,
   onIssued,
@@ -135,7 +136,8 @@ export function UserEditor({
    * exists so the UI AGREES with that gate rather than offering a control whose
    * only possible answer is a refusal.
    */
-  viewerIsOwner: boolean;
+  /** P15-03 — the viewer, whose rank bounds which roles they may tick. */
+  viewer: { userId: string; role: Role };
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /**
@@ -165,7 +167,7 @@ export function UserEditor({
             leaveTypes={leaveTypes}
             balanceYear={balanceYear}
             user={user}
-            viewerIsOwner={viewerIsOwner}
+            viewer={viewer}
             onDone={() => onOpenChange(false)}
             onIssued={onIssued}
           />
@@ -180,7 +182,7 @@ function UserForm({
   leaveTypes,
   balanceYear,
   user,
-  viewerIsOwner,
+  viewer,
   onDone,
   onIssued,
 }: {
@@ -189,7 +191,8 @@ function UserForm({
   balanceYear: number;
   user?: EditableUser;
   /** P8-01. See `UserEditor`. Only an owner may grant Owner, Admin or HR. */
-  viewerIsOwner: boolean;
+  /** P15-03 — the viewer, whose rank bounds which roles they may tick. */
+  viewer: { userId: string; role: Role };
   onDone: () => void;
   /** P8-11. See `UserEditor`. */
   onIssued: (issued: { email: string; password: string }) => void;
@@ -712,7 +715,8 @@ function UserForm({
           <div className="space-y-2">
             {GRANTABLE_ROLES.map((rank) => {
               const ticked = roles.includes(rank);
-              const ownerBlocked = rank === "owner" && !viewerIsOwner;
+              // P15-03 — only roles below the viewer's own, and Admin only from the Admin.
+              const ownerBlocked = !grantableRoles(viewer.role).includes(rank);
 
               return (
                 <label
@@ -728,7 +732,11 @@ function UserForm({
                   <span>
                     <span className="font-medium">{ROLE_LABELS[rank].label}</span>
                     <span className="block text-xs text-muted-foreground">
-                      {ownerBlocked ? "Only an Admin can grant this." : ROLE_LABELS[rank].hint}
+                      {ownerBlocked
+                        ? rank === "admin"
+                          ? "Only the Admin can grant this."
+                          : "Only someone senior to this role can grant it."
+                        : ROLE_LABELS[rank].hint}
                     </span>
                   </span>
                 </label>

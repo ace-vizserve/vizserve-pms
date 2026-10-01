@@ -5,18 +5,26 @@ import { notFound } from "next/navigation";
 
 import { BreadcrumbLabel } from "@/components/app-shell/dynamic-breadcrumb";
 import { PageShell } from "@/components/page-shell";
-import {
-  ApprovalDecisionBadge,
-  RequestStatusBadge,
-  TaskStatusBadge,
-} from "@/components/status-badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { RequestStatusBadge, TaskStatusBadge } from "@/components/status-badge";
+import { StageTrack } from "@/components/stage-track";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RichText } from "@/components/ui/rich-text";
 import { canApproveClientRequest, requireRole } from "@/lib/auth/authorization";
-import { formatDate, formatDateTime, isOverdue } from "@/lib/dates";
+import { formatDate, formatDateTime, formatDuration, isOverdue } from "@/lib/dates";
 import { createClient } from "@/utils/supabase/server";
 
 import { AttachmentList } from "./attachment-list";
+import { TASK_DETAIL_GRID } from "../../tasks/[id]/grid";
+import { GateTrack } from "../../tasks/[id]/lifecycle-rail";
+import {
+  RequestActivity,
+  elapsed,
+  isQaReturn,
+  preTaskSteps,
+  type ProgressClientDecision,
+  type ProgressFeedback,
+  type ProgressHistoryRow,
+} from "./request-progress";
 import { ReviewPanel } from "./review-panel";
 
 export const metadata: Metadata = { title: "Request" };
@@ -116,7 +124,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         ? { data: null }
         : supabase
             .from("vizserve_pms_tasks")
-            .select("id, title, status, assignee_id, qa_assignee_id")
+            .select("id, title, status, assignee_id, qa_assignee_id, due_date, list_id, resolution, output_link")
             .eq("request_id", id)
             .maybeSingle(),
 
@@ -196,10 +204,57 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
    * SELECTED by the decisions query above and then never rendered, which is how
    * "Approved · 2 Sep" ended up not saying by whom.
    */
+  /*
+   * P15-01 — EVERYTHING THAT HAPPENED TO THE WORK AFTER GATE 1. All keyed by the
+   * task, all readable by the department's leads (the same scope as this page),
+   * and none of it was shown before: QA's returns, the client's answer, their
+   * rating, the hours behind it.
+   */
+  const [history, clientDecisions, feedback, hours, list] = linkedTask
+    ? await Promise.all([
+        supabase
+          .from("vizserve_pms_task_status_history")
+          .select("from_status, to_status, actor_id, comment, is_override, created_at")
+          .eq("task_id", linkedTask.id)
+          .order("created_at"),
+        supabase
+          .from("vizserve_pms_client_decisions")
+          .select("decision, approver_name, comment, created_at")
+          .eq("task_id", linkedTask.id)
+          .order("created_at"),
+        supabase
+          .from("vizserve_pms_feedback")
+          .select("rating, comment, created_at")
+          .eq("task_id", linkedTask.id)
+          .order("created_at"),
+        supabase.from("vizserve_pms_timesheet_entries").select("minutes, user_id").eq("task_id", linkedTask.id),
+        linkedTask.list_id
+          ? supabase.from("vizserve_pms_lists").select("name").eq("id", linkedTask.list_id).maybeSingle()
+          : { data: null },
+      ])
+    : [{ data: null }, { data: null }, { data: null }, { data: null }, { data: null }];
+
+  const historyRows = (history.data ?? []) as ProgressHistoryRow[];
+  const clientRows = (clientDecisions.data ?? []) as ProgressClientDecision[];
+  const feedbackRows = (feedback.data ?? []) as ProgressFeedback[];
+  const loggedMinutes = (hours.data ?? []).reduce((total, row) => total + row.minutes, 0);
+  const loggedPeople = new Set((hours.data ?? []).map((row) => row.user_id)).size;
+
+  const qaReturns = historyRows.filter(isQaReturn).length;
+  const revisions = clientRows.filter((row) => row.decision === "REVISION_REQUESTED").length;
+  const completedAt = [...historyRows]
+    .reverse()
+    .find((row) => row.to_status === "COMPLETED" || row.to_status === "COMPLETED_NO_RESPONSE")?.created_at;
+  const turnaroundMinutes =
+    completedAt && request.submitted_at
+      ? Math.round((Date.parse(completedAt) - Date.parse(request.submitted_at)) / 60_000)
+      : null;
+
   const peopleIds = [
-    decisions?.data?.[0]?.approver_id,
+    ...(decisions?.data ?? []).map((decision) => decision.approver_id),
     linkedTask?.assignee_id,
     linkedTask?.qa_assignee_id,
+    ...historyRows.map((row) => row.actor_id),
   ].filter((value): value is string => Boolean(value));
 
   const { data: people } =
@@ -222,29 +277,53 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
   const negotiated = request.approved_target_date && request.approved_target_date !== request.target_date;
 
+  const { data: department } = form?.department_id
+    ? await supabase.from("vizserve_pms_departments").select("name").eq("id", form.department_id).maybeSingle()
+    : { data: null };
+
+  const gateDecision = decisions?.data?.[0] ?? null;
+  const late = isOverdue(request.target_date) && request.status === "PENDING_REVIEW";
+  const lastClientDecision = clientRows.length > 0 ? clientRows[clientRows.length - 1]! : null;
+
   return (
-    <PageShell className="mx-auto w-full max-w-4xl">
+    /*
+      P15-01 — THE TASK PAGE'S SHAPE. It was one narrow column of seven cards,
+      with the story of the request at the bottom. Now: the header, the pipeline
+      across the top (the task page's own `GateTrack` once there is a task), and
+      two columns on the template the task page shares with its skeleton — the
+      request on the left, its work and what happened on the right.
+    */
+    <PageShell className="gap-3">
       {/* Names this page in the shell breadcrumb. Without it the crumb is the
           raw UUID from the URL. */}
       <BreadcrumbLabel value={request.reference_no} />
 
-      <div>
-        <Link
-          href="/requests"
-          className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground">
-          <ArrowLeft className="size-3.5" />
-          Requests
-        </Link>
-
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <h1 className="text-xl font-semibold tracking-tight">{request.reference_no}</h1>
+      <div className="min-w-0 space-y-2">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-muted-foreground">
+          <Link href="/requests" className="inline-flex items-center gap-1.5 hover:text-foreground">
+            <ArrowLeft className="size-3.5" />
+            Requests
+          </Link>
+          <span className="font-medium text-foreground tabular-nums">{request.reference_no}</span>
           <RequestStatusBadge status={request.status} />
+          {/* "Approved" is Gate 1's answer, not where the work is. */}
+          {linkedTask ? (
+            <span className="inline-flex items-center gap-1.5">
+              Work
+              <TaskStatusBadge status={linkedTask.status} />
+            </span>
+          ) : null}
+          <span className={late ? "font-medium text-destructive tabular-nums" : "tabular-nums"}>
+            wanted by {formatDate(request.target_date)}
+            {/* Never colour alone. */}
+            {late ? " · overdue" : null}
+          </span>
         </div>
-        <p className="mt-1 text-sm text-muted-foreground">{request.title}</p>
+        <h1 className="text-xl font-semibold tracking-tight">{request.title}</h1>
       </div>
 
       {request.decision_reason ? (
-        <div className="rounded-lg border border-info/30 bg-info-subtle p-4">
+        <div className="rounded-lg border border-info/30 bg-info-subtle p-3">
           <p className="text-xs font-medium text-info">Decision reason</p>
           {/* P7-56. `text-info` has to come through on the wrapper — `RichText`
               sets no colour of its own, so the banner's tone is inherited. */}
@@ -252,221 +331,242 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         </div>
       ) : null}
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Requester</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl>
-            <Row label="Name">{request.requester_name}</Row>
-            {/* Bound at submission and not editable by staff — it is the identity
-                used at the Phase 4 client approval gate. */}
-            <Row label="Email">
-              <a href={`mailto:${request.requester_email}`} className="hover:underline">
-                {request.requester_email}
-              </a>
-            </Row>
-            <Row label="Organisation">{request.requester_org}</Row>
-            <Row label="Submitted">{formatDateTime(request.submitted_at)}</Row>
-          </dl>
-        </CardContent>
+      <Card size="sm" className="py-0">
+        {linkedTask ? (
+          <GateTrack
+            status={linkedTask.status}
+            category="request"
+            createdAt={request.submitted_at ?? ""}
+            createdByName={null}
+            picName={linkedTask.assignee_id ? (nameOf.get(linkedTask.assignee_id) ?? null) : null}
+            qaName={linkedTask.qa_assignee_id ? (nameOf.get(linkedTask.qa_assignee_id) ?? null) : null}
+            request={{
+              submittedAt: request.submitted_at,
+              requesterName: request.requester_name,
+              reviewedAt: gateDecision?.created_at ?? null,
+              reviewedByName: gateDecision?.approver_id ? (nameOf.get(gateDecision.approver_id) ?? null) : null,
+            }}
+            decision={
+              lastClientDecision
+                ? {
+                    decision: lastClientDecision.decision,
+                    createdAt: lastClientDecision.created_at,
+                    approverName: lastClientDecision.approver_name,
+                  }
+                : null
+            }
+          />
+        ) : (
+          <StageTrack
+            steps={preTaskSteps(
+              request.status,
+              request.submitted_at,
+              request.requester_name,
+              gateDecision
+                ? {
+                    at: gateDecision.created_at,
+                    by: gateDecision.approver_id ? (nameOf.get(gateDecision.approver_id) ?? null) : null,
+                  }
+                : null,
+            )}
+          />
+        )}
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Request</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl>
-            <Row label="Form">{form?.name ?? "—"}</Row>
-            <Row label="Description">
-              <RichText html={request.description} />
-            </Row>
-            <Row label="Target date">
-              {formatDate(request.target_date)}
-              {isOverdue(request.target_date) && request.status === "PENDING_REVIEW" ? (
-                <span className="ml-2 text-xs font-medium text-destructive">Overdue</span>
-              ) : null}
-            </Row>
-            {/* Both dates are kept on purpose: the gap between what the client
-                asked for and what was agreed is the metric that proves Gate 1 is
-                negotiating rather than rubber-stamping. */}
-            {negotiated ? (
-              <Row label="Agreed date">
-                {formatDate(request.approved_target_date)}
-                <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
-              </Row>
-            ) : null}
-          </dl>
-        </CardContent>
-      </Card>
+      <div className={TASK_DETAIL_GRID}>
+        {/* ---------------------------------------------------------- LEFT */}
+        <div className="flex min-w-0 flex-col gap-3">
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Details</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <dl className="grid gap-x-8 gap-y-2.5 sm:grid-cols-2">
+                <Prop label="Client">{request.requester_name}</Prop>
+                {/* Bound at submission and not editable by staff — it is the
+                    identity used at the Phase 4 client approval gate. */}
+                <Prop label="Email">
+                  <a href={`mailto:${request.requester_email}`} className="truncate hover:underline">
+                    {request.requester_email}
+                  </a>
+                </Prop>
+                <Prop label="Organisation">{request.requester_org || "—"}</Prop>
+                <Prop label="Submitted">{formatDateTime(request.submitted_at)}</Prop>
+                <Prop label="Form">{form?.name ?? "—"}</Prop>
+                <Prop label="Department">{department?.name ?? "—"}</Prop>
+                <Prop label="Wanted by">{formatDate(request.target_date)}</Prop>
+                {/* Both dates are kept on purpose: the gap between what the
+                    client asked for and what was agreed is the metric that proves
+                    Gate 1 is negotiating rather than rubber-stamping. */}
+                <Prop label="Agreed date">
+                  {request.approved_target_date ? formatDate(request.approved_target_date) : "—"}
+                  {negotiated ? <span className="text-xs text-muted-foreground">negotiated</span> : null}
+                </Prop>
+              </dl>
 
-      {fields && fields.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Submitted details</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <dl>
-              {fields.map((field) => (
-                <Row key={field.field_key} label={field.label}>
-                  {renderValue(values[field.field_key])}
-                  {!field.is_active ? (
-                    <span className="ml-2 text-2xs text-muted-foreground">(archived field)</span>
-                  ) : null}
-                </Row>
-              ))}
-            </dl>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Attachments</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {/* Signed on click, not on render — a URL minted here would sit in the
-              page source and in the browser history whether or not anyone opened
-              the file. */}
-          <AttachmentList attachments={attachments ?? []} />
-        </CardContent>
-      </Card>
-
-      {/* P14-04. Gate 1 is a Team Leader of the form's department, or the Manager — not CEO, Business Manager or Admin. */}
-      {awaitingDecision && canApproveClientRequest(context, form?.department_id ?? null) ? (
-        <ReviewPanel
-          requestId={request.id}
-          requestTitle={request.title}
-          requestDescription={request.description}
-          targetDate={request.target_date}
-          candidates={candidates.data ?? []}
-          capacity={capacity.data ?? []}
-          currentUserId={context.userId}
-          currentUserName={context.fullName}
-          lists={lists?.data ?? []}
-          defaultListId={form?.default_list_id ?? null}
-          // P7-23. The form's department, not the viewer's: a list created
-          // during the review has to belong where the task will.
-          departmentId={form?.department_id ?? ""}
-          // P7-25. The department's Client Requests folder, so a list made here
-          // lands with the client work rather than loose under the department.
-          clientFolderId={(clientFolder?.data as { id: string } | null)?.id ?? null}
-        />
-      ) : decisions?.data && decisions.data.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>Decision</CardTitle>
-          </CardHeader>
-
-          {/*
-            P7-63 — THE OUTCOME, READ AS AN OUTCOME.
-
-            Three beats, in the order the story happened: what was decided, on
-            what terms, and where the work went. It used to be a decision
-            sentence with a <dl> bolted under it, which put the route through to
-            the task in a table cell — the one thing somebody opening a closed
-            request actually wants to click.
-          */}
-          <CardContent className="space-y-5">
-            {decisions.data.map((decision) => (
-              <div key={decision.created_at} className="space-y-2">
-                <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
-                  {/* The chip carries a glyph as well as a label, so the
-                      decision survives greyscale and a printed queue. */}
-                  <ApprovalDecisionBadge decision={decision.decision} />
-                  <span className="text-sm text-muted-foreground">
-                    {formatDateTime(decision.created_at)}
-                    {/* P7-59. `approver_id` was already being selected here and
-                        never shown, so the card said what happened and not who
-                        did it — the one fact somebody chasing a request needs. */}
-                    {nameOf.get(decision.approver_id ?? "")
-                      ? ` · ${nameOf.get(decision.approver_id ?? "")}`
-                      : null}
-                  </span>
-                </div>
-
-                {decision.reason ? (
-                  // The CLIENT's words on the approval page, not staff markup —
-                  // that surface has no editor. Rendered through `RichText`
-                  // anyway, because it is the same column shape and the
-                  // sanitiser is what makes any of these safe.
-                  <RichText html={decision.reason} className="rounded-sm bg-muted/50 px-3 py-2" />
-                ) : null}
+              <div className="border-t pt-3">
+                <p className="mb-1 text-xs text-muted-foreground">Description</p>
+                <RichText html={request.description} />
               </div>
-            ))}
+            </CardContent>
+          </Card>
 
-            {/*
-              P7-59 / P7-63 — WHERE IT WENT.
+          {fields && fields.length > 0 ? (
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle>Submitted details</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <dl>
+                  {fields.map((field) => (
+                    <Row key={field.field_key} label={field.label}>
+                      {renderValue(values[field.field_key])}
+                      {!field.is_active ? (
+                        <span className="ml-2 text-2xs text-muted-foreground">(archived field)</span>
+                      ) : null}
+                    </Row>
+                  ))}
+                </dl>
+              </CardContent>
+            </Card>
+          ) : null}
 
-              Only ever drawn for an approval: a returned or rejected request has
-              no task and no agreed date, and stops at the reason above. The
-              guard is `linkedTask` rather than the decision word, because the
-              task is the thing being described.
-            */}
-            {linkedTask ? (
-              <>
-                <div>
-                  <span className="text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
-                    Agreed delivery
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Attachments</CardTitle>
+            </CardHeader>
+            <CardContent>
+              {/* Signed on click, not on render — a URL minted here would sit in
+                  the page source and in the browser history whether or not
+                  anyone opened the file. */}
+              <AttachmentList attachments={attachments ?? []} />
+            </CardContent>
+          </Card>
+
+          {/* P14-04. Gate 1 is a Team Leader of the form's department, or the Manager — not CEO, Business Manager or Admin. */}
+          {awaitingDecision && canApproveClientRequest(context, form?.department_id ?? null) ? (
+            <ReviewPanel
+              requestId={request.id}
+              requestTitle={request.title}
+              requestDescription={request.description}
+              targetDate={request.target_date}
+              candidates={candidates.data ?? []}
+              capacity={capacity.data ?? []}
+              currentUserId={context.userId}
+              currentUserName={context.fullName}
+              lists={lists?.data ?? []}
+              defaultListId={form?.default_list_id ?? null}
+              departmentId={form?.department_id ?? ""}
+              clientFolderId={(clientFolder?.data as { id: string } | null)?.id ?? null}
+            />
+          ) : null}
+        </div>
+
+        {/* --------------------------------------------------------- RIGHT */}
+        <div className="flex min-w-0 flex-col gap-3">
+          {linkedTask ? (
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle>The work</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* ONE LINK, ONE TAB STOP — it navigates, so it is a link (§2.1). */}
+                <Link
+                  href={`/tasks/${linkedTask.id}`}
+                  className="flex items-center gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised transition-[box-shadow,border-color] hover:border-accent-border hover:shadow-raised-lg"
+                >
+                  <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-accent-border bg-accent grade-chip text-accent-foreground">
+                    <ClipboardCheck aria-hidden className="size-4" />
                   </span>
-                  <p className="mt-0.5 text-sm">
-                    {formatDate(request.approved_target_date ?? request.target_date)}
-                    {/* Same word the Request card above uses for the same fact, so
-                        a renegotiated date reads identically in both places. */}
-                    {negotiated ? (
-                      <span className="ml-2 text-xs text-muted-foreground">negotiated</span>
-                    ) : null}
-                  </p>
-                </div>
-
-                <div>
-                  <span className="text-2xs font-semibold tracking-wide text-muted-foreground uppercase">
-                    The work
+                  <span className="flex min-w-0 flex-1 flex-col gap-0.5">
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 truncate text-sm font-medium">{linkedTask.title}</span>
+                      <TaskStatusBadge status={linkedTask.status} />
+                    </span>
+                    <span className="text-xs text-muted-foreground">
+                      {nameOf.get(linkedTask.assignee_id ?? "") ?? "Unassigned"}
+                      {nameOf.get(linkedTask.qa_assignee_id ?? "")
+                        ? ` · QA ${nameOf.get(linkedTask.qa_assignee_id ?? "")}`
+                        : null}
+                    </span>
                   </span>
+                  {/* Decoration only. `--foreground-faint` is 3.44:1 and may never carry a word. */}
+                  <ChevronRight aria-hidden className="size-4 shrink-0 text-foreground-faint" />
+                </Link>
 
-                  {/*
-                    ONE LINK, ONE TAB STOP. A plain <Link> rather than a button
-                    wearing link clothes — it navigates, so it is a link (§2.1).
-                    The title, the stage and the two people are all inside it, so
-                    there is no second focusable thing to tab past.
+                <dl className="grid gap-x-8 gap-y-2.5 sm:grid-cols-2">
+                  <Prop label="Due">{formatDate(linkedTask.due_date)}</Prop>
+                  <Prop label="List">{list.data?.name ?? "—"}</Prop>
+                  <Prop label="Time logged">
+                    {loggedMinutes > 0
+                      ? `${formatDuration(loggedMinutes)} · ${loggedPeople} ${loggedPeople === 1 ? "person" : "people"}`
+                      : "None yet"}
+                  </Prop>
+                  <Prop label="Turnaround">
+                    {turnaroundMinutes !== null ? elapsed(turnaroundMinutes) : "Not finished"}
+                  </Prop>
+                  <Prop label="QA returns">
+                    {qaReturns === 0 ? "None" : `${qaReturns} ${qaReturns === 1 ? "time" : "times"}`}
+                  </Prop>
+                  <Prop label="Revisions">
+                    {revisions === 0 ? "None" : `${revisions} from the client`}
+                  </Prop>
+                  {feedbackRows.length > 0 ? (
+                    <Prop label="Rating">{feedbackRows[feedbackRows.length - 1]!.rating} out of 5</Prop>
+                  ) : null}
+                  {linkedTask.output_link ? (
+                    <Prop label="Output">
+                      <a
+                        href={linkedTask.output_link}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="truncate text-primary hover:underline"
+                      >
+                        {linkedTask.output_link}
+                      </a>
+                    </Prop>
+                  ) : null}
+                </dl>
 
-                    Raised, never inset: `grade-surface` sits BESIDE `bg-card`
-                    rather than replacing it, because tailwind-merge keeps only
-                    the last `bg-*` and would eat the colour token.
-                  */}
-                  <Link
-                    href={`/tasks/${linkedTask.id}`}
-                    className="mt-1.5 flex items-center gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised transition-[box-shadow,border-color] hover:border-accent-border hover:shadow-raised-lg">
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-md border border-accent-border bg-accent grade-chip text-accent-foreground">
-                      <ClipboardCheck aria-hidden className="size-4" />
-                    </span>
+                {linkedTask.resolution ? (
+                  <div className="border-t pt-3">
+                    <p className="mb-1 text-xs text-muted-foreground">Resolution</p>
+                    <RichText html={linkedTask.resolution} />
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ) : null}
 
-                    <span className="flex min-w-0 flex-1 flex-col gap-0.5">
-                      <span className="flex min-w-0 items-center gap-2">
-                        <span className="min-w-0 truncate text-sm font-medium">
-                          {linkedTask.title}
-                        </span>
-                        <TaskStatusBadge status={linkedTask.status} />
-                      </span>
-                      <span className="text-xs text-muted-foreground">
-                        {nameOf.get(linkedTask.assignee_id ?? "") ?? "Unassigned"}
-                        {nameOf.get(linkedTask.qa_assignee_id ?? "")
-                          ? ` · QA ${nameOf.get(linkedTask.qa_assignee_id ?? "")}`
-                          : null}
-                      </span>
-                    </span>
-
-                    {/* Decoration only. `--foreground-faint` is 3.44:1 and may
-                        never carry a word. */}
-                    <ChevronRight aria-hidden className="size-4 shrink-0 text-foreground-faint" />
-                  </Link>
-                </div>
-              </>
-            ) : null}
-          </CardContent>
-        </Card>
-      ) : null}
+          <Card size="sm">
+            <CardHeader>
+              <CardTitle>Activity</CardTitle>
+              <CardDescription className="text-xs">Every step, newest first</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <RequestActivity
+                submittedAt={request.submitted_at}
+                requesterName={request.requester_name}
+                gateDecisions={decisions?.data ?? []}
+                history={historyRows}
+                clientDecisions={clientRows}
+                feedback={feedbackRows}
+                nameOf={nameOf}
+              />
+            </CardContent>
+          </Card>
+        </div>
+      </div>
     </PageShell>
+  );
+}
+
+/** One property, label beside value — the task page's `Prop`. */
+function Prop({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center gap-3">
+      <dt className="w-24 shrink-0 text-xs text-muted-foreground">{label}</dt>
+      <dd className="flex min-w-0 flex-1 flex-wrap items-center gap-1.5 text-sm">{children}</dd>
+    </div>
   );
 }

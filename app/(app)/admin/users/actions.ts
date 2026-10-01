@@ -2,7 +2,13 @@
 
 import { revalidatePath } from "next/cache";
 
-import { APP_ACCESS_KEY, requireAdmin } from "@/lib/auth/authorization";
+import {
+  APP_ACCESS_KEY,
+  canEditUser,
+  grantableRoles,
+  requireUserManager,
+  type AuthContext,
+} from "@/lib/auth/authorization";
 import type { LeaveBalanceSummaryRow } from "@/lib/database.types";
 import { setLeaveAllocations as setHrLeaveAllocations } from "@/app/(app)/hr/balances/actions";
 import {
@@ -51,6 +57,32 @@ type AuditableProfile = {
   app_access: string[];
   managed_department_ids: string[];
 };
+
+/**
+ * P15-03 — WHAT A NON-ADMIN MAY DO HERE, checked on the server whatever the
+ * dialog offered. Grant only roles below your own and never Admin; edit only
+ * people whose roles you could have granted; never yourself. Admin passes.
+ */
+function rankRefusal(
+  context: AuthContext,
+  target: { id: string; roles: Role[] } | null,
+  nextRoles: Role[],
+): string | null {
+  if (context.role === "admin") return null;
+  if (target && !canEditUser(context, target)) {
+    return target.id === context.userId
+      ? "Ask the Admin or someone senior to change your own account."
+      : "This person holds a role at or above yours, so only someone senior to them can change it.";
+  }
+  const grantable = grantableRoles(context.role);
+  const refused = nextRoles.filter((role) => role !== "member" && !grantable.includes(role));
+  return refused.length > 0 ? "You can only give roles below your own, and only the Admin gives Admin." : null;
+}
+
+async function heldRolesOf(admin: ReturnType<typeof createAdminClient>, userId: string): Promise<Role[]> {
+  const { data } = await admin.from("vizserve_pms_user_roles").select("role").eq("user_id", userId);
+  return (data ?? []).map((row) => row.role as Role);
+}
 
 async function readProfileForAudit(
   admin: ReturnType<typeof createAdminClient>,
@@ -173,7 +205,7 @@ function revalidateProfileScreens(): void {
 export async function createUser(
   input: unknown,
 ): Promise<ActionResult<{ id: string; password: string; email: string }>> {
-  const context = await requireAdmin();
+  const context = await requireUserManager();
 
   const parsed = createUserSchema.safeParse(input);
   if (!parsed.success) {
@@ -186,6 +218,8 @@ export async function createUser(
 
   const values = parsed.data;
   const held = normaliseHeldRoles(values.role, values.roles);
+  const refusal = rankRefusal(context, null, held);
+  if (refusal) return { ok: false, error: refusal };
   const managed = normaliseManagedDepartments(ledScope(held), values.managed_department_ids);
   const admin = createAdminClient();
 
@@ -297,7 +331,7 @@ export async function createUser(
 // ---------------------------------------------------------------------------
 
 export async function updateUser(userId: string, input: unknown): Promise<ActionResult> {
-  const context = await requireAdmin();
+  const context = await requireUserManager();
 
   const parsed = updateUserSchema.safeParse(input);
   if (!parsed.success) {
@@ -323,6 +357,13 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
   // even when they had changed nothing at all, because the role they submit is
   // now `owner` and never `admin` again. Same for the last-active check below.
   const held = normaliseHeldRoles(values.role, values.roles);
+
+  const refusal = rankRefusal(context, { id: userId, roles: await heldRolesOf(admin, userId) }, held);
+  if (refusal) return { ok: false, error: refusal };
+  // The legacy Business Manager flag is not a rung a non-Admin hands out.
+  if (context.role !== "admin" && values.is_business_manager !== before.is_business_manager) {
+    return { ok: false, error: "Only the Admin can change that." };
+  }
 
   // P14-05. An Admin who drops their own Admin role — or stops acting as it —
   // loses this screen mid-save, and the recovery is a SQL console.
@@ -442,7 +483,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
  * screen calls it. The shared action gates on `requireHr()`, which admins pass.
  */
 export async function setLeaveAllocations(input: unknown): Promise<ActionResult> {
-  await requireAdmin();
+  await requireUserManager();
   return setHrLeaveAllocations(input);
 }
 
@@ -464,7 +505,7 @@ export async function readLeaveBalances(
   userId: string,
   year: number,
 ): Promise<ActionResult<LeaveBalanceSummaryRow[]>> {
-  await requireAdmin();
+  await requireUserManager();
 
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("vizserve_pms_leave_balance_summary", {
@@ -578,7 +619,7 @@ function generateTemporaryPassword(): string {
 export async function setTemporaryPassword(
   userId: string,
 ): Promise<ActionResult<{ password: string; email: string }>> {
-  const context = await requireAdmin();
+  const context = await requireUserManager();
 
   const admin = createAdminClient();
   const { data: profile } = await admin
@@ -588,6 +629,10 @@ export async function setTemporaryPassword(
     .maybeSingle();
 
   if (!profile) return { ok: false, error: "That user no longer exists." };
+
+  if (!canEditUser(context, { id: userId, roles: await heldRolesOf(admin, userId) }) && userId !== context.userId) {
+    return { ok: false, error: "This person holds a role at or above yours, so only someone senior to them can reset it." };
+  }
 
   const password = generateTemporaryPassword();
 

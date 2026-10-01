@@ -51,7 +51,10 @@ export {
   canAdminDepartment,
   canApproveClientRequest,
   canDoHr,
+  canEditUser,
+  canManageUsers,
   departmentScopeFilter,
+  grantableRoles,
   isApprover,
   isSystemAdmin,
   seesEveryDepartment,
@@ -68,6 +71,7 @@ import {
   canAccessDepartment,
   canAdminDepartment,
   canDoHr,
+  canManageUsers,
   departmentScopeFilter,
   isSystemAdmin,
   canShapeAnyDepartment,
@@ -438,6 +442,19 @@ export async function requireAdmin(): Promise<AuthContext> {
   return context;
 }
 
+
+/**
+ * P15-03 — the Users page and its actions: Manager and above. What each may
+ * change there is bounded by `grantableRoles` / `canEditUser`, which the
+ * actions check per user.
+ */
+export async function requireUserManager(): Promise<AuthContext> {
+  const context = await requireAuthContext();
+  if (!canManageUsers(context)) {
+    throw new ForbiddenError("This area is for the Manager and above.");
+  }
+  return context;
+}
 
 /**
  * For pages and actions the HR capability guards.

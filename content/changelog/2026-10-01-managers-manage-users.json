@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-01",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The manager and above can manage users",
+  "description": "The Users page was for the admin alone. The manager, business manager and CEO can now open it too, under People & HR in the sidebar.",
+  "items": [
+    "You can give only roles below your own; only the admin gives the admin role",
+    "You can change only people junior to you, and not your own account",
+    "HR comes with the manager role and above, and stays off for team leaders"
+  ],
+  "refs": ["P15-03"]
+}

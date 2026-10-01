@@ -1,11 +1,12 @@
 import { loadAllDepartments } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
-import { requireAdmin } from "@/lib/auth/authorization";
+import { requireUserManager } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { currentBalanceYear } from "@/lib/schemas/leave-balances";
 import { normaliseHeldRoles } from "@/lib/schemas/users";
 import type { Role } from "@/lib/auth/roles";
+import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 
@@ -29,7 +30,7 @@ export const metadata: Metadata = { title: "Users" };
  * an auth identity genuinely requires it.
  */
 export default async function UsersPage() {
-  const context = await requireAdmin();
+  const context = await requireUserManager();
   const supabase = await createClient();
 
   // P7-33. Manila's year, not the server's — see `currentBalanceYear`. On
@@ -86,7 +87,9 @@ export default async function UsersPage() {
       .eq("balance_year", balanceYear),
 
     // P14-05. Every role each person holds.
-    supabase.from("vizserve_pms_user_roles").select("user_id, role"),
+    // P15-03. Held roles are readable by Admin and up under RLS; a Manager on
+    // this screen reads them through the service role, after the gate above.
+    createAdminClient().from("vizserve_pms_user_roles").select("user_id, role"),
   ]);
 
   // Grouped in one pass rather than a query per user — this table is the whole
@@ -153,7 +156,7 @@ export default async function UsersPage() {
           `true` would silently let them appoint themselves.
         */
         // P14-05. Admin (IT) runs this screen and may grant any role, CEO included.
-        viewerIsOwner={context.role === "admin"}
+        viewer={{ userId: context.userId, role: context.role }}
       />
       )}
     </PageShell>

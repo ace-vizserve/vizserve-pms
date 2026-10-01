@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-01",
+  "kind": "added",
+  "area": "Reporting",
+  "title": "A page for each person",
+  "description": "Open anyone from Analytics → People to see their performance against their department and the previous period, and everything behind it.",
+  "items": [
+    "Performance: work, quality, hours, timesheets and attendance",
+    "Tasks they are doing or reviewing, open or all",
+    "Their timesheet weeks for the last six months",
+    "Requests they filed, and client requests they decided at Gate 1",
+    "Activity, for the manager and above: what they did in the app and what was changed on their account"
+  ],
+  "refs": ["P15-03"]
+}

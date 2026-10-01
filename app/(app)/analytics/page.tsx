@@ -1,6 +1,6 @@
+import { Suspense } from "react";
 import type { Metadata } from "next";
-import { ChartPie, CheckSquare, FileBarChart, ListChecks, TriangleAlert } from "lucide-react";
-import Link from "next/link";
+import { CalendarClock, ChartPie, CheckSquare, Hourglass, ListChecks, PauseCircle, TriangleAlert, UserX } from "lucide-react";
 
 import { departmentPickerScope, requireRole } from "@/lib/auth/authorization";
 import {
@@ -13,17 +13,20 @@ import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { StatTile } from "@/components/stat-tile";
-import { buttonVariants } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { createClient } from "@/utils/supabase/server";
 
 import { StageLegend } from "../reports/charts";
 import { AnalyticsTable, type AnalyticsRow } from "./analytics-table";
+import { workload, type PerfTask, type WorkKind } from "@/lib/performance";
+
+import { AnalyticsTabs } from "./analytics-tabs";
+import { FiguresSkeleton as WorkloadSkeleton } from "./figures";
 import { AnalyticsFilters } from "./filters";
 import { PersonBar } from "./person-bar";
 import { StageDonut, type DonutSubject } from "./stage-donut";
 
-export const metadata: Metadata = { title: "Department analytics" };
+export const metadata: Metadata = { title: "Analytics" };
 
 /**
  * PostgREST hands back at most 1,000 rows per request. A department's whole
@@ -31,6 +34,14 @@ export const metadata: Metadata = { title: "Department analytics" };
  * person on the page — so the two unbounded reads below page until they run dry.
  */
 const PAGE = 1000;
+
+/** P15-02 — the workload row plus what the age and attention tiles read. */
+type AgedTask = WorkloadTask & {
+  created_at: string;
+  updated_at: string;
+  request_id: string | null;
+  is_personal: boolean;
+};
 
 /**
  * How many task ids go into one `.in(...)`.
@@ -149,11 +160,13 @@ async function readAll<T>(
 export default async function AnalyticsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ department?: string; from?: string; to?: string }>;
+  searchParams: Promise<{ department?: string; from?: string; to?: string; kind?: string }>;
 }) {
   const context = await requireRole("team_leader");
   const params = await searchParams;
   const scope = departmentPickerScope(context);
+  // P15-02 — client, internal or personal work only. Unknown values mean all.
+  const kind = (["client", "internal", "personal"] as const).find((value) => value === params.kind) ?? null;
 
   if (scope.kind === "none") {
     return (
@@ -237,6 +250,52 @@ export default async function AnalyticsPage({
     );
   }
 
+  return (
+    <PageShell className="gap-3">
+      <AnalyticsTabs />
+      <AnalyticsFilters departments={departments} allLabel={allLabel} from={from} to={to} />
+      {/* P15-02 — the bar is on screen at once; the figures stream in below it,
+          and a new filter shows the skeleton straight away. */}
+      <Suspense key={JSON.stringify({ ids, from, to, kind })} fallback={<WorkloadSkeleton />}>
+        <WorkloadBody
+          departments={departments}
+          ids={ids}
+          selected={selected}
+          from={from}
+          to={to}
+          kind={kind}
+          inverted={inverted}
+          allLabel={allLabel}
+          periodLabel={periodLabel}
+        />
+      </Suspense>
+    </PageShell>
+  );
+}
+
+async function WorkloadBody({
+  departments,
+  ids,
+  selected,
+  from,
+  to,
+  kind,
+  inverted,
+  allLabel,
+  periodLabel,
+}: {
+  departments: { id: string; name: string }[];
+  ids: string[];
+  selected: { id: string; name: string } | null;
+  from: string;
+  to: string;
+  kind: "client" | "internal" | "personal" | null;
+  inverted: boolean;
+  allLabel: string;
+  periodLabel: string;
+}) {
+  const supabase = await createClient();
+
   /*
    * ⚠️ EVERY STATEMENT HERE IS DELIBERATELY SMALL, and that is a correctness
    * requirement rather than a tuning preference. Production failed with
@@ -277,15 +336,19 @@ export default async function AnalyticsPage({
     Promise.all(
       ids.map((departmentId) =>
         inverted
-          ? Promise.resolve({ data: [] as WorkloadTask[], error: null })
-          : readAll<WorkloadTask>((offset, end) => {
+          ? Promise.resolve({ data: [] as AgedTask[], error: null })
+          : readAll<AgedTask>((offset, end) => {
               let query = supabase
                 .from("vizserve_pms_tasks")
                 // `count` so `readAll` can fire the remaining pages at once.
-                .select("id, title, status, department_id, due_date, assignee_id", {
+                .select("id, title, status, department_id, due_date, assignee_id, created_at, updated_at, request_id, is_personal", {
                   count: "exact",
                 })
                 .eq("department_id", departmentId);
+
+              if (kind === "client") query = query.not("request_id", "is", null);
+              if (kind === "internal") query = query.is("request_id", null).eq("is_personal", false);
+              if (kind === "personal") query = query.eq("is_personal", true);
 
               // Inclusive at both ends, and no timestamp arithmetic: `due_date`
               // is a real DATE column, so the bare strings compare directly. A
@@ -348,6 +411,34 @@ export default async function AnalyticsPage({
 
   const people = peopleResult.data ?? [];
   const departmentName = new Map(departments.map((department) => [department.id, department.name]));
+
+  /*
+   * P15-02 — the open work's AGE and ATTENTION, which the counts above cannot
+   * say: due this week, sitting for a month, untouched for two weeks, nobody
+   * on it. Same engine as the other Analytics tabs.
+   */
+  const doersOf = new Map<string, string[]>();
+  for (const row of assignmentsResult.data) doersOf.set(row.task_id, [...(doersOf.get(row.task_id) ?? []), row.user_id]);
+  const load = workload(
+    tasksResult.data.map(
+      (task): PerfTask => ({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        departmentId: task.department_id,
+        listId: null,
+        dueDate: task.due_date,
+        createdAt: task.created_at,
+        updatedAt: task.updated_at,
+        doers: [...new Set([task.assignee_id, ...(doersOf.get(task.id) ?? [])].filter((id): id is string => Boolean(id)))],
+        qaId: null,
+        kind: (task.request_id ? "client" : task.is_personal ? "personal" : "internal") as WorkKind,
+        priority: null,
+        estimateMinutes: null,
+      }),
+    ),
+    todayInAppZone(),
+  );
 
   const summary = summariseWorkload({
     tasks: tasksResult.data,
@@ -423,16 +514,7 @@ export default async function AnalyticsPage({
   const rings = perPerson ? personRings : departmentRings;
 
   return (
-    <PageShell>
-      {/* /reports has no nav row of its own; this is the way in. Same gate
-          (team_leader), so nobody is shown a link they cannot open. */}
-      <div className="flex justify-end">
-        <Link href="/reports" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          <FileBarChart aria-hidden />
-          Reports
-        </Link>
-      </div>
-      <AnalyticsFilters departments={departments} allLabel={allLabel} from={from} to={to} />
+    <>
 
       {error ? (
         <QueryError what="department analytics" message={error.message} />
@@ -482,9 +564,38 @@ export default async function AnalyticsPage({
             <StatTile
               label="Overdue now"
               value={totals.overdue}
-              hint="Past due and still open, as of today"
+              hint={
+                load.overdueDays === null
+                  ? "Past due and still open, as of today"
+                  : `Past due and still open · ${load.overdueDays.toFixed(1)} days late on average`
+              }
               icon={<TriangleAlert />}
               tone={totals.overdue > 0 ? "warning" : undefined}
+            />
+          </div>
+
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            <StatTile label="Due in the next 7 days" value={load.dueSoon} hint="Open, with a due date this week" icon={<CalendarClock />} />
+            <StatTile
+              label="Open over 30 days"
+              value={load.age.old}
+              hint={`${load.age.fresh} opened this week · ${load.age.month} in the last month`}
+              icon={<Hourglass />}
+              tone={load.age.old > 0 ? "warning" : undefined}
+            />
+            <StatTile
+              label="Untouched for 2 weeks"
+              value={load.stale}
+              hint="Open, with no edit or move in 14 days"
+              icon={<PauseCircle />}
+              tone={load.stale > 0 ? "warning" : undefined}
+            />
+            <StatTile
+              label="Nobody on it"
+              value={load.unassigned}
+              hint="Open, with no one assigned"
+              icon={<UserX />}
+              tone={load.unassigned > 0 ? "warning" : undefined}
             />
           </div>
 
@@ -567,6 +678,6 @@ export default async function AnalyticsPage({
           </div>
         </>
       )}
-    </PageShell>
+    </>
   );
 }

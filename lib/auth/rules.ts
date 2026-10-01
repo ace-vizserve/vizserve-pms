@@ -507,3 +507,43 @@ export function canManageDepartmentTree(
   if (isCollaborationSpace(context, departmentId)) return true;
   return context.primaryDepartmentId === departmentId;
 }
+
+
+/*
+ * P15-03 — WHO MANAGES PEOPLE.
+ *
+ * Manager and above (Manager, Admin, Business Manager, CEO) open the Users
+ * page. What each may DO there is bounded by rank, so the page cannot be used
+ * to climb:
+ *
+ *   - Admin (IT) grants and edits anything, as before P15-03.
+ *   - Everyone else grants only roles BELOW their own, never Admin, and edits
+ *     only people whose every role is one they could have granted. They cannot
+ *     edit themselves.
+ *
+ * Equality on `admin`, not the ladder: Business Manager and CEO outrank Admin
+ * on it, and Admin is the IT job, not a rung they should be able to hand out.
+ */
+export const GRANTABLE_ROLE_ORDER: Role[] = ["owner", "business_manager", "admin", "manager", "team_leader"];
+
+export function canManageUsers(context: Pick<AuthContext, "role">): boolean {
+  return roleAtLeast(context.role, "manager");
+}
+
+/** The roles this viewer may tick for somebody, most senior first. */
+export function grantableRoles(viewerRole: Role): Role[] {
+  if (viewerRole === "admin") return GRANTABLE_ROLE_ORDER;
+  if (!roleAtLeast(viewerRole, "manager")) return [];
+  return GRANTABLE_ROLE_ORDER.filter((role) => role !== "admin" && !roleAtLeast(role, viewerRole));
+}
+
+/** May this viewer edit somebody holding these roles? */
+export function canEditUser(
+  viewer: Pick<AuthContext, "role" | "userId">,
+  target: { id: string; roles: readonly Role[] },
+): boolean {
+  if (viewer.role === "admin") return true;
+  if (!roleAtLeast(viewer.role, "manager") || target.id === viewer.userId) return false;
+  const grantable = grantableRoles(viewer.role);
+  return target.roles.every((role) => role === "member" || grantable.includes(role));
+}
