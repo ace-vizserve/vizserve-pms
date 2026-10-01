@@ -122,6 +122,71 @@ export function responsesToCsv(
   return toCsv([header, ...rows]);
 }
 
+/** P15-05 — one client request, as the client-form export writes it. */
+export type ExportableRequest = {
+  reference_no: string;
+  status: string;
+  submitted_at: string;
+  requester_name: string;
+  requester_email: string;
+  requester_org: string;
+  title: string;
+  description: string;
+  target_date: string | null;
+  field_values: unknown;
+};
+
+/**
+ * P15-05 — a client form's export. The request's own columns first (reference,
+ * status, who sent it and the three fixed request fields under the form's own
+ * labels), then every question's answer, archived and removed ones included.
+ */
+export function requestsToCsv(
+  schema: FormSchema,
+  requests: ReadonlyArray<ExportableRequest>,
+  {
+    labels,
+    formatTimestamp,
+  }: {
+    labels: { title: string; description: string; target_date: string };
+    formatTimestamp: (value: string) => string;
+  },
+): string {
+  const columns = responseColumns(schema, answeredKeysOf(requests));
+
+  const header = [
+    "Reference",
+    "Status",
+    "Submitted at",
+    "Name",
+    "Email",
+    "Organisation",
+    labels.title,
+    labels.description,
+    labels.target_date,
+    ...columns.map((column) => {
+      if (column.origin === "archived") return `${column.label} (archived)`;
+      if (column.origin === "orphan") return `${column.label} (removed)`;
+      return column.label;
+    }),
+  ];
+
+  const rows = requests.map((request) => [
+    request.reference_no,
+    request.status,
+    formatTimestamp(request.submitted_at),
+    request.requester_name,
+    request.requester_email,
+    request.requester_org,
+    request.title,
+    request.description,
+    request.target_date ?? "",
+    ...columns.map((column) => answerFor(request.field_values, column.key) ?? ""),
+  ]);
+
+  return toCsv([header, ...rows]);
+}
+
 /**
  * A filename somebody can find again.
  *

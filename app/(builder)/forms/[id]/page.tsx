@@ -25,6 +25,7 @@ import { loadRoutableDepartments } from "@/app/(app)/forms/routable-departments"
 import { countFormSubmissions } from "@/app/(app)/forms/submission-count";
 import { BuilderTitle } from "./builder-title";
 import { SaveStatusLine, SaveStatusProvider } from "./save-status";
+import { ClientFormResponses } from "./client-responses";
 import { builderTabsFor, resolveBuilderTab } from "./tabs";
 
 export const metadata: Metadata = { title: "Edit form" };
@@ -146,7 +147,7 @@ export default async function EditFormPage({
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_quiz, is_public, is_active, archived_at, first_published_at, audience_is_all_departments, requires_attachment, sla_minutes, default_list_id, client_approval_days, schema",
+      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_quiz, is_public, is_active, archived_at, first_published_at, audience_is_all_departments, requires_attachment, sla_minutes, default_list_id, client_approval_days, title_label, description_label, target_date_label, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -516,7 +517,7 @@ export default async function EditFormPage({
       </BuilderHeader>
 
       <BuilderTabs
-        initialTab={resolveBuilderTab(rawTab, builderTabsFor(form.purpose))}
+        initialTab={resolveBuilderTab(rawTab, builderTabsFor())}
         responsesCount={submissionCount}
         questions={
           /*
@@ -544,6 +545,11 @@ export default async function EditFormPage({
             isAnonymous={form.is_anonymous}
             formName={form.name}
             description={form.description}
+            requestLabels={{
+              title: form.title_label,
+              description: form.description_label,
+              target_date: form.target_date_label,
+            }}
             submissionCount={submissionCount}
             isQuiz={form.is_quiz}
             grading={grading}
@@ -552,18 +558,10 @@ export default async function EditFormPage({
         }
         responses={
           /*
-            ⚠️ P7-66 Phase 4 — NO PANEL AT ALL ON A CLIENT FORM, WHICH REMOVES
-            THE TAB RATHER THAN EMPTYING IT.
-
-            This used to render a second panel here, listing the requests the
-            form had minted. It was a second door onto /requests that showed
-            less: no filters, no SLA clock, no Gate 1 decision, eight rows and a
-            link. /requests is the ONE place requests are read, and a more
-            convenient screen that tells you less is how a queue stops being the
-            queue.
-
-            An internal form is the opposite case — its answers have no other
-            screen — so the tab on the form IS where they are read.
+            Two different panels. An internal form's answers have no other
+            screen, so the tab reads them. A client form's submissions are
+            requests (P15-05): the tab lists them and links each to
+            /requests/[id], where it is still approved.
           */
           isInternal ? (
             <FormResponses
@@ -578,7 +576,9 @@ export default async function EditFormPage({
                 departmentIds: (audienceRows ?? []).map((row) => row.department_id),
               }}
             />
-          ) : undefined
+          ) : (
+            <ClientFormResponses formId={form.id} />
+          )
         }
         settings={
           /*

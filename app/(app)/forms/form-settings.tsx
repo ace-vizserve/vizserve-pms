@@ -14,10 +14,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { formatSlaDuration } from "@/lib/schemas/duration";
 import {
-  DEFAULT_SLA_MINUTES,
   formCreateSchema,
   formSettingsSchema,
-  prefixFromName,
   slugFromName,
   type FormSettingsInput,
   type FormSettingsValues,
@@ -29,6 +27,18 @@ type Department = { id: string; name: string };
 type List = { id: string; name: string; department_id: string; form_id?: string | null };
 
 const NO_LIST = "__none__";
+
+/**
+ * A client form's SLA is picked by urgency, not typed. Each tier is a whole
+ * number of working days, stored as `sla_minutes` like any other duration
+ * (1d = 8 working hours). A new form starts on Normal.
+ */
+const SLA_URGENCIES = [
+  { value: "3d", label: "Urgent", days: 3 },
+  { value: "5d", label: "High", days: 5 },
+  { value: "8d", label: "Normal", days: 8 },
+  { value: "12d", label: "Low", days: 12 },
+] as const;
 
 /**
  * P7-66 Phase 4 — SETTINGS FOR A CLIENT REQUEST FORM.
@@ -71,7 +81,6 @@ export function ClientFormSettings({
   lists = [],
   formId,
   initial,
-  hasSubmissions = false,
   isArchived = false,
 }: {
   departments: Department[];
@@ -128,7 +137,7 @@ export function ClientFormSettings({
       reference_prefix: initial?.reference_prefix ?? "",
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
-      sla_minutes: formatSlaDuration(initial?.sla_minutes ?? DEFAULT_SLA_MINUTES),
+      sla_minutes: initial?.sla_minutes !== undefined ? formatSlaDuration(initial.sla_minutes) : "8d",
       default_list_id: initial?.default_list_id ?? null,
       client_approval_days: initial?.client_approval_days ?? 3,
     },
@@ -165,22 +174,19 @@ export function ClientFormSettings({
   }, [initial?.name, setValue]);
 
   /*
-   * P7-29 — what the server will fill in if these are left blank.
+   * P7-29 — what the server will fill in if the slug is left blank.
    *
-   * Shown rather than silently applied, and only while creating. The same two
-   * pure functions run here and in `createForm`, so the preview is the value —
+   * Shown rather than silently applied, and only while creating. The same
+   * pure function runs here and in `createForm`, so the preview is the value —
    * not an approximation of it that drifts the first time either changes.
    */
   const creating = !formId;
   const name = watch("name") ?? "";
   const slug = watch("slug") ?? "";
-  const prefix = watch("reference_prefix") ?? "";
 
   const willDeriveSlug = creating && slug === "" && name.trim() !== "";
-  const willDerivePrefix = creating && prefix === "" && name.trim() !== "";
 
   const shownSlug = slug || (willDeriveSlug ? slugFromName(name) : "");
-  const shownPrefix = prefix || (willDerivePrefix ? prefixFromName(name) : "");
 
   // A list belongs to one department, so offering another department's would be
   // offering a guaranteed rejection from the database.
@@ -226,6 +232,16 @@ export function ClientFormSettings({
   // Select.Value falls back to rendering the raw value, and these two are the
   // worst case of that: a bare UUID and the literal string "__none__".
   const departmentItems = Object.fromEntries(departments.map((d) => [d.id, d.name]));
+  /*
+   * A form saved before urgency tiers existed may hold a duration that is none
+   * of them. It is offered as-is so a save does not silently move it.
+   */
+  const slaValue = watch("sla_minutes") as unknown as string;
+  const slaItems: Record<string, string> = Object.fromEntries(
+    SLA_URGENCIES.map((tier) => [tier.value, `${tier.label} — ${tier.days} working days`]),
+  );
+  if (slaValue && !(slaValue in slaItems)) slaItems[slaValue] = `Custom — ${slaValue}`;
+
   const listItems = {
     [NO_LIST]: "No list",
     ...Object.fromEntries(departmentLists.map((list) => [list.id, ownListLabel(list)])),
@@ -306,7 +322,7 @@ export function ClientFormSettings({
         <p className="text-xs text-muted-foreground">Shown to the client above the fields.</p>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="department">Routing department</Label>
           {/* `items` is what makes the trigger show "VizBytes" instead of the
@@ -338,43 +354,31 @@ export function ClientFormSettings({
           {errors.department_id ? <p className="text-xs text-destructive">{errors.department_id.message}</p> : null}
         </div>
 
-        <div className="space-y-2">
-          <Label htmlFor="reference_prefix">Reference prefix</Label>
-          <Input
-            id="reference_prefix"
-            placeholder={willDerivePrefix ? prefixFromName(name) : "COL"}
-            className="uppercase"
-            aria-invalid={Boolean(errors.reference_prefix)}
-            disabled={hasSubmissions}
-            {...register("reference_prefix")}
-          />
-          <p className="text-xs text-muted-foreground">
-            {hasSubmissions
-              ? // P7-29. Not just disabled — the server refuses the change too,
-                // because a reference already in a client's inbox is
-                // reconstructed from this and stops matching if it moves.
-                "Locked — requests already quote it."
-              : `e.g. ${shownPrefix || "COL"}-2026-0142${willDerivePrefix ? ", from the name" : ""}`}
-          </p>
-          {errors.reference_prefix ? (
-            <p className="text-xs text-destructive">{errors.reference_prefix.message}</p>
-          ) : null}
-        </div>
+        {/* The reference prefix is not a control: `createForm` derives it from
+            the name, and an edit leaves it alone — a reference already quoted
+            to a client is rebuilt from it. It rides along in the form state. */}
 
         <div className="space-y-2">
-          <Label htmlFor="sla_minutes">SLA</Label>
-          {/* P7-31 — a duration, not a count of days, so a form whose work
-              turns around in half a day can say so. TEXT, not type="number":
-              the value is `2d 4h`, which a number input would refuse to hold. */}
-          <Input
-            id="sla_minutes"
-            placeholder="e.g. 5d, 8h, 2d 4h"
-            aria-invalid={Boolean(errors.sla_minutes)}
-            {...register("sla_minutes")}
-          />
+          <Label htmlFor="sla_minutes">Urgency</Label>
+          <Select
+            items={slaItems}
+            value={slaValue}
+            onValueChange={(value) =>
+              setValue("sla_minutes", value as unknown as FormSettingsValues["sla_minutes"], { shouldValidate: true })
+            }>
+            <SelectTrigger id="sla_minutes" aria-invalid={Boolean(errors.sla_minutes)}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {Object.entries(slaItems).map(([value, label]) => (
+                <SelectItem key={value} value={value}>
+                  {label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <p className="text-xs text-muted-foreground">
-            Turnaround standard for this form&rsquo;s work. 1d = 8 working hours. Internal &mdash; the client never sees
-            it.
+            Sets the turnaround (SLA) for this form&rsquo;s work. Internal &mdash; the client never sees it.
           </p>
           {errors.sla_minutes ? <p className="text-xs text-destructive">{errors.sla_minutes.message}</p> : null}
         </div>

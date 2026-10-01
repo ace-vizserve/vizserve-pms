@@ -106,6 +106,39 @@ export const attachmentRulesSchema = z.object({
 
 export type AttachmentRules = z.infer<typeof attachmentRulesSchema>;
 
+/**
+ * P15-04 — the three request fields every client form carries. They are
+ * columns on `vizserve_pms_requests`, so the fields themselves are fixed; only
+ * what they are CALLED is the form's to choose. A null label shows the default.
+ */
+export const REQUEST_FIELD_KEYS = ["title", "description", "target_date"] as const;
+export type RequestFieldKey = (typeof REQUEST_FIELD_KEYS)[number];
+
+export const REQUEST_FIELD_DEFAULT_LABELS: Record<RequestFieldKey, string> = {
+  title: "Title",
+  description: "Description",
+  target_date: "Target date",
+};
+
+export const requestFieldLabelsSchema = z.object({
+  title: z.string().nullable().default(null),
+  description: z.string().nullable().default(null),
+  target_date: z.string().nullable().default(null),
+});
+
+export type RequestFieldLabels = z.infer<typeof requestFieldLabelsSchema>;
+
+/** What a client reads: the form's own label, or the default. */
+export function requestFieldLabel(labels: Partial<RequestFieldLabels> | null | undefined, key: RequestFieldKey): string {
+  return labels?.[key] || REQUEST_FIELD_DEFAULT_LABELS[key];
+}
+
+/** Blank clears the override back to the default; otherwise 1–120 characters. */
+export const requestFieldLabelInputSchema = z.object({
+  key: z.enum(REQUEST_FIELD_KEYS),
+  label: z.string().trim().max(120, "Keep the label under 120 characters."),
+});
+
 export const publicFormSchema = z.object({
   id: z.uuid(),
   name: z.string(),
@@ -115,6 +148,8 @@ export const publicFormSchema = z.object({
   // Nullable so a form read before the P1-09 migration still parses rather than
   // rendering a not-found page.
   attachment_rules: attachmentRulesSchema.nullish(),
+  // P15-04. Defaulted so a form read before the migration still parses.
+  request_labels: requestFieldLabelsSchema.default({ title: null, description: null, target_date: null }),
   fields: z.array(publicFormFieldSchema),
 });
 

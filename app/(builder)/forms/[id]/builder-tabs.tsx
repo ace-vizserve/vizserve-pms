@@ -16,10 +16,8 @@ import type { BuilderTab } from "./tabs";
  * precisely because it made the form itself look like the smaller half of its
  * own page.
  *
- * ⚠️ RESPONSES IS OPTIONAL, AND A CLIENT FORM DOES NOT PASS ONE. Two tabs, not
- * three, and not a third tab holding an explanation of why it is empty. The
- * reasoning is in `builderTabsFor`: a client form's submissions are requests,
- * and /requests is the one place requests are read.
+ * RESPONSES IS OPTIONAL in the props. Since P15-05 both purposes pass one: an
+ * internal form's answers, or a client form's requests.
  *
  * ⚠️ EVERY PANEL RENDERED IS KEPT MOUNTED. `keepMounted` is not a performance
  * choice, it is the only way the canvas survives a tab change: the builder store
@@ -55,12 +53,7 @@ export function BuilderTabs({
    */
   responsesCount: number;
   questions: React.ReactNode;
-  /**
-   * ⚠️ UNDEFINED ON A CLIENT FORM, WHICH REMOVES THE TAB RATHER THAN EMPTYING
-   * IT. `builderTabsFor` decides; this prop is the same decision expressed as a
-   * child, so the strip and the panel cannot disagree about whether the tab
-   * exists.
-   */
+  /** Undefined removes the tab rather than emptying it. */
   responses?: React.ReactNode;
   settings: React.ReactNode;
 }) {

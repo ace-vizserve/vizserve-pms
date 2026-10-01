@@ -43,10 +43,8 @@ import { ExportAnswers } from "./export-answers";
  * answered is Phase 6 — it needs the audience Phase 5 adds, because without a
  * roster "not answered" has no denominator.
  *
- * ⚠️ INTERNAL FORMS ONLY, and the caller decides that by not rendering the tab
- * at all otherwise. A CLIENT_REQUEST form's submissions are
- * `vizserve_pms_requests` and are read at /requests, which is the one place
- * requests are read. See `builderTabsFor`.
+ * ⚠️ INTERNAL FORMS ONLY. A CLIENT_REQUEST form's submissions are
+ * `vizserve_pms_requests`, and its tab is `ClientFormResponses`.
  */
 
 /**

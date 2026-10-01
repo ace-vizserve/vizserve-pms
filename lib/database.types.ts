@@ -807,6 +807,10 @@ export type Database = {
           audience_is_all_departments: boolean;
           requires_attachment: boolean;
           sla_minutes: number;
+          /** P15-04 — client-form label overrides; null shows the default. */
+          title_label: string | null;
+          description_label: string | null;
+          target_date_label: string | null;
           /** Business days the client gets at Gate 3 before auto-completion. */
           client_approval_days: number;
           default_list_id: string | null;
@@ -848,6 +852,9 @@ export type Database = {
           audience_is_all_departments?: boolean;
           requires_attachment?: boolean;
           sla_minutes?: number;
+          title_label?: string | null;
+          description_label?: string | null;
+          target_date_label?: string | null;
           client_approval_days?: number;
           default_list_id?: string | null;
           created_by?: string | null;
@@ -880,6 +887,9 @@ export type Database = {
           is_active: boolean;
           requires_attachment: boolean;
           sla_minutes: number;
+          title_label: string | null;
+          description_label: string | null;
+          target_date_label: string | null;
           client_approval_days: number;
           default_list_id: string | null;
           /** P7-66 — written by the Phase 1 dual-write, and by nothing else. */

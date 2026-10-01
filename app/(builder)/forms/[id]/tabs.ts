@@ -1,5 +1,3 @@
-import type { FormPurpose } from "@/lib/schemas/forms";
-
 /**
  * P7-66 — WHICH TABS THE BUILDER OFFERS, AND WHICH ONE IT OPENS ON.
  *
@@ -27,28 +25,13 @@ export const BUILDER_TABS = ["questions", "responses", "settings"] as const;
 export type BuilderTab = (typeof BUILDER_TABS)[number];
 
 /**
- * ⚠️ P7-66 Phase 4 — A CLIENT FORM HAS NO RESPONSES TAB, AND THAT IS A PRODUCT
- * DECISION RATHER THAN A TIDY-UP.
- *
- * The two purposes are different products sharing one builder. A submission to
- * a CLIENT_REQUEST form is not an answer sheet — it MINTS A REQUEST, with a
- * reference number the client quotes back, a status, a Gate 1 decision, an SLA
- * clock and a task once it is approved. All of that already has a screen, at
- * /requests, and /requests is the ONE place requests are read.
- *
- * A second door onto them here would be a screen that shows less, disagrees
- * about what a submission IS, and is the more convenient of the two — which is
- * how a queue quietly stops being the queue. So the tab is not built, not
- * emptied and not disabled: it is not offered.
- *
- * An INTERNAL form is the opposite case. Its answers are stored
- * nowhere else and have no other screen, so the tab on the form IS the place
- * they are read.
+ * The tabs a form offers. Since P15-05 that is all three on both purposes: an
+ * internal form's Responses tab reads its answers, a client form's lists the
+ * requests it produced (each opening at /requests/[id], where it is approved).
+ * P7-66 Phase 4 had removed the client tab; it came back on request.
  */
-export function builderTabsFor(purpose: FormPurpose): readonly BuilderTab[] {
-  return purpose === "INTERNAL"
-    ? BUILDER_TABS
-    : BUILDER_TABS.filter((tab) => tab !== "responses");
+export function builderTabsFor(): readonly BuilderTab[] {
+  return BUILDER_TABS;
 }
 
 /**

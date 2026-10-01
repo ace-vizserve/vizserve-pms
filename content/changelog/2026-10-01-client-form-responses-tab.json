@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-01",
+  "kind": "added",
+  "area": "Forms",
+  "title": "Client forms have a Responses tab",
+  "description": "A client form now shows the requests it has received, the way an internal form shows its answers. Each request still opens in the request queue, where it is approved.",
+  "items": [
+    "How many requests, when the last one came in, and how many are in each status",
+    "The most recent requests with reference, sender and status",
+    "Export CSV: every request with its answers, including questions archived since"
+  ],
+  "refs": ["P15-05"]
+}

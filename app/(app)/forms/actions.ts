@@ -26,11 +26,13 @@ import {
   isPublicForPurpose,
   nextCandidate,
   prefixFromName,
+  requestFieldLabel,
+  requestFieldLabelInputSchema,
   slugFromName,
   type FormAudience,
 } from "@/lib/schemas/forms";
 
-import { responsesCsvFilename, responsesToCsv } from "@/lib/form-builder/csv";
+import { requestsToCsv, responsesCsvFilename, responsesToCsv, type ExportableRequest } from "@/lib/form-builder/csv";
 import { formatDateTime, todayInAppZone } from "@/lib/dates";
 import { reconcileFormSchema, optionsFromRow, type FormFieldRow } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
@@ -797,6 +799,42 @@ export async function renameForm(formId: string, name: unknown): Promise<ActionR
 }
 
 /**
+ * P15-04 — rename one of a client form's three fixed request fields.
+ *
+ * Only the label moves: the field is still `title`, `description` or
+ * `target_date` on the request, so nothing downstream notices. A blank label
+ * clears the override and the client sees the default again.
+ */
+export async function setRequestFieldLabel(formId: string, input: unknown): Promise<ActionResult> {
+  const { supabase, form } = await assertCanEditForm(formId);
+
+  if (form.purpose !== "CLIENT_REQUEST") {
+    return { ok: false, error: "Only a client form has request fields to rename." };
+  }
+
+  const parsed = requestFieldLabelInputSchema.safeParse(input);
+
+  if (!parsed.success) {
+    return { ok: false, error: parsed.error.issues[0]?.message ?? "That label could not be saved." };
+  }
+
+  const label = parsed.data.label === "" ? null : parsed.data.label;
+  const patch =
+    parsed.data.key === "title"
+      ? { title_label: label }
+      : parsed.data.key === "description"
+        ? { description_label: label }
+        : { target_date_label: label };
+
+  const { error } = await supabase.from("vizserve_pms_forms").update(patch).eq("id", formId);
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/forms/${formId}`);
+  return { ok: true, data: undefined };
+}
+
+/**
  * P7-66 Phase 8 — SET OR CLEAR ONE QUESTION'S ANSWER KEY.
  *
  * ⚠️ NOT PART OF THE SCHEMA SAVE, AND THAT IS THE WHOLE DESIGN.
@@ -956,7 +994,7 @@ export async function exportFormResponses(
 
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
-    .select("id, name, purpose, is_anonymous, schema")
+    .select("id, name, purpose, is_anonymous, schema, title_label, description_label, target_date_label")
     .eq("id", formId)
     .maybeSingle();
 
@@ -964,17 +1002,15 @@ export async function exportFormResponses(
   if (!form) return { ok: false, error: "That form does not exist, or is outside your scope." };
 
   /*
-   * ⚠️ INTERNAL FORMS ONLY. A client form's submissions are
+   * ⚠️ WHICH TABLE DEPENDS ON THE FORM. An internal form's answers are
+   * `vizserve_pms_form_responses`; a client form's are `vizserve_pms_requests`
+   * (P15-05). Reading the wrong one produces a header row and nothing under
+   * it, which reads as "no submissions" rather than "wrong table". A client form's submissions are
    * `vizserve_pms_requests`, and this reads `vizserve_pms_form_responses` — so
    * on a client form it would cheerfully produce a file with a header row and
    * nothing under it, which reads as "no submissions" rather than "wrong table".
    */
-  if (form.purpose !== "INTERNAL") {
-    return {
-      ok: false,
-      error: "A client form's submissions are requests. Export them from the request queue.",
-    };
-  }
+  const isClient = form.purpose === "CLIENT_REQUEST";
 
   /*
    * ⚠️ THE SCHEMA IS RECONCILED AGAINST THE ROWS, exactly as the builder page
@@ -1017,6 +1053,52 @@ export async function exportFormResponses(
   }
 
   const { schema } = reconcileFormSchema(form.schema, fields);
+
+  if (isClient) {
+    const savedLabels = { title: form.title_label, description: form.description_label, target_date: form.target_date_label };
+    const requests: ExportableRequest[] = [];
+
+    // Paged for the same reason as the responses read below: PostgREST's
+    // `max-rows` truncates silently.
+    for (let from = 0; ; from += EXPORT_PAGE) {
+      const { data: page, error: requestsError } = await supabase
+        .from("vizserve_pms_requests")
+        .select(
+          "reference_no, status, submitted_at, requester_name, requester_email, requester_org, title, description, target_date, field_values",
+        )
+        .eq("form_id", formId)
+        .order("submitted_at", { ascending: false })
+        .range(from, from + EXPORT_PAGE - 1);
+
+      if (requestsError) return { ok: false, error: requestsError.message };
+
+      requests.push(...(page ?? []));
+
+      if ((page?.length ?? 0) < EXPORT_PAGE) break;
+
+      if (requests.length >= EXPORT_MAX_ROWS) {
+        return {
+          ok: false,
+          error: `This form has more than ${EXPORT_MAX_ROWS} requests, which is more than this export can produce in one file.`,
+        };
+      }
+    }
+
+    return {
+      ok: true,
+      data: {
+        filename: responsesCsvFilename(form.name, todayInAppZone()),
+        csv: requestsToCsv(schema, requests, {
+          labels: {
+            title: requestFieldLabel(savedLabels, "title"),
+            description: requestFieldLabel(savedLabels, "description"),
+            target_date: requestFieldLabel(savedLabels, "target_date"),
+          },
+          formatTimestamp: formatDateTime,
+        }),
+      },
+    };
+  }
 
   /*
    * ⚠️⚠️ PAGED WITH `.range()`, BECAUSE "NO LIMIT" IS NOT THE SAME AS "ALL OF

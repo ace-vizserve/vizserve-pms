@@ -28,7 +28,7 @@ import {
 import { FieldDndProvider, type FieldDrag } from "@/lib/form-builder/dnd";
 import { planSchemaSave, type SchemaSaveAttempt } from "@/lib/form-builder/save-outcome";
 import { planEntityReorder } from "@/lib/form-builder/schema";
-import type { FieldType, FormPurpose } from "@/lib/schemas/forms";
+import type { FieldType, FormPurpose, RequestFieldLabels } from "@/lib/schemas/forms";
 
 import { QuestionEditor } from "./question-editor";
 import { QuestionList } from "./question-list";
@@ -107,6 +107,7 @@ export function FieldBuilder({
   isAnonymous,
   formName,
   description,
+  requestLabels,
   submissionCount,
   isQuiz,
   grading,
@@ -126,6 +127,8 @@ export function FieldBuilder({
   isAnonymous: boolean;
   formName: string;
   description: string;
+  /** P15-04 — a client form's own names for its three request fields. */
+  requestLabels: RequestFieldLabels;
   /**
    * ⚠️ HOW MANY ANSWERS THE FORM HAS — AND WHETHER IT HAS ANY IS THE
    * GRANULARITY THE DATABASE WORKS AT. `vizserve_pms_form_field_protect`
@@ -803,6 +806,8 @@ export function FieldBuilder({
 
           <div className="min-h-0 max-[1180px]:col-span-full max-[1180px]:border-t">
             <RespondentPreview
+              formId={formId}
+              requestLabels={requestLabels}
               builderStore={builderStore}
               purpose={purpose}
               isAnonymous={isAnonymous}

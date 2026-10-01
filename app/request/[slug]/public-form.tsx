@@ -25,7 +25,7 @@ import {
   routeFieldErrors,
   type FieldValues,
 } from "@/lib/form-builder/values";
-import { requestCoreSchema, type AttachmentRef, type PublicForm } from "@/lib/schemas/forms";
+import { requestCoreSchema, requestFieldLabel, type AttachmentRef, type PublicForm } from "@/lib/schemas/forms";
 
 import { submitPublicRequest, uploadPublicAttachment } from "./actions";
 
@@ -441,7 +441,7 @@ export function PublicFormRenderer({
 
           <div className="space-y-2">
             <Label htmlFor="title">
-              Title
+              {requestFieldLabel(form.request_labels, "title")}
               <span className="ml-0.5 text-destructive" aria-label="required">
                 *
               </span>
@@ -454,7 +454,7 @@ export function PublicFormRenderer({
 
           <div className="space-y-2">
             <Label htmlFor="description">
-              Description
+              {requestFieldLabel(form.request_labels, "description")}
               <span className="ml-0.5 text-destructive" aria-label="required">
                 *
               </span>
@@ -467,7 +467,7 @@ export function PublicFormRenderer({
 
           <div className="space-y-2">
             <Label htmlFor="target_date">
-              Target date
+              {requestFieldLabel(form.request_labels, "target_date")}
               <span className="ml-0.5 text-destructive" aria-label="required">
                 *
               </span>

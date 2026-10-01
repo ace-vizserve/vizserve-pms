@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-01",
+  "kind": "changed",
+  "area": "Forms",
+  "title": "Client forms are set up by urgency, and name their own request fields",
+  "description": "Setting up a client form asks for less. The reference prefix is no longer a field, the turnaround is an urgency instead of a typed duration, and the title, description and target date fields can be renamed to suit the form.",
+  "items": [
+    "The reference prefix is made from the form's name, as it already was when left blank",
+    "Urgency sets the turnaround: Urgent 3 working days, High 5, Normal 8, Low 12",
+    "Click a request field's label in the builder preview to rename it; clear it to go back to the default",
+    "Clients see the new labels on the public form"
+  ],
+  "refs": ["P15-04"]
+}
