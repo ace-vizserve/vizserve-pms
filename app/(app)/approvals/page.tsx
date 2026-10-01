@@ -7,8 +7,7 @@ import {
   listPendingTimesheetWeeks,
   waitingOnMe,
 } from "@/lib/approvals-queue-server";
-import { approvesTimesheets, requireAuthContext } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
+import { approvesTimesheets, isSystemAdmin, requireAuthContext } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
@@ -380,9 +379,8 @@ export default async function ApprovalsPage({
           // the same row the submit function will consult, so the form cannot
           // disagree with the rule that refuses it.
           hasDepartment={Boolean(context.primaryDepartmentId)}
-          // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now
-          // `owner`, and the equality would be true for nobody.
-          isAdmin={roleAtLeast(context.role, "owner")}
+          // P14-05: /admin/users is the Admin (IT) role's alone.
+          isAdmin={isSystemAdmin(context)}
           prefill={{
             ...prefill,
             // Opened only when something survived narrowing. Landing on

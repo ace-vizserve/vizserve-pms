@@ -4,7 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth/client-auth";
 import { roleAtLeast } from "@/lib/auth/roles";
-import { isCollaborationSpace } from "@/lib/auth/rules";
+import { canAccessDepartment, isCollaborationSpace } from "@/lib/auth/rules";
 import { browserClient } from "@/lib/query/browser-client";
 import {
   fetchActiveDepartments,
@@ -134,14 +134,12 @@ export function NewTaskButton({
   }
 
   // 3. A lead.
-  const allowed = (
-    roleAtLeast(auth.role, "owner")
-      ? departments.data
-      : departments.data.filter(
-          (department) =>
-            auth.managedDepartmentIds.includes(department.id) || isCollaborationSpace(auth, department.id),
-        )
-  ).map((department) => ({ id: department.id, name: department.name }));
+  const allowed = departments.data
+    .filter(
+      (department) =>
+        canAccessDepartment(auth, department.id) || isCollaborationSpace(auth, department.id),
+    )
+    .map((department) => ({ id: department.id, name: department.name }));
 
   if (allowed.length === 0) return null;
 

@@ -128,6 +128,13 @@ describe("administersForm — internal forms are owner only", () => {
     expect(administersForm(owner, internalForm(null, SOMEBODY_ELSE))).toBe(true);
   });
 
+  it("P14 — admits Admin and Business Manager, as `vizserve_pms_is_admin()` does, and not the Manager", () => {
+    for (const role of ["admin", "business_manager"] as const) {
+      expect(administersForm(context({ role }), internalForm(DEPT_B, SOMEBODY_ELSE))).toBe(true);
+    }
+    expect(administersForm(context({ role: "manager" }), internalForm(DEPT_B, SOMEBODY_ELSE))).toBe(false);
+  });
+
   it("⚠️ refuses a lead OF THE OWNING DEPARTMENT", () => {
     /*
      * The case that separates this rule from every other one in this file. On a

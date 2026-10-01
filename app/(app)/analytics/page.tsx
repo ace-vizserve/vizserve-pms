@@ -162,7 +162,7 @@ export default async function AnalyticsPage({
           <EmptyState
             icon={<ChartPie />}
             title="You do not lead a department yet"
-            description="This page shows the departments you manage. Ask a CEO to add your departments on Users, then come back."
+            description="This page shows the departments you manage. Ask the Admin to add your departments on Users, then come back."
           />
         </div>
       </PageShell>
@@ -229,7 +229,7 @@ export default async function AnalyticsPage({
             <EmptyState
               icon={<ChartPie />}
               title="None of your departments are active"
-              description="Every department you manage has been switched off. A CEO can turn one back on from the admin screens."
+              description="Every department you manage has been switched off. The Admin can turn one back on from the admin screens."
             />
           </div>
         )}

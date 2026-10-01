@@ -9,6 +9,8 @@ import { QueryError } from "@/components/query-error";
 import { TableSkeleton } from "@/components/skeletons";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { useAuth } from "@/lib/auth/client-auth";
+import { departmentScopeFilter } from "@/lib/auth/rules";
 import { formatDate, formatDuration } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
 import { DTR_PAGE_SIZE, fetchDtrView, type DtrSort } from "@/lib/query/fetchers/dtr";
@@ -40,11 +42,10 @@ import { DtrToolbar } from "./dtr-toolbar";
  * shape — and it has to sit INSIDE this rail, above the filters. Passing the
  * element down is how both are true at once.
  *
- * ⚠️ SCOPE IS RLS'S JOB. Every query behind this carries no department filter
- * and no `user_id = me` clause: the policy returns your own rows plus your
- * team's if you lead one. `isLead` below decides whether a PICKER is offered,
- * which is a presentation question — a member has nobody else to look at, and
- * the policy would refuse them anyway.
+ * ⚠️ P14 — SCOPE IS THE ACTIVE ROLE'S, NOT RLS'S ALONE. The policies also
+ * answer for the HR tick, which reads the whole company; this page narrows to
+ * `departmentScopeFilter` (see `visiblePeople` in the fetcher). `isLead` below
+ * decides whether a PICKER is offered.
  * ------------------------------------------------------------------------
  */
 export function DtrView({
@@ -69,6 +70,9 @@ export function DtrView({
   rangeInverted: boolean;
   isLead: boolean;
 }) {
+  const auth = useAuth();
+  const scope = departmentScopeFilter(auth);
+
   const view = useQuery({
     /*
      * ⚠️ EVERY FILTER IS IN THE KEY BECAUSE EVERY FILTER CHANGES THE ROWS. The
@@ -96,6 +100,8 @@ export function DtrView({
         ascending,
         rangeInverted,
         isLead,
+        viewerId,
+        scope,
       }),
   });
 
@@ -135,8 +141,15 @@ export function DtrView({
    * there is nobody in their scope. The banner in the rail is what makes the two
    * cases different on screen.
    */
+  // P14 — the picker offers the same people the list shows, by the active role.
   const people = (directory.data ?? [])
-    .filter((person) => person.is_active)
+    .filter(
+      (person) =>
+        person.is_active &&
+        (scope === null ||
+          person.id === viewerId ||
+          (person.primary_department_id !== null && scope.includes(person.primary_department_id))),
+    )
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
   const showPerson = isLead && !selectedUser;

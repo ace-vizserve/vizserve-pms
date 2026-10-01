@@ -4,6 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { QueryError } from "@/components/query-error";
 import { TeamWeekGridSkeleton } from "@/components/skeletons";
+import { useAuth } from "@/lib/auth/client-auth";
+import { departmentScopeFilter } from "@/lib/auth/rules";
 import { browserClient } from "@/lib/query/browser-client";
 import { fetchTeamWeek } from "@/lib/query/fetchers/timesheet";
 import { qk } from "@/lib/query/keys";
@@ -44,13 +46,19 @@ export function TeamView({
   days: string[];
   today: string;
 }) {
+  const auth = useAuth();
   const teamKey = qk.teamWeekVisible(monday);
 
   const weekQuery = useQuery({
     queryKey: teamKey,
     // `browserClient()` inside the `queryFn`, never in the body — a client
     // component still renders on the server for its initial HTML.
-    queryFn: () => fetchTeamWeek(browserClient(), { monday }),
+    queryFn: () =>
+      fetchTeamWeek(browserClient(), {
+        monday,
+        viewerId: auth.userId,
+        scope: departmentScopeFilter(auth),
+      }),
   });
 
   /* A failed read rendering as "nobody logged anything" is the specific failure

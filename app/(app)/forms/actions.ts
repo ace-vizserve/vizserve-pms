@@ -214,7 +214,8 @@ function internalAdminRefusal(
   // P8-01: `roleAtLeast`, not `=== "admin"`. The top rung is now `owner`, so
   // the equality would refuse an internal form to the very people it exists
   // to admit. Widened to `Role` from `string` so the comparison can be typed.
-  if (purpose !== "INTERNAL" || roleAtLeast(role, "owner")) return null;
+  // P14 — `vizserve_pms_is_admin()`: Admin, Business Manager and CEO.
+  if (purpose !== "INTERNAL" || roleAtLeast(role, "admin")) return null;
 
   return {
     ok: false,

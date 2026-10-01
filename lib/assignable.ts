@@ -1,4 +1,5 @@
-import { roleAtLeast, type Role } from "@/lib/auth/roles";
+import type { Role } from "@/lib/auth/roles";
+import { canAccessDepartment } from "@/lib/auth/rules";
 
 /**
  * P13-02 — WHO A PICKER MAY OFFER, given where the person is standing.
@@ -97,7 +98,10 @@ export function assignableInList({
       if (listDepartmentId) return person.primary_department_id === listDepartmentId;
 
       // No list: the caller's own scope, unchanged from before P13-02.
-      return roleAtLeast(role, "owner") || callerScope.has(person.primary_department_id);
+      return (
+        canAccessDepartment({ role, managedDepartmentIds }, person.primary_department_id) ||
+        callerScope.has(person.primary_department_id)
+      );
     })
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 }

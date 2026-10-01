@@ -12,7 +12,7 @@ import {
   type HideableColumn,
 } from "@/components/data-table-columns";
 import { TaskCategoryBadge, taskCategoryEdge, taskStatusRow } from "@/components/status-badge";
-import { roleAtLeast } from "@/lib/auth/roles";
+import { canAccessDepartment, seesEveryDepartment } from "@/lib/auth/rules";
 import type {
   VizservePmsTaskStatus,
   VizservePmsUserRole,
@@ -251,12 +251,12 @@ export function viewerSeat(viewer: Viewer, lookups: TaskLookups, task: TaskRow) 
       (get(lookups.extraAssignees, task.id) ?? []).some((person) => person.id === viewer.userId),
     isQa: task.qa_assignee_id === viewer.userId,
     leadsDepartment:
-      roleAtLeast(viewer.role, "owner") || viewer.managedDepartmentIds.includes(task.department_id),
+      canAccessDepartment(viewer, task.department_id),
     /* P11-05. Mirrors `v_in_dept`: `primary_department_id` is what this
        schema means by "a member of a department" everywhere else. The
        server re-checks it — this only decides what is on screen. */
     inDepartment: viewer.primaryDepartmentId === task.department_id,
-    isAdmin: roleAtLeast(viewer.role, "owner"),
+    isAdmin: seesEveryDepartment(viewer),
   };
 }
 
@@ -293,8 +293,7 @@ export function TaskGroupTable({
   function canDelete(task: TaskRow) {
     if (task.request_id !== null) return false;
     const leads =
-      roleAtLeast(viewer.role, "owner") ||
-      viewer.managedDepartmentIds.includes(task.department_id);
+      canAccessDepartment(viewer, task.department_id);
     return (
       leads ||
       // P8-01c — the Admin tick. Beside the lead test, never folded into it:
@@ -349,8 +348,7 @@ export function TaskGroupTable({
    */
   function canSelect(task: TaskRow) {
     return (
-      roleAtLeast(viewer.role, "owner") ||
-      viewer.managedDepartmentIds.includes(task.department_id) ||
+      canAccessDepartment(viewer, task.department_id) ||
       task.department_id === viewer.deptAdminOf ||
       task.department_id === viewer.primaryDepartmentId ||
       task.created_by === viewer.userId ||

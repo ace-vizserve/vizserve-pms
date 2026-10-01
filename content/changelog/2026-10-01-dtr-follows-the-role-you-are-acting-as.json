@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-01",
+  "kind": "fixed",
+  "area": "DTR",
+  "title": "The DTR follows the role you are acting as",
+  "description": "With HR access, a team leader's DTR listed every punch, leave and correction in the company. The list, the person picker and the export now show your team while you act as team leader. The HR attendance screen still shows everyone.",
+  "refs": ["P14-05"]
+}

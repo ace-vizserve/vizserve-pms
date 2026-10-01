@@ -173,6 +173,29 @@ describe("departmentScopeFilter", () => {
     const tl = context({ role: "team_leader", managedDepartmentIds: [] });
     expect(departmentScopeFilter(tl)).toEqual([]);
   });
+
+  /*
+   * P14 — the ACTIVE role decides, and the HR tick does not widen it. A Team
+   * Leader of one department who also holds Business Manager sees their team
+   * while acting as Team Leader, and everybody once switched.
+   */
+  it("follows the active role for somebody holding Team Leader and Business Manager", () => {
+    const actingAsTl = context({ role: "team_leader", managedDepartmentIds: [DEPT_A], isHr: true });
+    expect(departmentScopeFilter(actingAsTl)).toEqual([DEPT_A]);
+
+    const actingAsBm = context({ role: "business_manager", managedDepartmentIds: [DEPT_A], isHr: true });
+    expect(departmentScopeFilter(actingAsBm)).toBeNull();
+  });
+
+  it("is everything for Manager, Admin, Business Manager and CEO", () => {
+    for (const role of ["manager", "admin", "business_manager", "owner"] as const) {
+      expect(departmentScopeFilter(context({ role }))).toBeNull();
+    }
+  });
+
+  it("is nothing for a member, HR tick or not", () => {
+    expect(departmentScopeFilter(context({ role: "member", isHr: true }))).toEqual([]);
+  });
 });
 
 describe("departmentPickerScope", () => {

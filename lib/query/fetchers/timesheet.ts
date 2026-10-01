@@ -497,6 +497,10 @@ export async function fetchLoggableTasks(
  */
 export type { TeamRow, TeamTaskRow } from "@/app/(app)/timesheet/team/team-week-grid";
 
+const teamPersonRowSchema = personBreakRowSchema.extend({
+  primary_department_id: z.uuid().nullable(),
+});
+
 export type TeamWeek = {
   rows: TeamRow[];
   /**
@@ -527,7 +531,15 @@ export type TeamWeek = {
  */
 export async function fetchTeamWeek(
   client: TimesheetReadClient,
-  params: { monday: string },
+  params: {
+    monday: string;
+    viewerId: string;
+    /**
+     * P14 — `departmentScopeFilter(viewer)`: the departments whose people this
+     * grid shows, or null for all of them. See the filter on `userIds` below.
+     */
+    scope: string[] | null;
+  },
 ): Promise<TeamWeek> {
   const days = weekDates(params.monday);
   const monday = params.monday;
@@ -614,7 +626,9 @@ export async function fetchTeamWeek(
      * through the week is exactly that case, and it is the week a lead most
      * needs to read. RLS still scopes this to the caller's own department.
      */
-    read<unknown[]>(client.from("vizserve_pms_users").select("id, full_name, break_minutes")),
+    read<unknown[]>(
+      client.from("vizserve_pms_users").select("id, full_name, break_minutes, primary_department_id"),
+    ),
 
     /*
      * P8-07 — what the clock says, beside what the timesheet says.
@@ -682,7 +696,7 @@ export async function fetchTeamWeek(
   const leaveSpans = parseAll(leaveCalendarRowSchema, leaveRows, "approved leave").filter(
     (span) => span.status === "APPROVED",
   );
-  const people = parseAll(personBreakRowSchema, peopleRows, "people");
+  const people = parseAll(teamPersonRowSchema, peopleRows, "people");
   const punches =
     punchRows.data === null ? [] : parseAll(punchRowSchema, punchRows.data, "punched hours");
   const departments = parseAll(namedRowSchema, departmentRows, "departments");
@@ -858,7 +872,26 @@ export async function fetchTeamWeek(
     ...punched.keys(),
   ]);
 
+  /*
+   * ⚠️ P14 — THE GRID IS THE VIEWER'S TEAM, BY THE ROLE THEY ARE ACTING AS.
+   *
+   * RLS alone over-answers here, from two directions. `vizserve_pms_leave_calendar`
+   * is the company calendar and returns everybody on leave; and the HR tick
+   * widens the DTR and users reads to the whole company whatever role is
+   * active. Either one put people from other departments on a Team Leader's
+   * grid. A person stays only when their department is in scope (or the scope
+   * is everything) — a person whose profile RLS withheld has no department here
+   * and is therefore out, which is the right answer for somebody you cannot see.
+   */
+  const departmentOf = new Map(people.map((row) => [row.id, row.primary_department_id]));
+  const inScope = (userId: string): boolean => {
+    if (userId === params.viewerId || params.scope === null) return true;
+    const departmentId = departmentOf.get(userId);
+    return Boolean(departmentId && params.scope.includes(departmentId));
+  };
+
   const rows: TeamRow[] = [...userIds]
+    .filter(inScope)
     .map((userId) => {
       const week = weekByUser.get(userId);
       /*

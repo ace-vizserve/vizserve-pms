@@ -15,6 +15,7 @@ import {
 import { SearchHighlight } from "@/components/search-highlight";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
+import { canAccessDepartment, seesEveryDepartment } from "@/lib/auth/rules";
 import type { Json, VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
@@ -277,11 +278,12 @@ export function BoardColumns({
         person.is_active &&
         person.id !== viewer.userId &&
         person.primary_department_id !== null &&
-        (roleAtLeast(viewer.role, "owner") || assignableScope.has(person.primary_department_id)),
+        (canAccessDepartment(viewer, person.primary_department_id) ||
+          assignableScope.has(person.primary_department_id)),
     )
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
-  const isAdmin = roleAtLeast(viewer.role, "owner");
+  const isAdmin = seesEveryDepartment(viewer);
   function seat(task: {
     id: string;
     assignee_id: string | null;
@@ -294,7 +296,7 @@ export function BoardColumns({
       // alone.
       isAssignee: task.assignee_id === viewer.userId || joinedTaskIdSet.has(task.id),
       isQa: task.qa_assignee_id === viewer.userId,
-      leadsDepartment: roleAtLeast(viewer.role, "owner") || viewer.managedDepartmentIds.includes(task.department_id),
+      leadsDepartment: canAccessDepartment(viewer, task.department_id),
       // P11-05. Mirrors `v_in_dept` — see `lib/schemas/tasks.ts`.
       inDepartment: viewer.primaryDepartmentId === task.department_id,
       isAdmin,
@@ -320,7 +322,7 @@ export function BoardColumns({
     if (task.request_id !== null) return false;
     // The lead test inline rather than through `seat()`, which also wants a
     // `qa_assignee_id` that has nothing to do with deleting.
-    const leads = roleAtLeast(viewer.role, "owner") || viewer.managedDepartmentIds.includes(task.department_id);
+    const leads = canAccessDepartment(viewer, task.department_id);
     return (
       leads ||
       // P8-01c. Beside the lead test, never folded into it: leading a department

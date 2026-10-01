@@ -167,7 +167,8 @@ export default async function FormsPage({
         submissionCounts={submissionCounts}
         submissionsReadable={submissionsReadable}
         lastSubmission={lastSubmission}
-        isOwner={roleAtLeast(context.role, "owner")}
+        // P14 — `vizserve_pms_delete_form` asks `vizserve_pms_is_admin()`.
+        isOwner={roleAtLeast(context.role, "admin")}
       />
     </PageShell>
   );

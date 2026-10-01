@@ -246,7 +246,7 @@ function DeleteFormDialog({
     } else if (workload.open_tasks > 0) {
       refusal = `Its list still has ${plural(workload.open_tasks, "open task", "open tasks")}. Close or move them before deleting the form.`;
     } else if (submissions > 0 && !isOwner) {
-      refusal = `This form has ${plural(submissions, "submission", "submissions")}. Deleting it deletes them too, which only a CEO can do. Archiving keeps them.`;
+      refusal = `This form has ${plural(submissions, "submission", "submissions")}. Deleting it deletes them too, which only an Admin, Business Manager or CEO can do. Archiving keeps them.`;
     }
   }
 

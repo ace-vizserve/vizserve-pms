@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-01",
+  "kind": "fixed",
+  "area": "Tasks",
+  "title": "The manager sees every department's tasks",
+  "description": "The manager oversees every department but could only see their own department's tasks. Task actions a lead can take were also hidden from the manager, admin and business manager.",
+  "items": [
+    "The manager now sees tasks in every department",
+    "Deleting, bulk-selecting, moving status and assigning across departments are offered to the manager, admin and business manager"
+  ],
+  "refs": ["P14-14"]
+}

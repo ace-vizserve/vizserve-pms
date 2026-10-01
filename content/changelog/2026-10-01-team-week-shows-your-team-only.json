@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-01",
+  "kind": "fixed",
+  "area": "Timesheet",
+  "title": "The team week shows your team only",
+  "description": "A team leader with HR access, or with somebody from another department on leave that week, saw people from other departments on the team week. It now follows the role you are acting as.",
+  "items": [
+    "Acting as team leader: the departments you lead",
+    "Acting as manager, admin, business manager or CEO: everyone"
+  ],
+  "refs": ["P14-05"]
+}

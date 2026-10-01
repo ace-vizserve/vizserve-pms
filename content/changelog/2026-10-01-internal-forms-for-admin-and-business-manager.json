@@ -1,0 +1,7 @@
+{
+  "date": "2026-10-01",
+  "kind": "fixed",
+  "area": "Forms",
+  "title": "Admin and business manager can manage internal forms",
+  "description": "Internal forms, and deleting a form that already has submissions, were offered only to the CEO. The admin and business manager can now do both too, as they already could behind the scenes."
+}

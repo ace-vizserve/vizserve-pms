@@ -14,8 +14,13 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { RichTextClient } from "@/components/ui/rich-text-client";
 import type { Json } from "@/lib/database.types";
 import { useAuth } from "@/lib/auth/client-auth";
-import { roleAtLeast } from "@/lib/auth/roles";
-import { canAdminDepartment, isCollaborationSpace, realtimeDepartmentFilter } from "@/lib/auth/rules";
+import {
+  canAccessDepartment,
+  canAdminDepartment,
+  isCollaborationSpace,
+  realtimeDepartmentFilter,
+  seesEveryDepartment,
+} from "@/lib/auth/rules";
 import { formatDate, formatDateTime, todayInAppZone } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
 import {
@@ -272,8 +277,8 @@ export function TaskDetail({ taskId }: { taskId: string }) {
   const viewer = {
     isAssignee: task.assignee_id === auth.userId || joinedQuery.data === true,
     isQa: task.qa_assignee_id === auth.userId,
-    leadsDepartment: roleAtLeast(auth.role, "owner") || auth.managedDepartmentIds.includes(task.department_id),
-    isAdmin: roleAtLeast(auth.role, "owner"),
+    leadsDepartment: canAccessDepartment(auth, task.department_id),
+    isAdmin: seesEveryDepartment(auth),
     inDepartment: auth.primaryDepartmentId === task.department_id || collaboration,
     administersDepartment: canAdminDepartment(auth, task.department_id),
   };

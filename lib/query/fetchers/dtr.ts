@@ -235,13 +235,44 @@ export type DtrViewParams = {
   rangeInverted: boolean;
   /** Team leader and above. Decided on the server; see `page.tsx`. */
   isLead: boolean;
+  viewerId: string;
+  /**
+   * P14 — `departmentScopeFilter(viewer)`: whose records this page shows, by
+   * the role the viewer is ACTING AS. See `visiblePeople` below.
+   */
+  scope: string[] | null;
 };
+
+/**
+ * P14 — THE PEOPLE THIS PAGE MAY SHOW, or null for everybody.
+ *
+ * ⚠️ NOT LEFT TO RLS. The HR tick makes every DTR row, every leave and every
+ * correction in the company readable (`vizserve_pms_is_hr()`), whatever role
+ * the person is acting as — right for /hr/attendance, wrong here. A Team Leader
+ * acting as one reads their team; a member reads themselves; Manager and up
+ * read everyone. The viewer is always in their own scope.
+ */
+export async function visiblePeople(
+  client: TimesheetReadClient,
+  viewerId: string,
+  scope: string[] | null,
+): Promise<string[] | null> {
+  if (scope === null) return null;
+  if (scope.length === 0) return [viewerId];
+
+  const rows = await read<{ id: string }[]>(
+    client.from("vizserve_pms_users").select("id").in("primary_department_id", scope),
+  );
+  return [...new Set([viewerId, ...rows.map((row) => row.id)])];
+}
 
 export async function fetchDtrView(
   client: TimesheetReadClient,
   params: DtrViewParams,
 ): Promise<DtrView> {
   const { from, to, selectedUser, sort, ascending, rangeInverted, isLead } = params;
+
+  const visible = await visiblePeople(client, params.viewerId, params.scope);
 
   const [punchRows, leaveResult, requestRowsRaw, settings, peopleRows] = await Promise.all([
     // ONE MORE THAN WE RENDER.
@@ -285,6 +316,7 @@ export async function fetchDtrView(
           .limit(DTR_PAGE_SIZE + 1);
 
         if (selectedUser) query = query.eq("user_id", selectedUser);
+        if (visible) query = query.in("user_id", visible);
         return query;
       })(),
     ),
@@ -328,6 +360,7 @@ export async function fetchDtrView(
               .gte("end_date", from);
 
             if (selectedUser) query = query.eq("requester_id", selectedUser);
+            if (visible) query = query.in("requester_id", visible);
             return query;
           })(),
         );
@@ -371,6 +404,7 @@ export async function fetchDtrView(
           .order("created_at", { ascending: false });
 
         if (selectedUser) query = query.eq("requester_id", selectedUser);
+        if (visible) query = query.in("requester_id", visible);
         return query;
       })(),
     ),

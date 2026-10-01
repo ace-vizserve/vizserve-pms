@@ -51,8 +51,10 @@ export {
   canAdminDepartment,
   canApproveClientRequest,
   canDoHr,
+  departmentScopeFilter,
   isApprover,
   isSystemAdmin,
+  seesEveryDepartment,
   canManageAnyDepartmentTree,
   canManageDepartmentTree,
   canShapeAnyDepartment,
@@ -66,6 +68,7 @@ import {
   canAccessDepartment,
   canAdminDepartment,
   canDoHr,
+  departmentScopeFilter,
   isSystemAdmin,
   canShapeAnyDepartment,
   canShapeDepartment,
@@ -482,26 +485,6 @@ export function assertDepartmentAccess(context: AuthContext, departmentId: strin
   if (!canAccessDepartment(context, departmentId)) {
     throw new ForbiddenError("That department is outside your scope.");
   }
-}
-
-/**
- * The department filter for list queries.
- *
- * `null` means "no filter — this user sees everything" (owner). An empty array
- * means "this user leads nothing", and callers MUST treat that as zero rows
- * rather than as no filter. Getting that backwards turns a member into an
- * owner, so it is stated here rather than left to each call site.
- *
- * ⚠️ `"owner"`, NOT `"admin"` — the dead rung must not unfilter a list query.
- * See `canAccessDepartment` above for why the accident is worse than the bug.
- */
-export function departmentScopeFilter(context: AuthContext): string[] | null {
-  // P14-05. Admin, Business Manager and CEO see every department.
-  if (roleAtLeast(context.role, "admin")) return null;
-  // P14-04. The manager oversees every department — `vizserve_pms_manages_department` says so.
-  if (context.role === "manager") return null;
-  if (!roleAtLeast(context.role, "team_leader")) return [];
-  return context.managedDepartmentIds;
 }
 
 /**

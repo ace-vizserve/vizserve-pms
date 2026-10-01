@@ -82,7 +82,8 @@ export function administersForm(context: AuthContext, form: AdministrableForm): 
    * every question editable. This decides what a SCREEN is about.
    */
   // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now `owner`.
-  if (form.purpose === "INTERNAL") return roleAtLeast(context.role, "owner");
+  // P14 — `vizserve_pms_is_admin()`: Admin, Business Manager and CEO.
+  if (form.purpose === "INTERNAL") return roleAtLeast(context.role, "admin");
 
   /*
    * ⚠️ P8-01c — THE ROLE FLOOR IS NO LONGER THE WHOLE OF THE FLOOR.

@@ -2,7 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 
-import { requireAuthContextOrThrow } from "@/lib/auth/authorization";
+import { departmentScopeFilter, requireAuthContextOrThrow } from "@/lib/auth/authorization";
 import { decimalHours, formatAppTime, workedMinutes } from "@/lib/dates";
 import {
   describeLeaveDay,
@@ -10,6 +10,7 @@ import {
   leaveKey,
 } from "@/lib/leave";
 import { loadApprovedLeaveSpans } from "@/lib/leave-server";
+import { visiblePeople } from "@/lib/query/fetchers/dtr";
 import { dtrExportSchema, punchSchema, type PunchResult } from "@/lib/schemas/dtr";
 import { createClient } from "@/utils/supabase/server";
 import { flattenIssues, readableError } from "@/lib/action-result";
@@ -85,7 +86,7 @@ function csvCell(value: string | number | null | undefined): string {
 export async function exportDtrCsv(
   input: unknown,
 ): Promise<ActionResult<{ filename: string; csv: string }>> {
-  await requireAuthContextOrThrow();
+  const context = await requireAuthContextOrThrow();
 
   const parsed = dtrExportSchema.safeParse(input);
   if (!parsed.success) {
@@ -94,6 +95,16 @@ export async function exportDtrCsv(
 
   const { from, to, user_id } = parsed.data;
   const supabase = await createClient();
+
+  // P14 — the same people the page shows, by the active role. The HR tick reads
+  // the whole company; a Team Leader's export is their team.
+  let visible: string[] | null;
+  try {
+    visible = await visiblePeople(supabase, context.userId, departmentScopeFilter(context));
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : "Could not load your team." };
+  }
+  const isVisible = (id: string) => visible === null || visible.includes(id);
 
   const [entriesResult, leaveResult, peopleResult] = await Promise.all([
     (() => {
@@ -111,6 +122,7 @@ export async function exportDtrCsv(
         .order("work_date", { ascending: true });
 
       if (user_id) query = query.eq("user_id", user_id);
+      if (visible) query = query.in("user_id", visible);
       return query;
     })(),
 
@@ -166,7 +178,11 @@ export async function exportDtrCsv(
     } | null;
   };
 
-  const leaveDays = expandLeaveDays(leaveResult.spans, from, to);
+  const leaveDays = expandLeaveDays(
+    leaveResult.spans.filter((span) => isVisible(span.user_id)),
+    from,
+    to,
+  );
 
   const person = new Map(
     ((peopleResult.data ?? []) as { id: string; full_name: string; email: string }[]).map(

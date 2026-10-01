@@ -25,7 +25,8 @@
       "Bash(git commit *)",
       "Bash(grep -v \"\\\\.map$\")",
       "Bash(grep -v \"^\\\\s*/\\\\*\")",
-      "Bash(grep -v \"^\\\\s*$\")"
+      "Bash(grep -v \"^\\\\s*$\")",
+      "Bash(node ./.tmp-*.mjs)"
     ],
     "additionalDirectories": [
       "C:\\Users\\Ace\\.claude\\plans",

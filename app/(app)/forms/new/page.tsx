@@ -68,7 +68,8 @@ function parsePurpose(raw: string | string[] | undefined): FormPurpose | null {
 // ordering rather than an equality — the top rung is now `owner`, and
 // `=== "admin"` would offer the internal card to nobody at all.
 function purposesFor(role: Role): readonly FormPurpose[] {
-  return roleAtLeast(role, "owner")
+  // P14 — `vizserve_pms_is_admin()`: Admin, Business Manager and CEO.
+  return roleAtLeast(role, "admin")
     ? FORM_PURPOSES
     : FORM_PURPOSES.filter((purpose) => purpose !== "INTERNAL");
 }

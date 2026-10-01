@@ -167,6 +167,39 @@ export function canAdminDepartment(context: AuthContext, departmentId: string | 
 
 
 /**
+ * P14 — Admin, Business Manager and CEO: the oversight roles that see every
+ * department. Mirrors `vizserve_pms_is_admin()`, which P14-05 re-pointed to
+ * `admin` and above. Confers no approval — see `isApprover`.
+ */
+export function seesEveryDepartment(context: Pick<AuthContext, "role">): boolean {
+  return roleAtLeast(context.role, "admin");
+}
+
+/**
+ * The department filter for list queries, by the ACTIVE role.
+ *
+ * `null` means "no filter — this user sees everything" (Manager and up). An
+ * empty array means "this user leads nothing", and callers MUST treat that as
+ * zero rows rather than as no filter. Getting that backwards turns a member into
+ * an owner, so it is stated here rather than left to each call site.
+ *
+ * ⚠️ P14 — THIS, NOT RLS ALONE, IS WHAT A "MY TEAM" VIEW SCOPES BY. The HR tick
+ * widens the reads on users, DTR and internal requests to the whole company
+ * (`vizserve_pms_is_hr()`) whatever role the person is acting as. That is right
+ * for the HR screens and wrong for a Team Leader's team week, which must show
+ * their team and nobody else.
+ */
+export function departmentScopeFilter(
+  context: { role: Role; managedDepartmentIds: readonly string[] },
+): string[] | null {
+  if (seesEveryDepartment(context)) return null;
+  // P14-04. The manager oversees every department — `vizserve_pms_manages_department` says so.
+  if (context.role === "manager") return null;
+  if (!roleAtLeast(context.role, "team_leader")) return [];
+  return [...context.managedDepartmentIds];
+}
+
+/**
  * Department scope. An owner reaches everything; everyone else must hold
  * team_leader-or-above AND have this department in their managed set. Holding
  * the role alone is not enough — that is the whole point of the managed-set
@@ -183,9 +216,12 @@ export function canAdminDepartment(context: AuthContext, departmentId: string | 
  *
  * Same reasoning, same rung, as `canDoHr` — see the note there.
  */
-export function canAccessDepartment(context: AuthContext, departmentId: string | null): boolean {
+export function canAccessDepartment(
+  context: { role: Role; managedDepartmentIds: readonly string[] },
+  departmentId: string | null,
+): boolean {
   // P14-05. Admin, Business Manager and CEO see every department — `vizserve_pms_is_admin()`.
-  if (roleAtLeast(context.role, "admin")) return true;
+  if (seesEveryDepartment(context)) return true;
   // P14-04. The manager oversees every department — `vizserve_pms_manages_department` says so.
   if (context.role === "manager") return true;
   if (!departmentId) return false;
