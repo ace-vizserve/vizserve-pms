@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 7 September 2026 (evening).** What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 1 October 2026.** The summary and the section directly below it cover 22 Sep – 1 Oct; everything after that is the record as it stood on 7–21 Sep. What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -18,9 +18,13 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **5 — DTR + Internal Approvals** | **Done.** The three migrations are applied and `tests/db/phase5.test.ts` passes 20/20 — the "unverified" state recorded below was true on 4 Aug and no longer is |
 | **6 — Timesheet, Reporting, Archive** | **Started.** P6-01/02/03 built, applied and green, and rebuilt as a **week grid** on 18 Aug. **P6-05 done 19 Aug** (`/timesheet/team` + `/reports`). **P7-44 rebuilt the entry editor on 25 Aug** — see below. P6-04/06/07/08/09 not begun |
 | **7 — Personal tasks, overtime, timesheet approval** | **Done — backend and screens.** Twenty-eight migrations live, **P7-52/P7-53 applied 1 Sep** (HR as a capability + the filterable leave audit — see below), P7-32 through P7-41 included — applied and verified against the dev project on 24–25 Aug. **P7-32 gender · P7-33 leave balances · P7-34 leave audit PDF · P7-41 VAWC leave.** **P7-35 holiday calendar needs no migration** and works as deployed. **P7-36 to P7-40 = the smart DTR** — see below |
-| **8 — Live board, email transport, owner rung, personal settings** | **In progress.** P8-01 through P8-12 — see the Phase 8 section below. P8-11/P8-12 (personal settings, temporary passwords, clock reminders) ship with a migration that is **not yet applied** |
+| **8 — Live board, email transport, owner rung, personal settings** | **In progress.** P8-01 through P8-20 — see the Phase 8 section below. **P8-19** (per-type email switches get a screen) was itself replaced by P14-09's notification rules on 30 Sep. P8-11/P8-12 (personal settings, temporary passwords, clock reminders) ship with a migration that is **not yet applied** |
 | **9 — Leave hand-over and the approval chain** | **Done. All eight migrations applied** (`p9_01`…`p9_08`), 5–7 Sep. Relievers, the turn-over confirmation, task coverage, withdrawal, and a two- or three-stage chain for every leave request. `tests/db/relievers.test.ts` still has **never been run** — see the Phase 9 section below |
 | **11 — The six demo gaps** | **Done. Four migrations applied** (`p11_01`…`p11_04`), 7 Sep. The rename, character counters, the approval timeline, split reminder leads, the SPA pass, and **a reversal of who may edit a task** (P7-14). See the Phase 11 section below |
+| **12 — The SPA release** | **Done and on `main` since 28 Sep** (`acfea98` → `2ee3da3`). Cache-driven client pages, direct-to-Supabase writes, functions in Tokyo, virtualised list and board, search/person/due filters. Both migrations applied. See *22 Sep – 1 Oct* below |
+| **13 — Company-wide work** | **Done.** `p13_01` (a collaboration space every department shares) and `p13_02` (anyone may be put on company-wide work), 21 Sep |
+| **14 — Roles, approval routing, notifications by stage** | **Done. All migrations applied by hand, 29 Sep – 1 Oct.** Several roles per person and a switcher, Business Manager and CEO, hard-coded approval routing, per-stage notification rules drawn as a flowchart. Proven by `tests/sql/p14-flows.sql` on the live database (rolled back) |
+| **15 — Analytics, person pages, client form setup** | **Done, 1 Oct.** P15-01 through P15-05. One migration (`p15_04`), applied |
 | **10 — Performance pass** | **Done, code only — no migration.** Auth round trips removed, request waterfalls collapsed, duplicate reads memoised, 27 Suspense boundaries added, Next 16.2.12 → 16.3.4. No business logic changed. See the Performance pass section below |
 
 `npm run verify` is green: **1,499 passed, 389 skipped, 0 failures** (7 Sep).
@@ -64,6 +68,110 @@ long-standing gap and found two pre-existing failures:
 - **`utils/supabase/middleware.test.ts` still asserted `/` was public**, which
   stopped being true when P7-10 made `/` the staff home and emptied
   `PUBLIC_EXACT`.
+
+---
+
+## 22 Sep – 1 Oct 2026 — P7-77 to P15-05
+
+Reconstructed from `git log 7dbafcc..b77aad3`. Every migration in this stretch was
+**pasted by hand into the SQL editor** — never `db:push` (prod migration history
+is empty). `main` and `staging` both sit at `b77aad3`.
+
+### P7-77 – P7-80 · Who the client request flow tells (23 Sep)
+
+| ID | What |
+|---|---|
+| P7-77 / 77b | Gate 1 submission notifies the department's **Team Leaders only**. On approval, TLs get `request_approved` beside the client, PIC and QA, and PIC and QA are written into `vizserve_pms_task_assignees` |
+| P7-77c | **A Team Leader is the lead of a department who belongs to it** (`primary_department_id`), any role — `role = 'team_leader'` matched nobody in VizBytes |
+| P7-77d / 77e | Submission **awaits** the client acknowledgement and the TL's "Approval needed" email in parallel. A background drain was cut off when Vercel froze the function after the response — the same fix later applied to task transitions and Gate 3 |
+| P7-78 | QA send-back is its own `qa_returned` type and **emails the PIC** with QA's comment. "Send back to PIC" is a destructive button |
+| P7-79 | Client approves → PIC, QA, every assignee and the TL told once each. Client asks for changes → PIC only |
+| P7-80 | Client ratings by person and priority on `/reports` (now Analytics → Client results). A rating counts once for the PIC and once for QA |
+| P4-04 | **Gate 3 needs a confirm step.** Gmail's link scanner opened approval links and clicked Approve, closing two tasks ~80 s after the email went out (23 and 29 Sep). "Send back for changes" was also broken — its form unmounted — and now works |
+
+### P12 · The SPA release (25–28 Sep, on `main` 28 Sep)
+
+- **Client pages over a TanStack Query cache**: `/inbox`, `/timesheet`, `/timesheet/team`,
+  `/dtr`, `/tasks`, `/tasks/board`, `/tasks/[id]`. `page.tsx` is the client component;
+  metadata moved to a sibling `layout.tsx`. A revisit draws from cache with no server
+  render. `gcTime` 30 min; router `staleTimes` dynamic 300 s, static 1800 s.
+- **The rail is one query** — `vizserve_pms_sidebar_snapshot()` (SECURITY INVOKER) replaces
+  nine reads, counts aggregated in Postgres. A new notification invalidates its key.
+- **Writes go browser → Supabase** for every single-policy-checked call (timesheet, DTR punch,
+  read receipts, task field edits, comments, assignees, checklist, custom fields) — files
+  are `app/(app)/*/writes.ts`. Same zod checks; RLS and the database functions still decide.
+  Writes that queue email call `drainEmailOutbox()`. `transitionTask`, creates, copies, bulk,
+  uploads, deletes and the DTR CSV stay server actions.
+- `lib/auth/rules.ts` holds the pure predicates the browser needs; `authorization.ts`
+  re-exports them. `lib/task-scope.ts` holds `applyTaskScope`.
+- **Speed**: functions pinned to `hnd1` beside the Tokyo database (they ran in `iad1`,
+  ~420 ms per round trip); hover preloads a task's page and data; the task list virtualises
+  rows (`@tanstack/react-virtual`) and builds row popovers on intent; board columns
+  virtualise and finished columns scroll for more, 20 at a time.
+- **Filters** on list and board: `?q=` title search, `?person=me|<id>&role=any|pic|qa|assignee`
+  via `vizserve_pms_tasks_for_person()`, `?due=overdue|this_week|next_week|none`.
+  A person-filtered view failed until `a1099b2` selected the columns it orders by.
+- Rollback to the pre-SPA build is in CLAUDE.md (*Releases and rollback*).
+
+### Tasks, alongside P12
+
+- **P7-82** — drag a task between stages on the list; refused stages dim (`position` column on tasks).
+- Log time from the task list's *Time tracked* cell, with your entries on that task above the form.
+- ClickUp-style breadcrumb (Department › Folder › List › Task) and one filter bar; search
+  matches highlighted (`--highlight` token).
+- Creating a subtask from the task page.
+
+### P14 · Roles, approval routing, notifications by stage (29 Sep – 1 Oct)
+
+| ID | What |
+|---|---|
+| P14-01 / 02a | `business_manager` rung directly under `owner`. **"Owner" reads "CEO"** everywhere a user sees it; the enum value is unchanged |
+| P14-04 | **Approval routing is hard-coded and checked by equality**, not `>=`. Timesheet → Manager. Leave → relievers → dept TL → Manager. Overtime, DTR corrections, reimbursement → dept TL → Manager. A TL's own request skips to the Manager; the Manager's own requests and timesheets auto-approve. CEO, Business Manager and Admin approve nothing. In-flight requests were re-routed. `roleAtLeast` fails closed on an unknown role |
+| P14-05 | **Several roles per person** (`vizserve_pms_user_roles`); `users.role` is the role being acted as, switched from the top bar (shown with 2+ roles), last one sticks. **Admin = IT**: only Admin reaches Users, Settings and Audit. Admin, Business Manager and CEO see every department |
+| P14-06 | Department-admin tick retired and cleared; led departments only for Team Leaders; HR is a tick in the roles list |
+| P14-07 | Who a step waits on reads **held** roles; approving needs the matching **active** role, and the refusal names the role to switch to. One person holding TL + Manager signs each step as that role |
+| P14-08 | "N items are waiting on you as &lt;role&gt; — Switch" in the top bar, with a count per role in the switcher |
+| P14-09 – 11 | **Notification rules per stage** (`vizserve_pms_notification_events`, `_rules`; `vizserve_pms_emit`). All 15 notifying functions emit events instead of hard-coding recipients. Notifications carry `in_app`. CEO and Business Manager are told in-app when any process ends. Replaces P8-19's switch list |
+| P14-12 | The client flow gains PIC assigned, QA assigned, Ready for QA, QA sent back and Sent to the client. Admin / Settings draws each process as a **flowchart**; click a stage to edit who is told |
+| P14-13 | Events moves to HR (HR tick, or Manager and above) |
+| P14-14 | `/timesheet/team` and `/dtr` scope by the active role (`departmentScopeFilter`), not RLS alone. **The Manager reads every task.** UI lead checks mirror `manages_department` / `is_admin` |
+
+**Proof.** `tests/sql/p14-flows.sql` runs every P14 flow on the live database as real
+people, then raises on purpose so everything rolls back — nothing saved, nothing emailed.
+42/42 on 30 Sep (before the Gate 3 checks were added). `tests/db/p14-approval-routing.test.ts`
+is the same flows for a scratch project and skips here.
+
+⚠️ **The P14-05 migration header calls the multi-role decision "D22"**, but `D22` in
+`00-README.md` is already *three kinds of task*. The multi-role decision is **not yet in
+the register**, and `D15` there still says one role per person.
+
+### P15 · Analytics, person pages, client form setup (1 Oct)
+
+- **P15-01** — the request page uses the task page's layout (stage track, details, the work,
+  activity across Gate 1, QA and the client's answer). Team week grouped by department.
+  Sidebar grouped by process.
+- **P15-02** — Analytics in five sections (Workload, Delivery & quality, Time & attendance,
+  Client results, People), compared with the previous period, filterable by department,
+  kind, priority and period. `/reports` redirects to Client results. `lib/performance.ts` is
+  pure and tested; `lib/performance-server.ts` scopes by the active role. Imported tasks
+  created already finished do not count as completions. **No comparison against a period
+  before the records start** — task moves from 3 Sep, time from 24 Aug, client requests
+  from 23 Sep; when 80 % or more of the earlier period predates them, the figure says so.
+- **P15-03** — a page per person (performance vs department average, tasks, timesheets,
+  requests, activity), Manager and up. **Managers manage users**: grant only roles below
+  their own, only Admin grants Admin, never edit yourself.
+- **P15-04** — client forms: the reference prefix is always derived from the name; the SLA
+  is picked by urgency (Urgent 3d, High 5d, Normal 8d, Low 12d); Title / Description /
+  Target date labels are editable per form (`p15_04`, applied) and shown on the public form.
+- **P15-05** — a Responses tab per client form: its requests, a status breakdown, and a CSV
+  of requests and answers.
+
+### What is owed
+
+- **The multi-role decision needs a number in `00-README.md`**, and `D15` needs marking superseded.
+- `docs/03-roadmap.md` stops at Phase 6; Phases 7–15 live here and in commit messages only.
+- `npm run verify` has not been re-counted for this document since 7 Sep. The db suite
+  still skips on this machine.
 
 ---
 
@@ -1298,6 +1406,8 @@ Reconstructed here from `git log`:
 | **P8-16** | **EmailJS is removed entirely** — the adapter, the `EmailJsConfig` reading, `isTransportConfigured()`, `emailTransport()`, the `EMAIL_TRANSPORT` switch and the four `*_EMAILJS_*` keys. `lib/email/send.ts` stays a PORT over a single adapter on purpose: it is where the reserved-domain gate and the never-throws contract live, above any transport. Removing the second transport touched none of the ten call sites | **Shipped** |
 | **P8-17** | **The emails stop leading with a filing code** — every client-facing subject now names the job and trails the reference in parentheses, and the reference moves to the LAST row of the detail block rather than the first. `lib/email/request-details.ts` loads the request itself once — service, organisation, submitted, requested and agreed dates, who is looking after it, the brief, and a progress trail — and every sender renders what it was given, a null omitting its row. The feedback email asks its 1-5 question IN the email, and `/feedback/[token]` reads `?rating=` to preselect. A company footer and a header link row land at the same time. Migration `20260921090000` fixes the two notification titles SQL builds, which had the same fault | **Shipped; migration applied 21 Sep 2026** |
 | **P8-18** | **A mention is worth an email; a comment still is not** — `mentioned` flips to `send_email = true` and sends from `notifications@`. `commented` stays off: that is discussion among everyone already on a task, while a mention is somebody typing your name because they are waiting on you, which is the test docs/12 §3 applies to an assignment or a QA hand-off. Turned up two `Record`s over `VizservePmsNotificationType` that had never heard of `mentioned` — `db:types` needs Docker and has not run here since 17 Sep — so the inbox had no Mentions filter and the outbox drain would have thrown on the first one. `PRESENTATION[type]` is now guarded: it logs and skips without claiming the row, so the email stays owed. Reversible with one `update`, no deploy | **Shipped; migration applied 21 Sep 2026** |
+| **P8-19** | **The per-type email switches get a screen** on Admin / Settings — owner only, audited, one save. A failed read renders a sentence, never eight switches in the off position. **Superseded by P14-09** (notification rules per stage) on 30 Sep | **Replaced** |
+| **P8-20** | **Mentions actually send.** `addTaskComment` and `editTaskComment` never drained the outbox, so a mention email waited for the cron. `DispatchSummary` now counts `dryRun` apart from `sent` | **Shipped** |
 
 ### P8-11 — the password moves into `/settings`
 

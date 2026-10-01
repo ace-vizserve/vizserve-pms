@@ -75,18 +75,22 @@ Three structural points that are easy to get wrong:
 
 - **The approval engine is built once, generically** (Phase 2, `P2-00`), and the client Gate 1 is its *first consumer*, not its implementation. Phase 5's internal HR approvals reuse it with zero engine changes. The acceptance test is a throwaway second request type routing end to end without touching engine code.
 - **Internal Approvals and Client Forms stay separate tables.** They look mergeable — both are "a form that gets approved" — but internal types are a fixed list behind auth, client forms are user-built and public. Different auth models, different lifecycles. Explicitly decided; don't unify them behind a flag.
-- **Roles are inclusive**: `admin` ⊇ `manager` ⊇ `team_leader` ⊇ `member`. A user holds one role (the highest); `vizserve_pms_user_managed_departments` decides *which* departments they lead. Authorization checks `role >= required`, never `role == required` — encoded as the Postgres enum's declaration order, so `>=` works directly in SQL.
+- **Roles are a ladder, a person may hold several, and approving is not climbing it** (P14, 30 Sep 2026). Enum order: `member` < `team_leader` < `manager` < `admin` < `business_manager` < `owner` (shown as "CEO"; the value stays `owner`).
+  - `vizserve_pms_user_roles` holds every role a person has; `vizserve_pms_users.role` is the one they are **acting as**, switched from the top bar (P14-05). Every policy reads that column. This supersedes the old "one role, the highest".
+  - **Seeing** uses `>=`: `is_admin()` is admin and above, so Admin, Business Manager and CEO see every department, and the Manager reads every task (P14-14). `vizserve_pms_user_managed_departments` decides which departments a Team Leader leads.
+  - **Approving** is hard-coded routing checked by **equality**, not the ladder (P14-04): timesheet → Manager; leave → relievers → department TL → Manager; overtime, DTR corrections, reimbursement → department TL → Manager. A TL's own request skips to the Manager; the Manager's own auto-approve. **Admin (IT, the configuration screens only), Business Manager and CEO approve nothing.** Who a step waits on reads *held* roles; signing it needs the matching *active* role.
+  - HR and Business Manager are also ticks on the user. HR screens: the HR tick, or Manager and above.
 
 ## Document map
 
-[docs/00-README.md](docs/00-README.md) is the index and carries decisions **D1–D21**, settled and not to be relitigated.
+[docs/00-README.md](docs/00-README.md) is the index and carries decisions **D1–D33**, settled and not to be relitigated.
 
 **`D21`: ClickUp is a feature reference, not a system to exchange data with.** No sync, no export/import, no migration — nothing here reads from or writes to ClickUp. What carries over is the *shape* of features the team already knows (the timesheet week grid is the first). This app is the internal ClickUp. `P6-10` is withdrawn.
 
 | Doc | Why you'd open it |
 |---|---|
 | [13-implementation-status.md](docs/13-implementation-status.md) | **What is actually built.** Read first |
-| [00-README.md](docs/00-README.md) | Decision register D1–D21 |
+| [00-README.md](docs/00-README.md) | Decision register D1–D33 |
 | [01-updated-workflow.md](docs/01-updated-workflow.md) | Canonical flow, six modules, **canonical status enums** |
 | [02-data-model.md](docs/02-data-model.md) | Tables, RLS strategy, auth-metadata security rule |
 | [03-roadmap.md](docs/03-roadmap.md) | **Plan of record.** Phase order, track split, exit criteria |
