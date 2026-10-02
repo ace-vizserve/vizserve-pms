@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { DataTable, type Column } from "@/components/data-table";
+import { ExportCsvButton } from "@/components/export-csv-button";
 import { useColumnVisibility } from "@/components/data-table-columns";
 import type { AttendanceSummary } from "@/lib/attendance-summary";
 
@@ -235,14 +236,41 @@ export function AttendanceTable({
         columns={columns}
         rows={rows}
         toolbar={
-          <Input
-            id="search"
-            value={query}
-            placeholder="Find someone by name or department"
-            onChange={(event) => setQuery(event.target.value)}
-            className="h-9 w-full sm:w-64"
-            aria-label="Find someone"
-          />
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+            <Input
+              id="search"
+              value={query}
+              placeholder="Find someone by name or department"
+              onChange={(event) => setQuery(event.target.value)}
+              className="h-9 w-full sm:w-64"
+              aria-label="Find someone"
+            />
+            {/* P15-06 — the rows as filtered and sorted on screen. */}
+            <ExportCsvButton
+              filename={`vizserve-attendance-${month}`}
+              disabled={rows.length === 0}
+              rows={() => [
+                ["Employee", "Department", "Working days", "Present", "On leave", "Absent", "Late", "Late minutes", "Undertime", "Rate %", "Note"],
+                ...rows.map((row) =>
+                  row.unscheduled
+                    ? [row.fullName, row.departmentName ?? "", row.workingDays, "", "", "", "", "", "", "", "No fixed hours"]
+                    : [
+                        row.fullName,
+                        row.departmentName ?? "",
+                        row.workingDays,
+                        row.present,
+                        row.onLeave,
+                        row.absent,
+                        row.late,
+                        row.lateMinutes,
+                        row.undertime,
+                        attendanceRate(row) ?? "",
+                        "",
+                      ],
+                ),
+              ]}
+            />
+          </div>
         }
         count={
           <>

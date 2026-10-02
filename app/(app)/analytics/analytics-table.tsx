@@ -6,6 +6,7 @@ import Link from "next/link";
 import { DataTable, type Column } from "@/components/data-table";
 import { useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
+import { ExportCsvButton } from "@/components/export-csv-button";
 import type { WorkloadRow } from "@/lib/department-analytics";
 
 import { Monogram } from "../tasks/assignees";
@@ -136,6 +137,25 @@ export function AnalyticsTable({ rows }: { rows: AnalyticsRow[] }) {
       onColumnVisibilityChange={onVisibilityChange}
       columns={columns}
       rows={rows}
+      toolbar={
+        <ExportCsvButton
+          filename="vizserve-workload"
+          disabled={rows.length === 0}
+          rows={() => [
+            ["Person", "Department", "Tasks", "Not started", "In progress", "Completed", "Done %", "Overdue"],
+            ...rows.map((row) => [
+              row.name,
+              row.departmentName ?? "",
+              row.total,
+              row.notStarted,
+              row.active,
+              row.completed,
+              row.total === 0 ? "" : Math.round((row.completed / row.total) * 100),
+              row.overdue,
+            ]),
+          ]}
+        />
+      }
       getRowKey={(row) => row.id}
       empty={
         <EmptyState

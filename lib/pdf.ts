@@ -161,6 +161,12 @@ function escapePdfText(text: string): string {
   return text.replaceAll("\\", "\\\\").replaceAll("(", "\\(").replaceAll(")", "\\)");
 }
 
+/** `#RRGGBB` → the three 0-1 operands PDF's `rg` takes. */
+function rgbOperands(hex: string): string {
+  const value = hex.replace("#", "");
+  return [0, 2, 4].map((at) => (parseInt(value.slice(at, at + 2), 16) / 255).toFixed(3)).join(" ");
+}
+
 type Page = { operations: string[] };
 
 export type TextOptions = {
@@ -170,6 +176,8 @@ export type TextOptions = {
   align?: "left" | "right";
   /** 0 is black, 1 is white. */
   gray?: number;
+  /** P15-08 — a colour instead of a grey, as `#RRGGBB`. Wins over `gray`. */
+  color?: string;
 };
 
 /**
@@ -218,7 +226,7 @@ export class PdfDocument {
 
     this.page().operations.push(
       "BT",
-      `${gray.toFixed(3)} g`,
+      options.color ? `${rgbOperands(options.color)} rg` : `${gray.toFixed(3)} g`,
       `/${font === "bold" ? "F2" : "F1"} ${size} Tf`,
       `${left.toFixed(2)} ${this.y(yFromTop).toFixed(2)} Td`,
       `(${escapePdfText(value)}) Tj`,
@@ -243,9 +251,10 @@ export class PdfDocument {
   }
 
   /** `yFromTop` is the rectangle's TOP edge; it extends `height` downward. */
-  rect(x: number, yFromTop: number, width: number, height: number, gray: number): void {
+  rect(x: number, yFromTop: number, width: number, height: number, gray: number | string): void {
     this.page().operations.push(
-      `${gray.toFixed(3)} g`,
+      // P15-08 — a number is a grey (0 black, 1 white); a string is `#RRGGBB`.
+      typeof gray === "string" ? `${rgbOperands(gray)} rg` : `${gray.toFixed(3)} g`,
       `${x.toFixed(2)} ${this.y(yFromTop + height).toFixed(2)} ${width.toFixed(2)} ${height.toFixed(2)} re`,
       "f",
     );

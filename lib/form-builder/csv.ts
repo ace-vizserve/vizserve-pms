@@ -28,30 +28,16 @@ import { answerFor, responseColumns, answeredKeysOf } from "@/lib/form-builder/r
  * while still carrying the timestamp that identifies them anyway.
  */
 
-/**
- * RFC 4180 quoting. A free-text answer containing a comma must not become two
- * columns, and one containing a newline must not become two rows.
- *
- * The same rule as `csvCell` in the DTR export. Stated twice rather than shared,
- * because that one lives in a `"use server"` module and importing it here would
- * pull a server action's whole graph into a pure helper — but it is four lines
- * and both are pinned by tests.
+/*
+ * RFC 4180 quoting, CRLF rows. P15-06 moved the rule to `lib/csv.ts` so the
+ * report tables can build files in the browser without importing the form
+ * builder; re-exported so this module's callers and tests are unchanged. The
+ * DTR export keeps its own copy for the reason it always has — it lives in a
+ * `"use server"` module.
  */
-export function csvCell(value: string | number | null | undefined): string {
-  if (value === null || value === undefined) return "";
-  const text = String(value);
-  return /[",\n\r]/.test(text) ? `"${text.replaceAll('"', '""')}"` : text;
-}
+import { csvCell, toCsv } from "@/lib/csv";
 
-/** Rows → a CSV document. */
-export function toCsv(rows: ReadonlyArray<ReadonlyArray<string | number | null>>): string {
-  /*
-   * ⚠️ CRLF, WHICH IS WHAT RFC 4180 SAYS AND WHAT EXCEL ON WINDOWS EXPECTS. A
-   * lone `\n` opens fine in most tools and is exactly the kind of thing that
-   * turns out to matter on the one machine the file is actually opened on.
-   */
-  return rows.map((row) => row.map(csvCell).join(",")).join("\r\n");
-}
+export { csvCell, toCsv };
 
 /** One response, in the shape the export needs. */
 export type ExportableResponse = {

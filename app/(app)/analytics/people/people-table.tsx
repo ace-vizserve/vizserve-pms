@@ -1,12 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { Users } from "lucide-react";
+import { FileDown, Users } from "lucide-react";
 
 import { DataTable, type Column } from "@/components/data-table";
 import { EmptyState } from "@/components/empty-state";
+import { Button } from "@/components/ui/button";
 import { TableCell, TableRow } from "@/components/ui/table";
+import { formatDate, todayInAppZone } from "@/lib/dates";
+import { downloadPdfBytes } from "@/lib/download-file";
 import { cn } from "@/lib/utils";
+
+import { peoplePdfFilename, renderPeoplePdf } from "./people-pdf";
+import { isWorse } from "./rows";
 
 /**
  * P15-02 — one row per person, every measure a column, the department average
@@ -49,14 +55,30 @@ const pctCell = (value: number | null, of?: number) =>
   );
 const hoursCell = (minutes: number | null) => (minutes === null ? dash : `${(minutes / 60).toFixed(1)}h`);
 
-/** Worse than the department average by a clear margin — said with a word, not colour alone. */
-function flag(value: number | null, average: number | null | undefined, better: "up" | "down") {
-  if (value === null || average === null || average === undefined) return false;
-  const margin = Math.max(1, Math.abs(average) * 0.25);
-  return better === "up" ? value < average - margin : value > average + margin;
-}
+const flag = isWorse;
 
-export function PeopleTable({ rows, average }: { rows: PersonRow[]; average: AverageRow }) {
+/** What the PDF header says the rows are: the period and filters on screen. */
+export type PeopleReportMeta = { from: string; to: string; scope: string };
+
+export function PeopleTable({
+  rows,
+  average,
+  report,
+}: {
+  rows: PersonRow[];
+  average: AverageRow;
+  report: PeopleReportMeta;
+}) {
+  function exportPdf() {
+    const bytes = renderPeoplePdf(rows, average, {
+      // A hyphen, not the screen's en dash: the PDF is WinAnsi.
+      period: `${formatDate(report.from)} - ${formatDate(report.to)}`,
+      scope: report.scope,
+      generatedOn: formatDate(todayInAppZone()),
+    });
+    downloadPdfBytes(bytes, peoplePdfFilename(report.from, report.to));
+  }
+
   const watch = (content: React.ReactNode, isFlagged: boolean) =>
     isFlagged ? (
       <span className="font-medium text-warning" title="Clearly worse than the department average">
@@ -205,6 +227,13 @@ export function PeopleTable({ rows, average }: { rows: PersonRow[]; average: Ave
       rows={rows}
       getRowKey={(row) => row.id}
       defaultSort={{ key: "person", dir: "asc" }}
+      toolbar={
+        // P15-09 — a KPI pack to read, so a PDF with charts rather than a CSV.
+        <Button type="button" variant="outline" size="sm" disabled={rows.length === 0} onClick={exportPdf}>
+          <FileDown />
+          Export PDF
+        </Button>
+      }
       empty={<EmptyState icon={<Users />} title="Nobody in scope" description="There is nobody in the departments you can see." />}
       footer={
         <TableRow>

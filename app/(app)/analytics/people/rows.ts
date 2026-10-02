@@ -53,3 +53,14 @@ export function averageRow(rows: PersonRow[]): AverageRow {
   } as AverageRow;
 }
 
+
+/**
+ * Worse than the department average by a clear margin — a quarter of the
+ * average, and never less than one. Shared by the table (▾) and the PDF
+ * (orange), so both mark the same people.
+ */
+export function isWorse(value: number | null, average: number | null | undefined, better: "up" | "down") {
+  if (value === null || average === null || average === undefined) return false;
+  const margin = Math.max(1, Math.abs(average) * 0.25);
+  return better === "up" ? value < average - margin : value > average + margin;
+}

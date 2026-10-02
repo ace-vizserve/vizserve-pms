@@ -3,7 +3,7 @@ import "server-only";
 import { emailMode, isDeliverable, type EmailSender } from "./config";
 import type { EmailBody } from "./layout";
 import { sendViaResend } from "./transports/resend";
-import type { EmailTransportAdapter, SendOutcome } from "./transports/types";
+import type { EmailAttachment, EmailTransportAdapter, SendOutcome } from "./transports/types";
 
 /**
  * P0-11 / P8-16 — THE PORT. One function, every email in the system.
@@ -59,6 +59,8 @@ export type SendEmailInput = {
   sender: EmailSender;
   subject: string;
   body: EmailBody;
+  /** P15-08 — files to attach. Passed to the transport untouched. */
+  attachments?: EmailAttachment[];
 };
 
 /**
@@ -81,6 +83,7 @@ export async function sendEmail({
   sender,
   subject,
   body,
+  attachments,
 }: SendEmailInput): Promise<SendOutcome> {
   const recipient = to.trim();
 
@@ -118,7 +121,7 @@ export async function sendEmail({
   }
 
   try {
-    return await deliver({ to: recipient, sender, subject, body });
+    return await deliver({ to: recipient, sender, subject, body, attachments });
   } catch (cause) {
     // A backstop, not the plan. The adapter maps its own failures, because only
     // it can put the transport's own error text into the outcome. This catches

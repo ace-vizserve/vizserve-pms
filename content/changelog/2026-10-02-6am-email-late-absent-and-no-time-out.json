@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-02",
+  "kind": "added",
+  "area": "DTR",
+  "title": "A 6:00 AM email with yesterday's late, absent and no time-out",
+  "description": "Every working day at 6:00 AM, the CEO and every Business Manager get the previous working day's attendance, ready before work starts. The email lists who was absent, late or never timed out; the attached PDF has every employee's time in, time out and status, so nobody has to log in to read it. Monday's email covers Friday.",
+  "items": [
+    "The PDF: every active employee with schedule, time in, time out and status, worst first and colour-coded: absent in red, late or no time-out in orange, on leave in blue (with the leave type), on time in green",
+    "Absent: people with fixed hours, no time record and nothing on the leave calendar for the day",
+    "Late: time-in past the start by more than the grace period, with how late and when they arrived",
+    "No time-out: anyone who timed in and never timed out",
+    "Anyone with leave on the calendar, approved or still pending, full or half day, is marked on leave and never absent; the type of leave is shown except for types kept confidential by law"
+  ],
+  "refs": [
+    "P15-08"
+  ]
+}

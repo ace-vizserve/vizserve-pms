@@ -4,6 +4,7 @@ import type { Metadata } from "next";
 import { PageShell } from "@/components/page-shell";
 import { departmentScopeFilter, requireRole, type AuthContext } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
+import { TASK_PRIORITY_LABELS } from "@/lib/schemas/tasks";
 import { loadDepartmentOptions, loadPerformance, type PerformanceFilters as PerformanceFilterValues } from "@/lib/performance-server";
 
 import { AnalyticsTabs } from "../analytics-tabs";
@@ -14,6 +15,8 @@ import { PeopleTable } from "./people-table";
 import { averageRow, personRow } from "./rows";
 
 export const metadata: Metadata = { title: "People" };
+
+const KIND_LABELS = { client: "Client work", internal: "Internal work", personal: "Personal tasks" } as const;
 
 /**
  * P15-02 — EVERY PERSON IN SCOPE, EVERY MEASURE, against the average.
@@ -59,10 +62,19 @@ async function Body({ context, filters }: { context: AuthContext; filters: Perfo
     personRow(person, person.departmentId ? (departmentName.get(person.departmentId) ?? null) : null),
   );
 
+  // P15-09 — the filters in words, for the PDF's header.
+  const scope = [
+    filters.departmentId ? (departmentName.get(filters.departmentId) ?? "One department") : "All departments",
+    filters.kind ? KIND_LABELS[filters.kind] : null,
+    filters.priority ? `${TASK_PRIORITY_LABELS[filters.priority as keyof typeof TASK_PRIORITY_LABELS] ?? filters.priority} priority` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <>
       <LoadErrors errors={data.errors} />
-      <PeopleTable rows={rows} average={averageRow(rows)} />
+      <PeopleTable rows={rows} average={averageRow(rows)} report={{ from: filters.from, to: filters.to, scope }} />
       <p className="text-2xs text-muted-foreground">
         ▾ marks a figure clearly worse than the department average. Late and absent are blank for anyone with no fixed
         hours on record. Hover a percentage to see how many it was out of.

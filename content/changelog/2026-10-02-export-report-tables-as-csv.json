@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-02",
+  "kind": "added",
+  "area": "Reporting",
+  "title": "Export the reports: CSV for Workload and Attendance, a PDF pack for People",
+  "description": "Workload in Analytics and HR Attendance now have an Export CSV button, with plain numbers a spreadsheet can add up. People has Export PDF instead: a report to read, with charts. Both hold exactly what you can see on screen.",
+  "items": [
+    "Workload: tasks, not started, in progress, completed, done % and overdue per person",
+    "HR Attendance: the month on screen, respecting your search; people with no fixed hours are marked rather than shown as zeroes",
+    "People PDF: headline figures for the period, a bar chart per measure ranking everybody against the average, anyone clearly worse than the average in orange, and the full table at the end"
+  ],
+  "refs": [
+    "P15-06",
+    "P15-09"
+  ]
+}

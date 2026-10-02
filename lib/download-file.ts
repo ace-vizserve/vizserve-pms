@@ -32,3 +32,31 @@ export function downloadBase64(base64: string, filename: string, mimeType: strin
 export function downloadPdf(base64: string, filename: string): void {
   downloadBase64(base64, filename, "application/pdf");
 }
+
+/**
+ * P15-06 — hand the browser a CSV built in the page.
+ *
+ * ⚠️ THE BOM IS LOAD-BEARING. Excel on Windows opens a BOM-less file as the
+ * system codepage, and every "ñ" in a name turns into two characters of
+ * mojibake. The DTR export prepends the same three bytes for the same reason.
+ */
+export function downloadCsv(csv: string, filename: string): void {
+  const url = URL.createObjectURL(new Blob([`﻿${csv}\r\n`], { type: "text/csv;charset=utf-8" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
+/** P15-09 — a PDF built in the browser, as bytes rather than base64. */
+export function downloadPdfBytes(bytes: Uint8Array, filename: string): void {
+  // Copied into a fresh ArrayBuffer: a Uint8Array view may sit on a larger or
+  // shared buffer, and `Blob` would take all of it.
+  const url = URL.createObjectURL(new Blob([bytes.slice().buffer], { type: "application/pdf" }));
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}

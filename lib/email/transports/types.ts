@@ -57,7 +57,11 @@ export type TransportInput = {
   sender: EmailSender;
   subject: string;
   body: EmailBody;
+  /** P15-08 — files to attach, e.g. a report PDF. */
+  attachments?: EmailAttachment[];
 };
+
+export type EmailAttachment = { filename: string; content: Uint8Array };
 
 /**
  * An adapter: one email in, one outcome out, and it never throws.

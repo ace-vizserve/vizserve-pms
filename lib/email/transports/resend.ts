@@ -83,6 +83,7 @@ export async function sendViaResend({
   sender,
   subject,
   body,
+  attachments,
 }: TransportInput): Promise<SendOutcome> {
   const config = resendConfig();
 
@@ -112,6 +113,16 @@ export async function sendViaResend({
             subject,
             html,
             text,
+            // P15-08. Omitted rather than `[]` when there are none, so every
+            // other email's request is byte-for-byte what it was.
+            ...(attachments?.length
+              ? {
+                  attachments: attachments.map((file) => ({
+                    filename: file.filename,
+                    content: Buffer.from(file.content),
+                  })),
+                }
+              : {}),
           });
 
           // Resend's own rejection. `error.message` is the only thing that says

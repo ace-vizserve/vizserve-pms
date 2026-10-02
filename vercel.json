@@ -15,6 +15,10 @@
     {
       "path": "/api/cron/client-approvals",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/daily-attendance",
+      "schedule": "0 22 * * *"
     }
   ]
 }

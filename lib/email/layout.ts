@@ -192,6 +192,8 @@ export type EmailBody = {
   paragraphs: string[];
   /** Label/value rows, e.g. "Target date — 5 Aug 2026". Escaped for you. */
   facts?: { label: string; value: string }[];
+  /** The detail card's title. Defaults to "Your request". Escaped for you. */
+  factsTitle?: string;
   /**
    * A quiet line under the detail card. The reference number lives here rather
    * than as a row in the table: it is a "keep this" not a "read this", and a
@@ -253,7 +255,7 @@ function renderHtml(body: EmailBody): string {
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
                        style="margin:22px 0 0;background:${CARD};border:1px solid ${BORDER};border-radius:10px;">
                   <tr>
-                    <td style="padding:12px 16px;border-bottom:1px solid ${BORDER};color:${INK};font-size:13px;font-weight:700;letter-spacing:-.01em;">Your request</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid ${BORDER};color:${INK};font-size:13px;font-weight:700;letter-spacing:-.01em;">${escapeHtml(body.factsTitle ?? "Your request")}</td>
                   </tr>
                   <tr>
                     <td style="padding:0;">
