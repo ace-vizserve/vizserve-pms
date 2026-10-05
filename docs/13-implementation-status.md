@@ -24,7 +24,7 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **12 — The SPA release** | **Done and on `main` since 28 Sep** (`acfea98` → `2ee3da3`). Cache-driven client pages, direct-to-Supabase writes, functions in Tokyo, virtualised list and board, search/person/due filters. Both migrations applied. See *22 Sep – 1 Oct* below |
 | **13 — Company-wide work** | **Done.** `p13_01` (a collaboration space every department shares) and `p13_02` (anyone may be put on company-wide work), 21 Sep |
 | **14 — Roles, approval routing, notifications by stage** | **Done. All migrations applied by hand, 29 Sep – 1 Oct.** Several roles per person and a switcher, Business Manager and CEO, hard-coded approval routing, per-stage notification rules drawn as a flowchart. Proven by `tests/sql/p14-flows.sql` on the live database (rolled back) |
-| **15 — Analytics, person pages, client form setup, oversight** | **Done, 5 Oct.** P15-01 through P15-13. Two migrations (`p15_04`, `p15_10`), both applied |
+| **15 — Analytics, person pages, client form setup, oversight** | **Done, 5 Oct.** P15-01 through P15-15. Two migrations (`p15_04`, `p15_10`), both applied |
 | **10 — Performance pass** | **Done, code only — no migration.** Auth round trips removed, request waterfalls collapsed, duplicate reads memoised, 27 Suspense boundaries added, Next 16.2.12 → 16.3.4. No business logic changed. See the Performance pass section below |
 
 `npm run test` is green: **1,918 passed, 430 skipped, 0 failures** (5 Oct).
@@ -72,11 +72,11 @@ long-standing gap and found two pre-existing failures:
 
 ---
 
-## 22 Sep – 5 Oct 2026 — P7-77 to P15-13
+## 22 Sep – 5 Oct 2026 — P7-77 to P15-15
 
-Reconstructed from `git log 7dbafcc..4bd90fa`. Every migration in this stretch was
+Reconstructed from `git log 7dbafcc..b6e5cbd`. Every migration in this stretch was
 **pasted by hand into the SQL editor** — never `db:push` (prod migration history
-is empty). `main` and `staging` both sit at `4bd90fa`.
+is empty). `main` and `staging` both sit at `b6e5cbd`.
 
 ### P7-77 – P7-80 · Who the client request flow tells (23 Sep)
 
@@ -216,6 +216,19 @@ commit SUBJECTS of `4286f63`, `ec6ce89`, `58a7c36` and `4bd90fa` still say P15-0
   (`EVENT_LEAVE_CODES`) are allocated to everyone eligible and almost never used, and on prod
   they put 1,815 of 2,261 allocated days in the denominator and the "used" figure at 0 %.
   Days taken still counts every type.
+- **P15-14 — one table per screen, in tabs** (`d04a04c`). `/approvals` stacked up to three
+  tables; each is now a URL tab (`?tab=`) with its count. Regular view: *Waiting on me*
+  (approvers, or anyone a hand-over waits on), *Timesheet weeks* (Manager), *My requests* —
+  opening on *Waiting on me* when something is, else *My requests*; paging belongs to
+  *My requests* and carries `tab=mine`. Oversight view: *Requests* / *Timesheet weeks*.
+  `components/link-tabs.tsx` is the shared strip (the Analytics look); Holidays & events uses
+  it. **The rule for new screens: never stack two tables — tab them.**
+- **P15-15 — every list on a person's page is paged** (`b6e5cbd`). Activity printed the last
+  100 of 261 actions in one scroll and silently cut the rest. Activity (*What they did* /
+  *Changes to their account*) and Requests (*Filed* / *Decided at Gate 1*) are sub-tabs
+  (`?sub=`); every list pages with the shared `Pagination`. Tasks' open-only filter moved
+  into the query (`TERMINAL_STATUSES`), so a page is a real page; Timesheets slices its
+  26 weeks. The inactive sub-tab is only counted (`limit(0)` with `count: exact`).
 
 ### What is owed
 
