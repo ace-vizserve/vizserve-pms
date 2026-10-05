@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-05",
+  "kind": "changed",
+  "area": "Approvals",
+  "title": "Approvals shows every request to admin, business manager and CEO",
+  "description": "These roles file nothing and approve nothing, so Approvals was empty for them. Acting as one of them, it now lists every request across the company, read-only.",
+  "items": [
+    "Filter by status: all, pending, approved, rejected, withdrawn",
+    "Each pending request shows who it is waiting on: relievers, team leader or manager",
+    "Timesheet weeks waiting on the manager are listed underneath"
+  ],
+  "refs": ["P15-07"]
+}

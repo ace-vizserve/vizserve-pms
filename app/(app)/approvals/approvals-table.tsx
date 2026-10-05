@@ -25,11 +25,21 @@ import { requestDetail } from "./request-summary";
 
 export type Row = InternalRequestRow & { vizserve_pms_users: { full_name: string } | null };
 
+/** P15-07. Which step a pending request is at, in the words the chain uses. */
+function stepLabel(request: Row): string | null {
+  if (request.status !== "PENDING_REVIEW") return null;
+  if (request.approval_stage === 1) return "Relievers";
+  if (request.approval_stage === 3) return "Manager";
+  return "Team leader";
+}
+
 function columnsFor(
   showWho: boolean,
   reviewerName?: (id: string) => string | undefined,
+  departmentName?: (id: string) => string | undefined,
+  showStep = false,
 ): Column<Row>[] {
-  return [
+  const columns: Column<Row>[] = [
     {
       key: "request",
       header: "Request",
@@ -44,6 +54,9 @@ function columnsFor(
             {showWho ? (
               <span className="text-2xs text-muted-foreground">
                 {request.vizserve_pms_users?.full_name ?? "—"}
+                {departmentName?.(request.department_id)
+                  ? ` · ${departmentName(request.department_id)}`
+                  : ""}
               </span>
             ) : null}
           </div>
@@ -111,6 +124,20 @@ function columnsFor(
       cell: (request) => <InternalStatusBadge status={request.status} />,
     },
   ];
+
+  /* P15-07. For the oversight view, where "who has it now" is the question the
+     whole list is opened to answer. The approver's own queue does not need it:
+     everything in it is waiting on them. */
+  if (showStep) {
+    columns.push({
+      key: "step",
+      header: "Waiting on",
+      className: "hidden sm:table-cell whitespace-nowrap text-muted-foreground",
+      cell: (request) => stepLabel(request) ?? <span className="text-foreground-faint">—</span>,
+    });
+  }
+
+  return columns;
 }
 
 export function Section({
@@ -119,6 +146,9 @@ export function Section({
   rows,
   showWho,
   reviewerNames,
+  departmentNames,
+  showStep = false,
+  count,
   empty,
 }: {
   title: string;
@@ -127,9 +157,20 @@ export function Section({
   showWho: boolean;
   /** Reviewer id → name, for the Decided column. A Map cannot cross the wire. */
   reviewerNames?: Record<string, string>;
+  /** P15-07. Department id → name, shown after the requester. */
+  departmentNames?: Record<string, string>;
+  /** P15-07. Adds the "Waiting on" column. */
+  showStep?: boolean;
+  /** P15-07. The total across pages, when the section is paged. */
+  count?: number;
   empty: React.ReactNode;
 }) {
-  const columns = columnsFor(showWho, (id) => reviewerNames?.[id]);
+  const columns = columnsFor(
+    showWho,
+    (id) => reviewerNames?.[id],
+    (id) => departmentNames?.[id],
+    showStep,
+  );
   /* Both sections on this page share one storage key deliberately: they are the
      same columns over the same shape, and hiding "Reason" in one while it stays
      in the other would read as the setting not applying. */
@@ -161,8 +202,8 @@ export function Section({
         }
         count={
           <>
-            <span className="tabular-nums">{rows.length}</span>{" "}
-            {rows.length === 1 ? "request" : "requests"}
+            <span className="tabular-nums">{count ?? rows.length}</span>{" "}
+            {(count ?? rows.length) === 1 ? "request" : "requests"}
           </>
         }
         empty={empty}

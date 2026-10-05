@@ -7,7 +7,12 @@ import {
   listPendingTimesheetWeeks,
   waitingOnMe,
 } from "@/lib/approvals-queue-server";
-import { approvesTimesheets, isSystemAdmin, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  approvesTimesheets,
+  isSystemAdmin,
+  requireAuthContext,
+  seesEveryDepartment,
+} from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
@@ -21,6 +26,7 @@ import { MyLeaveRecordButton } from "./my-leave-record";
 import { NewRequestDialog } from "./new-request-dialog";
 import { Section, type Row } from "./approvals-table";
 import { TimesheetWeeksSection } from "./timesheet-weeks-table";
+import { isOversightStatus, OversightApprovals } from "./oversight-view";
 
 /** Rows rendered. The query asks for one more so the cap is detectable. */
 const APPROVALS_PAGE_SIZE = 200;
@@ -64,6 +70,8 @@ export default async function ApprovalsPage({
     dir?: string | string[];
     page?: string;
     size?: string;
+    /** P15-07. The oversight view's status filter. */
+    status?: string;
   }>;
 }) {
   const context = await requireAuthContext();
@@ -136,6 +144,30 @@ export default async function ApprovalsPage({
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.size);
   const rangeFrom = (page - 1) * pageSize;
+
+  /*
+   * P15-07. Admin, Business Manager and CEO file nothing and approve nothing,
+   * so "mine" and "waiting on me" are both empty for them. They get the
+   * company-wide read-only view instead. Decided by the ACTIVE role, so Amier
+   * acting as Team Leader keeps his queue.
+   */
+  if (seesEveryDepartment(context)) {
+    const status = first(params.status);
+    return (
+      <PageShell className="gap-6">
+        <OversightApprovals
+          supabase={supabase}
+          status={isOversightStatus(status) ? status : "all"}
+          orderColumn={ORDER_COLUMN[sort]}
+          ascending={ascending}
+          page={page}
+          pageSize={pageSize}
+          sort={requested}
+          dir={first(params.dir)}
+        />
+      </PageShell>
+    );
+  }
 
   const SELECT =
     "*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)";

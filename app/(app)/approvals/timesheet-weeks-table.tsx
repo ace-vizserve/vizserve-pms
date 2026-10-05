@@ -105,9 +105,12 @@ const COLUMNS: Column<PendingWeek>[] = [
 
 export function TimesheetWeeksSection({
   rows,
+  description = "Approving or sending a week back happens on the team week grid, beside the hours it is made of. These rows open it on the right week.",
   empty,
 }: {
   rows: PendingWeek[];
+  /** P15-07. The oversight view reads these weeks; it does not approve them. */
+  description?: string;
   /** The failure state. A week queue that renders empty on a failed read is the
       worst tie on this page — see `components/query-error.tsx`. */
   empty: React.ReactNode;
@@ -121,10 +124,7 @@ export function TimesheetWeeksSection({
         toolbar={
           <div>
             <h2 className="text-sm font-semibold">Timesheet weeks handed in</h2>
-            <p className="mt-0.5 text-xs text-muted-foreground">
-              Approving or sending a week back happens on the team week grid, beside the hours it is
-              made of. These rows open it on the right week.
-            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
           </div>
         }
         count={
