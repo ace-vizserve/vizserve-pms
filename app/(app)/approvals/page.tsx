@@ -70,7 +70,7 @@ export default async function ApprovalsPage({
     dir?: string | string[];
     page?: string;
     size?: string;
-    /** P15-07. The oversight view's status filter. */
+    /** P15-11. The oversight view's status filter. */
     status?: string;
   }>;
 }) {
@@ -146,7 +146,7 @@ export default async function ApprovalsPage({
   const rangeFrom = (page - 1) * pageSize;
 
   /*
-   * P15-07. Admin, Business Manager and CEO file nothing and approve nothing,
+   * P15-11. Admin, Business Manager and CEO file nothing and approve nothing,
    * so "mine" and "waiting on me" are both empty for them. They get the
    * company-wide read-only view instead. Decided by the ACTIVE role, so Amier
    * acting as Team Leader keeps his queue.

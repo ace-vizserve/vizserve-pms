@@ -289,7 +289,7 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "users",
   },
   {
-    // P15-08. Events joined this page as a second tab.
+    // P15-12. Events joined this page as a second tab.
     label: "Holidays & events",
     href: "/admin/holidays",
     // P7-52 moved this from `minRole: "admin"` to the HR capability, and moved

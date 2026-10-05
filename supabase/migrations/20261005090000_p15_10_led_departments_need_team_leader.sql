@@ -1,4 +1,4 @@
--- P15-06 — LEADING A DEPARTMENT IS PART OF BEING ITS TEAM LEADER (5 Oct 2026).
+-- P15-10 — LEADING A DEPARTMENT IS PART OF BEING ITS TEAM LEADER (5 Oct 2026).
 --
 -- `vizserve_pms_user_managed_departments` and the Team Leader role were two
 -- unconnected facts. From 7 to 30 Sep Joel (then owner, later Manager) had all

@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 /**
- * P15-08 — events moved onto /admin/holidays as its second tab. This stays so a
+ * P15-12 — events moved onto /admin/holidays as its second tab. This stays so a
  * bookmark or a link in the audit trail still lands on the events list, for
  * the year it named.
  */

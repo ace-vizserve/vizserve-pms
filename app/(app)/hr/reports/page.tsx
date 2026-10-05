@@ -31,7 +31,7 @@ export const metadata: Metadata = { title: "Leave reports" };
 export default async function LeaveReportsPage({
   searchParams,
 }: {
-  /** P15-09. The year the figures cover. A mangled value opens this year. */
+  /** P15-13. The year the figures cover. A mangled value opens this year. */
   searchParams: Promise<{ year?: string | string[] }>;
 }) {
   await requireHr();

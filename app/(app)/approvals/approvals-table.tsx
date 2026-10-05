@@ -25,7 +25,7 @@ import { requestDetail } from "./request-summary";
 
 export type Row = InternalRequestRow & { vizserve_pms_users: { full_name: string } | null };
 
-/** P15-07. Which step a pending request is at, in the words the chain uses. */
+/** P15-11. Which step a pending request is at, in the words the chain uses. */
 function stepLabel(request: Row): string | null {
   if (request.status !== "PENDING_REVIEW") return null;
   if (request.approval_stage === 1) return "Relievers";
@@ -125,7 +125,7 @@ function columnsFor(
     },
   ];
 
-  /* P15-07. For the oversight view, where "who has it now" is the question the
+  /* P15-11. For the oversight view, where "who has it now" is the question the
      whole list is opened to answer. The approver's own queue does not need it:
      everything in it is waiting on them. */
   if (showStep) {
@@ -157,11 +157,11 @@ export function Section({
   showWho: boolean;
   /** Reviewer id → name, for the Decided column. A Map cannot cross the wire. */
   reviewerNames?: Record<string, string>;
-  /** P15-07. Department id → name, shown after the requester. */
+  /** P15-11. Department id → name, shown after the requester. */
   departmentNames?: Record<string, string>;
-  /** P15-07. Adds the "Waiting on" column. */
+  /** P15-11. Adds the "Waiting on" column. */
   showStep?: boolean;
-  /** P15-07. The total across pages, when the section is paged. */
+  /** P15-11. The total across pages, when the section is paged. */
   count?: number;
   empty: React.ReactNode;
 }) {

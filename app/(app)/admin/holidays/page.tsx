@@ -17,7 +17,7 @@ import { HolidaysTable } from "./holidays-table";
 export const metadata: Metadata = { title: "Holidays & events" };
 
 /**
- * P15-08 — HOLIDAYS AND EVENTS ON ONE PAGE, a tab each.
+ * P15-12 — HOLIDAYS AND EVENTS ON ONE PAGE, a tab each.
  *
  * They were two sibling screens with near-identical tables, both HR's and both
  * feeding the one shared calendar. They still MEAN opposite things — a holiday

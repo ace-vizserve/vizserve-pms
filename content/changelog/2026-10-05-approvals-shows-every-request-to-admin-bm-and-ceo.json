@@ -9,5 +9,5 @@
     "Each pending request shows who it is waiting on: relievers, team leader or manager",
     "Timesheet weeks waiting on the manager are listed underneath"
   ],
-  "refs": ["P15-07"]
+  "refs": ["P15-11"]
 }

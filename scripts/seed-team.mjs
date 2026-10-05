@@ -155,7 +155,7 @@ const ROSTER = [
   ...team("VizBooks", "amy.castro", ["hazel.amoranto", "raechelle.mallari"]),
 
   // Managers over everything. No primary department — they do not sit in one.
-  // P15-06: and no led departments either. The Manager role already sees every
+  // P15-10: and no led departments either. The Manager role already sees every
   // department (P14-04); ticking them here made each manager a Team Leader of
   // all four, which is how a Manager signed VizBytes' Team Leader step. The
   // database now refuses a led department without the Team Leader role.

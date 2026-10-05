@@ -109,7 +109,7 @@ export function TimesheetWeeksSection({
   empty,
 }: {
   rows: PendingWeek[];
-  /** P15-07. The oversight view reads these weeks; it does not approve them. */
+  /** P15-11. The oversight view reads these weeks; it does not approve them. */
   description?: string;
   /** The failure state. A week queue that renders empty on a failed read is the
       worst tie on this page — see `components/query-error.tsx`. */

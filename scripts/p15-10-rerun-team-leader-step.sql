@@ -1,6 +1,6 @@
--- P15-06 — RE-RUN THE TEAM LEADER STEP ON FOUR LEAVE REQUESTS (5 Oct 2026).
+-- P15-10 — RE-RUN THE TEAM LEADER STEP ON FOUR LEAVE REQUESTS (5 Oct 2026).
 --
--- Before P15-06, led departments were not tied to the Team Leader role, and
+-- Before P15-10, led departments were not tied to the Team Leader role, and
 -- four leave requests had their Team Leader step signed by somebody who does
 -- not lead that department. All four were then final-approved by Joel as
 -- Manager:
@@ -57,7 +57,7 @@ audited as (
            jsonb_build_object('status', 'APPROVED', 'approval_stage', 3),
            jsonb_build_object(
              'status', 'PENDING_REVIEW', 'to_stage', 2,
-             'reason', 'P15-06: the Team Leader step was signed by somebody who does not lead this department'
+             'reason', 'P15-10: the Team Leader step was signed by somebody who does not lead this department'
            )
          ) as ok
     from info i

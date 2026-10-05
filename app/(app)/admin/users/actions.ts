@@ -303,7 +303,7 @@ export async function createUser(
 
   if (profileError) return { ok: false, error: profileError.message };
 
-  // P15-06. Roles BEFORE led departments: the database refuses a led
+  // P15-10. Roles BEFORE led departments: the database refuses a led
   // department for somebody who does not hold Team Leader, so somebody made a
   // Team Leader in this save must hold the role before their department lands.
   const rolesError = await replaceHeldRoles(admin, userId, held);
@@ -444,7 +444,7 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
 
   if (updateError) return { ok: false, error: updateError.message };
 
-  // P15-06. Roles BEFORE led departments: the database refuses a led
+  // P15-10. Roles BEFORE led departments: the database refuses a led
   // department for somebody who does not hold Team Leader, so somebody made a
   // Team Leader in this save must hold the role before their department lands.
   const rolesError = await replaceHeldRoles(admin, userId, held);
