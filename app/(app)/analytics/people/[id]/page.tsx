@@ -28,7 +28,8 @@ import { days, Delta, Figure, FiguresSkeleton, hours, LoadErrors, pct, periodLab
 import { readAnalyticsFilters, type AnalyticsSearch } from "../../params";
 import { PerformanceFilters } from "../../performance-filters";
 import { averageRow, personRow } from "../rows";
-import { ActivitySection, RequestsSection, TasksSection, TimesheetsSection } from "./sections";
+import { resolvePage, resolvePageSize } from "@/components/pagination";
+import { ActivitySection, RequestsSection, TasksSection, TimesheetsSection, type Paging } from "./sections";
 
 export const metadata: Metadata = { title: "Person" };
 
@@ -58,7 +59,7 @@ export default async function PersonPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<AnalyticsSearch & { view?: string; show?: string }>;
+  searchParams: Promise<AnalyticsSearch & { view?: string; show?: string; sub?: string; page?: string; size?: string }>;
 }) {
   const { id } = await params;
   const search = await searchParams;
@@ -88,11 +89,30 @@ export default async function PersonPage({
   const roles = ((held ?? []).map((row) => row.role) as Role[]).sort();
   const editable = isManager && canEditUser(context, { id, roles: roles.length > 0 ? roles : [person.role] });
 
+  // Switching section drops what belongs to the old one: its toggle, sub-tab and page.
   const query = (next: Record<string, string>) => {
     const merged = new URLSearchParams();
-    for (const [key, value] of Object.entries(search)) if (typeof value === "string" && key !== "show") merged.set(key, value);
+    for (const [key, value] of Object.entries(search))
+      if (typeof value === "string" && !["show", "sub", "page"].includes(key)) merged.set(key, value);
     for (const [key, value] of Object.entries(next)) merged.set(key, value);
     return `?${merged.toString()}`;
+  };
+
+  const basePath = `/analytics/people/${id}`;
+  const paging: Paging = {
+    page: resolvePage(search.page),
+    pageSize: resolvePageSize(search.size),
+    basePath,
+    href: (next) => {
+      const merged = new URLSearchParams();
+      for (const [key, value] of Object.entries(search)) if (typeof value === "string") merged.set(key, value);
+      for (const [key, value] of Object.entries(next)) {
+        if (value === undefined) merged.delete(key);
+        else merged.set(key, value);
+      }
+      const qs = merged.toString();
+      return qs ? `${basePath}?${qs}` : basePath;
+    },
   };
 
   return (
@@ -148,13 +168,13 @@ export default async function PersonPage({
       {view === "performance" ? (
         <Performance context={context} personId={id} departmentId={person.primary_department_id} search={search} />
       ) : view === "tasks" ? (
-        <TasksSection userId={id} show={search.show === "all" ? "all" : "open"} />
+        <TasksSection userId={id} show={search.show === "all" ? "all" : "open"} paging={paging} />
       ) : view === "timesheets" ? (
-        <TimesheetsSection userId={id} />
+        <TimesheetsSection userId={id} paging={paging} />
       ) : view === "requests" ? (
-        <RequestsSection userId={id} />
+        <RequestsSection userId={id} sub={search.sub === "gate1" ? "gate1" : "filed"} paging={paging} />
       ) : (
-        <ActivitySection userId={id} />
+        <ActivitySection userId={id} sub={search.sub === "account" ? "account" : "did"} paging={paging} />
       )}
       </Suspense>
     </PageShell>
