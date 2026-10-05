@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-05",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Tasks can repeat daily, weekly or monthly",
+  "description": "Routine work like the daily huddle, a weekly meeting or the monthly finance close no longer has to be re-created every time, or reused until its tracked time runs far past the estimate. Set a task to repeat, and each new day, week or month gets a fresh copy while the last one is closed with its time kept.",
+  "items": [
+    "Set it from the new-task dialog, the 🔁 icon on a task's row or card, or the Repeats row on the task page",
+    "Each new copy keeps the title, description, people, list, priority and estimate, moves to the new period's dates (Mon–Fri stays Mon–Fri), starts at 0h tracked, and lands in Ongoing or Open, your choice",
+    "When the next copy starts, the previous one is marked Completed and keeps its logged time, so past timesheet weeks do not change",
+    "Recurring tasks show a 🔁 Daily, Weekly or Monthly badge, and the task page lists every earlier copy",
+    "Daily means working days only: no copies on weekends or holidays",
+    "Stop repeating at any time; copies already made are kept",
+    "Internal and personal tasks only — client-request tasks and subtasks cannot repeat"
+  ],
+  "refs": ["P15-10"],
+  "pending": "Needs the P15-10 database update applied before it works."
+}

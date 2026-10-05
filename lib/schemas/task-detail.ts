@@ -71,6 +71,13 @@ export const taskRowSchema = z.object({
   custom_fields: z.unknown().nullable(),
   created_by: z.uuid().nullable(),
   created_at: z.string(),
+  /** P7-09. Read so the page knows a subtask cannot carry its own schedule (P15-10). */
+  parent_task_id: z.uuid().nullable(),
+  /** P15-10. The series this task is a copy of — set even after the schedule stops. */
+  series_id: z.uuid().nullable(),
+  series_period_start: z.string().nullable(),
+  /** P15-10. Computed column: the ACTIVE schedule's frequency, or null. */
+  repeats: z.enum(["DAILY", "WEEKLY", "MONTHLY"]).nullable(),
 });
 
 export type TaskRow = z.infer<typeof taskRowSchema>;

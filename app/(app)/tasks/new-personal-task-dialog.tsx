@@ -29,6 +29,7 @@ import type { TaskPriority } from "@/lib/schemas/tasks";
 import { createPersonalTask, createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
+import { NO_REPEAT, RepeatPicker, saveRepeatAfterCreate, type RepeatChoice } from "./repeat-picker";
 import { PeoplePicker } from "./people-picker";
 import { FieldError } from "@/components/ui/field-error";
 
@@ -142,6 +143,8 @@ export function NewPersonalTaskDialog({
 }) {
   const [open, setOpen] = useState(false);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
+  // P15-10.
+  const [repeat, setRepeat] = useState<RepeatChoice>(NO_REPEAT);
   const [estimate, setEstimate] = useState<number | null>(null);
   /*
    * ⚠️ NEVER EMPTY. `[MINE]` is the default and `onValueChange` puts it back
@@ -263,6 +266,7 @@ export function NewPersonalTaskDialog({
 
   function reset() {
     setPriority(null);
+    setRepeat(NO_REPEAT);
     setEstimate(null);
     setAssignees([MINE]);
     setErrors({});
@@ -340,6 +344,8 @@ export function NewPersonalTaskDialog({
         toast.error(result.error);
         return;
       }
+
+      await saveRepeatAfterCreate(result.data.taskId, repeat);
 
       toast.success(
         forSomebodyElse ? `Assigned to ${nameList(chosenColleagues, includesMe)}.` : "Added to your tasks.",
@@ -553,6 +559,14 @@ export function NewPersonalTaskDialog({
           </div>
 
           <PriorityPicker value={priority} onChange={setPriority} disabled={pending} />
+
+          <RepeatPicker
+            value={repeat}
+            onChange={setRepeat}
+            startDate={startDate}
+            dueDate={dueDate}
+            disabled={pending}
+          />
 
           {errors.form?.length ? <FieldError messages={errors.form} /> : null}
 

@@ -43,7 +43,9 @@ import { CustomFieldDisplay, CustomFieldEditor } from "../custom-field-value";
 import { TaskSection } from "./task-section";
 
 import { overrideTaskStatus, reassignTask } from "../writes";
-import { InlineDate, InlineEstimate, InlineList, InlinePriority } from "../inline";
+import { InlineDate, InlineEstimate, InlineList, InlinePriority, InlineRepeat, RepeatBadge } from "../inline";
+import { SeriesCopies } from "./series-copies";
+import type { RecurrenceFrequency } from "@/lib/recurrence";
 import { ACTION_LINK } from "./grid";
 import { useTaskGate } from "./task-gate";
 import { useTaskAutosave } from "./use-task-autosave";
@@ -133,6 +135,9 @@ export function TaskSurface({
   estimateMinutes,
   trackedMinutes,
   priority,
+  repeats = null,
+  seriesId = null,
+  canRepeat = false,
   listId,
   lists,
   customFields,
@@ -185,6 +190,12 @@ export function TaskSurface({
    */
   trackedMinutes: number;
   priority: TaskPriority | null;
+  /** P15-10. The active schedule's frequency, or null. */
+  repeats?: RecurrenceFrequency | null;
+  /** P15-10. Set on any copy of a series, stopped or not — the history link. */
+  seriesId?: string | null;
+  /** P15-10. False for client-request work and subtasks, which cannot repeat. */
+  canRepeat?: boolean;
   listId: string | null;
   lists: { id: string; name: string }[];
   /** P7-73. The active custom fields of this task's list, in the manager's order. */
@@ -641,6 +652,27 @@ export function TaskSurface({
             </Prop>
 
             <Prop label="Estimate">{estimate}</Prop>
+
+            {/* P15-10. Shown wherever a schedule is possible or already exists. */}
+            {canRepeat || seriesId ? (
+              <Prop label="Repeats" className="sm:col-span-2">
+                {canEdit && canRepeat ? (
+                  repeats ? (
+                    <InlineRepeat taskId={taskId} value={repeats} startDate={startDate} dueDate={dueDate} />
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5">
+                      <InlineRepeat taskId={taskId} value={null} startDate={startDate} dueDate={dueDate} iconOnly />
+                      <span className="text-muted-foreground">Doesn't repeat</span>
+                    </span>
+                  )
+                ) : repeats ? (
+                  <RepeatBadge value={repeats} />
+                ) : (
+                  <span className="text-muted-foreground">Doesn't repeat</span>
+                )}
+                {seriesId ? <SeriesCopies seriesId={seriesId} currentTaskId={taskId} /> : null}
+              </Prop>
+            ) : null}
 
             {lists.length > 0 ? (
               <Prop label="List">

@@ -32,6 +32,7 @@ import type { TaskPriority } from "@/lib/schemas/tasks";
 import { createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
+import { NO_REPEAT, RepeatPicker, saveRepeatAfterCreate, type RepeatChoice } from "./repeat-picker";
 import { PeoplePicker } from "./people-picker";
 
 /**
@@ -242,6 +243,8 @@ function TaskForm({
    */
   const [listLocked, setListLocked] = useState(lockedList !== null);
   const [priority, setPriority] = useState<TaskPriority | null>(null);
+  // P15-10.
+  const [repeat, setRepeat] = useState<RepeatChoice>(NO_REPEAT);
   const [formError, setFormError] = useState<string | null>(null);
 
   // Narrowed to the chosen department, because the server refuses an assignee
@@ -365,6 +368,8 @@ function TaskForm({
         setFormError(result.error);
         return;
       }
+
+      await saveRepeatAfterCreate(result.data.taskId, repeat);
 
       toast.success("Task created");
       onDone();
@@ -533,6 +538,14 @@ function TaskForm({
         ) : null}
 
         <PriorityPicker value={priority} onChange={setPriority} disabled={pending} />
+
+        <RepeatPicker
+          value={repeat}
+          onChange={setRepeat}
+          startDate={startDate || null}
+          dueDate={dueDate || null}
+          disabled={pending}
+        />
 
         {formError ? (
           <p

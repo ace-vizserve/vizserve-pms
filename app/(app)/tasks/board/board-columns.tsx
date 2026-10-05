@@ -44,7 +44,7 @@ import type { TaskKind, TaskView } from "@/lib/task-scope";
 import { cn } from "@/lib/utils";
 
 import { BoardComposer } from "../add-task";
-import { SubtaskProgress, TaskRowActions } from "../inline";
+import { RepeatBadge, SubtaskProgress, TaskRowActions } from "../inline";
 import { TaskStatusSelect } from "../status-select";
 import { BoardCard, BoardColumn, BoardTaskGroup } from "./board-dnd";
 import { VirtualCardList } from "./virtual-card-list";
@@ -526,6 +526,8 @@ export function BoardColumns({
                             strip's flag is where it changes and one field
                             does not get two controls on one card. */}
                             <TaskPriorityBadge priority={task.priority as TaskPriority | null} className="h-5 px-1.5" />
+                            {/* P15-10. Read-only for the same reason; the strip's 🔁 edits it. */}
+                            <RepeatBadge value={task.repeats} />
 
                             {/* PIC and QA, in that order. The second assignee is
                             the thing this product turns on, so a board that
@@ -586,7 +588,13 @@ export function BoardColumns({
                               title={task.title}
                               priority={task.priority as TaskPriority | null}
                               assignable={assignable}
-                              deletable={canDelete(task)}>
+                              deletable={canDelete(task)}
+                              repeat={{
+                                value: task.repeats ?? null,
+                                startDate: task.start_date,
+                                dueDate: task.due_date,
+                                eligible: !task.request_id && !task.parent_task_id,
+                              }}>
                               {/* The glyph, not the chip: this card sits IN the
                               column whose heading is its status. */}
                               <TaskStatusSelect

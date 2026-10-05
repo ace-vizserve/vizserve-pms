@@ -1,4 +1,4 @@
-import type { Json } from "@/lib/database.types";
+import type { Json, VizservePmsRecurrenceFrequency } from "@/lib/database.types";
 import type { TaskComment } from "@/app/(app)/tasks/comment-thread";
 import type { TaskRow } from "@/app/(app)/tasks/tasks-table";
 import { read } from "@/lib/query/read";
@@ -131,7 +131,7 @@ const ORDER_COLUMN: Record<TaskListSort, string> = {
  * noticed, which is how the list shipped broken for every `?person=`.
  */
 const TASK_COLUMNS =
-  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields, position, created_at";
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields, position, created_at, series_id, repeats";
 
 /**
  * P12 — the base of a task query: the table, or, with a person filter set, the
@@ -357,7 +357,7 @@ export function subtaskProgress(childRows: TaskListView["childRows"]) {
 
 /** `updated_at` for the closed column's order — see the note on `TASK_COLUMNS`. */
 const BOARD_TASK_COLUMNS =
-  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution, custom_fields, updated_at";
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution, custom_fields, updated_at, series_id, repeats";
 
 /** One card's row — the columns `BOARD_TASK_COLUMNS` selects. */
 export type BoardTask = {
@@ -379,6 +379,9 @@ export type BoardTask = {
   resolution: string | null;
   /** P7-73 / P12 — read by the board's custom-field filters. */
   custom_fields: Json | null;
+  /** P15-10. The series this card is a copy of, and its active frequency (computed). */
+  series_id: string | null;
+  repeats: VizservePmsRecurrenceFrequency | null;
 };
 
 /** How many finished cards a terminal column loads per page as it is scrolled. */

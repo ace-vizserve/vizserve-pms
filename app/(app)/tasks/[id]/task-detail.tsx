@@ -464,6 +464,9 @@ export function TaskDetail({ taskId }: { taskId: string }) {
               estimateMinutes={task.estimate_minutes}
               trackedMinutes={trackedMinutes}
               priority={task.priority}
+              repeats={task.repeats ?? null}
+              seriesId={task.series_id ?? null}
+              canRepeat={!task.request_id && !task.parent_task_id}
               listId={task.list_id}
               lists={lists ?? []}
               customFields={customFields}

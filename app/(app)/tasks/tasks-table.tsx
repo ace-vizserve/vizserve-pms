@@ -18,6 +18,7 @@ import type {
   VizservePmsUserRole,
 } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
+import type { RecurrenceFrequency } from "@/lib/recurrence";
 import {
   INITIAL_TASK_STATUS,
   isTaskOverdue,
@@ -37,6 +38,7 @@ import {
   InlineDate,
   InlineEstimate,
   InlinePriority,
+  InlineRepeat,
   SubtaskProgress,
   TaskRowActions,
 } from "./inline";
@@ -108,6 +110,13 @@ export type TaskRow = {
    * client before the server answers (a placeholder) has none yet.
    */
   custom_fields?: unknown;
+  /**
+   * P15-10. The series this row is a copy of, and the ACTIVE schedule's
+   * frequency (a computed column — null when it does not repeat). Optional for
+   * the same reason as `custom_fields`.
+   */
+  series_id?: string | null;
+  repeats?: RecurrenceFrequency | null;
 };
 
 /**
@@ -648,6 +657,15 @@ export function TaskGroupTable({
                   everything marks nothing. */}
               <InlinePriority taskId={task.id} value={task.priority} />
 
+              {/* P15-10. "🔁 Weekly" — nothing at all on a task that does not repeat. */}
+              <InlineRepeat
+                taskId={task.id}
+                value={task.repeats ?? null}
+                startDate={task.start_date}
+                dueDate={task.due_date}
+                eligible={!task.request_id && !task.parent_task_id}
+              />
+
               {/* NO STATUS CONTROL IN THE STRIP ANY MORE (P12-18) — the badge
                   before the title is it. */}
               <TaskRowActions
@@ -656,6 +674,12 @@ export function TaskGroupTable({
                 priority={task.priority}
                 assignable={assignable}
                 deletable={canDelete(task)}
+                repeat={{
+                  value: task.repeats ?? null,
+                  startDate: task.start_date,
+                  dueDate: task.due_date,
+                  eligible: !task.request_id && !task.parent_task_id,
+                }}
               />
             </span>
 

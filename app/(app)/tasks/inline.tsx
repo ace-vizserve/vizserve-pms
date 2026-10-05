@@ -1,7 +1,7 @@
 "use client";
 
 import { toast } from "@/components/ui/toast";
-import { Ban, Check, Flag, Pencil, Plus, X } from "lucide-react";
+import { Ban, Check, Flag, Pencil, Plus, Repeat, X } from "lucide-react";
 import { useOptimistic, useState, type ReactNode } from "react";
 
 import { useOptimisticMove } from "./optimistic-move";
@@ -13,7 +13,17 @@ import { Input } from "@/components/ui/input";
 
 import { TaskPriorityBadge } from "@/components/status-badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { formatDate, parseDateOnly } from "@/lib/dates";
+import { formatDate, parseDateOnly, todayInAppZone } from "@/lib/dates";
+import {
+  DEFAULT_LANDING_STATUS,
+  RECURRENCE_DESCRIPTIONS,
+  RECURRENCE_FREQUENCIES,
+  RECURRENCE_LABELS,
+  RECURRENCE_LANDING_STATUSES,
+  previewNextCopy,
+  type RecurrenceFrequency,
+  type RecurrenceLandingStatus,
+} from "@/lib/recurrence";
 import {
   INITIAL_TASK_STATUS,
   TASK_PRIORITIES,
@@ -26,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { focusWithoutScroll } from "@/lib/focus";
 import { DeleteTaskDialog } from "./delete-task-dialog";
 
-import { updateTaskField } from "./writes";
+import { setTaskRecurrence, stopTaskRecurrence, updateTaskField } from "./writes";
 import { ComposerCard, type Assignable } from "./task-composer";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 import { useRowArmed } from "@/lib/row-arm";
@@ -106,7 +116,8 @@ function usePatch(taskId: string) {
 }
 
 /**
- * The action strip on a row or a card: rename, priority, add a subtask.
+ * The action strip on a row or a card: rename, priority, repeat (P15-10), add a
+ * subtask.
  *
  * All three are shortcuts to things that already exist — the title grant, the
  * P7-11 priority column and `vizserve_pms_set_task_parent` — so there is no new
@@ -135,12 +146,24 @@ export function TaskRowActions({
   priority,
   assignable = [],
   deletable = false,
+  repeat,
   className,
   children,
 }: {
   taskId: string;
   title: string;
   priority: TaskPriority | null;
+  /**
+   * P15-10. The repeat schedule and the dates its preview shifts. Omitted where
+   * a task cannot repeat at all (a subtask on a board card); `eligible: false`
+   * for a client-request task.
+   */
+  repeat?: {
+    value: RecurrenceFrequency | null;
+    startDate: string | null;
+    dueDate: string | null;
+    eligible: boolean;
+  };
   /** Passed through to the subtask composer. */
   assignable?: Assignable[];
   /**
@@ -171,6 +194,16 @@ export function TaskRowActions({
       {children}
       <InlineTitle taskId={taskId} title={title} />
       <InlinePriority taskId={taskId} value={priority} iconOnly />
+      {repeat ? (
+        <InlineRepeat
+          taskId={taskId}
+          value={repeat.value}
+          startDate={repeat.startDate}
+          dueDate={repeat.dueDate}
+          eligible={repeat.eligible}
+          iconOnly
+        />
+      ) : null}
       <AddSubtask parentId={taskId} assignable={assignable} />
       {/* Last in the strip, and the only destructive thing in it. */}
       {deletable ? <DeleteTaskDialog taskId={taskId} title={title} /> : null}
@@ -369,6 +402,181 @@ export function InlinePriority({
       </PopoverContent>
     </Popover>
   );
+}
+
+/**
+ * P15-10 — the repeat schedule, edited where it is read.
+ *
+ * Two shapes, as `InlinePriority` has: `iconOnly` is the 🔁 in the action strip
+ * (blue when set, the way the flag takes its priority's colour); the chip is
+ * "🔁 Weekly" beside the title, and renders NOTHING on a task that does not
+ * repeat — the word is what marks a recurring task, never the blue alone.
+ *
+ * `eligible` is false for a client-request task and for a subtask. The database
+ * refuses both; this is about not offering a door that does not open.
+ */
+export function InlineRepeat({
+  taskId,
+  value,
+  startDate,
+  dueDate,
+  eligible = true,
+  iconOnly = false,
+}: {
+  taskId: string;
+  value: RecurrenceFrequency | null;
+  startDate: string | null;
+  dueDate: string | null;
+  eligible?: boolean;
+  iconOnly?: boolean;
+}) {
+  const armed = useRowArmed();
+  const refresh = useTaskRefresh();
+  const patchRow = useOptimisticMove();
+  const [open, setOpen] = useState(false);
+  const [landing, setLanding] = useState<RecurrenceLandingStatus>(DEFAULT_LANDING_STATUS);
+  // `useOptimistic` for the reason `InlinePriority` gives: these are form actions.
+  const [shown, setShown] = useOptimistic(value);
+
+  if (!eligible || (!iconOnly && !shown)) return null;
+
+  async function choose(next: RecurrenceFrequency | null, landingStatus: RecurrenceLandingStatus = landing) {
+    setOpen(false);
+    setShown(next);
+    patchRow?.({ kind: "patch", id: taskId, fields: { repeats: next } });
+
+    const result = next
+      ? await setTaskRecurrence({ task_id: taskId, frequency: next, landing_status: landingStatus })
+      : await stopTaskRecurrence(taskId);
+
+    if (!result.ok) {
+      toast.error(result.error);
+      return;
+    }
+
+    await refresh();
+    toast.success(next ? `${RECURRENCE_DESCRIPTIONS[next]}` : "Stopped repeating. Earlier copies are kept.");
+  }
+
+  const label = shown ? `${RECURRENCE_DESCRIPTIONS[shown]}. Change it.` : "Make this repeat";
+  const trigger = {
+    "data-arm-slot": iconOnly ? "repeat-icon" : "repeat",
+    "aria-label": label,
+    title: shown ? RECURRENCE_DESCRIPTIONS[shown] : "Repeat",
+    className: cn(
+      iconOnly ? ICON_BUTTON : "rounded-md focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none",
+      "disabled:cursor-not-allowed disabled:opacity-60",
+    ),
+  };
+  const face = iconOnly ? (
+    <Repeat className={cn("size-3.5", shown ? "text-primary" : undefined)} aria-hidden />
+  ) : (
+    <span className="inline-flex h-5 items-center gap-1 rounded-md border border-primary/25 bg-primary/10 px-1.5 text-2xs font-medium text-primary">
+      <Repeat className="size-3" aria-hidden />
+      {shown ? RECURRENCE_LABELS[shown] : null}
+    </span>
+  );
+
+  // P12 — an unarmed row draws the trigger alone. See `lib/row-arm.tsx`.
+  if (!armed) {
+    return (
+      <button type="button" {...trigger}>
+        {face}
+      </button>
+    );
+  }
+
+  const today = todayInAppZone();
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger {...trigger}>{face}</PopoverTrigger>
+
+      <PopoverContent align="start" className="w-64 p-1">
+        <form>
+          <p className="px-2 pt-1.5 pb-1 text-2xs font-medium text-muted-foreground">Repeat</p>
+          {RECURRENCE_FREQUENCIES.map((option) => {
+            const next = previewNextCopy(option, { start_date: startDate, due_date: dueDate }, today);
+            return (
+              <button
+                key={option}
+                type="submit"
+                formAction={() => choose(option)}
+                className={cn(MENU_ROW, "items-start", shown === option && "font-semibold")}>
+                <Repeat className="mt-0.5 size-3.5 shrink-0 text-primary" aria-hidden />
+                <span className="flex min-w-0 flex-col">
+                  <span>{RECURRENCE_DESCRIPTIONS[option]}</span>
+                  {next ? (
+                    <span className="text-2xs font-normal text-muted-foreground">
+                      Next copy {formatCopyDates(next.start_date, next.due_date, next.period)}
+                    </span>
+                  ) : null}
+                </span>
+                {shown === option ? <Check className="ml-auto size-3.5 shrink-0" aria-hidden /> : null}
+              </button>
+            );
+          })}
+
+          <div className="mx-2 my-1 border-t" />
+          <p className="px-2 pt-1 pb-1 text-2xs font-medium text-muted-foreground">New copy starts as</p>
+          <div role="radiogroup" aria-label="New copy starts as" className="flex gap-1 px-2 pb-1.5">
+            {RECURRENCE_LANDING_STATUSES.map((status) => (
+              <button
+                key={status}
+                type={shown ? "submit" : "button"}
+                role="radio"
+                aria-checked={landing === status}
+                // On a task that already repeats, changing this saves at once.
+                formAction={shown ? () => choose(shown, status) : undefined}
+                onClick={() => setLanding(status)}
+                className={cn(
+                  "flex-1 rounded-sm border px-2 py-1 text-2xs",
+                  landing === status ? "border-primary bg-primary/10 font-medium text-primary" : "text-muted-foreground",
+                )}>
+                {TASK_STATUS_LABELS[status]}
+              </button>
+            ))}
+          </div>
+          <p className="px-2 pb-1.5 text-2xs text-muted-foreground">
+            When a new copy starts, the previous one is marked Completed and keeps its time.
+          </p>
+
+          {shown !== null ? (
+            <button type="submit" formAction={() => choose(null)} className={cn(MENU_ROW, "text-muted-foreground")}>
+              <Ban className="size-3.5 shrink-0" aria-hidden />
+              Stop repeating
+            </button>
+          ) : null}
+        </form>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+/**
+ * P15-10. The read-only "🔁 Weekly" for a place where the strip's icon is the
+ * editor (a board card), so one field does not get two controls. Nothing at
+ * all when the task does not repeat.
+ */
+export function RepeatBadge({ value, className }: { value: RecurrenceFrequency | null | undefined; className?: string }) {
+  if (!value) return null;
+  return (
+    <span
+      title={RECURRENCE_DESCRIPTIONS[value]}
+      className={cn(
+        "inline-flex h-5 items-center gap-1 rounded-md border border-primary/25 bg-primary/10 px-1.5 text-2xs font-medium text-primary",
+        className,
+      )}>
+      <Repeat className="size-3" aria-hidden />
+      {RECURRENCE_LABELS[value]}
+    </span>
+  );
+}
+
+/** "12 Oct – 16 Oct 2026", one date, or the period's first day when undated. */
+function formatCopyDates(start: string | null, due: string | null, period: string): string {
+  if (start && due && start !== due) return `${formatDate(start)} – ${formatDate(due)}`;
+  return formatDate(start ?? due ?? period);
 }
 
 /**

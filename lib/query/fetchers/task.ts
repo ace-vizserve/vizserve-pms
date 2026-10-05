@@ -68,7 +68,7 @@ export async function fetchTaskDetail(client: TaskReadClient, taskId: string): P
       client
         .from("vizserve_pms_tasks")
         .select(
-          "id, title, description, status, resolution, output_link, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, field_values, custom_fields, created_by, created_at",
+          "id, title, description, status, resolution, output_link, due_date, start_date, assignee_id, qa_assignee_id, department_id, list_id, request_id, is_personal, priority, estimate_minutes, field_values, custom_fields, created_by, created_at, parent_task_id, series_id, series_period_start, repeats",
         )
         .eq("id", taskId)
         .maybeSingle(),

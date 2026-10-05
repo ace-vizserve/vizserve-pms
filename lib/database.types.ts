@@ -166,6 +166,9 @@ export type VizservePmsTokenPurpose = "approval" | "feedback";
  * himself live. COMPLETED_NO_RESPONSE is deliberately distinct: "the client
  * approved" and "the clock ran out" are different facts.
  */
+/** P15-10. How often a recurring task makes its next copy. */
+export type VizservePmsRecurrenceFrequency = "DAILY" | "WEEKLY" | "MONTHLY";
+
 export type VizservePmsTaskStatus =
   | "OPEN"
   | "ONGOING"
@@ -1319,6 +1322,20 @@ export type Database = {
            * that puts this rule back in the query string is that bug returning.
            */
           is_mine: boolean;
+          /**
+           * P15-10. The recurring series this task is a copy of, or null. NOT in
+           * `Update`: joining or leaving a series is
+           * `vizserve_pms_set_task_recurrence` / `vizserve_pms_stop_task_recurrence`.
+           */
+          series_id: string | null;
+          /** P15-10. First day of the period this copy covers. Unique per series. */
+          series_period_start: string | null;
+          /**
+           * P15-10 — NOT A REAL COLUMN. PostgREST computed column backed by
+           * `repeats(vizserve_pms_tasks)`: the ACTIVE schedule's frequency, or
+           * null when the task does not repeat (or its series was stopped).
+           */
+          repeats: VizservePmsRecurrenceFrequency | null;
         };
         // Tasks are born from an approval (P2-07) or from
         // vizserve_pms_create_task (P3-12). Never from a plain insert.
@@ -1360,6 +1377,25 @@ export type Database = {
             referencedColumns: ["id"];
           },
         ];
+      };
+      /** P15-10. A recurring task's rule. Read-only to clients; written by RPC. */
+      vizserve_pms_task_series: {
+        Row: {
+          id: string;
+          department_id: string;
+          frequency: VizservePmsRecurrenceFrequency;
+          /** OPEN or ONGOING: where each new copy starts. */
+          landing_status: VizservePmsTaskStatus;
+          is_active: boolean;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+          stopped_at: string | null;
+          stopped_by: string | null;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
       };
       /** P7-73. A custom field on one list. Archived, never deleted. */
       vizserve_pms_list_fields: {
@@ -2906,6 +2942,25 @@ export type Database = {
         Args: { p_task_id: string; p_list_id: string | null; p_include?: string[] };
         Returns: string;
       };
+      /** P15-10. Set, change or restart a task's schedule. Returns the series id. */
+      vizserve_pms_set_task_recurrence: {
+        Args: {
+          p_task_id: string;
+          p_frequency: VizservePmsRecurrenceFrequency;
+          p_landing_status?: VizservePmsTaskStatus;
+        };
+        Returns: string;
+      };
+      /** P15-10. Stop a schedule. Past and current copies are untouched. */
+      vizserve_pms_stop_task_recurrence: {
+        Args: { p_task_id: string };
+        Returns: undefined;
+      };
+      /** P15-10. Service role only — the daily cron. One row per copy made. */
+      vizserve_pms_generate_recurring_tasks: {
+        Args: { p_today: string };
+        Returns: { series_id: string; task_id: string; closed_count: number }[];
+      };
       /** P7-72. Counts only. Raises unless the caller administers the form. */
       vizserve_pms_form_workload: {
         Args: { p_form_id: string };
@@ -3314,6 +3369,7 @@ export type Database = {
       vizserve_pms_event_category: VizservePmsEventCategory;
       vizserve_pms_form_purpose: VizservePmsFormPurpose;
       vizserve_pms_list_field_type: VizservePmsListFieldType;
+      vizserve_pms_recurrence_frequency: VizservePmsRecurrenceFrequency;
     };
     CompositeTypes: Record<never, never>;
   };

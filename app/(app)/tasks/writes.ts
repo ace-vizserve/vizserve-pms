@@ -6,6 +6,7 @@ import { flattenIssues, readableError, type ActionResult } from "@/lib/action-re
 import type { Json } from "@/lib/database.types";
 import { browserClient } from "@/lib/query/browser-client";
 import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
+import { setRecurrenceSchema } from "@/lib/recurrence";
 import { taskFieldValueSchema, toListField } from "@/lib/schemas/list-fields";
 import {
   checklistItemSchema,
@@ -340,5 +341,33 @@ export async function setTaskFieldValue(taskId: string, fieldId: string, value: 
   });
 
   if (error) return { ok: false, error: error.message };
+  return { ok: true, data: undefined };
+}
+
+/*
+ * P15-10 — a task's repeat schedule. Both are database functions that check
+ * the caller can change the task (the P11-06 department rule) and refuse a
+ * client-request task or a subtask with a sentence of their own.
+ */
+
+export async function setTaskRecurrence(input: unknown): Promise<ActionResult> {
+  const parsed = setRecurrenceSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Pick how often it repeats." };
+
+  const { error } = await browserClient().rpc("vizserve_pms_set_task_recurrence", {
+    p_task_id: parsed.data.task_id,
+    p_frequency: parsed.data.frequency,
+    p_landing_status: parsed.data.landing_status,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+  return { ok: true, data: undefined };
+}
+
+export async function stopTaskRecurrence(taskId: string): Promise<ActionResult> {
+  if (!z.uuid().safeParse(taskId).success) return { ok: false, error: "That task does not exist." };
+
+  const { error } = await browserClient().rpc("vizserve_pms_stop_task_recurrence", { p_task_id: taskId });
+  if (error) return { ok: false, error: readableError(error) };
   return { ok: true, data: undefined };
 }
