@@ -154,11 +154,14 @@ const ROSTER = [
   ]),
   ...team("VizBooks", "amy.castro", ["hazel.amoranto", "raechelle.mallari"]),
 
-  // Managers over everything. No primary department — they do not sit in one,
-  // they oversee all four, and `manages` is what actually grants that scope.
-  { email: `nina.cacananta@${DOMAIN}`, role: "manager", dept: null, manages: ALL_DEPARTMENTS },
-  { email: `gary.cacananta@${DOMAIN}`, role: "manager", dept: null, manages: ALL_DEPARTMENTS },
-  { email: "manager@vizserve.com", role: "manager", dept: null, manages: ALL_DEPARTMENTS },
+  // Managers over everything. No primary department — they do not sit in one.
+  // P15-06: and no led departments either. The Manager role already sees every
+  // department (P14-04); ticking them here made each manager a Team Leader of
+  // all four, which is how a Manager signed VizBytes' Team Leader step. The
+  // database now refuses a led department without the Team Leader role.
+  { email: `nina.cacananta@${DOMAIN}`, role: "manager", dept: null, manages: [] },
+  { email: `gary.cacananta@${DOMAIN}`, role: "manager", dept: null, manages: [] },
+  { email: "manager@vizserve.com", role: "manager", dept: null, manages: [] },
 
   // Roles are inclusive (D15), so an owner already outranks every department
   // check. No managed-department rows are needed to see everything.

@@ -94,8 +94,10 @@ const USERS = [
   // everybody. The email keeps its name because a dozen scripts and db tests
   // sign in with it; only the rank moved.
   { email: "test.admin@example.com", name: "Test Admin", role: "owner", gender: "MALE", dept: null, manages: [] },
-  { email: "test.manager@example.com", name: "Test Manager", role: "manager", gender: "FEMALE", dept: null, manages: ["VizAssists", "VizBooks"] },
-  { email: "test.manager.all@example.com", name: "Test Manager (All)", role: "manager", gender: "MALE", dept: null, manages: ["VizBytes", "VizAssists", "VizBooks", "VizMedia"] },
+  // P15-06. Managers lead no department — the role sees all of them, and the
+  // database refuses a led department without the Team Leader role.
+  { email: "test.manager@example.com", name: "Test Manager", role: "manager", gender: "FEMALE", dept: null, manages: [] },
+  { email: "test.manager.all@example.com", name: "Test Manager (All)", role: "manager", gender: "MALE", dept: null, manages: [] },
 
   { email: "test.tl.vizbytes@example.com", name: "TL VizBytes", role: "team_leader", gender: "FEMALE", dept: "VizBytes", manages: ["VizBytes"] },
   { email: "test.tl.vizassists@example.com", name: "TL VizAssists", role: "team_leader", gender: "MALE", dept: "VizAssists", manages: ["VizAssists"] },
