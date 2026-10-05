@@ -8,6 +8,7 @@ import type { VizservePmsInternalRequestStatus } from "@/lib/database.types";
 import { cn } from "@/lib/utils";
 import type { createClient } from "@/utils/supabase/server";
 import { EmptyState } from "@/components/empty-state";
+import { LinkTabs } from "@/components/link-tabs";
 import { PAGE_SIZES, Pagination } from "@/components/pagination";
 import { QueryError } from "@/components/query-error";
 import { buttonVariants } from "@/components/ui/button";
@@ -47,8 +48,11 @@ export function isOversightStatus(value: string | undefined): value is Oversight
  * No filing button and no decision panel: the detail page decides that from
  * `waitingOnMe`, which is never true for these roles.
  */
+export type OversightTab = "requests" | "weeks";
+
 export async function OversightApprovals({
   supabase,
+  tab,
   status,
   orderColumn,
   ascending,
@@ -58,6 +62,8 @@ export async function OversightApprovals({
   dir,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
+  /** One table per screen: requests and weeks are a tab each. */
+  tab: OversightTab;
   status: OversightStatus;
   orderColumn: string;
   ascending: boolean;
@@ -80,8 +86,10 @@ export async function OversightApprovals({
   const statusValue = OVERSIGHT_STATUSES[status].value;
   if (statusValue) query = query.eq("status", statusValue);
 
-  const [{ data, error, count }, weeks, departments] = await Promise.all([
-    query,
+  const [{ data, error, count }, { count: allRequests }, weeks, departments] = await Promise.all([
+    // Only the open tab's table is read in full; the other contributes a count.
+    tab === "requests" ? query : Promise.resolve({ data: null, error: null, count: null }),
+    supabase.from("vizserve_pms_internal_requests").select("id", { count: "exact", head: true }),
     // The Manager's queue, read rather than worked. The caller's id is passed
     // only for the helper's own-week exclusion, which drops nothing here: these
     // roles hand in no weeks.
@@ -100,6 +108,7 @@ export async function OversightApprovals({
   function href(next: { status?: OversightStatus; page?: number }) {
     const params = new URLSearchParams();
     const targetStatus = next.status ?? status;
+    // The requests tab is the default and stays out of the URL.
     if (targetStatus !== "all") params.set("status", targetStatus);
     if (sort) params.set("sort", sort);
     if (sort && dir === "desc") params.set("dir", "desc");
@@ -117,71 +126,91 @@ export async function OversightApprovals({
         manager.
       </p>
 
-      {/* Links, not a client filter: the list is paged on the server, so the
-          filter has to reach the query. */}
-      <nav aria-label="Filter by status" className="flex flex-wrap gap-2">
-        {(Object.keys(OVERSIGHT_STATUSES) as OversightStatus[]).map((key) => (
-          <Link
-            key={key}
-            href={href({ status: key })}
-            aria-current={key === status ? "page" : undefined}
-            className={cn(buttonVariants({ variant: key === status ? "default" : "outline", size: "sm" }))}
-          >
-            {OVERSIGHT_STATUSES[key].label}
-          </Link>
-        ))}
-      </nav>
-
-      <Section
-        title="All requests"
-        description="Every department. Open one to see its hand-over, its steps and who signed each."
-        rows={rows}
-        showWho
-        showStep
-        count={total}
-        departmentNames={Object.fromEntries(departments)}
-        reviewerNames={reviewerNames}
-        empty={
-          error ? (
-            <QueryError what="the requests" message={error.message} />
-          ) : (
-            <EmptyState
-              icon={<Inbox />}
-              title={status === "all" ? "No requests yet" : "No requests with that status"}
-              description="Leave, time corrections, overtime and reimbursements appear here as people file them."
-            />
-          )
-        }
+      <LinkTabs
+        label="Approvals"
+        active={tab}
+        tabs={[
+          { key: "requests", label: "Requests", href: "/approvals", count: allRequests ?? undefined },
+          {
+            key: "weeks",
+            label: "Timesheet weeks",
+            href: "/approvals?tab=weeks",
+            count: weeks.error ? undefined : weekRows.length,
+          },
+        ]}
       />
 
-      <Pagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        hrefFor={(target) => href({ page: target })}
-        basePath="/approvals"
-      />
+      {tab === "requests" ? (
+        <>
+          {/* Links, not a client filter: the list is paged on the server, so the
+              filter has to reach the query. */}
+          <nav aria-label="Filter by status" className="flex flex-wrap gap-2">
+            {(Object.keys(OVERSIGHT_STATUSES) as OversightStatus[]).map((key) => (
+              <Link
+                key={key}
+                href={href({ status: key })}
+                aria-current={key === status ? "page" : undefined}
+                className={cn(buttonVariants({ variant: key === status ? "default" : "outline", size: "sm" }))}
+              >
+                {OVERSIGHT_STATUSES[key].label}
+              </Link>
+            ))}
+          </nav>
 
-      <TimesheetWeeksSection
-        rows={weekRows}
-        description="Weeks handed in and waiting on the manager. These rows open the team week grid on the right week."
-        empty={
-          weeks.error ? (
-            <QueryError what="the timesheet weeks" message={weeks.error.message} />
-          ) : (
-            <EmptyState
-              icon={<Inbox />}
-              title="No weeks waiting"
-              description="Every week handed in has been decided."
-            />
-          )
-        }
-      />
-      {weeksTruncated ? (
-        <p className="text-xs text-muted-foreground">
-          Showing the first {WEEKS_CAP} weeks handed in.
-        </p>
-      ) : null}
+          <Section
+            title="All requests"
+            description="Every department. Open one to see its hand-over, its steps and who signed each."
+            rows={rows}
+            showWho
+            showStep
+            count={total}
+            departmentNames={Object.fromEntries(departments)}
+            reviewerNames={reviewerNames}
+            empty={
+              error ? (
+                <QueryError what="the requests" message={error.message} />
+              ) : (
+                <EmptyState
+                  icon={<Inbox />}
+                  title={status === "all" ? "No requests yet" : "No requests with that status"}
+                  description="Leave, time corrections, overtime and reimbursements appear here as people file them."
+                />
+              )
+            }
+          />
+
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            hrefFor={(target) => href({ page: target })}
+            basePath="/approvals"
+          />
+        </>
+      ) : (
+        <>
+          <TimesheetWeeksSection
+            rows={weekRows}
+            description="Weeks handed in and waiting on the manager. These rows open the team week grid on the right week."
+            empty={
+              weeks.error ? (
+                <QueryError what="the timesheet weeks" message={weeks.error.message} />
+              ) : (
+                <EmptyState
+                  icon={<Inbox />}
+                  title="No weeks waiting"
+                  description="Every week handed in has been decided."
+                />
+              )
+            }
+          />
+          {weeksTruncated ? (
+            <p className="text-xs text-muted-foreground">
+              Showing the first {WEEKS_CAP} weeks handed in.
+            </p>
+          ) : null}
+        </>
+      )}
     </>
   );
 }

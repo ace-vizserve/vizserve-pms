@@ -1,15 +1,13 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
 import { requireHr } from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { loadAllDepartments } from "@/lib/departments-server";
 import { holidayYearSchema } from "@/lib/schemas/holidays";
-import { cn } from "@/lib/utils";
 import { createClient } from "@/utils/supabase/server";
+import { LinkTabs } from "@/components/link-tabs";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
-import { buttonVariants } from "@/components/ui/button";
 
 import { EventsTable } from "../events/events-table";
 import { HolidaysTable } from "./holidays-table";
@@ -71,18 +69,14 @@ export default async function HolidaysAndEventsPage({
 
   return (
     <PageShell>
-      <nav aria-label="Calendar" className="flex flex-wrap gap-2">
-        {(["holidays", "events"] as const).map((key) => (
-          <Link
-            key={key}
-            href={tabHref(key)}
-            aria-current={key === tab ? "page" : undefined}
-            className={cn(buttonVariants({ variant: key === tab ? "default" : "outline", size: "sm" }))}
-          >
-            {key === "holidays" ? "Holidays" : "Events"}
-          </Link>
-        ))}
-      </nav>
+      <LinkTabs
+        label="Calendar"
+        active={tab}
+        tabs={[
+          { key: "holidays", label: "Holidays", href: tabHref("holidays") },
+          { key: "events", label: "Events", href: tabHref("events") },
+        ]}
+      />
 
       {tab === "holidays" ? <HolidaysTab year={year} currentYear={currentYear} supabase={supabase} /> : null}
       {tab === "events" ? <EventsTab year={year} currentYear={currentYear} supabase={supabase} /> : null}
