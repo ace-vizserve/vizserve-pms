@@ -18,9 +18,12 @@ import type {
   VizservePmsTimesheetWeekStatus,
 } from "@/lib/database.types";
 import { addDays, formatDate, formatDateTime, formatDuration, todayInAppZone } from "@/lib/dates";
-import { isTaskOverdue, isTerminal, taskCategory } from "@/lib/schemas/tasks";
+import { isTaskOverdue, TERMINAL_STATUSES, taskCategory } from "@/lib/schemas/tasks";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
+
+import { LinkTabs } from "@/components/link-tabs";
+import { Pagination } from "@/components/pagination";
 
 import { SimpleTable } from "../../figures";
 
@@ -33,16 +36,54 @@ import { SimpleTable } from "../../figures";
 
 const empty = (what: string) => <p className="text-xs text-muted-foreground">{what}</p>;
 
+/**
+ * Paging for every list on the person page. Every list pages — the activity
+ * tab used to print 130 rows in one scroll. `href` rebuilds the page's own URL
+ * with the given params changed (`undefined` removes one).
+ */
+export type Paging = {
+  page: number;
+  pageSize: number;
+  basePath: string;
+  href: (next: Record<string, string | undefined>) => string;
+};
+
+function Pager({ paging, total }: { paging: Paging; total: number }) {
+  return (
+    <Pagination
+      page={paging.page}
+      pageSize={paging.pageSize}
+      total={total}
+      hrefFor={(target) => paging.href({ page: target > 1 ? String(target) : undefined })}
+      basePath={paging.basePath}
+    />
+  );
+}
+
+const rangeOf = (paging: Paging) => {
+  const from = (paging.page - 1) * paging.pageSize;
+  return [from, from + paging.pageSize - 1] as const;
+};
+
 // ---------------------------------------------------------------------------
 
-export async function TasksSection({ userId, show }: { userId: string; show: "open" | "all" }) {
+export async function TasksSection({
+  userId,
+  show,
+  paging,
+}: {
+  userId: string;
+  show: "open" | "all";
+  paging: Paging;
+}) {
   const supabase = await createClient();
   const today = todayInAppZone();
-  const { data, error } = await supabase
-    .rpc("vizserve_pms_tasks_for_person", { p_user: userId, p_role: "any" })
+  let query = supabase
+    .rpc("vizserve_pms_tasks_for_person", { p_user: userId, p_role: "any" }, { count: "exact" })
     .select("id, title, status, due_date, assignee_id, qa_assignee_id, request_id, is_personal, updated_at")
-    .order("updated_at", { ascending: false })
-    .limit(300);
+    .order("updated_at", { ascending: false });
+  if (show === "open") query = query.not("status", "in", `(${TERMINAL_STATUSES.join(",")})`);
+  const { data, error, count } = await query.range(...rangeOf(paging));
 
   const tasks = ((data ?? []) as {
     id: string;
@@ -54,7 +95,7 @@ export async function TasksSection({ userId, show }: { userId: string; show: "op
     request_id: string | null;
     is_personal: boolean;
     updated_at: string;
-  }[]).filter((task) => show === "all" || !isTerminal(task.status));
+  }[]);
 
   return (
     <Card size="sm">
@@ -62,7 +103,7 @@ export async function TasksSection({ userId, show }: { userId: string; show: "op
         <CardTitle className="text-sm">{show === "open" ? "Open tasks" : "Every task"}</CardTitle>
         <CardDescription className="text-xs">
           Tasks they are doing or reviewing, most recently touched first.{" "}
-          <Link href={`?view=tasks&show=${show === "open" ? "all" : "open"}`} className="text-primary hover:underline">
+          <Link href={paging.href({ show: show === "open" ? "all" : undefined, page: undefined })} className="text-primary hover:underline">
             {show === "open" ? "Include finished ones" : "Open only"}
           </Link>
         </CardDescription>
@@ -92,6 +133,7 @@ export async function TasksSection({ userId, show }: { userId: string; show: "op
             ])}
           />
         )}
+        <Pager paging={paging} total={count ?? 0} />
       </CardContent>
     </Card>
   );
@@ -99,7 +141,7 @@ export async function TasksSection({ userId, show }: { userId: string; show: "op
 
 // ---------------------------------------------------------------------------
 
-export async function TimesheetsSection({ userId }: { userId: string }) {
+export async function TimesheetsSection({ userId, paging }: { userId: string; paging: Paging }) {
   const supabase = await createClient();
   const since = addDays(todayInAppZone(), -7 * 26) ?? todayInAppZone();
   const [{ data: weeks, error }, { data: entries }] = await Promise.all([
@@ -130,6 +172,8 @@ export async function TimesheetsSection({ userId }: { userId: string }) {
     }[]).map((week) => [week.week_start, week]),
   );
   const allWeeks = [...new Set([...byWeek.keys(), ...logged.keys()])].sort().reverse();
+  const [from, to] = rangeOf(paging);
+  const shownWeeks = allWeeks.slice(from, to + 1);
 
   return (
     <Card size="sm">
@@ -143,7 +187,7 @@ export async function TimesheetsSection({ userId }: { userId: string }) {
         ) : (
           <SimpleTable
             head={["Week of", "Status", "Logged", "Submitted", "Note"]}
-            rows={allWeeks.map((monday) => {
+            rows={shownWeeks.map((monday) => {
               const week = byWeek.get(monday);
               return [
                 <Link key="w" href={`/timesheet/team?week=${monday}`} className="hover:underline">
@@ -157,6 +201,7 @@ export async function TimesheetsSection({ userId }: { userId: string }) {
             })}
           />
         )}
+        <Pager paging={paging} total={allWeeks.length} />
       </CardContent>
     </Card>
   );
@@ -164,31 +209,102 @@ export async function TimesheetsSection({ userId }: { userId: string }) {
 
 // ---------------------------------------------------------------------------
 
-export async function RequestsSection({ userId }: { userId: string }) {
+/**
+ * Two lists — what they filed, and the client requests they decided at Gate 1
+ * — so two tabs. One table per screen, each paged.
+ */
+export async function RequestsSection({
+  userId,
+  sub,
+  paging,
+}: {
+  userId: string;
+  sub: "filed" | "gate1";
+  paging: Paging;
+}) {
   const supabase = await createClient();
-  const [{ data: filed, error }, { data: reviewed }] = await Promise.all([
-    supabase
-      .from("vizserve_pms_internal_requests")
-      .select("id, request_type, status, start_date, end_date, work_date, overtime_minutes, created_at")
-      .eq("requester_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(100),
-    supabase
-      .from("vizserve_pms_approvals")
-      .select("entity_id, decision, created_at")
-      .eq("approver_id", userId)
-      .eq("entity_type", "request")
-      .order("created_at", { ascending: false })
-      .limit(50),
+  const range = rangeOf(paging);
+
+  const filedQuery = supabase
+    .from("vizserve_pms_internal_requests")
+    .select("id, request_type, status, start_date, end_date, work_date, overtime_minutes, created_at", { count: "exact" })
+    .eq("requester_id", userId)
+    .order("created_at", { ascending: false });
+  const decidedQuery = supabase
+    .from("vizserve_pms_approvals")
+    .select("entity_id, decision, created_at", { count: "exact" })
+    .eq("approver_id", userId)
+    .eq("entity_type", "request")
+    .order("created_at", { ascending: false });
+
+  // The open tab is read a page at a time; the other is only counted.
+  const [filed, decided] = await Promise.all([
+    sub === "filed" ? filedQuery.range(...range) : filedQuery.limit(0),
+    sub === "gate1" ? decidedQuery.range(...range) : decidedQuery.limit(0),
   ]);
 
-  const reviewedIds = (reviewed ?? []).map((row) => row.entity_id);
-  const { data: clientRequests } = reviewedIds.length
-    ? await supabase.from("vizserve_pms_requests").select("id, reference_no, title, status").in("id", reviewedIds)
-    : { data: [] };
-  const requestOf = new Map((clientRequests ?? []).map((row) => [row.id, row]));
+  const tabs = (
+    <LinkTabs
+      label="Requests"
+      active={sub}
+      tabs={[
+        { key: "filed", label: "Filed", href: paging.href({ sub: undefined, page: undefined }), count: filed.count ?? undefined },
+        {
+          key: "gate1",
+          label: "Decided at Gate 1",
+          href: paging.href({ sub: "gate1", page: undefined }),
+          count: decided.count ?? undefined,
+        },
+      ]}
+    />
+  );
 
-  const rows = (filed ?? []) as {
+  if (sub === "gate1") {
+    const reviewed = decided.data ?? [];
+    const reviewedIds = reviewed.map((row) => row.entity_id);
+    const { data: clientRequests } = reviewedIds.length
+      ? await supabase.from("vizserve_pms_requests").select("id, reference_no, title, status").in("id", reviewedIds)
+      : { data: [] };
+    const requestOf = new Map((clientRequests ?? []).map((row) => [row.id, row]));
+
+    return (
+      <div className="grid gap-3">
+        {tabs}
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle className="text-sm">Client requests they decided at Gate 1</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {decided.error ? empty(`Could not load decisions: ${decided.error.message}`) : reviewed.length === 0 ? (
+              empty("None.")
+            ) : (
+              <SimpleTable
+                head={["Request", "Decided", "Their decision", "Status now"]}
+                rows={reviewed.map((row) => {
+                  const request = requestOf.get(row.entity_id);
+                  return [
+                    request ? (
+                      <Link key="r" href={`/requests/${request.id}`} className="hover:underline">
+                        {request.reference_no} · {request.title}
+                      </Link>
+                    ) : (
+                      "A request you cannot open"
+                    ),
+                    formatDate(row.created_at.slice(0, 10)),
+                    row.decision,
+                    request ? <RequestStatusBadge key="s" status={request.status as VizservePmsRequestStatus} /> : "—",
+                  ];
+                })}
+              />
+            )}
+            <Pager paging={paging} total={decided.count ?? 0} />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const rows = (filed.data ?? []) as {
     id: string;
     request_type: VizservePmsInternalRequestType;
     status: VizservePmsInternalRequestStatus;
@@ -201,13 +317,14 @@ export async function RequestsSection({ userId }: { userId: string }) {
 
   return (
     <div className="grid gap-3">
+      {tabs}
       <Card size="sm">
         <CardHeader>
           <CardTitle className="text-sm">Requests they filed</CardTitle>
           <CardDescription className="text-xs">Leave, overtime, time corrections and reimbursements, newest first.</CardDescription>
         </CardHeader>
         <CardContent>
-          {error ? empty(`Could not load requests: ${error.message}`) : rows.length === 0 ? (
+          {filed.error ? empty(`Could not load requests: ${filed.error.message}`) : rows.length === 0 ? (
             empty("None you can see.")
           ) : (
             <SimpleTable
@@ -226,36 +343,9 @@ export async function RequestsSection({ userId }: { userId: string }) {
               ])}
             />
           )}
+          <Pager paging={paging} total={filed.count ?? 0} />
         </CardContent>
       </Card>
-
-      {reviewedIds.length > 0 ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="text-sm">Client requests they decided at Gate 1</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <SimpleTable
-              head={["Request", "Decided", "Their decision", "Status now"]}
-              rows={(reviewed ?? []).map((row) => {
-                const request = requestOf.get(row.entity_id);
-                return [
-                  request ? (
-                    <Link key="r" href={`/requests/${request.id}`} className="hover:underline">
-                      {request.reference_no} · {request.title}
-                    </Link>
-                  ) : (
-                    "A request you cannot open"
-                  ),
-                  formatDate(row.created_at.slice(0, 10)),
-                  row.decision,
-                  request ? <RequestStatusBadge key="s" status={request.status as VizservePmsRequestStatus} /> : "—",
-                ];
-              })}
-            />
-          </CardContent>
-        </Card>
-      ) : null}
     </div>
   );
 }
@@ -264,79 +354,116 @@ export async function RequestsSection({ userId }: { userId: string }) {
 
 /**
  * What they did, and what was done to their account — Manager and above only.
+ * Two lists, so two tabs, each paged. It used to print 130 rows in one scroll.
  *
  * ⚠️ THROUGH THE SERVICE ROLE. The audit log is readable by Admin and up under
  * RLS; the Manager reaches it here, after the page's own Manager-and-up check,
  * for this one person and nothing else.
  */
-export async function ActivitySection({ userId }: { userId: string }) {
+export async function ActivitySection({
+  userId,
+  sub,
+  paging,
+}: {
+  userId: string;
+  sub: "did" | "account";
+  paging: Paging;
+}) {
   const admin = createAdminClient();
-  const [{ data: did, error }, { data: account }] = await Promise.all([
-    admin
-      .from("vizserve_pms_audit_logs")
-      .select("id, entity_type, entity_id, action, created_at")
-      .eq("actor_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(100),
-    admin
-      .from("vizserve_pms_audit_logs")
-      .select("id, entity_type, entity_id, action, actor_id, created_at")
-      .eq("entity_type", "user")
-      .eq("entity_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(30),
+  const range = rangeOf(paging);
+
+  const didQuery = admin
+    .from("vizserve_pms_audit_logs")
+    .select("id, entity_type, entity_id, action, created_at", { count: "exact" })
+    .eq("actor_id", userId)
+    .order("created_at", { ascending: false });
+  const accountQuery = admin
+    .from("vizserve_pms_audit_logs")
+    .select("id, entity_type, entity_id, action, actor_id, created_at", { count: "exact" })
+    .eq("entity_type", "user")
+    .eq("entity_id", userId)
+    .order("created_at", { ascending: false });
+
+  const [did, account] = await Promise.all([
+    sub === "did" ? didQuery.range(...range) : didQuery.limit(0),
+    sub === "account" ? accountQuery.range(...range) : accountQuery.limit(0),
   ]);
 
-  const actorIds = [...new Set((account ?? []).map((row) => row.actor_id).filter((id): id is string => Boolean(id)))];
-  const { data: actors } = actorIds.length
-    ? await admin.from("vizserve_pms_users").select("id, full_name").in("id", actorIds)
-    : { data: [] };
-  const nameOf = new Map((actors ?? []).map((row) => [row.id, row.full_name]));
+  const tabs = (
+    <LinkTabs
+      label="Activity"
+      active={sub}
+      tabs={[
+        { key: "did", label: "What they did", href: paging.href({ sub: undefined, page: undefined }), count: did.count ?? undefined },
+        {
+          key: "account",
+          label: "Changes to their account",
+          href: paging.href({ sub: "account", page: undefined }),
+          count: account.count ?? undefined,
+        },
+      ]}
+    />
+  );
 
+  if (sub === "account") {
+    const rows = account.data ?? [];
+    const actorIds = [...new Set(rows.map((row) => row.actor_id).filter((id): id is string => Boolean(id)))];
+    const { data: actors } = actorIds.length
+      ? await admin.from("vizserve_pms_users").select("id, full_name").in("id", actorIds)
+      : { data: [] };
+    const nameOf = new Map((actors ?? []).map((row) => [row.id, row.full_name]));
+
+    return (
+      <div className="grid gap-3">
+        {tabs}
+        <Card size="sm">
+          <CardHeader>
+            <CardTitle className="text-sm">Changes to their account</CardTitle>
+            <CardDescription className="text-xs">Role, department, access and schedule changes, newest first.</CardDescription>
+          </CardHeader>
+          <CardContent>
+            {account.error ? empty(`Could not load changes: ${account.error.message}`) : rows.length === 0 ? (
+              empty("Nothing recorded.")
+            ) : (
+              <SimpleTable
+                head={["When", "Change", "By"]}
+                rows={rows.map((row) => [
+                  formatDateTime(row.created_at),
+                  auditActionLabel(row.action),
+                  row.actor_id ? (nameOf.get(row.actor_id) ?? "Someone") : "System",
+                ])}
+              />
+            )}
+            <Pager paging={paging} total={account.count ?? 0} />
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  const rows = did.data ?? [];
   return (
-    <div className="grid gap-3 lg:grid-cols-2">
+    <div className="grid gap-3">
+      {tabs}
       <Card size="sm">
         <CardHeader>
           <CardTitle className="text-sm">What they did</CardTitle>
-          <CardDescription className="text-xs">The last 100 recorded actions, newest first.</CardDescription>
+          <CardDescription className="text-xs">Every recorded action, newest first.</CardDescription>
         </CardHeader>
         <CardContent>
-          {error ? empty(`Could not load activity: ${error.message}`) : (did ?? []).length === 0 ? (
+          {did.error ? empty(`Could not load activity: ${did.error.message}`) : rows.length === 0 ? (
             empty("Nothing recorded.")
           ) : (
-            <ol className="space-y-1.5">
-              {(did ?? []).map((row) => (
-                <li key={row.id} className="border-l-2 pl-2.5 text-sm">
-                  <span className="font-medium">{auditActionLabel(row.action)}</span>{" "}
-                  <span className="text-muted-foreground">· {auditEntityLabel(row.entity_type)}</span>
-                  <span className="block text-xs text-muted-foreground">{formatDateTime(row.created_at)}</span>
-                </li>
-              ))}
-            </ol>
+            <SimpleTable
+              head={["When", "Action", "On"]}
+              rows={rows.map((row) => [
+                formatDateTime(row.created_at),
+                auditActionLabel(row.action),
+                auditEntityLabel(row.entity_type),
+              ])}
+            />
           )}
-        </CardContent>
-      </Card>
-
-      <Card size="sm">
-        <CardHeader>
-          <CardTitle className="text-sm">Changes to their account</CardTitle>
-          <CardDescription className="text-xs">Role, department, access and schedule changes.</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {(account ?? []).length === 0 ? (
-            empty("Nothing recorded.")
-          ) : (
-            <ol className="space-y-1.5">
-              {(account ?? []).map((row) => (
-                <li key={row.id} className="border-l-2 pl-2.5 text-sm">
-                  <span className="font-medium">{auditActionLabel(row.action)}</span>
-                  <span className="block text-xs text-muted-foreground">
-                    {row.actor_id ? (nameOf.get(row.actor_id) ?? "Someone") : "System"} · {formatDateTime(row.created_at)}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          )}
+          <Pager paging={paging} total={did.count ?? 0} />
         </CardContent>
       </Card>
     </div>

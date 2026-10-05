@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-05",
+  "kind": "fixed",
+  "area": "Approvals",
+  "title": "Only a department's team leader signs its team leader step",
+  "description": "Until 30 Sep a manager could be ticked as leading every department, which let them sign another department's team leader step. Leading a department now requires the team leader role, and the four leave requests signed that way went back to the right team leader.",
+  "items": [
+    "A department can only be assigned to someone who holds the team leader role",
+    "Removing someone's team leader role removes the departments they led",
+    "Three VizBytes leaves go back to Amier, and one VizBooks leave to Joel as team leader, then to the manager again"
+  ],
+  "refs": ["P15-10"]
+}

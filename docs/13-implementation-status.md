@@ -1,6 +1,6 @@
 # Implementation Status
 
-**As of 1 October 2026.** The summary and the section directly below it cover 22 Sep – 1 Oct; everything after that is the record as it stood on 7–21 Sep. What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
+**As of 5 October 2026.** The summary and the section directly below it cover 22 Sep – 5 Oct; everything after that is the record as it stood on 7–21 Sep. What is actually built, what is deliberately absent, and what is owed. Read this before assuming a feature exists or is missing.
 
 The phase docs (`04`–`09`) remain the *specification*. This document is the *state*.
 
@@ -24,11 +24,12 @@ The phase docs (`04`–`09`) remain the *specification*. This document is the *s
 | **12 — The SPA release** | **Done and on `main` since 28 Sep** (`acfea98` → `2ee3da3`). Cache-driven client pages, direct-to-Supabase writes, functions in Tokyo, virtualised list and board, search/person/due filters. Both migrations applied. See *22 Sep – 1 Oct* below |
 | **13 — Company-wide work** | **Done.** `p13_01` (a collaboration space every department shares) and `p13_02` (anyone may be put on company-wide work), 21 Sep |
 | **14 — Roles, approval routing, notifications by stage** | **Done. All migrations applied by hand, 29 Sep – 1 Oct.** Several roles per person and a switcher, Business Manager and CEO, hard-coded approval routing, per-stage notification rules drawn as a flowchart. Proven by `tests/sql/p14-flows.sql` on the live database (rolled back) |
-| **15 — Analytics, person pages, client form setup** | **Done, 1 Oct.** P15-01 through P15-05. One migration (`p15_04`), applied |
+| **15 — Analytics, person pages, client form setup, oversight** | **Done, 5 Oct.** P15-01 through P15-15. Two migrations (`p15_04`, `p15_10`), both applied |
 | **10 — Performance pass** | **Done, code only — no migration.** Auth round trips removed, request waterfalls collapsed, duplicate reads memoised, 27 Suspense boundaries added, Next 16.2.12 → 16.3.4. No business logic changed. See the Performance pass section below |
 
-`npm run verify` is green: **1,499 passed, 389 skipped, 0 failures** (7 Sep).
-Lint reports **0 errors and 7 warnings**, all pre-existing.
+`npm run test` is green: **1,918 passed, 430 skipped, 0 failures** (5 Oct).
+Lint reports **0 errors and 9 warnings**, all in files untouched since.
+(7 Sep: 1,499 passed, 389 skipped, 7 warnings.)
 
 ⚠️ **THE 389 SKIPS ARE THE WHOLE OF `tests/db`, AND THAT IS THE NEW SAFE
 DEFAULT — read the note below before treating it as a regression.** Until 7 Sep
@@ -71,11 +72,11 @@ long-standing gap and found two pre-existing failures:
 
 ---
 
-## 22 Sep – 1 Oct 2026 — P7-77 to P15-05
+## 22 Sep – 5 Oct 2026 — P7-77 to P15-15
 
-Reconstructed from `git log 7dbafcc..b77aad3`. Every migration in this stretch was
+Reconstructed from `git log 7dbafcc..b6e5cbd`. Every migration in this stretch was
 **pasted by hand into the SQL editor** — never `db:push` (prod migration history
-is empty). `main` and `staging` both sit at `b77aad3`.
+is empty). `main` and `staging` both sit at `b6e5cbd`.
 
 ### P7-77 – P7-80 · Who the client request flow tells (23 Sep)
 
@@ -166,12 +167,75 @@ the register**, and `D15` there still says one role per person.
 - **P15-05** — a Responses tab per client form: its requests, a status breakdown, and a CSV
   of requests and answers.
 
+### P15 · ⚠️ P15-06 – P15-09 were briefly numbered twice
+
+Kurt's commit `6ac4f51` (2 Oct) used P15-06 – P15-09; Ace's 5 Oct commits reused them.
+**Ace's were renumbered P15-10 – P15-13** in the code, changelog and this document, but the
+commit SUBJECTS of `4286f63`, `ec6ce89`, `58a7c36` and `4bd90fa` still say P15-06 – P15-09
+— they are pushed. Read those four subjects as +4.
+
+### P15 · Kurt, 2 Oct (`6ac4f51`) — no migration
+
+- **6:00 AM attendance email** (refs *P15-08*; the separate 7 AM leave email, *P15-07*, was
+  folded into it). Every working day the CEO and every Business Manager get the previous
+  working day's absent / late / no-time-out list, with a PDF of every employee's day.
+  Monday covers Friday. Leave on the calendar, approved or pending, is never absent.
+  `app/api/cron/daily-attendance` at `0 22 * * *` UTC (06:00 Manila) in `vercel.json`;
+  `lib/daily-attendance-report.ts` (pure, tested) and `lib/oversight-digest-server.ts` (admin
+  client — a cron has no session, so it applies the visibility rules itself).
+- **Report exports** (refs *P15-06*, *P15-09*): CSV for Analytics → Workload and HR
+  Attendance, a PDF pack for Analytics → People (`people-pdf.ts`, tested).
+
+### P15 · Ace, 5 Oct (`4286f63` – `4bd90fa`, subjects say P15-06 – P15-09)
+
+- **P15-10 — only a Team Leader leads a department** (`p15_10`, applied 5 Oct). Led
+  departments were unconnected to the Team Leader role: `seed-team.mjs` gave every manager
+  `ALL_DEPARTMENTS`, Joel had all five ticked 7–30 Sep, and the pre-P14 Team Leader step
+  let him sign three VizBytes leaves (Amier, VizBytes' lead, never saw them); Amier signed
+  one VizBooks leave the same way on 29 Sep. Now two triggers: a led department needs the
+  held `team_leader` role, and losing it drops the departments led. The Users save writes
+  roles **before** departments, or promoting someone and ticking their department in one save
+  is refused. Seeds no longer tick departments for managers (the role already sees all).
+  **The four leaves were sent back to stage 2** by `scripts/p15-10-rerun-team-leader-step.sql`
+  (run 5 Oct, as `postgres`): Ace ×1 and Kurt ×2 → Amier, Raechelle → Joel as Team Leader,
+  then the Manager again. A sweep of all 14 Team Leader sign-offs found no others.
+- **P15-11 — Approvals for the roles that only watch.** Admin, Business Manager and CEO file
+  nothing, hand in no timesheet and approve nothing, so `/approvals` was blank for them.
+  Acting as one of them (`seesEveryDepartment`, the ACTIVE role), it is a read-only list of
+  every request with a status filter and a "Waiting on" column, plus the weeks waiting on
+  the Manager. `app/(app)/approvals/oversight-view.tsx`. No migration: RLS already gives
+  admin-and-above every department.
+- **P15-12 — Holidays & events on one page**, a tab each (`?tab=events`). `/admin/events`
+  redirects there keeping `?year=`. One sidebar entry. Still two tables: a holiday changes
+  leave and deadline arithmetic, an event changes nothing.
+- **P15-13 — leave figures on `/hr/reports`**, above the PDF builder, with a year switcher.
+  Read through the same two functions as the PDFs (`vizserve_pms_leave_report`, and
+  `vizserve_pms_leave_taken` once per month for the month chart), so screen and filed audit
+  cannot disagree. `lib/leave-stats.ts` is pure and tested. **Allocation figures cover
+  regular leave only** — maternity, paternity, solo parent, special leave for women and VAWC
+  (`EVENT_LEAVE_CODES`) are allocated to everyone eligible and almost never used, and on prod
+  they put 1,815 of 2,261 allocated days in the denominator and the "used" figure at 0 %.
+  Days taken still counts every type.
+- **P15-14 — one table per screen, in tabs** (`d04a04c`). `/approvals` stacked up to three
+  tables; each is now a URL tab (`?tab=`) with its count. Regular view: *Waiting on me*
+  (approvers, or anyone a hand-over waits on), *Timesheet weeks* (Manager), *My requests* —
+  opening on *Waiting on me* when something is, else *My requests*; paging belongs to
+  *My requests* and carries `tab=mine`. Oversight view: *Requests* / *Timesheet weeks*.
+  `components/link-tabs.tsx` is the shared strip (the Analytics look); Holidays & events uses
+  it. **The rule for new screens: never stack two tables — tab them.**
+- **P15-15 — every list on a person's page is paged** (`b6e5cbd`). Activity printed the last
+  100 of 261 actions in one scroll and silently cut the rest. Activity (*What they did* /
+  *Changes to their account*) and Requests (*Filed* / *Decided at Gate 1*) are sub-tabs
+  (`?sub=`); every list pages with the shared `Pagination`. Tasks' open-only filter moved
+  into the query (`TERMINAL_STATUSES`), so a page is a real page; Timesheets slices its
+  26 weeks. The inactive sub-tab is only counted (`limit(0)` with `count: exact`).
+
 ### What is owed
 
 - **The multi-role decision needs a number in `00-README.md`**, and `D15` needs marking superseded.
 - `docs/03-roadmap.md` stops at Phase 6; Phases 7–15 live here and in commit messages only.
-- `npm run verify` has not been re-counted for this document since 7 Sep. The db suite
-  still skips on this machine.
+- The db suite still skips on this machine, so `p15_10`'s triggers are proven only by the
+  `pg_trigger` check run on prod on 5 Oct, not by a test.
 
 ---
 
@@ -1122,7 +1186,7 @@ Every db suite **detects whether its migration has been applied** and skips with
 | P0-06 | RLS policies | ✅ …plus a follow-up grants migration, see *The grants incident* |
 | P0-07 | App shell + role nav | ✅ Unbuilt modules render disabled with their phase |
 | P0-08 | Dashboard | ✅ Pending-approvals and unread counts are real; tickets card is a placeholder until Phase 3 |
-| P0-09 | Audit log | ✅ Table + `vizserve_pms_write_audit_log()`. Called on submission, user create/edit, and every Gate 1 decision. **`/admin/audit` reads it** — admin only, filtered by record type, actor and period, with a before/after diff per entry |
+| P0-09 | Audit log | ✅ Table + `vizserve_pms_write_audit_log()`. Called on submission, user create/edit, and every Gate 1 decision. **`/admin/audit` reads it** — the Admin (IT) role only (`requireAdmin`), filtered by record type, actor and period, with a before/after diff per entry. Team leaders and up have no audit page; a task's history shows on the task |
 | P0-10 | Notifications + inbox | ✅ Table, per-type `send_email` settings, `vizserve_pms_notify()`, `/inbox` |
 | P0-11 | Transactional email | ✅ Outbox drain + cron + templates. ⚠️ **nobody has confirmed one landing in an inbox** |
 | P0-12 | Seed + scope tests | ✅ 15 accounts seeded; the scope suite is written and green |

@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-05",
+  "kind": "added",
+  "area": "Leave",
+  "title": "Leave figures on Leave reports",
+  "description": "Leave reports now opens on the year at a glance, above the printable documents, from the same figures the documents print.",
+  "items": [
+    "Days taken, regular leave allocated, remaining and used, people who took leave, pending requests",
+    "Days taken by month and by leave type",
+    "By department, and who took the most",
+    "Maternity, paternity and other life-event leave are left out of the allocation figures, so they do not bury the percentage"
+  ],
+  "refs": ["P15-13"]
+}

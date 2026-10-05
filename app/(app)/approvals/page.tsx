@@ -7,13 +7,20 @@ import {
   listPendingTimesheetWeeks,
   waitingOnMe,
 } from "@/lib/approvals-queue-server";
-import { approvesTimesheets, isSystemAdmin, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  approvesTimesheets,
+  isApprover,
+  isSystemAdmin,
+  requireAuthContext,
+  seesEveryDepartment,
+} from "@/lib/auth/authorization";
 import { todayInAppZone } from "@/lib/dates";
 import { narrowRequestPrefill } from "@/lib/schemas/internal-requests";
 import { currentBalanceYear, leaveTypeApplies } from "@/lib/schemas/leave-balances";
 import { fetchHandoverTasks } from "@/lib/tasks-server";
 import { createClient } from "@/utils/supabase/server";
 import { EmptyState } from "@/components/empty-state";
+import { LinkTabs, type LinkTab } from "@/components/link-tabs";
 import { PageShell } from "@/components/page-shell";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
 import { QueryError } from "@/components/query-error";
@@ -21,6 +28,7 @@ import { MyLeaveRecordButton } from "./my-leave-record";
 import { NewRequestDialog } from "./new-request-dialog";
 import { Section, type Row } from "./approvals-table";
 import { TimesheetWeeksSection } from "./timesheet-weeks-table";
+import { isOversightStatus, OversightApprovals } from "./oversight-view";
 
 /** Rows rendered. The query asks for one more so the cap is detectable. */
 const APPROVALS_PAGE_SIZE = 200;
@@ -64,6 +72,10 @@ export default async function ApprovalsPage({
     dir?: string | string[];
     page?: string;
     size?: string;
+    /** P15-11. The oversight view's status filter. */
+    status?: string;
+    /** One table per screen — which tab is open. */
+    tab?: string | string[];
   }>;
 }) {
   const context = await requireAuthContext();
@@ -136,6 +148,31 @@ export default async function ApprovalsPage({
   const page = resolvePage(params.page);
   const pageSize = resolvePageSize(params.size);
   const rangeFrom = (page - 1) * pageSize;
+
+  /*
+   * P15-11. Admin, Business Manager and CEO file nothing and approve nothing,
+   * so "mine" and "waiting on me" are both empty for them. They get the
+   * company-wide read-only view instead. Decided by the ACTIVE role, so Amier
+   * acting as Team Leader keeps his queue.
+   */
+  if (seesEveryDepartment(context)) {
+    const status = first(params.status);
+    return (
+      <PageShell className="gap-6">
+        <OversightApprovals
+          supabase={supabase}
+          tab={first(params.tab) === "weeks" ? "weeks" : "requests"}
+          status={isOversightStatus(status) ? status : "all"}
+          orderColumn={ORDER_COLUMN[sort]}
+          ascending={ascending}
+          page={page}
+          pageSize={pageSize}
+          sort={requested}
+          dir={first(params.dir)}
+        />
+      </PageShell>
+    );
+  }
 
   const SELECT =
     "*, vizserve_pms_users!vizserve_pms_internal_requests_requester_id_fkey(full_name)";
@@ -324,9 +361,50 @@ export default async function ApprovalsPage({
     ? weeksQueue.rows.slice(0, APPROVALS_PAGE_SIZE)
     : weeksQueue.rows;
 
+  /*
+   * ONE TABLE PER SCREEN. "Waiting on me", the weeks and "My requests" were
+   * three tables stacked on one page, and everything under the first was below
+   * the fold. Each is a tab now; the URL says which (`?tab=`), and with none the
+   * page opens on whatever is waiting on the reader, else their own requests.
+   *
+   * "Waiting on me" shows for an approver even when empty, and for anybody a
+   * relieving hand-over is waiting on — a member is owed those too.
+   */
+  type Tab = "waiting" | "weeks" | "mine";
+  const showQueue = isApprover(context) || pendingOnMe.length > 0;
+  const requestedTab = first(params.tab);
+  const tab: Tab =
+    requestedTab === "waiting" && showQueue
+      ? "waiting"
+      : requestedTab === "weeks" && approvesWeeks
+        ? "weeks"
+        : requestedTab === "mine"
+          ? "mine"
+          : pendingOnMe.length > 0
+            ? "waiting"
+            : "mine";
+
+  const tabs: LinkTab[] = [
+    ...(showQueue
+      ? [{ key: "waiting", label: "Waiting on me", href: "/approvals?tab=waiting", count: pendingOnMe.length }]
+      : []),
+    ...(approvesWeeks
+      ? [{
+          key: "weeks",
+          label: "Timesheet weeks",
+          href: "/approvals?tab=weeks",
+          count: weeksQueue.error ? undefined : pendingWeeks.length,
+        }]
+      : []),
+    { key: "mine", label: "My requests", href: "/approvals?tab=mine", count: total },
+  ];
+
   /* Rebuilt from the narrowed values, so the paginator cannot drop the sort. */
   function hrefFor(target: number) {
     const next = new URLSearchParams();
+    // Paging is the "My requests" tab's alone, and has to say so: with no tab
+    // the page may open on "Waiting on me" instead.
+    next.set("tab", "mine");
     /* Only what the URL actually named. Emitting the default back would be a
        link claiming a choice nobody made, and `dir` without a `sort` beside it
        now means nothing at all. */
@@ -353,7 +431,7 @@ export default async function ApprovalsPage({
   const reviewerNames = await loadUserNames(reviewerIds);
 
   return (
-    <PageShell className="gap-8">
+    <PageShell className="gap-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <p className="text-xs text-muted-foreground">
           Leave, time corrections and reimbursements. Your remaining leave shows as you file — it is
@@ -396,35 +474,50 @@ export default async function ApprovalsPage({
         </div>
       </div>
 
-      {/* Approver queue first when there is one: it is the thing with somebody
-          else waiting on the other end. Rendered only when non-empty, so it
-          needs no empty state of its own. */}
-      {pendingOnMe.length > 0 ? (
-        <Section
-          title="Pending your approval"
-          description="Requests from the departments you lead."
-          rows={pendingOnMe}
-          showWho
-          reviewerNames={reviewerNames}
-          empty={null}
-        />
+      {tabs.length > 1 ? <LinkTabs label="Approvals" active={tab} tabs={tabs} /> : null}
+
+      {tab === "waiting" ? (
+        <>
+          <Section
+            title="Waiting on me"
+            description="Requests from the departments you lead, and hand-overs you are named on."
+            rows={pendingOnMe}
+            showWho
+            reviewerNames={reviewerNames}
+            empty={
+              <EmptyState
+                icon={<Inbox />}
+                title="Nothing is waiting on you"
+                description="Requests appear here when they reach your step."
+              />
+            }
+          />
+          {truncated ? (
+            <p className="text-xs text-muted-foreground">
+              {/* A queue this long is a backlog, not a paging problem. */}
+              Showing the first {APPROVALS_PAGE_SIZE} awaiting you. Clear some to see the rest.
+            </p>
+          ) : null}
+        </>
       ) : null}
 
-      {/* The other thing waiting on a lead, and the one that had no queue at
-          all — the decision itself stays on the team week grid. Rendered when
-          there is something to show OR when the read FAILED: an empty approvals
-          queue is the one people believe and act on, so a broken query must not
-          be able to look like an empty one. Hidden entirely for a member, who
-          approves nothing and would otherwise get a heading with a permanent
-          empty table under it. */}
-      {approvesWeeks && (pendingWeeks.length > 0 || weeksQueue.error) ? (
+      {/* The decision itself stays on the team week grid; these rows open it.
+          A failed read renders as an error, never as an empty queue — an empty
+          approvals queue is the one people believe and act on. */}
+      {tab === "weeks" ? (
         <>
           <TimesheetWeeksSection
             rows={pendingWeeks}
             empty={
               weeksQueue.error ? (
                 <QueryError what="timesheet weeks awaiting you" message={weeksQueue.error.message} />
-              ) : null
+              ) : (
+                <EmptyState
+                  icon={<Inbox />}
+                  title="No weeks waiting"
+                  description="Weeks appear here when somebody hands one in."
+                />
+              )
             }
           />
           {weeksTruncated ? (
@@ -435,39 +528,36 @@ export default async function ApprovalsPage({
         </>
       ) : null}
 
-      <Section
-        title="My requests"
-        description="Everything you have submitted."
-        rows={mine}
-        showWho={false}
-        reviewerNames={reviewerNames}
-        empty={
-          requestsError ? (
-            <QueryError what="your requests" message={requestsError.message} />
-          ) : (
-            <EmptyState
-              icon={<Inbox />}
-              title="You have not submitted any requests"
-              description="Leave, a missed time in or out, and reimbursements all start here. Your department lead decides them — you cannot decide your own."
-            />
-          )
-        }
-      />
+      {tab === "mine" ? (
+        <>
+          <Section
+            title="My requests"
+            description="Everything you have submitted."
+            rows={mine}
+            showWho={false}
+            reviewerNames={reviewerNames}
+            count={total}
+            empty={
+              requestsError ? (
+                <QueryError what="your requests" message={requestsError.message} />
+              ) : (
+                <EmptyState
+                  icon={<Inbox />}
+                  title="You have not submitted any requests"
+                  description="Leave, a missed time in or out, and reimbursements all start here. Your department lead decides them — you cannot decide your own."
+                />
+              )
+            }
+          />
 
-      <Pagination
-        page={page}
-        pageSize={pageSize}
-        total={total}
-        hrefFor={hrefFor}
-        basePath="/approvals"
-      />
-
-      {truncated ? (
-        <p className="text-xs text-muted-foreground">
-          {/* Now about the QUEUE only — "My requests" pages properly above.
-              A queue this long is a backlog, not a paging problem. */}
-          Showing the first {APPROVALS_PAGE_SIZE} awaiting you. Clear some to see the rest.
-        </p>
+          <Pagination
+            page={page}
+            pageSize={pageSize}
+            total={total}
+            hrefFor={hrefFor}
+            basePath="/approvals"
+          />
+        </>
       ) : null}
     </PageShell>
   );

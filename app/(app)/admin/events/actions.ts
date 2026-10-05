@@ -43,7 +43,7 @@ export type { ActionResult };
  * actions.
  */
 function revalidateEventScreens(): void {
-  revalidatePath("/admin/events");
+  revalidatePath("/admin/holidays"); // P15-12: events are a tab there
   revalidatePath("/");
 }
 

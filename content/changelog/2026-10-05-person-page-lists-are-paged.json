@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-05",
+  "kind": "fixed",
+  "area": "Reporting",
+  "title": "A person's page shows its lists a page at a time",
+  "description": "The tabs on a person's page in Analytics printed every row in one long scroll, and Activity quietly stopped at the last 100 actions. Every list now pages, and nothing is cut off.",
+  "items": [
+    "Activity: What they did, and Changes to their account, as two tabs",
+    "Requests: Filed, and Decided at Gate 1, as two tabs",
+    "Tasks and Timesheets page as well"
+  ],
+  "refs": ["P15-15"]
+}

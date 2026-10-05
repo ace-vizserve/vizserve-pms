@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-05",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "Holidays and events on one page",
+  "description": "Holidays and Events were two separate screens. They are now one, Holidays & events, with a tab each. Old links to Events still land on its tab.",
+  "refs": ["P15-12"]
+}

@@ -303,11 +303,14 @@ export async function createUser(
 
   if (profileError) return { ok: false, error: profileError.message };
 
-  const managedError = await replaceManagedDepartments(admin, userId, managed);
-  if (managedError) return { ok: false, error: managedError };
-
+  // P15-10. Roles BEFORE led departments: the database refuses a led
+  // department for somebody who does not hold Team Leader, so somebody made a
+  // Team Leader in this save must hold the role before their department lands.
   const rolesError = await replaceHeldRoles(admin, userId, held);
   if (rolesError) return { ok: false, error: rolesError };
+
+  const managedError = await replaceManagedDepartments(admin, userId, managed);
+  if (managedError) return { ok: false, error: managedError };
 
   // Phase 0 exit criterion: an audit row on user create/edit.
   await admin.rpc("vizserve_pms_write_audit_log", {
@@ -441,11 +444,14 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
 
   if (updateError) return { ok: false, error: updateError.message };
 
-  const managedError = await replaceManagedDepartments(admin, userId, managed);
-  if (managedError) return { ok: false, error: managedError };
-
+  // P15-10. Roles BEFORE led departments: the database refuses a led
+  // department for somebody who does not hold Team Leader, so somebody made a
+  // Team Leader in this save must hold the role before their department lands.
   const rolesError = await replaceHeldRoles(admin, userId, held);
   if (rolesError) return { ok: false, error: rolesError };
+
+  const managedError = await replaceManagedDepartments(admin, userId, managed);
+  if (managedError) return { ok: false, error: managedError };
 
   const after = await readProfileForAudit(admin, userId);
 

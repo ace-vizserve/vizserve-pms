@@ -233,7 +233,7 @@ export function EventsTable({
             next year's calendar rather than describing it. */}
         <div className="flex items-center gap-1.5">
           <Link
-            href={`/admin/events?year=${year - 1}`}
+            href={`/admin/holidays?tab=events&year=${year - 1}`}
             aria-label={`Go to ${year - 1}`}
             className={buttonVariants({ variant: "outline", size: "icon-sm" })}
           >
@@ -241,7 +241,7 @@ export function EventsTable({
           </Link>
           <span className="min-w-14 text-center text-sm font-semibold tabular-nums">{year}</span>
           <Link
-            href={`/admin/events?year=${year + 1}`}
+            href={`/admin/holidays?tab=events&year=${year + 1}`}
             aria-label={`Go to ${year + 1}`}
             className={buttonVariants({ variant: "outline", size: "icon-sm" })}
           >

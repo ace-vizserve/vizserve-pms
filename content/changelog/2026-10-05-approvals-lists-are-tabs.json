@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-05",
+  "kind": "changed",
+  "area": "Approvals",
+  "title": "Approvals shows one list at a time, in tabs",
+  "description": "Approvals stacked up to three lists on one page, and everything under the first was easy to miss. Each list is now a tab with its count, and the page opens on whatever is waiting on you.",
+  "items": [
+    "Team leaders and the manager: Waiting on me, Timesheet weeks (manager only) and My requests",
+    "Admin, business manager and CEO: Requests and Timesheet weeks",
+    "Holidays & events uses the same tabs"
+  ],
+  "refs": ["P15-14"]
+}
