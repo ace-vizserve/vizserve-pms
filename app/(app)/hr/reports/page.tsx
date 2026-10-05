@@ -8,6 +8,7 @@ import { createClient } from "@/utils/supabase/server";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 
+import { LeaveStats } from "./leave-stats";
 import { ReportBuilder } from "./report-builder";
 
 export const metadata: Metadata = { title: "Leave reports" };
@@ -27,7 +28,12 @@ export const metadata: Metadata = { title: "Leave reports" };
  * DEFINER and bypass every policy that produced these lists. Picking somebody
  * you may not see returns no rows rather than their record.
  */
-export default async function LeaveReportsPage() {
+export default async function LeaveReportsPage({
+  searchParams,
+}: {
+  /** P15-09. The year the figures cover. A mangled value opens this year. */
+  searchParams: Promise<{ year?: string | string[] }>;
+}) {
   await requireHr();
   const supabase = await createClient();
 
@@ -50,9 +56,17 @@ export default async function LeaveReportsPage() {
     ]);
 
   const currentYear = currentBalanceYear(todayInAppZone());
+  const params = await searchParams;
+  const requestedYear = Number(Array.isArray(params.year) ? params.year[0] : params.year);
+  const statsYear =
+    Number.isInteger(requestedYear) && requestedYear >= 2020 && requestedYear <= currentYear + 1
+      ? requestedYear
+      : currentYear;
 
   return (
-    <PageShell>
+    <PageShell className="gap-8">
+      <LeaveStats supabase={supabase} year={statsYear} currentYear={currentYear} />
+
       {/* The intro paragraph that used to sit here is gone. It explained the
           difference between the two documents in five lines of 12px grey, and
           the builder now explains it on the two cards you choose between — in
