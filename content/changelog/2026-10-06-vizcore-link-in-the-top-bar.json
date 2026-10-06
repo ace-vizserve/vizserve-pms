@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-06",
+  "kind": "added",
+  "area": "Platform",
+  "title": "VizCore link in the top bar",
+  "description": "A VizCore button beside the changelog opens VizCore in a new tab from any page, for your payslip.",
+  "items": ["Goes to core.vizserve.com/actions"]
+}

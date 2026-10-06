@@ -1,6 +1,6 @@
 import { Suspense } from "react";
 import Link from "next/link";
-import { ScrollText } from "lucide-react";
+import { ScrollText, Wallet } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { AuthProvider } from "@/lib/auth/client-auth";
@@ -145,6 +145,27 @@ export default async function AppLayout({ children }: { children: React.ReactNod
                 >
                   <ScrollText aria-hidden />
                 </Link>
+                {/*
+                  VizCore, beside the changelog. Payslips live there, outside
+                  this app, so this is a plain `<a>` to another origin in a new
+                  tab — not a `Link`, which would try to route it here.
+
+                  Labelled, unlike its neighbours: a wallet alone does not say
+                  "VizCore". `xs` is `h-7` like `icon-xs`, so it still lines up.
+                  The word drops below `sm`, where the breadcrumb needs the room;
+                  `aria-label` keeps the name there.
+                */}
+                <a
+                  aria-label="VizCore (opens in a new tab)"
+                  className={cn(buttonVariants({ variant: "outline", size: "xs" }), "text-muted-foreground")}
+                  href="https://core.vizserve.com/actions"
+                  rel="noopener noreferrer"
+                  target="_blank"
+                  title="VizCore"
+                >
+                  <Wallet aria-hidden />
+                  <span className="hidden sm:inline">VizCore</span>
+                </a>
                 <ThemeToggle />
               </div>
             </header>
