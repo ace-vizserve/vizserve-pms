@@ -1,0 +1,14 @@
+#!/bin/sh
+# Credits the real person on main. post-checkout stamps every main commit with
+# ace.vizserve@gmail.com so Vercel will deploy it, which makes GitHub show
+# Kurt's commits as Ace's. Changing the author breaks the deploy, so this adds
+# a Co-authored-by trailer with the committer's GLOBAL email instead (the local
+# override leaves the global one untouched) — GitHub then shows both avatars.
+# Ace's own commits get nothing: their global email is the deploy email.
+[ "$(git rev-parse --abbrev-ref HEAD 2>/dev/null)" = "main" ] || exit 0
+real=$(git config --global user.email)
+[ -n "$real" ] && [ "$real" != "ace.vizserve@gmail.com" ] || exit 0
+name=$(git config user.name)
+git interpret-trailers --in-place --if-exists addIfDifferent \
+  --trailer "Co-authored-by: $name <$real>" "$1"
+exit 0
