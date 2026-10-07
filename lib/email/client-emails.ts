@@ -481,7 +481,10 @@ export function sendApprovalReminderEmail(
       status: { label: "Awaiting your approval", tone: "warning" },
       paragraphs: [
         `Hi ${firstName(input.requesterName)},`,
-        `We sent "${input.title}" for your approval and have not heard back yet.`,
+        // P16-06 — a later approver is reminded whose request it is.
+        input.chain && input.chain.step > 1
+          ? `${input.chain.requesterName} named you as approver ${input.chain.step} of ${input.chain.steps} for "${input.title}". We sent it for your approval and have not heard back yet.`
+          : `We sent "${input.title}" for your approval and have not heard back yet.`,
         last
           ? "This is the last reminder we will send. If we do not hear from you, it will be closed as completed."
           : "If it is fine as it is, one click approves it. If something needs changing, tell us on the same page.",

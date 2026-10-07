@@ -80,7 +80,25 @@ export async function GET(request: Request) {
       continue;
     }
 
+    // P16-06 — the token says whose step it is. A later approver's reminder
+    // names the requester and where they sit in the chain.
+    const step = (issued as { step?: number; steps?: number }).step ?? 1;
+    const steps = (issued as { step?: number; steps?: number }).steps ?? step;
+    let chain: { step: number; steps: number; requesterName: string } | undefined;
+    if (step > 1) {
+      const { data: owner } = await admin
+        .from("vizserve_pms_tasks")
+        .select("vizserve_pms_requests(requester_name)")
+        .eq("id", reminder.task_id)
+        .maybeSingle();
+      const requesterName =
+        (owner as { vizserve_pms_requests?: { requester_name: string } | null } | null)?.vizserve_pms_requests
+          ?.requester_name ?? "The requester";
+      chain = { step, steps, requesterName };
+    }
+
     const outcome = await sendApprovalReminderEmail({
+      chain,
       details: await loadRequestDetailsForTask(reminder.task_id),
       to: reminder.requester_email,
       requesterName: reminder.requester_name ?? "there",
