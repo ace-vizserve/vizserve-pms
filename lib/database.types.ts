@@ -195,7 +195,9 @@ export type VizservePmsRequestStatus =
   | "PENDING_REVIEW"
   | "APPROVED"
   | "RETURNED"
-  | "REJECTED";
+  | "REJECTED"
+  /** P16-02 — wrong form, duplicate, withdrawn. Not a refusal. */
+  | "CANCELLED";
 
 export type Database = {
   public: {
@@ -3196,6 +3198,11 @@ export type Database = {
            */
           p_priority?: VizservePmsTaskPriority | null;
         };
+        Returns: Json;
+      };
+      /** P16-02. TL or Manager, while pending or returned; reason required. */
+      vizserve_pms_cancel_request: {
+        Args: { p_request_id: string; p_reason: string };
         Returns: Json;
       };
       vizserve_pms_decide_request: {

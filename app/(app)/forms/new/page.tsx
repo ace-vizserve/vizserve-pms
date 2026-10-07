@@ -229,16 +229,6 @@ export default async function NewFormPage({
     );
   }
 
-  // P2-06 — a brand-new form can point at an existing list straight away. Read
-  // only on the client-request branch: `default_list_id` is where an APPROVED
-  // request files, and an internal form never has one.
-  const { data: lists } = await supabase
-    .from("vizserve_pms_lists")
-    .select("id, name, department_id")
-    .eq("is_active", true)
-    .order("sort_order")
-    .order("name");
-
   return (
     <PageShell className="mx-auto w-full max-w-3xl">
       <div>
@@ -255,7 +245,7 @@ export default async function NewFormPage({
         {/* P7-66 Phase 4 — no `initial`, and no purpose to state. This branch is
             already the client-request one (`?purpose=`), and the card is now
             client-only: it hard-codes the purpose it sends. */}
-        <ClientFormSettings departments={departments} lists={lists ?? []} />
+        <ClientFormSettings departments={departments} />
       </div>
     </PageShell>
   );

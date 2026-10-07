@@ -61,7 +61,15 @@ export function preTaskSteps(
   requesterName: string,
   decision: { at: string; by: string | null } | null,
 ): Step[] {
-  const stopped = status === "RETURNED" || status === "REJECTED";
+  // P16-01 — a form that needs no approval has no pipeline to draw.
+  if (status === "SUBMITTED") {
+    return [
+      { label: "Requested", state: "done", meta: metaLine(metaDate(submittedAt), requesterName) },
+      { label: "Recorded · this form needs no approval", state: "done" },
+    ];
+  }
+
+  const stopped = status === "RETURNED" || status === "REJECTED" || status === "CANCELLED";
 
   return [
     { label: "Requested", state: "done", meta: metaLine(metaDate(submittedAt), requesterName) },
@@ -69,7 +77,9 @@ export function preTaskSteps(
       label: stopped
         ? status === "RETURNED"
           ? "Gate 1 · returned to the client"
-          : "Gate 1 · rejected"
+          : status === "CANCELLED"
+            ? "Gate 1 · cancelled"
+            : "Gate 1 · rejected"
         : "Gate 1 · team leader review",
       state: stopped ? "attention" : "current",
       meta: stopped ? metaLine(metaDate(decision?.at), decision?.by) : "Waiting for a decision",

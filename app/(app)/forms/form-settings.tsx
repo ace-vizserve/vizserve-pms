@@ -24,9 +24,6 @@ import { createForm, updateFormSettings } from "./actions";
 import { useUnpublishConfirm } from "./form-lifecycle";
 
 type Department = { id: string; name: string };
-type List = { id: string; name: string; department_id: string; form_id?: string | null };
-
-const NO_LIST = "__none__";
 
 /**
  * A client form's SLA is picked by urgency, not typed. Each tier is a whole
@@ -78,14 +75,11 @@ const SLA_URGENCIES = [
  */
 export function ClientFormSettings({
   departments,
-  lists = [],
   formId,
   initial,
   isArchived = false,
 }: {
   departments: Department[];
-  /** P2-06 — where approved requests from this form land. */
-  lists?: List[];
   /** Absent while creating. */
   formId?: string;
   initial?: Partial<FormSettingsInput>;
@@ -190,45 +184,6 @@ export function ClientFormSettings({
 
   const shownSlug = slug || (willDeriveSlug ? slugFromName(name) : "");
 
-  // A list belongs to one department, so offering another department's would be
-  // offering a guaranteed rejection from the database.
-  const departmentLists = lists
-    .filter((list) => list.department_id === departmentId)
-    /*
-     * P7-18 — this form's OWN inbox list sorts to the front.
-     *
-     * Every form now gets one, created by a trigger and living in the
-     * department's Client Requests folder, and `default_list_id` is pointed at
-     * it automatically. So this Select is no longer choosing between equals:
-     * one of these is where the form already files, and it should not be buried
-     * alphabetically among lists that have nothing to do with it.
-     *
-     * The control STAYS, deliberately. The migration sets `default_list_id`
-     * only when it is null, precisely so a lead's explicit choice survives —
-     * removing the picker would take away a decision the database goes out of
-     * its way to preserve.
-     */
-    .sort((a, b) => Number(b.form_id === formId) - Number(a.form_id === formId));
-
-  const ownListLabel = (list: List) => (list.form_id === formId ? `${list.name} — this form's list` : list.name);
-
-  /*
-   * P7-24 — SAY WHERE REQUESTS ACTUALLY LAND.
-   *
-   * The bug this exists to stop repeating: a form's own inbox list sat empty in
-   * Client Requests while every approved request went to a different list, and
-   * nothing on any screen said so. It took an afternoon to work out from the
-   * outside, because the list was correctly named and correctly filed — it was
-   * simply not the one being used.
-   *
-   * P7-24 repairs the case that is never intentional (a default pointing at
-   * ANOTHER form's inbox). This covers the case that IS legitimate and still
-   * surprising: routing to an ordinary project list, which leaves this form's
-   * own list permanently empty.
-   */
-  const ownList = departmentLists.find((list) => list.form_id === formId) ?? null;
-  const chosenListId = watch("default_list_id") ?? null;
-  const routedElsewhere = Boolean(ownList && chosenListId && chosenListId !== ownList.id);
 
   // value → label maps for the two Selects below. Without these, Base UI's
   // Select.Value falls back to rendering the raw value, and these two are the
@@ -244,10 +199,6 @@ export function ClientFormSettings({
   );
   if (slaValue && !(slaValue in slaItems)) slaItems[slaValue] = `Custom — ${slaValue}`;
 
-  const listItems = {
-    [NO_LIST]: "No list",
-    ...Object.fromEntries(departmentLists.map((list) => [list.id, ownListLabel(list)])),
-  };
 
   const onSubmit = handleSubmit((values) => {
     setFormError(null);
@@ -393,54 +344,8 @@ export function ClientFormSettings({
           back on finds them as they were. */}
       {requiresApproval ? (
       <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          <Label htmlFor="default_list">Default list</Label>
-          <Select
-            items={listItems}
-            value={watch("default_list_id") ?? NO_LIST}
-            onValueChange={(value) => setValue("default_list_id", value === NO_LIST ? null : value)}
-            disabled={departmentLists.length === 0}>
-            <SelectTrigger id="default_list">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={NO_LIST}>No list</SelectItem>
-              {/* The label goes in BOTH the items map and the children — Base UI
-                  reads the map for the trigger and the children for the popup,
-                  and labelling only one is how they drift. */}
-              {departmentLists.map((list) => (
-                <SelectItem key={list.id} value={list.id}>
-                  {ownListLabel(list)}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {/* P2-06. Pre-fills the review screen; the TL can still override it
-              per request. */}
-          <p className="text-xs text-muted-foreground">
-            {departmentLists.length === 0
-              ? "This department has no lists yet."
-              : "Where approved requests land. This form has a list of its own in Client Requests; pick another only if you want them filed elsewhere. The reviewer can still change it per request."}
-          </p>
-
-          {/* Stated out loud, with the way back. A form routed away from its own
-              list is a legitimate choice — but it leaves that list empty
-              forever, and somebody opening it and finding nothing has no way to
-              tell that from a bug. */}
-          {routedElsewhere && ownList ? (
-            <p className="rounded-md border border-warning/30 bg-warning/10 px-2.5 py-2 text-xs text-foreground">
-              Requests from this form do <strong>not</strong> go to its own list (&ldquo;{ownList.name}&rdquo;), which
-              will stay empty.{" "}
-              <button
-                type="button"
-                className="font-medium underline underline-offset-2"
-                onClick={() => setValue("default_list_id", ownList.id, { shouldDirty: true })}>
-                Send them there instead
-              </button>
-            </p>
-          ) : null}
-        </div>
-
+        {/* P16-02 — no list picker. A client form always files into its own
+            list in Client Requests, created on first publish. */}
         <div className="space-y-2">
           <Label htmlFor="client_approval_days">Client approval window</Label>
           <Input

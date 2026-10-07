@@ -25,6 +25,7 @@ import {
   type ProgressFeedback,
   type ProgressHistoryRow,
 } from "./request-progress";
+import { CancelRequestButton } from "./cancel-request";
 import { ReviewPanel } from "./review-panel";
 
 export const metadata: Metadata = { title: "Request" };
@@ -83,7 +84,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     await Promise.all([
       supabase
         .from("vizserve_pms_forms")
-        .select("id, name, sla_minutes, department_id, default_list_id")
+        .select("id, name, sla_minutes, department_id")
         .eq("id", request.form_id)
         .maybeSingle(),
 
@@ -148,7 +149,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
   //
   // STILL A WAVE OF ITS OWN, and it has to be: all four are keyed by the form's
   // `department_id`, which does not exist until the read above has landed.
-  const [candidates, capacity, lists, clientFolder] = awaitingDecision
+  const [candidates, capacity, ownList] = awaitingDecision
     ? await Promise.all([
         supabase
           .from("vizserve_pms_users")
@@ -160,41 +161,10 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           p_department_id: form?.department_id ?? "",
           p_target_date: request.target_date,
         }),
-        supabase
-          .from("vizserve_pms_lists")
-          .select("id, name")
-          .eq("department_id", form?.department_id ?? "")
-          .eq("is_active", true)
-          .order("sort_order")
-          .order("name"),
-        /*
-         * P7-25 — where a list created DURING the approval goes.
-         *
-         * Without this the inline creator called `saveList` with no `group_id`
-         * and the list hung loose under the department, outside every folder —
-         * so a lead who made a list for a piece of client work found it filed
-         * nowhere near the client work.
-         *
-         * The reserved folder, by its flag rather than by its name: the name is
-         * refused a rename by trigger, but matching on a string would still be
-         * matching on a label where a boolean exists.
-         */
-        supabase
-          .from("vizserve_pms_task_groups")
-          .select("id")
-          .eq("department_id", form?.department_id ?? "")
-          .eq("is_system", true)
-          .maybeSingle(),
+        // P16-02. The only list an approval can file into: the form's own.
+        supabase.from("vizserve_pms_lists").select("name").eq("form_id", request.form_id).maybeSingle(),
       ])
-    : [
-        { data: null },
-        { data: null },
-        { data: null },
-        // Fourth slot, matching the branch above. A decided request renders no
-        // review panel, so neither the lists nor the folder are ever read —
-        // but the tuple has to have the same shape either way.
-        { data: null },
-      ];
+    : [{ data: null }, { data: null }, { data: null }];
 
   /*
    * Names for the three people this card can mention: whoever approved it, and
@@ -319,7 +289,13 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
             {late ? " · overdue" : null}
           </span>
         </div>
-        <h1 className="text-xl font-semibold tracking-tight">{request.title}</h1>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <h1 className="text-xl font-semibold tracking-tight">{request.title}</h1>
+          {(request.status === "PENDING_REVIEW" || request.status === "RETURNED") &&
+          canApproveClientRequest(context, form?.department_id ?? null) ? (
+            <CancelRequestButton requestId={request.id} />
+          ) : null}
+        </div>
       </div>
 
       {request.decision_reason ? (
@@ -454,10 +430,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
               capacity={capacity.data ?? []}
               currentUserId={context.userId}
               currentUserName={context.fullName}
-              lists={lists?.data ?? []}
-              defaultListId={form?.default_list_id ?? null}
-              departmentId={form?.department_id ?? ""}
-              clientFolderId={(clientFolder?.data as { id: string } | null)?.id ?? null}
+              listName={(ownList?.data as { name: string } | null)?.name ?? null}
             />
           ) : null}
         </div>

@@ -225,6 +225,7 @@ const REQUEST_STATUS: Record<VizservePmsRequestStatus, { label: string; tone: To
   APPROVED: { label: "Approved", tone: "success" },
   RETURNED: { label: "Returned", tone: "info" },
   REJECTED: { label: "Rejected", tone: "danger" },
+  CANCELLED: { label: "Cancelled", tone: "neutral" },
 };
 
 export function RequestStatusBadge({

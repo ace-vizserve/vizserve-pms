@@ -40,7 +40,8 @@ export type RequestRow = {
     | "PENDING_REVIEW"
     | "APPROVED"
     | "RETURNED"
-    | "REJECTED";
+    | "REJECTED"
+    | "CANCELLED";
   submitted_at: string;
   form_id: string;
 };

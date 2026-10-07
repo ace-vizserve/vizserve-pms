@@ -662,13 +662,13 @@ export function TaskSurface({
                   ) : (
                     <span className="inline-flex items-center gap-1.5">
                       <InlineRepeat taskId={taskId} value={null} startDate={startDate} dueDate={dueDate} iconOnly />
-                      <span className="text-muted-foreground">Doesn't repeat</span>
+                      <span className="text-muted-foreground">Doesn&rsquo;t repeat</span>
                     </span>
                   )
                 ) : repeats ? (
                   <RepeatBadge value={repeats} />
                 ) : (
-                  <span className="text-muted-foreground">Doesn't repeat</span>
+                  <span className="text-muted-foreground">Doesn&rsquo;t repeat</span>
                 )}
                 {seriesId ? <SeriesCopies seriesId={seriesId} currentTaskId={taskId} /> : null}
               </Prop>
@@ -676,7 +676,8 @@ export function TaskSurface({
 
             {lists.length > 0 ? (
               <Prop label="List">
-                {canEdit ? (
+                {/* P16-02 — client work stays in its form's list. */}
+                {canEdit && category !== "request" ? (
                   <InlineList taskId={taskId} value={listId} lists={lists} />
                 ) : (
                   <span className="min-w-0 truncate">

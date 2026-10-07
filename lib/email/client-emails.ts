@@ -327,6 +327,33 @@ export function sendRequestRejectedEmail(input: DecisionEmailInput): Promise<Sen
   });
 }
 
+/**
+ * P16-02 — cancelled: a wrong form, a duplicate, or withdrawn. Not a refusal,
+ * so it does not read like one. No button: which form is the right one is for
+ * the reason to say.
+ */
+export function sendRequestCancelledEmail(input: DecisionEmailInput): Promise<SendOutcome> {
+  return sendEmail({
+    to: input.to,
+    sender: "approvals",
+    subject: `Request cancelled — ${input.title} (${input.referenceNo})`,
+    body: {
+      preheader: `${input.title} — cancelled.`,
+      heading: "Your request was cancelled",
+      status: { label: "Cancelled", tone: "neutral" },
+      paragraphs: [
+        `Hi ${firstName(input.requesterName)},`,
+        `We have cancelled "${input.title}". The reason is below.`,
+        "If it was sent through the wrong form, please submit it again through the right one. Reply to this email if anything is unclear.",
+      ],
+      facts: [{ label: "Request", value: input.title }],
+      factsNote: `Reference ${input.referenceNo}`,
+      quote: { label: "Reason", text: input.reason },
+      footnote: "This request is closed. A new submission starts a new reference number.",
+    },
+  });
+}
+
 function firstName(fullName: string): string {
   return fullName.trim().split(/\s+/)[0] || "there";
 }

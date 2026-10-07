@@ -99,12 +99,6 @@ export const approveDecisionSchema = z.object({
   /** Typo corrections made while approving. Null means unchanged. */
   title: z.string().trim().min(1).max(300).nullable().default(null),
   description: z.string().trim().min(1).nullable().default(null),
-  /**
-   * P2-06. Null means "use the form's default" — NOT "no list". Clearing is not
-   * something the review screen offers, and treating an absent value as a
-   * deletion is how a form's default silently stops applying.
-   */
-  list_id: z.uuid().nullable().default(null),
 });
 
 export const returnDecisionSchema = z.object({
@@ -150,6 +144,26 @@ export const approveResultSchema = z.object({
   task_id: z.uuid(),
   reference_no: z.string(),
   approved_target_date: z.string().nullable(),
+});
+
+/** P16-02 — cancelling a client request. Plain text: it is emailed as is. */
+export const CANCEL_REASON_PRESETS = ["Submitted through the wrong form.", "Duplicate of another request.", "Withdrawn by the client."] as const;
+
+export const cancelRequestSchema = z.object({
+  reason: z
+    .string()
+    .trim()
+    .min(3, "Say why it is being cancelled.")
+    .max(DECISION_REASON_MAX, "Keep it under 2000 characters."),
+});
+
+export const cancelResultSchema = z.object({
+  ok: z.literal(true),
+  status: z.literal("CANCELLED"),
+  reference_no: z.string(),
+  requester_email: z.string(),
+  requester_name: z.string(),
+  title: z.string(),
 });
 
 export const decideResultSchema = z.object({

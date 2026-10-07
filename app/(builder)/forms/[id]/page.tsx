@@ -205,14 +205,6 @@ export default async function EditFormPage({
     .eq("form_id", id)
     .order("sort_order");
 
-  // P2-06 — scoped by RLS to the departments this person leads.
-  const { data: lists, error: listsError } = await supabase
-    .from("vizserve_pms_lists")
-    .select("id, name, department_id, form_id")
-    .eq("is_active", true)
-    .order("sort_order")
-    .order("name");
-
   /*
    * ⚠️ P7-66 Phase 4b — RESPONSES COUNT TOWARDS `hasSubmissions` TOO, and this
    * is the SCREEN's half of the fix the purpose lock makes on the server. An
@@ -311,7 +303,7 @@ export default async function EditFormPage({
    *   - `submissionCount` decides `hasSubmissions`, which is what stops a slug
    *     or a reference prefix being changed under live requests. A dropped count
    *     reads as zero and unlocks it.
-   *   - `lists` and `departments` fill two `<Select>`s in the settings card. An
+   *   - `departments` fills a `<Select>` in the settings card. An
    *     empty one is a form whose owning department appears unset, and saving
    *     that screen writes what it shows. Note this catches a FAILURE only: an
    *     empty `departments` with no error is a team leader who leads nothing,
@@ -331,7 +323,7 @@ export default async function EditFormPage({
    * and it is the exact failure the column exists to prevent on the database
    * side. It must not be reintroduced by the screen.
    */
-  const readFailure = fieldsError ?? countError ?? listsError ?? departmentsError ?? audienceError;
+  const readFailure = fieldsError ?? countError ?? departmentsError ?? audienceError;
 
   if (readFailure) {
     return (
@@ -636,7 +628,6 @@ export default async function EditFormPage({
             ) : (
               <ClientFormSettings
                 departments={departments}
-                lists={lists ?? []}
                 formId={form.id}
                 hasSubmissions={submissionCount > 0}
                 isArchived={form.archived_at !== null}

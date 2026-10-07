@@ -9,11 +9,14 @@ import { dispatchPendingEmailsInBackground } from "@/lib/email/dispatch";
 import { loadRequestDetails } from "@/lib/email/request-details";
 import {
   sendRequestApprovedEmail,
+  sendRequestCancelledEmail,
   sendRequestRejectedEmail,
   sendRequestReturnedEmail,
 } from "@/lib/email/client-emails";
 import {
   approveResultSchema,
+  cancelRequestSchema,
+  cancelResultSchema,
   decideResultSchema,
   decisionPayloadSchema,
 } from "@/lib/schemas/approvals";
@@ -82,7 +85,6 @@ export async function decideOnRequest(
       // P7-56. Sanitised on write; `<RichText>` sanitises again on render,
       // which is the pass that actually guards.
       p_description: sanitizeRichText(payload.description),
-      p_list_id: payload.list_id,
     });
 
     if (error) return { ok: false, error: readableError(error) };
@@ -214,6 +216,50 @@ export async function decideOnRequest(
 }
 
 /** The public URL to resubmit against. Only sent on a return. */
+/**
+ * P16-02 — cancel a pending or returned request: wrong form, duplicate,
+ * withdrawn. The database decides who may (the Gate 1 authority); the client
+ * is emailed the reason.
+ */
+export async function cancelRequest(requestId: string, input: unknown): Promise<ActionResult> {
+  await requireRole("team_leader");
+
+  const parsed = cancelRequestSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Check the highlighted fields.", fieldErrors: flattenIssues(parsed.error) };
+  }
+
+  const supabase = await createClient();
+  const { data, error } = await supabase.rpc("vizserve_pms_cancel_request", {
+    p_request_id: requestId,
+    p_reason: parsed.data.reason,
+  });
+
+  if (error) return { ok: false, error: readableError(error) };
+
+  const result = cancelResultSchema.safeParse(data);
+  if (!result.success) return { ok: false, error: "The cancellation did not complete." };
+
+  const outcome = await sendRequestCancelledEmail({
+    details: await loadRequestDetails(requestId),
+    to: result.data.requester_email,
+    requesterName: result.data.requester_name,
+    referenceNo: result.data.reference_no,
+    title: result.data.title,
+    reason: parsed.data.reason,
+  });
+  if (outcome.status === "failed") {
+    console.error(`[cancel] ${result.data.reference_no}: email failed — ${outcome.error}`);
+  }
+
+  revalidatePath("/requests");
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+
+  return { ok: true, data: undefined };
+}
+
 async function resolveResubmitPath(
   supabase: Awaited<ReturnType<typeof createClient>>,
   requestId: string,
