@@ -809,6 +809,8 @@ export type Database = {
            */
           audience_is_all_departments: boolean;
           requires_attachment: boolean;
+          /** P16-01 — false: submissions are recorded, never reviewed. */
+          requires_approval: boolean;
           sla_minutes: number;
           /** P15-04 — client-form label overrides; null shows the default. */
           title_label: string | null;
@@ -854,6 +856,7 @@ export type Database = {
           /** P7-66. Defaults true — a new form is open to everyone until narrowed. */
           audience_is_all_departments?: boolean;
           requires_attachment?: boolean;
+          requires_approval?: boolean;
           sla_minutes?: number;
           title_label?: string | null;
           description_label?: string | null;
@@ -889,6 +892,8 @@ export type Database = {
           is_public: boolean;
           is_active: boolean;
           requires_attachment: boolean;
+          /** P16-01 — false: submissions are recorded, never reviewed. */
+          requires_approval: boolean;
           sla_minutes: number;
           title_label: string | null;
           description_label: string | null;

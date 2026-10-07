@@ -145,6 +145,8 @@ export const publicFormSchema = z.object({
   slug: z.string(),
   description: z.string().default(""),
   requires_attachment: z.boolean(),
+  // P16-01. Defaulted so a form read before the migration still parses.
+  requires_approval: z.boolean().default(true),
   // Nullable so a form read before the P1-09 migration still parses rather than
   // rendering a not-found page.
   attachment_rules: attachmentRulesSchema.nullish(),
@@ -315,6 +317,8 @@ export const submissionResultSchema = z.union([
      * missing tracking page must never fail a submission.
      */
     status_url: z.string().optional(),
+    /** P16-01. False: the form only collects answers; nothing is reviewed. */
+    requires_approval: z.boolean().default(true),
   }),
   z.object({
     ok: z.literal(false),
@@ -656,6 +660,12 @@ export const formSettingsSchema = z.object({
   is_active: z.boolean(),
   /** Undefaulted: `false` DROPS a rule the form was relying on. */
   requires_attachment: z.boolean(),
+  /**
+   * P16-01 — does a submission go to a Team Leader at all? Undefaulted for the
+   * same reason: an omitted `false` would quietly stop every request reaching
+   * Gate 1.
+   */
+  requires_approval: z.boolean(),
   sla_minutes: slaMinutesField,
   /**
    * Where approved requests from this form land (P2-06 / Q18).
@@ -777,6 +787,7 @@ export const formCreateSchema = formSettingsSchema.extend({
   is_quiz: formSettingsSchema.shape.is_quiz.default(false),
   is_active: formSettingsSchema.shape.is_active.default(false),
   requires_attachment: formSettingsSchema.shape.requires_attachment.default(false),
+  requires_approval: formSettingsSchema.shape.requires_approval.default(true),
   default_list_id: formSettingsSchema.shape.default_list_id.default(null),
   client_approval_days: formSettingsSchema.shape.client_approval_days.default(3),
 });

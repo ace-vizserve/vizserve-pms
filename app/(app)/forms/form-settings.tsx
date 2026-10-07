@@ -137,6 +137,7 @@ export function ClientFormSettings({
       reference_prefix: initial?.reference_prefix ?? "",
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
+      requires_approval: initial?.requires_approval ?? true,
       sla_minutes: initial?.sla_minutes !== undefined ? formatSlaDuration(initial.sla_minutes) : "8d",
       default_list_id: initial?.default_list_id ?? null,
       client_approval_days: initial?.client_approval_days ?? 3,
@@ -144,6 +145,7 @@ export function ClientFormSettings({
   });
 
   const isActive = watch("is_active");
+  const requiresApproval = watch("requires_approval");
   const departmentId = watch("department_id");
 
   /*
@@ -358,6 +360,7 @@ export function ClientFormSettings({
             the name, and an edit leaves it alone — a reference already quoted
             to a client is rebuilt from it. It rides along in the form state. */}
 
+        {requiresApproval ? (
         <div className="space-y-2">
           <Label htmlFor="sla_minutes">Urgency</Label>
           <Select
@@ -382,8 +385,13 @@ export function ClientFormSettings({
           </p>
           {errors.sla_minutes ? <p className="text-xs text-destructive">{errors.sla_minutes.message}</p> : null}
         </div>
+        ) : null}
       </div>
 
+      {/* P16-01 — urgency, list and the Gate 3 window mean nothing on a form
+          that only collects answers. Hidden, not cleared: switching approval
+          back on finds them as they were. */}
+      {requiresApproval ? (
       <div className="grid gap-4 sm:grid-cols-2">
         <div className="space-y-2">
           <Label htmlFor="default_list">Default list</Label>
@@ -449,6 +457,25 @@ export function ClientFormSettings({
           {errors.client_approval_days ? (
             <p className="text-xs text-destructive">{errors.client_approval_days.message}</p>
           ) : null}
+        </div>
+      </div>
+      ) : null}
+
+      <div className="space-y-3 rounded-lg border p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <Label htmlFor="requires_approval">Needs approval</Label>
+            <p className="mt-0.5 text-xs text-muted-foreground">
+              {requiresApproval
+                ? "Each submission goes to the department’s Team Leader and becomes a task once approved."
+                : "Answers are only collected — read them on the Responses tab. No approval, no task."}
+            </p>
+          </div>
+          <Switch
+            id="requires_approval"
+            checked={requiresApproval}
+            onCheckedChange={(checked) => setValue("requires_approval", checked, { shouldDirty: true })}
+          />
         </div>
       </div>
 

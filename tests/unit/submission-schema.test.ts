@@ -38,6 +38,7 @@ function form(fields: PublicFormField[]): PublicForm {
     slug: "fixture",
     description: "",
     requires_attachment: false,
+    requires_approval: true,
     request_labels: { title: null, description: null, target_date: null },
     fields,
   };

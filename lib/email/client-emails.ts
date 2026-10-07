@@ -134,20 +134,32 @@ export function sendRequestSubmittedEmail(input: {
    * still sends a correct, shorter email.
    */
   details?: RequestDetails | null;
+  /**
+   * P16-01. False on a form that only collects answers: nobody reviews it, so
+   * the email promises nothing further and carries no tracking link.
+   */
+  reviewed?: boolean;
 }): Promise<SendOutcome> {
+  const reviewed = input.reviewed ?? true;
   return sendEmail({
     to: input.to,
     sender: "support",
-    subject: `We have your request — ${input.title} (${input.referenceNo})`,
+    subject: `We have your ${reviewed ? "request" : "response"} — ${input.title} (${input.referenceNo})`,
     body: {
-      preheader: `${input.title} — received, and with the team now.`,
-      heading: "Request received",
-      status: { label: "Awaiting review", tone: "warning" },
-      paragraphs: [
-        `Hi ${firstName(input.requesterName)},`,
-        `Thanks for sending through "${input.title}". It has reached the team and somebody will review it shortly.`,
-        "You do not need to do anything else for now. We will email you if we need more detail, and again once it is under way.",
-      ],
+      preheader: reviewed ? `${input.title} — received, and with the team now.` : `${input.title} — received. Thank you.`,
+      heading: reviewed ? "Request received" : "Response received",
+      status: reviewed ? { label: "Awaiting review", tone: "warning" } : { label: "Received", tone: "success" },
+      paragraphs: reviewed
+        ? [
+            `Hi ${firstName(input.requesterName)},`,
+            `Thanks for sending through "${input.title}". It has reached the team and somebody will review it shortly.`,
+            "You do not need to do anything else for now. We will email you if we need more detail, and again once it is under way.",
+          ]
+        : [
+            `Hi ${firstName(input.requesterName)},`,
+            `Thanks for sending through "${input.title}". It has reached the team.`,
+            "You do not need to do anything else.",
+          ],
       facts: [
         { label: "Request", value: input.title },
         ...detailRows(input.details, ["formName", "submittedAt"]),
@@ -168,7 +180,7 @@ export function sendRequestSubmittedEmail(input: {
        * `statusUrl()` supplies the origin, because a relative path means nothing
        * in a mail client.
        */
-      button: input.statusUrl ? { label: "Track this request", path: input.statusUrl } : undefined,
+      button: reviewed && input.statusUrl ? { label: "Track this request", path: input.statusUrl } : undefined,
       footnote: "Keep this reference number — quote it if you need to ask us about this request.",
     },
   });

@@ -32,6 +32,7 @@ function accepts(field: "slug" | "reference_prefix", value: string): boolean {
     is_quiz: false,
     is_active: false,
     requires_attachment: false,
+    requires_approval: true,
     sla_minutes: 2400,
     default_list_id: null,
     client_approval_days: 3,

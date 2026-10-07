@@ -254,6 +254,7 @@ const INTERNAL_SETTINGS = {
   is_quiz: false,
   is_active: true,
   requires_attachment: false,
+  requires_approval: true,
   sla_minutes: DEFAULT_SLA_MINUTES,
   default_list_id: null,
   client_approval_days: 3,

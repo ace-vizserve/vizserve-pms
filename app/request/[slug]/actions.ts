@@ -127,7 +127,7 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
   // Honeypot: a hidden field no human fills. Report success to a bot rather
   // than an error — a bot that learns it was detected just adapts.
   if (parsed.data.honeypot && parsed.data.honeypot.trim() !== "") {
-    return { ok: true, request_id: crypto.randomUUID(), reference_no: "PENDING" };
+    return { ok: true, request_id: crypto.randomUUID(), reference_no: "PENDING", requires_approval: true };
   }
 
   const headerList = await headers();
@@ -230,14 +230,16 @@ export async function submitPublicRequest(input: unknown): Promise<SubmissionRes
   if (!result.success) return { ok: false, error: "validation_failed" };
   if (!result.data.ok) return result.data;
 
-  const trackingUrl = await issueTrackingLink(result.data.request_id, result.data.reference_no);
+  // P16-01 — a form that only collects answers has nothing to track.
+  const reviewed = result.data.requires_approval;
+  const trackingUrl = reviewed ? await issueTrackingLink(result.data.request_id, result.data.reference_no) : null;
 
   // Both emails at once, both awaited: the client's acknowledgement, and the
   // Team Leader's "Approval needed" row the RPC just queued. Awaited so Vercel
   // cannot freeze the function before Resend is called; a failed drain is
   // logged and retried by the cron, never a failed submission.
   await Promise.all([
-    acknowledge(result.data.request_id, result.data.reference_no, trackingUrl),
+    acknowledge(result.data.request_id, result.data.reference_no, trackingUrl, reviewed),
     dispatchPendingEmails().catch((error) => {
       console.error("[submit] Team Leader email failed:", error);
     }),
@@ -367,6 +369,7 @@ async function acknowledge(
   requestId: string,
   referenceNo: string,
   trackingUrl: string | null,
+  reviewed: boolean,
 ): Promise<void> {
   try {
     const admin = createAdminClient();
@@ -389,6 +392,7 @@ async function acknowledge(
       requesterName: request.requester_name,
       referenceNo,
       title: request.title,
+      reviewed,
     });
 
     if (outcome.status === "failed") {

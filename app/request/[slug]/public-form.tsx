@@ -375,9 +375,11 @@ export function PublicFormRenderer({
           <span className="font-medium text-foreground">{submitted.reference_no}</span>. Quote it in
           any email about this request.
         </p>
-        <p className="mt-4 text-sm text-muted-foreground">
-          A team leader will review it and confirm the delivery date with you.
-        </p>
+        {form.requires_approval ? (
+          <p className="mt-4 text-sm text-muted-foreground">
+            A team leader will review it and confirm the delivery date with you.
+          </p>
+        ) : null}
       </div>
     );
   }
@@ -591,9 +593,11 @@ export function PublicFormRenderer({
                 {isSubmitting ? "Submitting…" : "Submit request"}
               </Button>
               {/* What happens next, next to the button that makes it happen. */}
-              <p className="text-xs text-muted-foreground">
-                A team leader reviews this and may propose a different date.
-              </p>
+              {form.requires_approval ? (
+                <p className="text-xs text-muted-foreground">
+                  A team leader reviews this and may propose a different date.
+                </p>
+              ) : null}
             </div>
           }
         />
