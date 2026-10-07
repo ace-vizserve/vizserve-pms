@@ -25,6 +25,8 @@ export type ProgressClientDecision = {
   approver_name: string | null;
   comment: string | null;
   created_at: string;
+  /** P16-06 — which approver in the chain (1 = the requester). */
+  step?: number | null;
 };
 
 export type ProgressFeedback = { rating: number; comment: string | null; created_at: string };
@@ -176,7 +178,10 @@ export function RequestActivity({
   for (const decision of clientDecisions) {
     entries.push({
       at: decision.created_at,
-      title: CLIENT_TITLES[decision.decision],
+      title:
+        decision.step && decision.step > 1
+          ? `${CLIENT_TITLES[decision.decision]} (approver ${decision.step})`
+          : CLIENT_TITLES[decision.decision],
       who: decision.approver_name,
       note: decision.comment,
       tone: decision.decision === "REVISION_REQUESTED" ? "bad" : "good",

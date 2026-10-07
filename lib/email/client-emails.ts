@@ -364,7 +364,13 @@ function firstName(fullName: string): string {
 
 type ApprovalEmailInput = {
   to: string;
+  /** The person this link is for — the requester, or a later approver (P16-06). */
   requesterName: string;
+  /**
+   * P16-06 — where this person sits in the sign-off chain. Absent or step 1:
+   * the requester, and the email reads as it always did.
+   */
+  chain?: { step: number; steps: number; requesterName: string };
   referenceNo: string;
   title: string;
   resolution: string;
@@ -408,13 +414,19 @@ export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<Send
     subject: `Ready for your approval — ${input.title} (${input.referenceNo})`,
     body: {
       preheader: `${input.title} — please review by ${input.deadline}.`,
-      heading: "Your request is ready for approval",
+      heading: input.chain && input.chain.step > 1 ? "Work is ready for your approval" : "Your request is ready for approval",
       // Warning is the WAITING tone, and the wait is on them.
       status: { label: "Awaiting your approval", tone: "warning" },
-      paragraphs: [
-        `Hi ${firstName(input.requesterName)},`,
-        `"${input.title}" is done and waiting for you to look at it. The page below shows what was produced alongside what you originally asked for, so you can check it against your own brief.`,
-      ],
+      paragraphs:
+        input.chain && input.chain.step > 1
+          ? [
+              `Hi ${firstName(input.requesterName)},`,
+              `${input.chain.requesterName} asked us for "${input.title}" and named you as approver ${input.chain.step} of ${input.chain.steps}. Everyone before you has approved it. The page below shows what was produced alongside the original brief.`,
+            ]
+          : [
+              `Hi ${firstName(input.requesterName)},`,
+              `"${input.title}" is done and waiting for you to look at it. The page below shows what was produced alongside what you originally asked for, so you can check it against your own brief.`,
+            ],
       facts: [
         { label: "Request", value: input.title },
         ...(outputs.length > 0 ? [{ label: "Where to look", value: outputs.join(" · ") }] : []),

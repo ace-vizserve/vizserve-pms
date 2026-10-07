@@ -28,6 +28,7 @@ import {
 import { requestCoreSchemaFor, requestFieldLabel, type AttachmentRef, type PublicForm } from "@/lib/schemas/forms";
 
 import { submitPublicRequest, uploadPublicAttachment } from "./actions";
+import { ApproversField, approverProblem, filledApprovers, type ApproverDraft } from "./approvers-field";
 
 /**
  * The value shape is stable even though the form is not: the five fixed fields
@@ -125,6 +126,9 @@ export function PublicFormRenderer({
 
 
   const [formAttachments, setFormAttachments] = useState<AttachmentRef[]>([]);
+  // P16-06 — steps 2+ of the Gate 3 chain. The requester is step 1.
+  const [approvers, setApprovers] = useState<ApproverDraft[]>([]);
+  const [approverError, setApproverError] = useState<string | null>(null);
   const [attachmentError, setAttachmentError] = useState<string | null>(null);
 
   /*
@@ -256,6 +260,14 @@ export function PublicFormRenderer({
   async function submit(values: SubmissionFormValues) {
     setFormError(null);
     setAttachmentError(null);
+    setApproverError(null);
+
+    const approverIssue = form.requires_approval ? approverProblem(approvers) : null;
+    if (approverIssue) {
+      setApproverError(approverIssue);
+      setFormError(approverIssue);
+      return;
+    }
 
     // Seam 1. Resolves either way and writes its own errors into the store, so a
     // refusal is already sitting against the fields it belongs to.
@@ -300,7 +312,7 @@ export function PublicFormRenderer({
       slug: form.slug,
       // The shape is unchanged: the fixed fields flat, the per-form answers
       // under `field_values`.
-      payload,
+      payload: form.requires_approval ? { ...payload, approvers: filledApprovers(approvers) } : payload,
       attachments,
       honeypot:
         (document.getElementById("company_website") as HTMLInputElement | null)?.value ?? "",
@@ -324,6 +336,8 @@ export function PublicFormRenderer({
 
     // Server-side field errors win. The database re-derives the required list,
     // so it can legitimately reject something the browser thought was fine.
+    if (result.field_errors?.approvers) setApproverError(result.field_errors.approvers);
+
     if (result.field_errors) {
       /*
        * Seam 3. Both halves are keyed by `field_key`, so the routing is a name
@@ -510,6 +524,10 @@ export function PublicFormRenderer({
           ) : null}
 
           </fieldset>
+        ) : null}
+
+        {form.requires_approval ? (
+          <ApproversField rows={approvers} onChange={setApprovers} error={approverError} />
         ) : null}
         </div>
 

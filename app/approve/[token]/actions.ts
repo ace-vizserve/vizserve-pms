@@ -2,7 +2,7 @@
 
 import { headers } from "next/headers";
 
-import { issueFeedbackToken, sendFeedbackRequestEmailFor } from "@/lib/client-approval-server";
+import { issueAndSendApproval, issueFeedbackToken, sendFeedbackRequestEmailFor } from "@/lib/client-approval-server";
 import { dispatchPendingEmails } from "@/lib/email/dispatch";
 import {
   clientDecisionSchema,
@@ -26,7 +26,7 @@ import { createClient } from "@/utils/supabase/server";
  */
 
 export type DecisionResult =
-  | { ok: true; decision: string; status: string; feedbackToken?: string }
+  | { ok: true; decision: string; status: string; feedbackToken?: string; nextName?: string }
   | { ok: false; error: string };
 
 /** Every failure said the same way, so a probe learns nothing from the wording. */
@@ -76,7 +76,15 @@ export async function submitClientDecision(token: string, input: unknown): Promi
     return { ok: false, error: "Something went wrong. Please try again." };
   }
 
-  const result = data as { ok: boolean; error?: string; decision?: string; status?: string };
+  const result = data as {
+    ok: boolean;
+    error?: string;
+    decision?: string;
+    status?: string;
+    task_id?: string;
+    next_step?: number;
+    next_name?: string;
+  };
 
   if (!result.ok) {
     return { ok: false, error: MESSAGES[result.error ?? ""] ?? MESSAGES.invalid! };
@@ -96,6 +104,13 @@ export async function submitClientDecision(token: string, input: unknown): Promi
   //
   // Every path below therefore still ends in `ok: true`; a missing token just
   // means the confirmation card falls back to plain text.
+  // P16-06 — approved, and someone else signs after this: send them theirs.
+  if (result.decision === "APPROVED" && result.next_step && result.task_id) {
+    const handed = await issueAndSendApproval(result.task_id);
+    if (!handed.ok) console.error(`[gate3] next approver not emailed: ${handed.error}`);
+    return { ok: true, decision: result.decision, status: result.status!, nextName: result.next_name };
+  }
+
   let feedbackToken: string | undefined;
   let feedbackEmail: Promise<unknown> = Promise.resolve();
 

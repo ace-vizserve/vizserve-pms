@@ -68,6 +68,10 @@ export async function issueAndSendApproval(taskId: string): Promise<IssueOutcome
     token: string;
     requester_email: string;
     auto_complete_at: string | null;
+    // P16-06 — who this link is for, and where they sit in the chain.
+    approver_name?: string | null;
+    step?: number;
+    steps?: number;
   };
 
   const { data: task } = await admin
@@ -93,7 +97,11 @@ export async function issueAndSendApproval(taskId: string): Promise<IssueOutcome
   const outcome = await sendClientApprovalEmail({
     details: await loadRequestDetailsForTask(taskId),
     to: token.requester_email,
-    requesterName: request?.requester_name ?? "there",
+    requesterName: token.approver_name ?? request?.requester_name ?? "there",
+    chain:
+      token.step && token.step > 1
+        ? { step: token.step, steps: token.steps ?? token.step, requesterName: request?.requester_name ?? "The requester" }
+        : undefined,
     referenceNo: request?.reference_no ?? "your request",
     title: task?.title ?? "Your request",
     resolution: task?.resolution ?? "",

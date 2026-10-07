@@ -120,7 +120,11 @@ export default async function ClientApprovalPage({
     <Shell>
       <div className="space-y-4">
         <div className="rounded-lg border bg-card grade-surface shadow-raised-lg p-6 sm:p-8">
-          <p className="text-xs text-muted-foreground">{page.reference_no}</p>
+          <p className="text-xs text-muted-foreground">
+            {page.reference_no}
+            {/* P16-06 — a chain of approvers says where this one sits. */}
+            {page.steps > 1 ? ` · approver ${page.step} of ${page.steps}` : null}
+          </p>
           <h1 className="mt-1 text-xl font-semibold tracking-tight">{page.title}</h1>
 
           <dl className="mt-5 grid gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
@@ -215,7 +219,7 @@ export default async function ClientApprovalPage({
 
         <ApprovalForm
           token={token}
-          requesterName={page.requester_name ?? ""}
+          requesterName={page.approver_name ?? page.requester_name ?? ""}
           deadline={formatDate(page.auto_complete_at?.slice(0, 10) ?? null)}
         />
       </div>

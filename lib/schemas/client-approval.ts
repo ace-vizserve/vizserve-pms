@@ -29,6 +29,10 @@ export const approvalPageSchema = z.object({
   reference_no: z.string().nullable(),
   title: z.string(),
   requester_name: z.string().nullable(),
+  /** P16-06 — who this link is for, and where they sit in the chain. */
+  approver_name: z.string().nullable().default(null),
+  step: z.number().int().default(1),
+  steps: z.number().int().default(1),
   submitted_at: z.string().nullable(),
   agreed_date: z.string().nullable(),
   resolution: z.string().nullable(),

@@ -26,6 +26,7 @@ import {
   type ProgressHistoryRow,
 } from "./request-progress";
 import { CancelRequestButton } from "./cancel-request";
+import { ClientApprovers, type ApproverStep } from "./client-approvers";
 import { UrgencyControl } from "./urgency-control";
 import { ReviewPanel } from "./review-panel";
 import { isTerminal } from "@/lib/schemas/tasks";
@@ -65,6 +66,13 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     .maybeSingle();
 
   if (!request) notFound();
+
+  // P16-06 — steps 2+ of the Gate 3 chain. Empty for most requests.
+  const { data: extraApprovers } = await supabase
+    .from("vizserve_pms_request_approvers")
+    .select("id, step, name, email")
+    .eq("request_id", id)
+    .order("step");
 
   // Gate 1 is offered only while there is a decision left to make. A disabled
   // Approve on an already-decided request invites someone to wire around it.
@@ -127,7 +135,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         ? { data: null }
         : supabase
             .from("vizserve_pms_tasks")
-            .select("id, title, status, assignee_id, qa_assignee_id, due_date, list_id, resolution, output_link")
+            .select("id, title, status, assignee_id, qa_assignee_id, due_date, list_id, resolution, output_link, client_approval_step")
             .eq("request_id", id)
             .maybeSingle(),
 
@@ -192,7 +200,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           .order("created_at"),
         supabase
           .from("vizserve_pms_client_decisions")
-          .select("decision, approver_name, comment, created_at")
+          .select("decision, approver_name, comment, created_at, step")
           .eq("task_id", linkedTask.id)
           .order("created_at"),
         supabase
@@ -464,6 +472,37 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
         {/* --------------------------------------------------------- RIGHT */}
         <div className="flex min-w-0 flex-col gap-3">
+          {/* P16-06 — who signs the finished work off, in order. */}
+          {(extraApprovers ?? []).length > 0 ? (
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle>Client approvers</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ClientApprovers
+                  requestId={request.id}
+                  canEdit={canApproveClientRequest(context, form?.department_id ?? null)}
+                  steps={[
+                    { id: null, step: 1, name: request.requester_name, email: request.requester_email },
+                    ...(extraApprovers ?? []),
+                  ].map((row) => {
+                    const current = linkedTask?.client_approval_step ?? 1;
+                    const state: ApproverStep["state"] =
+                      linkedTask?.status === "COMPLETED"
+                        ? "approved"
+                        : linkedTask?.status === "FOR_CLIENT_APPROVAL"
+                          ? row.step < current
+                            ? "approved"
+                            : row.step === current
+                              ? "waiting"
+                              : "next"
+                          : "not_sent";
+                    return { ...row, state };
+                  })}
+                />
+              </CardContent>
+            </Card>
+          ) : null}
           {linkedTask ? (
             <Card size="sm">
               <CardHeader>

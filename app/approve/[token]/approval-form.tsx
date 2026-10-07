@@ -46,6 +46,8 @@ export function ApprovalForm({
   // issuing failed, or if this task already had feedback; either way the card
   // still has to read correctly, so nothing here may assume it is there.
   const [feedbackToken, setFeedbackToken] = useState<string | null>(null);
+  // P16-06 — set when this approval handed the work to the next approver.
+  const [nextName, setNextName] = useState<string | null>(null);
 
   /*
    * P11-05 — SENDING IS PREDICTED. SENT IS NOT.
@@ -81,6 +83,7 @@ export function ApprovalForm({
       }
 
       setFeedbackToken(result.feedbackToken ?? null);
+      setNextName(result.nextName ?? null);
       setDone(decision);
     });
   }
@@ -112,7 +115,9 @@ export function ApprovalForm({
         <p className="mx-auto mt-2 max-w-sm text-sm text-muted-foreground">
           {done !== "APPROVED"
             ? "Your comments have gone straight to the person who did the work. They will come back to you with a revision."
-            : askNow
+            : nextName
+              ? `Your approval is recorded. It now goes to ${nextName}, the next approver.`
+              : askNow
               ? "The team has been told and this request is now complete. One last thing — how did we do?"
               : "The team has been told and this request is now complete. We will email you shortly to ask how it went."}
         </p>

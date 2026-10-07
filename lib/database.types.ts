@@ -1163,6 +1163,21 @@ export type Database = {
           },
         ];
       };
+      /** P16-06 — steps 2+ of a request's Gate 3 chain. Written by functions only. */
+      vizserve_pms_request_approvers: {
+        Row: {
+          id: string;
+          request_id: string;
+          step: number;
+          name: string;
+          email: string;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: never;
+        Update: never;
+        Relationships: [];
+      };
       vizserve_pms_request_attachments: {
         Row: {
           id: string;
@@ -1363,6 +1378,8 @@ export type Database = {
           series_period_start: string | null;
           /** P16-03. Written only by vizserve_pms_cancel_task; NOT in `Update`. */
           cancel_reason: string | null;
+          /** P16-06 — whose turn it is at Gate 3. NOT in `Update`. */
+          client_approval_step: number;
           /** P16-03. Archive (client tasks, finished or cancelled). NOT in `Update`. */
           archived_at: string | null;
           archived_by: string | null;
@@ -1765,6 +1782,9 @@ export type Database = {
           ip: string | null;
           user_agent: string | null;
           created_at: string;
+          /** P16-06 — which step of the chain answered (1 = the requester). */
+          step: number | null;
+          approver_email: string | null;
         };
         Insert: never;
         Update: never;
@@ -3222,6 +3242,11 @@ export type Database = {
           p_description?: string | null;
         };
         Returns: Json;
+      };
+      /** P16-06. TL or Manager, until the approver's step comes up. */
+      vizserve_pms_update_request_approver: {
+        Args: { p_id: string; p_name: string; p_email: string };
+        Returns: undefined;
       };
       /** P16-05. TL or Manager, on approved, open work. */
       vizserve_pms_set_request_urgency: {

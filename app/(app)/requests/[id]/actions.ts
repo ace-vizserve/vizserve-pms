@@ -279,6 +279,25 @@ export async function setRequestUrgency(requestId: string, input: unknown): Prom
   return { ok: true, data: undefined };
 }
 
+/** P16-06 — correct a later approver's name or email before their step. */
+export async function updateRequestApprover(
+  requestId: string,
+  approverId: string,
+  input: { name: string; email: string },
+): Promise<ActionResult> {
+  await requireRole("team_leader");
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("vizserve_pms_update_request_approver", {
+    p_id: approverId,
+    p_name: input.name,
+    p_email: input.email,
+  });
+  if (error) return { ok: false, error: readableError(error) };
+
+  revalidatePath(`/requests/${requestId}`);
+  return { ok: true, data: undefined };
+}
+
 async function resolveResubmitPath(
   supabase: Awaited<ReturnType<typeof createClient>>,
   requestId: string,
