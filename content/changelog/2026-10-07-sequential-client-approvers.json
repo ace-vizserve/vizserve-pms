@@ -5,12 +5,14 @@
   "title": "More than one client can sign the work off, in order",
   "description": "On the public form the requester can add up to five more approvers. When the work is ready, each one gets their own email in turn, and the task completes when the last one approves.",
   "items": [
+    "The client drags approvers into the order they should sign",
     "Changes requested by anyone send it back to the team, and the chain starts again from the requester",
     "The approval window runs for each approver; if one runs out, the task closes with no response and the record says whose step it was",
     "The request page shows the chain, and a team leader can correct an approver's email until their turn"
   ],
   "refs": [
-    "P16-06"
+    "P16-06",
+    "P16-07"
   ],
   "pending": "Needs the P16 database updates applied before it works."
 }
