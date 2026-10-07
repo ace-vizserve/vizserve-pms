@@ -26,7 +26,15 @@ import { createClient } from "@/utils/supabase/server";
  */
 
 export type DecisionResult =
-  | { ok: true; decision: string; status: string; feedbackToken?: string; nextName?: string }
+  | {
+      ok: true;
+      decision: string;
+      status: string;
+      feedbackToken?: string;
+      nextName?: string;
+      /** P16-10 — a later approver finished the chain; the requester is asked to rate. */
+      lastApprover?: boolean;
+    }
   | { ok: false; error: string };
 
 /** Every failure said the same way, so a probe learns nothing from the wording. */
@@ -61,6 +69,21 @@ export async function submitClientDecision(token: string, input: unknown): Promi
   // The ordinary anon client, exactly like the public form. `anon` holds no
   // table privilege at all — this RPC is the only way in.
   const supabase = await createClient();
+
+  /*
+   * P16-10 — WHOSE LINK THIS IS, read before it is consumed.
+   *
+   * The rating belongs to the REQUESTER, step 1, and nobody else. The feedback
+   * email already goes only to them; the inline form did not — in a chain it
+   * appeared to whoever approved LAST, so a second approver's rating was
+   * recorded as the requester's. Read through the page's own function: the
+   * decision RPC does not say which step decided, and this needs no new grant.
+   * A failed read counts as "not the requester", which only costs the inline
+   * form — the email still asks the right person.
+   */
+  const { data: page } = await supabase.rpc("vizserve_pms_get_approval_page", { p_token: token });
+  const isRequester = (page as { ok?: boolean; step?: number } | null)?.ok === true
+    && ((page as { step?: number }).step ?? 1) === 1;
 
   const { data, error } = await supabase.rpc("vizserve_pms_record_client_decision", {
     p_token: token,
@@ -121,7 +144,9 @@ export async function submitClientDecision(token: string, input: unknown): Promi
       if (!feedback.ok) {
         console.error(`[gate3] feedback request failed: ${feedback.error}`);
       } else if (feedback.issued) {
-        feedbackToken = feedback.token;
+        // P16-10 — only the requester rates here. A later approver closing the
+        // chain gets the thank-you; the requester gets the email.
+        if (isRequester) feedbackToken = feedback.token;
 
         feedbackEmail = sendFeedbackRequestEmailFor(feedback.email, { autoCompleted: false }).catch(
           (cause: unknown) => {
@@ -151,7 +176,13 @@ export async function submitClientDecision(token: string, input: unknown): Promi
     }),
   ]);
 
-  return { ok: true, decision: result.decision!, status: result.status!, feedbackToken };
+  return {
+    ok: true,
+    decision: result.decision!,
+    status: result.status!,
+    feedbackToken,
+    lastApprover: !isRequester,
+  };
 }
 
 export async function submitFeedback(

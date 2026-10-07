@@ -48,6 +48,8 @@ export function ApprovalForm({
   const [feedbackToken, setFeedbackToken] = useState<string | null>(null);
   // P16-06 — set when this approval handed the work to the next approver.
   const [nextName, setNextName] = useState<string | null>(null);
+  // P16-10 — a later approver closed the chain. The rating is the requester's.
+  const [lastApprover, setLastApprover] = useState(false);
 
   /*
    * P11-05 — SENDING IS PREDICTED. SENT IS NOT.
@@ -84,6 +86,7 @@ export function ApprovalForm({
 
       setFeedbackToken(result.feedbackToken ?? null);
       setNextName(result.nextName ?? null);
+      setLastApprover(result.lastApprover ?? false);
       setDone(decision);
     });
   }
@@ -119,7 +122,9 @@ export function ApprovalForm({
               ? `Your approval is recorded. It now goes to ${nextName}, the next approver.`
               : askNow
               ? "The team has been told and this request is now complete. One last thing — how did we do?"
-              : "The team has been told and this request is now complete. We will email you shortly to ask how it went."}
+              : lastApprover
+                ? "You were the last approver, so this request is now complete. The team has been told, and the person who made the request will be asked how it went."
+                : "The team has been told and this request is now complete. We will email you shortly to ask how it went."}
         </p>
 
         {/* Reused as-is from the standalone feedback page — same component, same

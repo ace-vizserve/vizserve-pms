@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-07",
+  "kind": "fixed",
+  "area": "Approvals",
+  "title": "Only the requester rates the work",
+  "description": "When a request had more than one approver, the rating form appeared to whoever approved last, and their rating was saved as the requester's. Now the person who made the request is the only one asked to rate it.",
+  "items": [
+    "The requester still reviews first, and rates on the spot if they are the only approver",
+    "A later approver who completes the request sees a thank-you instead, and the requester is emailed the rating request"
+  ],
+  "refs": [
+    "P16-10"
+  ],
+  "pending": "Needs the P16 database updates applied before approver chains work."
+}
