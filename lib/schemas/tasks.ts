@@ -274,11 +274,14 @@ export const TASK_TRANSITIONS: readonly Transition[] = [
   // Only work with a client goes to the client. Before P7-02 this was open to
   // every task, and a request-less one arriving here stranded: the token issuer
   // refuses it and there is no legal way back out.
+  // P16-08 — a pass needs words too. It is the review the client ends up
+  // relying on, and until now it was the only outcome that left no record of
+  // what was checked.
   {
     from: "QA_IN_PROGRESS",
     to: "FOR_CLIENT_APPROVAL",
     actor: "qa",
-    requires: null,
+    requires: "comment",
     appliesTo: "request",
     label: "Pass QA",
   },
@@ -288,7 +291,7 @@ export const TASK_TRANSITIONS: readonly Transition[] = [
     from: "QA_IN_PROGRESS",
     to: "COMPLETED",
     actor: "qa",
-    requires: null,
+    requires: "comment",
     appliesTo: "internal",
     label: "Pass QA and close",
   },
@@ -483,6 +486,16 @@ export type TaskViewer = {
  * P11-05: so may any active member of the task's department, in the PIC seat.
  * The QA seat stays with the reviewer and the lead — see `TaskViewer`.
  */
+/**
+ * P16-08 — does moving work with no client from `from` to `to` end a QA
+ * review? Mirrors the check in `vizserve_pms_transition_task`'s internal
+ * branch. Client work needs no helper: its two pass rows and the send-back row
+ * already say `requires: "comment"` in the table above.
+ */
+export function reviewExitNeedsComment(from: TaskStatus, to: TaskStatus): boolean {
+  return from === "QA_IN_PROGRESS" && to !== "FOR_QA";
+}
+
 export function availableTransitions(
   status: TaskStatus,
   viewer: TaskViewer,
@@ -498,8 +511,9 @@ export function availableTransitions(
    * the buttons will not be there to press.
    *
    * `vizserve_pms_transition_task` does not consult the transition table at all
-   * for internal or personal work: any status to any status, no required
-   * fields, by anyone on the task. This branch is that rule, and it is the one
+   * for internal or personal work: any status to any status, by anyone on the
+   * task, and no required fields except a comment on leaving a review
+   * (P16-08). This branch is that rule, and it is the one
    * place in this file that is NOT a copy of a table row.
    *
    * The single exclusion is `FOR_CLIENT_APPROVAL`, and it is not a gate — it is
@@ -519,7 +533,10 @@ export function availableTransitions(
       from: status,
       to: target,
       actor: "pic" as const,
-      requires: null,
+      // P16-08 — the one required field free movement keeps: leaving a review
+      // is a review, and it says what was checked. Back into the queue is not
+      // one. The server's internal branch carries the same check.
+      requires: reviewExitNeedsComment(status, target) ? ("comment" as const) : null,
       appliesTo: "internal" as const,
       label: TASK_STATUS_LABELS[target],
     }));

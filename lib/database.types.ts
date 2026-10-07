@@ -3383,6 +3383,10 @@ export type Database = {
         Args: { p_token: string };
         Returns: Json;
       };
+      vizserve_pms_client_timeline: {
+        Args: { p_task_id: string };
+        Returns: Json;
+      };
       vizserve_pms_record_client_decision: {
         Args: {
           p_token: string;

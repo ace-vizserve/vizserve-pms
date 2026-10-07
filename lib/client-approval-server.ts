@@ -1,5 +1,6 @@
 import "server-only";
 
+import { clientTimelineSteps, parseClientTimeline } from "@/lib/client-timeline";
 import { formatDate } from "@/lib/dates";
 import type { RequestDetails } from "@/lib/email/request-details";
 import { loadRequestDetailsForTask } from "@/lib/email/request-details";
@@ -94,7 +95,17 @@ export async function issueAndSendApproval(taskId: string): Promise<IssueOutcome
     .eq("task_id", taskId)
     .eq("kind", "output");
 
+  // P16-09 — the page's own helper, so the email and the page cannot disagree
+  // about when it was finished. A failure only drops the card.
+  const { data: timeline, error: timelineError } = await admin.rpc("vizserve_pms_client_timeline", {
+    p_task_id: taskId,
+  });
+  if (timelineError) {
+    console.error(`[gate3] ${taskId}: timeline unavailable — ${timelineError.message}`);
+  }
+
   const outcome = await sendClientApprovalEmail({
+    timeline: clientTimelineSteps(parseClientTimeline(timeline)),
     details: await loadRequestDetailsForTask(taskId),
     to: token.requester_email,
     requesterName: token.approver_name ?? request?.requester_name ?? "there",

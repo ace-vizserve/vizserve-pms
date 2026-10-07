@@ -481,9 +481,12 @@ export function BoardColumns({
                           // which mirrors `vizserve_pms_transition_task`. The
                           // board does not get an opinion of its own about what
                           // is legal — that would be a fourth copy of the rules.
-                          allowed={availableTransitions(task.status, seat(task), task).map(
-                            (transition) => transition.to,
-                          )}
+                          // A move that needs a note is left out, as on the
+                          // list: a drop has nowhere to type one, and since
+                          // P16-08 that includes every exit from QA review.
+                          allowed={availableTransitions(task.status, seat(task), task)
+                            .filter((transition) => transition.requires !== "comment")
+                            .map((transition) => transition.to)}
                           className={cn(
                             "group/task flex flex-col gap-2.5 rounded-md border bg-card grade-surface p-2.5 pl-5 shadow-raised transition-all hover:border-primary/50 hover:shadow-raised-lg",
                             // P7-27. Client work carries an accented edge, so a

@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { clientTimelineSchema } from "@/lib/client-timeline";
+
 /**
  * PHASE 4 CONTRACT — the token payload and the client decision (D3a, R11).
  *
@@ -16,8 +18,13 @@ export type ClientDecision = (typeof CLIENT_DECISIONS)[number];
  * What the public approval page renders.
  *
  * Everything here is safe for an unauthenticated reader. Note what is absent:
- * no department, no PIC name, no internal ids beyond the task. A public endpoint
- * that leaks the org chart is a small thing that compounds.
+ * no department, no email address, no internal ids beyond the task, no team
+ * comments. A public endpoint that leaks the org chart is a small thing that
+ * compounds.
+ *
+ * P16-09 (7 Oct 2026) relaxed exactly one part of that: `timeline` carries the
+ * PIC's and the QA reviewer's NAMES, by decision — the client is told who did
+ * the work and who checked it. Names only; see the migration for the line.
  */
 export const approvalPageSchema = z.object({
   ok: z.literal(true),
@@ -43,6 +50,8 @@ export const approvalPageSchema = z.object({
   attachments: z
     .array(z.object({ id: z.uuid(), filename: z.string(), size_bytes: z.number() }))
     .default([]),
+  /** P16-09. Null until the migration is applied, and the page then omits it. */
+  timeline: clientTimelineSchema.nullable().default(null),
 });
 
 export type ApprovalPage = z.infer<typeof approvalPageSchema>;

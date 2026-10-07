@@ -1,5 +1,8 @@
 import type { Metadata } from "next";
 
+import { Check, Clock } from "lucide-react";
+
+import { clientTimelineSteps, type ClientTimelineStep } from "@/lib/client-timeline";
 import { richTextToPlainText } from "@/lib/rich-text";
 import { formatDate } from "@/lib/dates";
 import { approvalPageResultSchema, type ApprovalPage } from "@/lib/schemas/client-approval";
@@ -50,6 +53,62 @@ function Shell({ children }: { children: React.ReactNode }) {
         {children}
       </div>
     </main>
+  );
+}
+
+/**
+ * P16-09 — how it got here. Below the work and the output, because the client
+ * is here to check the work; this is context for it, not the point of it.
+ *
+ * The last row is theirs and is always drawn: it is the one step still open.
+ * Done and waiting are told apart by icon AND by words ("Waiting on you"),
+ * never by colour alone.
+ */
+function Timeline({ steps, deadline }: { steps: ClientTimelineStep[]; deadline: string }) {
+  if (steps.length === 0) return null;
+
+  return (
+    <section className="mt-6">
+      <h2 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+        Progress
+      </h2>
+      <ol className="mt-3 space-y-0">
+        {steps.map((step) => (
+          <li key={step.key} className="relative flex gap-3 pb-4">
+            <span
+              aria-hidden
+              className="absolute top-6 bottom-0 left-3 w-px -translate-x-1/2 bg-border"
+            />
+            <span className="relative mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground">
+              <Check className="size-3.5" aria-hidden />
+            </span>
+            <div className="min-w-0 flex-1 text-sm sm:flex sm:items-baseline sm:justify-between sm:gap-3">
+              <p>
+                <span className="font-medium">{step.label}</span>
+                {step.person ? (
+                  <span className="text-muted-foreground"> · {step.person}</span>
+                ) : null}
+              </p>
+              <p className="text-xs text-muted-foreground sm:shrink-0">{step.date}</p>
+            </div>
+          </li>
+        ))}
+        <li className="flex gap-3">
+          <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full border-2 border-primary bg-card text-primary">
+            <Clock className="size-3.5" aria-hidden />
+          </span>
+          <div className="min-w-0 flex-1 text-sm sm:flex sm:items-baseline sm:justify-between sm:gap-3">
+            <p>
+              <span className="font-medium">Your approval</span>
+              <span className="text-muted-foreground"> · Waiting on you</span>
+            </p>
+            {deadline !== "—" ? (
+              <p className="text-xs text-muted-foreground sm:shrink-0">by {deadline}</p>
+            ) : null}
+          </div>
+        </li>
+      </ol>
+    </section>
   );
 }
 
@@ -189,6 +248,11 @@ export default async function ClientApprovalPage({
               </ul>
             </section>
           ) : null}
+
+          <Timeline
+            steps={clientTimelineSteps(page.timeline)}
+            deadline={formatDate(page.auto_complete_at?.slice(0, 10) ?? null)}
+          />
 
           {/* Collapsed, and below the output — the client is checking the work
               against their brief, not rewriting the brief (Amier 44:30). */}

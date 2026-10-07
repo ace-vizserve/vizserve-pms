@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-07",
+  "kind": "changed",
+  "area": "Tasks",
+  "title": "Every QA review needs a comment",
+  "description": "Passing QA used to be one click, so a passed task kept no record of what the reviewer checked. Passing now asks what you checked, the same way sending work back asks what needs changing.",
+  "items": [
+    "Applies to Pass QA on client work and Pass QA and close on internal work",
+    "On internal work, any move out of review needs a comment, except putting it back in the QA queue",
+    "A task can no longer be dragged out of review on the board. Use the task's buttons or the status menu, which ask for the comment"
+  ],
+  "refs": [
+    "P16-08"
+  ],
+  "pending": "Needs the P16-08 database update applied before the database enforces it."
+}

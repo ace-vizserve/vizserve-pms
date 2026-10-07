@@ -1454,7 +1454,7 @@ export async function bulkTransitionTasks(
       p_task_id: taskId,
       p_to_status: parsed.data,
       /* No comment on a bulk move. The single-task path asks for one where the
-         transition table demands it (a QA return), and those moves are exactly
+         transition table demands it (every exit from QA review, P16-08), and those moves are exactly
          the ones nobody should be making forty at a time without saying why. */
       p_comment: null,
     });

@@ -116,7 +116,7 @@ async function taskAwaitingApproval(): Promise<{ taskId: string; token: string }
   await qa.client.rpc("vizserve_pms_transition_task", {
     p_task_id: taskId,
     p_to_status: "FOR_CLIENT_APPROVAL",
-    p_comment: null,
+    p_comment: "Checked against the brief.",
   });
 
   // Issued with the service role, exactly as the server action does.
@@ -578,6 +578,36 @@ describe.skipIf(!dbTestsEnabled)("P4 client approval", () => {
         expect(page).not.toHaveProperty("assignee_id");
         expect(page).not.toHaveProperty("qa_assignee_id");
         expect(page).not.toHaveProperty("token_hash");
+
+        // P16-09 — the timeline is names and dates and nothing else. If it
+        // grows an id, an email or a comment, this is where it gets caught.
+        const timeline = page.timeline as Record<string, unknown> | undefined;
+        if (timeline) {
+          expect(Object.keys(timeline).sort()).toEqual([
+            "accepted_at",
+            "finished_at",
+            "pic_name",
+            "qa_name",
+            "requested_at",
+            "reviewed_at",
+            "started_at",
+          ]);
+          expect(timeline.finished_at).not.toBeNull();
+          expect(timeline.reviewed_at).not.toBeNull();
+          expect(typeof timeline.qa_name).toBe("string");
+        }
+      },
+    );
+
+    it.skipIf(!migrationApplied)(
+      "cannot read the timeline helper directly",
+      async () => {
+        // Only reachable through the page's own function, which checks a token.
+        const { taskId } = await taskAwaitingApproval();
+        const { error } = await anonClient().rpc("vizserve_pms_client_timeline", {
+          p_task_id: taskId,
+        });
+        expect(error).not.toBeNull();
       },
     );
 

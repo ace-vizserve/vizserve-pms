@@ -255,6 +255,11 @@ function CommentDialog({
   const [comment, setComment] = useState("");
 
   const returning = transition.to === "ONGOING";
+  // P16-08 — a pass asks for a comment now too, and "Add a comment" undersold
+  // it: this is the record of what the reviewer actually checked.
+  const passing =
+    transition.from === "QA_IN_PROGRESS" &&
+    (transition.to === "FOR_CLIENT_APPROVAL" || transition.to === "COMPLETED");
 
   /* One string, two consumers: the visible <Label> and the editor's
      `aria-label`. Stated once so they cannot drift apart. */
@@ -263,7 +268,9 @@ function CommentDialog({
       ? "What are you waiting for?"
       : returning
         ? "What needs changing?"
-        : "Add a comment";
+        : passing
+          ? "What did you check?"
+          : "Add a comment";
   const tone = transitionTone(transition);
 
   return (
@@ -291,7 +298,9 @@ function CommentDialog({
           <DialogDescription>
             {returning
               ? "The PIC sees this at the top of Activity, flagged as needing changes — no need to comment as well."
-              : "Shown at the top of Activity, and counted toward how long this spent waiting."}
+              : passing
+                ? "Required on every review. Kept with this move in Activity as the record of what QA checked."
+                : "Shown at the top of Activity, and counted toward how long this spent waiting."}
           </DialogDescription>
         </DialogHeader>
 
@@ -308,7 +317,9 @@ function CommentDialog({
             placeholder={
               returning
                 ? "e.g. The logo is the old one — please use the 2026 mark."
-                : "e.g. Waiting on the client to confirm which of the two headlines."
+                : passing
+                  ? "e.g. Checked both sizes against the brief; colours match the 2026 palette."
+                  : "e.g. Waiting on the client to confirm which of the two headlines."
             }
           />
           {state.error ? (

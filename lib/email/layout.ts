@@ -201,6 +201,11 @@ export type EmailBody = {
    * do not need in order to act.
    */
   factsNote?: string;
+  /**
+   * P16-09 — a second card under the details: milestones in order, each a
+   * label and a value ("3 Oct 2026 · Ryza Santos"). Escaped for you.
+   */
+  timeline?: { title: string; rows: { label: string; value: string }[] };
   /** Quoted block — a decision reason, a QA comment. Escaped for you. */
   quote?: { label: string; text: string };
   button?: EmailButton;
@@ -240,30 +245,39 @@ function renderHtml(body: EmailBody): string {
    * is a database printout rather than a card. Ten unframed rows of
    * label-then-value is exactly what that looks like.
    */
-  const factRows = (body.facts ?? [])
-    .map(
-      (fact, index, all) => `
+  const cardRows = (rows: { label: string; value: string }[]) =>
+    rows
+      .map(
+        (fact, index, all) => `
                       <tr>
                         <td style="padding:10px 14px 10px 16px;${index === all.length - 1 ? "" : `border-bottom:1px solid ${BORDER};`}color:${INK_META};font-size:13px;line-height:1.45;width:144px;vertical-align:top;">${escapeHtml(fact.label)}</td>
                         <td style="padding:10px 16px 10px 0;${index === all.length - 1 ? "" : `border-bottom:1px solid ${BORDER};`}color:${INK};font-size:14px;line-height:1.45;font-weight:500;vertical-align:top;">${escapeHtml(fact.value)}</td>
                       </tr>`,
-    )
-    .join("");
+      )
+      .join("");
 
-  const facts = factRows
-    ? `
+  const card = (title: string, rows: string, margin: string) => `
                 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"
-                       style="margin:22px 0 0;background:${CARD};border:1px solid ${BORDER};border-radius:10px;">
+                       style="margin:${margin};background:${CARD};border:1px solid ${BORDER};border-radius:10px;">
                   <tr>
-                    <td style="padding:12px 16px;border-bottom:1px solid ${BORDER};color:${INK};font-size:13px;font-weight:700;letter-spacing:-.01em;">${escapeHtml(body.factsTitle ?? "Your request")}</td>
+                    <td style="padding:12px 16px;border-bottom:1px solid ${BORDER};color:${INK};font-size:13px;font-weight:700;letter-spacing:-.01em;">${escapeHtml(title)}</td>
                   </tr>
                   <tr>
                     <td style="padding:0;">
-                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${factRows}
+                      <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">${rows}
                       </table>
                     </td>
                   </tr>
-                </table>${
+                </table>`;
+
+  const factRows = cardRows(body.facts ?? []);
+
+  const timelineRows = cardRows(body.timeline?.rows ?? []);
+  const timeline =
+    body.timeline && timelineRows ? card(body.timeline.title, timelineRows, "16px 0 0") : "";
+
+  const facts = factRows
+    ? `${card(body.factsTitle ?? "Your request", factRows, "22px 0 0")}${
                   body.factsNote
                     ? `
                 <div style="margin:8px 2px 0;color:${INK_META};font-size:12px;line-height:1.45;">${escapeHtml(body.factsNote)}</div>`
@@ -400,7 +414,7 @@ function renderHtml(body: EmailBody): string {
                     `<p style="margin:0 0 14px;color:${INK_MUTED};font-size:16px;line-height:1.55;letter-spacing:-.005em;">${escapeHtml(p)}</p>`,
                 )
                 .join("")}
-              ${facts}${quote}
+              ${facts}${timeline}${quote}
               ${button}
               ${body.footnote ? `<p style="margin:16px 0 0;color:${INK_META};font-size:13px;line-height:1.5;${body.button ? "text-align:center;" : ""}">${escapeHtml(body.footnote)}</p>` : ""}
             </td>
@@ -487,6 +501,12 @@ function renderText(body: EmailBody): string {
   }
   if (body.facts?.length) lines.push("");
   if (body.factsNote) lines.push(body.factsNote, "");
+
+  if (body.timeline?.rows.length) {
+    lines.push(`${body.timeline.title}:`);
+    for (const row of body.timeline.rows) lines.push(`  ${row.label}: ${row.value}`);
+    lines.push("");
+  }
 
   if (body.quote) {
     lines.push(`${body.quote.label}:`, ...body.quote.text.split("\n").map((l) => `  ${l}`), "");

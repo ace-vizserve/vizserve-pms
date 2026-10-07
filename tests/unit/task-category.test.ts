@@ -185,10 +185,9 @@ describe("nextStep", () => {
     expect(nextStep("OPEN", PIC, CLIENT)).toMatchObject({ to: "ONGOING", label: "Start work" });
     expect(nextStep("ONGOING", PIC, CLIENT)).toMatchObject({ to: "FOR_QA", label: "Send for QA" });
     expect(nextStep("FOR_QA", QA, CLIENT)).toMatchObject({ to: "QA_IN_PROGRESS" });
-    expect(nextStep("QA_IN_PROGRESS", QA, CLIENT)).toMatchObject({
-      to: "FOR_CLIENT_APPROVAL",
-      label: "Pass QA",
-    });
+    // P16-08 — both outcomes of a review need a comment now, and a one-click
+    // button cannot carry one. The task screen's buttons open the dialog.
+    expect(nextStep("QA_IN_PROGRESS", QA, CLIENT)).toBeNull();
   });
 
   it("keeps the resolution gate on the button rather than routing around it", () => {
@@ -237,10 +236,9 @@ describe("nextStep", () => {
       to: "FOR_QA",
       label: "Send for QA",
     });
-    expect(nextStep("QA_IN_PROGRESS", QA_LEAD, INTERNAL)).toMatchObject({
-      to: "COMPLETED",
-      label: "Pass QA and close",
-    });
+    // P16-08 — closing a review needs a comment, so it is not a one-click
+    // button on either kind of work.
+    expect(nextStep("QA_IN_PROGRESS", QA_LEAD, INTERNAL)).toBeNull();
   });
 
   it("sends personal work straight to done — P7-02", () => {
@@ -360,5 +358,42 @@ describe("transitionIntent / transitionTone", () => {
     for (const transition of TASK_TRANSITIONS) {
       expect(["brand", "success", "info", "warning"]).toContain(transitionTone(transition));
     }
+  });
+});
+
+/*
+ * P16-08 — every QA review says what was checked. The SQL half is
+ * `20261007150000_p16_08_qa_review_needs_a_comment.sql`; these prove the
+ * mirror the buttons are drawn from agrees with it.
+ */
+describe("QA review needs a comment", () => {
+  const exits = (task: typeof CLIENT | typeof INTERNAL) =>
+    availableTransitions("QA_IN_PROGRESS", QA, task);
+
+  it("asks for one on every exit from review of client work", () => {
+    const moves = exits(CLIENT);
+    expect(targets(moves)).toEqual(["FOR_CLIENT_APPROVAL", "ONGOING"]);
+    for (const move of moves) expect(move.requires).toBe("comment");
+  });
+
+  it("asks for one on internal work too, except back into the queue", () => {
+    for (const move of exits(INTERNAL)) {
+      expect(move.requires).toBe(move.to === "FOR_QA" ? null : "comment");
+    }
+    expect(exits(INTERNAL).find((move) => move.to === "COMPLETED")?.requires).toBe("comment");
+  });
+
+  it("leaves free movement alone everywhere else", () => {
+    for (const move of availableTransitions("FOR_QA", PIC, INTERNAL)) {
+      expect(move.requires).toBeNull();
+    }
+  });
+
+  it("marks both pass rows in the canonical table", () => {
+    const passes = TASK_TRANSITIONS.filter(
+      (row) => row.from === "QA_IN_PROGRESS" && row.to !== "ONGOING",
+    );
+    expect(passes.map((row) => row.label).sort()).toEqual(["Pass QA", "Pass QA and close"]);
+    for (const row of passes) expect(row.requires).toBe("comment");
   });
 });

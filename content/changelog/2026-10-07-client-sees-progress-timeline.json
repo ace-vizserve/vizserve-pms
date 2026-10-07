@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-07",
+  "kind": "added",
+  "area": "Approvals",
+  "title": "Clients see how their request got to them",
+  "description": "The approval page and the approval email now show a progress timeline, so the client can see when the work was done and who did and checked it before they review it.",
+  "items": [
+    "Request submitted, accepted, work started, work finished with the person in charge, and checked by QA with the reviewer's name",
+    "The page ends with the client's own step and the date to respond by",
+    "Only names and dates are shown. Team comments, including the QA comment, stay internal"
+  ],
+  "refs": [
+    "P16-09"
+  ],
+  "pending": "Needs the P16-09 database update applied before the timeline appears."
+}

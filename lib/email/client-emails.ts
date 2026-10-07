@@ -1,6 +1,8 @@
 import "server-only";
 
 
+import type { ClientTimelineStep } from "@/lib/client-timeline";
+
 import type { RequestDetails } from "./request-details";
 import { richTextToPlainText } from "@/lib/rich-text";
 
@@ -384,6 +386,8 @@ type ApprovalEmailInput = {
    * field is optional and a null omits its row.
    */
   details?: RequestDetails | null;
+  /** P16-09 — milestones from `clientTimelineSteps`. Empty or absent omits the card. */
+  timeline?: ClientTimelineStep[];
 };
 
 /**
@@ -433,6 +437,19 @@ export function sendClientApprovalEmail(input: ApprovalEmailInput): Promise<Send
         { label: "Please respond by", value: input.deadline },
       ],
       factsNote: `Reference ${input.referenceNo}`,
+      /*
+       * P16-09 — the same steps, from the same helper, as the approval page.
+       * Their own step is the "Please respond by" row above, not repeated here.
+       */
+      timeline: input.timeline?.length
+        ? {
+            title: "Progress",
+            rows: input.timeline.map((step) => ({
+              label: step.label,
+              value: step.person ? `${step.date} · ${step.person}` : step.date,
+            })),
+          }
+        : undefined,
       /*
        * ⚠️ FLATTENED. `layout.ts` runs every interpolation through `escapeHtml`,
        * so a resolution written with a bullet list would arrive in the client's

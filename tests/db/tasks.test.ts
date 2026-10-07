@@ -229,7 +229,7 @@ async function advanceTo(taskId: string, target: string) {
   await qa.client.rpc("vizserve_pms_transition_task", {
     p_task_id: taskId,
     p_to_status: "FOR_CLIENT_APPROVAL",
-    p_comment: null,
+    p_comment: "Checked against the brief.",
   });
 }
 
@@ -491,7 +491,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const { error } = await client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "COMPLETED",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect(error).not.toBeNull();
@@ -508,7 +508,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const { error } = await client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "FOR_CLIENT_APPROVAL",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect(error).not.toBeNull();
@@ -538,7 +538,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const { error } = await client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "COMPLETED",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect(error).not.toBeNull();
@@ -1264,7 +1264,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const { error } = await me.client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "COMPLETED",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect(error).toBeNull();
@@ -1289,7 +1289,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const { error } = await pic.client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "COMPLETED",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect(error).not.toBeNull();
@@ -1306,7 +1306,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const { error } = await qa.client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "COMPLETED",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect(error).toBeNull();
@@ -1323,7 +1323,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
         const { error } = await qa.client.rpc("vizserve_pms_transition_task", {
           p_task_id: taskId,
           p_to_status: "FOR_CLIENT_APPROVAL",
-          p_comment: null,
+          p_comment: "Checked against the brief.",
         });
 
         expect(error).not.toBeNull();
@@ -1343,20 +1343,53 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
         const shortcut = await qa.client.rpc("vizserve_pms_transition_task", {
           p_task_id: taskId,
           p_to_status: "COMPLETED",
-          p_comment: null,
+          p_comment: "Checked against the brief.",
         });
         expect(shortcut.error).not.toBeNull();
 
         const { error } = await qa.client.rpc("vizserve_pms_transition_task", {
           p_task_id: taskId,
           p_to_status: "FOR_CLIENT_APPROVAL",
-          p_comment: null,
+          p_comment: "Checked against the brief.",
         });
 
         expect(error).toBeNull();
         expect(await statusOf(taskId)).toBe("FOR_CLIENT_APPROVAL");
       },
     );
+
+    // P16-08 — every review says what was checked, on both kinds of work.
+    it.skipIf(!completionApplied)("a QA pass with no comment is refused", async () => {
+      const qa = await signIn("member2VizBytes");
+
+      const client = await makeRequestTask();
+      await advanceTo(client, "QA_IN_PROGRESS");
+      const passed = await qa.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: client,
+        p_to_status: "FOR_CLIENT_APPROVAL",
+        p_comment: "   ",
+      });
+      expect(passed.error?.message).toMatch(/comment is required/i);
+      expect(await statusOf(client)).toBe("QA_IN_PROGRESS");
+
+      const internal = await makeTask();
+      await advanceTo(internal, "QA_IN_PROGRESS");
+      const closed = await qa.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: internal,
+        p_to_status: "COMPLETED",
+        p_comment: null,
+      });
+      expect(closed.error?.message).toMatch(/comment is required/i);
+      expect(await statusOf(internal)).toBe("QA_IN_PROGRESS");
+
+      // Back into the queue is not a review, so it still needs nothing.
+      const requeued = await qa.client.rpc("vizserve_pms_transition_task", {
+        p_task_id: internal,
+        p_to_status: "FOR_QA",
+        p_comment: null,
+      });
+      expect(requeued.error).toBeNull();
+    });
   });
 
   // =========================================================================
@@ -1406,7 +1439,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       await qa.client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "COMPLETED",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect((await move(taskId, "ONGOING")).error).toBeNull();
@@ -2106,7 +2139,7 @@ describe.skipIf(!dbTestsEnabled)("P3 tasks and QA", () => {
       const { error } = await pic.client.rpc("vizserve_pms_transition_task", {
         p_task_id: taskId,
         p_to_status: "FOR_CLIENT_APPROVAL",
-        p_comment: null,
+        p_comment: "Checked against the brief.",
       });
 
       expect(error?.message ?? "").toContain("no client to approve");
