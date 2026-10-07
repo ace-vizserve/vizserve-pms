@@ -78,6 +78,10 @@ export const taskRowSchema = z.object({
   series_period_start: z.string().nullable(),
   /** P15-10. Computed column: the ACTIVE schedule's frequency, or null. */
   repeats: z.enum(["DAILY", "WEEKLY", "MONTHLY"]).nullable(),
+  /** P16-03. Defaulted so a read before the migration still parses. */
+  cancel_reason: z.string().nullable().default(null),
+  archived_at: z.string().nullable().default(null),
+  archive_reason: z.string().nullable().default(null),
 });
 
 export type TaskRow = z.infer<typeof taskRowSchema>;

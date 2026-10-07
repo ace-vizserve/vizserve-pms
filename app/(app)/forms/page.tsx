@@ -6,7 +6,6 @@ import Link from "next/link";
 import { PageShell } from "@/components/page-shell";
 import { buttonVariants } from "@/components/ui/button";
 import { canAccessDepartment, requireDepartmentShape } from "@/lib/auth/authorization";
-import { roleAtLeast } from "@/lib/auth/roles";
 import { createClient } from "@/utils/supabase/server";
 import { administersForm } from "./administers";
 import { FormsTable, type FormRow } from "./forms-table";
@@ -168,7 +167,7 @@ export default async function FormsPage({
         submissionsReadable={submissionsReadable}
         lastSubmission={lastSubmission}
         // P14 — `vizserve_pms_delete_form` asks `vizserve_pms_is_admin()`.
-        isOwner={roleAtLeast(context.role, "admin")}
+        isOwner={context.role === "manager" || context.role === "admin"}
       />
     </PageShell>
   );

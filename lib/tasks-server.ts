@@ -92,7 +92,7 @@ export async function fetchHandoverTasks(
 
   // Named once: the four statuses split two ways everywhere in this app, and a
   // second spelling here would drift from the submit function's own test.
-  const FINISHED = "(COMPLETED,COMPLETED_NO_RESPONSE)";
+  const FINISHED = "(COMPLETED,COMPLETED_NO_RESPONSE,CANCELLED)";
 
   const [own, joined] = await Promise.all([
     // The two COLUMNS. Fixed-length filter, always.

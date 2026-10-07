@@ -82,6 +82,7 @@ export default async function TaskGanttPage({
     supabase
       .from("vizserve_pms_tasks")
       .select("id, title, status, start_date, due_date")
+      .is("archived_at", null)
       .order("start_date", { ascending: true, nullsFirst: false }),
     { listId, view: scope, kind, userId: context.userId },
   );

@@ -99,6 +99,23 @@ function buildSteps({
   request: RequestGate | null;
   decision: ClientDecision | null;
 }): Step[] {
+  // P16-03 — stopped, not finished. Drawing every stage as done would claim a
+  // sign-off that never happened.
+  if (status === "CANCELLED") {
+    const cancelled: Step = { label: "Cancelled", state: "attention", meta: null };
+    return category === "request"
+      ? [
+          { label: "Requested", state: "done", meta: line(request?.submittedAt, request?.requesterName) },
+          {
+            label: "Gate 1 · approved by the team leader",
+            state: "done",
+            meta: line(request?.reviewedAt, request?.reviewedByName),
+          },
+          cancelled,
+        ]
+      : [{ label: "Created", state: "done", meta: line(createdAt, createdByName) }, cancelled];
+  }
+
   const finished = isTerminal(status);
 
   /*

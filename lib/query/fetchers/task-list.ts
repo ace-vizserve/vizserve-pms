@@ -131,7 +131,7 @@ const ORDER_COLUMN: Record<TaskListSort, string> = {
  * noticed, which is how the list shipped broken for every `?person=`.
  */
 const TASK_COLUMNS =
-  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields, position, created_at, series_id, repeats";
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, list_id, request_id, is_personal, priority, estimate_minutes, parent_task_id, resolution, custom_fields, position, created_at, series_id, repeats, archived_at";
 
 /**
  * P12 — the base of a task query: the table, or, with a person filter set, the
@@ -141,11 +141,14 @@ const TASK_COLUMNS =
  * callers chain works on either. See the migration for why this is a function.
  */
 function selectTasks(client: TaskReadClient, extra: ExtraTaskFilters, columns: string, count?: "exact") {
-  const table = client.from("vizserve_pms_tasks").select(columns, count ? { count } : undefined);
+  // P16-03 — archived client tasks leave the list and the board. Both column
+  // sets project `archived_at`, so the filter holds on the RPC path too.
+  const table = client.from("vizserve_pms_tasks").select(columns, count ? { count } : undefined).is("archived_at", null);
   if (!extra.person) return table;
   return client
     .rpc("vizserve_pms_tasks_for_person", { p_user: extra.person, p_role: extra.role }, count ? { count } : undefined)
-    .select(columns) as unknown as typeof table;
+    .select(columns)
+    .is("archived_at", null) as unknown as typeof table;
 }
 
 export type TaskListFilters = {
@@ -357,7 +360,7 @@ export function subtaskProgress(childRows: TaskListView["childRows"]) {
 
 /** `updated_at` for the closed column's order — see the note on `TASK_COLUMNS`. */
 const BOARD_TASK_COLUMNS =
-  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution, custom_fields, updated_at, series_id, repeats";
+  "id, title, status, due_date, start_date, assignee_id, qa_assignee_id, department_id, created_by, request_id, is_personal, priority, output_link, parent_task_id, list_id, resolution, custom_fields, updated_at, series_id, repeats, archived_at";
 
 /** One card's row — the columns `BOARD_TASK_COLUMNS` selects. */
 export type BoardTask = {
@@ -413,7 +416,7 @@ export async function fetchBoardView(
   let live = applyTaskScope(
     selectTasks(client, filters.extra, BOARD_TASK_COLUMNS)
       .order("due_date", { ascending: true, nullsFirst: false })
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"),
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE,CANCELLED)"),
     scope,
   );
   if (filters.priority) live = live.eq("priority", filters.priority);

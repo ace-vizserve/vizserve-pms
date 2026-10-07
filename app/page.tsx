@@ -358,7 +358,7 @@ async function YoursToMoveCell({
       .from("vizserve_pms_tasks")
       .select("id, title, status, due_date")
       .eq("assignee_id", context.userId)
-      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
+      .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE,CANCELLED)")
       .order("due_date", { ascending: true, nullsFirst: false })
       .limit(5),
   ]);

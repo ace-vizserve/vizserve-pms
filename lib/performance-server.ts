@@ -222,7 +222,7 @@ export async function loadPerformance(
                 .from("vizserve_pms_tasks")
                 .select(TASK_COLUMNS, { count: "exact" })
                 .eq("department_id", departmentId)
-                .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)")
+                .not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE,CANCELLED)")
                 .order("id")
                 .range(from, to) as unknown as PromiseLike<{
                 data: TaskRow[] | null;

@@ -76,6 +76,7 @@ const STAGE_BAR: Record<VizservePmsTaskStatus, { fill: string; ink: string }> = 
   FOR_CLIENT_APPROVAL: { fill: "var(--gantt-bar-client)", ink: "var(--gantt-bar-client-ink)" },
   COMPLETED: { fill: "var(--gantt-bar-completed)", ink: "var(--gantt-bar-completed-ink)" },
   COMPLETED_NO_RESPONSE: { fill: "var(--gantt-bar-lapsed)", ink: "var(--gantt-bar-lapsed-ink)" },
+  CANCELLED: { fill: "var(--gantt-bar-open)", ink: "var(--gantt-bar-open-ink)" },
 };
 
 const RANGES = [

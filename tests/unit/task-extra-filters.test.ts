@@ -72,7 +72,7 @@ describe("applyExtraFilters", () => {
   it("overdue is before today AND not finished", () => {
     expect(apply({ due: "overdue" })).toEqual([
       ["lt", "due_date", todayInAppZone()],
-      ["not", "status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)"],
+      ["not", "status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE,CANCELLED)"],
     ]);
   });
 

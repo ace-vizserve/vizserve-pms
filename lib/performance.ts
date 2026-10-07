@@ -277,7 +277,8 @@ export const STALE_DAYS = 14;
 export const DUE_SOON_DAYS = 7;
 
 export function workload(tasks: PerfTask[], today: string): Workload {
-  const open = tasks.filter((task) => !isDone(task.status));
+  // P16-03 — a cancelled task is neither open nor done; it leaves the figures.
+  const open = tasks.filter((task) => !isDone(task.status) && task.status !== "CANCELLED");
   const overdue = open.filter((task) => task.dueDate !== null && task.dueDate < today);
   const soonEnd = addDays(today, DUE_SOON_DAYS) ?? today;
 

@@ -95,7 +95,7 @@ export function FormRowActions({
   isOwner,
 }: {
   form: { id: string; name: string; archived_at: string | null };
-  /** Force delete is owner-only in the database; this only decides what to offer. */
+  /** P16-03 — the Manager or Admin, who may force a delete; this only decides what to offer. */
   isOwner: boolean;
 }) {
   const router = useRouter();
@@ -234,24 +234,16 @@ function DeleteFormDialog({
   const submissions = workload ? workload.requests + workload.responses : 0;
 
   /*
-   * The same three refusals `vizserve_pms_delete_form` raises, in the same
-   * order, so the dialog never offers a button the database will turn down.
+   * P16-03 — with anything behind the form, deleting it is a FORCE: the Manager
+   * or Admin only, and only after typing DELETE. `vizserve_pms_delete_form`
+   * draws the same line.
    */
-  let refusal: string | null = null;
-  if (workload) {
-    if (workload.tasks_from_requests > 0) {
-      refusal = `${plural(workload.tasks_from_requests, "request", "requests")} from this form became tasks, so it cannot be deleted. ${
-        form.archived_at ? "It is already archived, which keeps everything." : "Archive it instead — nothing is lost, and its tasks stay client work."
-      }`;
-    } else if (workload.open_tasks > 0) {
-      refusal = `Its list still has ${plural(workload.open_tasks, "open task", "open tasks")}. Close or move them before deleting the form.`;
-    } else if (submissions > 0 && !isOwner) {
-      refusal = `This form has ${plural(submissions, "submission", "submissions")}. Deleting it deletes them too, which only an Admin, Business Manager or CEO can do. Archiving keeps them.`;
-    }
-  }
-
-  const force = submissions > 0;
-  const confirmed = !force || typed.trim() === form.name.trim();
+  const force = workload !== null && (submissions > 0 || workload.tasks_from_requests > 0 || workload.open_tasks > 0);
+  const refusal =
+    force && !isOwner
+      ? "This form has submissions or tasks behind it. Only the Manager or Admin can delete it with them. Archiving keeps everything."
+      : null;
+  const confirmed = !force || typed.trim() === "DELETE";
 
   function remove() {
     startTransition(async () => {
@@ -292,14 +284,17 @@ function DeleteFormDialog({
               {[
                 workload.requests > 0 ? plural(workload.requests, "request", "requests") : null,
                 workload.responses > 0 ? plural(workload.responses, "response", "responses") : null,
+                workload.tasks_from_requests > 0
+                  ? `${plural(workload.tasks_from_requests, "task", "tasks")} made from them, with their subtasks, logged hours, comments and files`
+                  : null,
               ]
                 .filter(Boolean)
-                .join(" and ")}
-              , with every uploaded file. None of them became a task.
+                .join(", ")}
+              , and every uploaded file.
             </p>
             <div className="space-y-1.5">
               <Label htmlFor="confirm-form-name">
-                Type <span className="font-semibold">{form.name}</span> to confirm
+                Type <span className="font-semibold">DELETE</span> to confirm
               </Label>
               <Input
                 id="confirm-form-name"
@@ -322,7 +317,7 @@ function DeleteFormDialog({
             onClick={remove}
             disabled={workload === null || refusal !== null || !confirmed}
             loading={pending}>
-            {force ? "Delete with submissions" : "Delete"}
+            {force ? "Delete everything" : "Delete"}
           </Button>
         </DialogFooter>
       </DialogContent>

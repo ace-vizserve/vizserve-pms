@@ -348,6 +348,8 @@ const TASK_STATUS_TONES: Record<VizservePmsTaskStatus, Tone> = {
    * (`CircleCheckBig` / `CircleSlash`). Both must stay.
    */
   COMPLETED_NO_RESPONSE: "lapsed",
+  // P16-03. Grey — stopped, not finished. Label and glyph carry the difference.
+  CANCELLED: "neutral",
 };
 
 /**
@@ -371,6 +373,7 @@ export const TASK_STATUS_ICONS: Record<VizservePmsTaskStatus, LucideIcon> = {
   // Distinct from COMPLETED here too — same rule as the tones. The clock ran
   // out; nobody signed anything off.
   COMPLETED_NO_RESPONSE: CircleSlash,
+  CANCELLED: CircleX,
 };
 
 /**

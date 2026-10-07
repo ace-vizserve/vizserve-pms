@@ -101,7 +101,7 @@ export function applyExtraFilters<T extends FilterableTaskQuery<T>>(query: T, fi
     const monday = startOfWeek(today)!;
 
     if (filters.due === "overdue") {
-      scoped = scoped.lt("due_date", today).not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE)");
+      scoped = scoped.lt("due_date", today).not("status", "in", "(COMPLETED,COMPLETED_NO_RESPONSE,CANCELLED)");
     } else if (filters.due === "this_week") {
       scoped = scoped.gte("due_date", monday).lte("due_date", addDays(monday, 6)!);
     } else if (filters.due === "next_week") {

@@ -38,6 +38,8 @@ export const TASK_STATUSES = [
   "FOR_CLIENT_APPROVAL",
   "COMPLETED",
   "COMPLETED_NO_RESPONSE",
+  // P16-03. Stopped with a reason. Out of every open count and every metric.
+  "CANCELLED",
 ] as const;
 
 export type TaskStatus = VizservePmsTaskStatus;
@@ -659,7 +661,7 @@ function forwardSpine(category: TaskCategory): TaskStatus[] {
 }
 
 /** Statuses that mean the work is finished, either way. */
-export const TERMINAL_STATUSES: readonly TaskStatus[] = ["COMPLETED", "COMPLETED_NO_RESPONSE"];
+export const TERMINAL_STATUSES: readonly TaskStatus[] = ["COMPLETED", "COMPLETED_NO_RESPONSE", "CANCELLED"];
 
 export function isTerminal(status: TaskStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
@@ -718,6 +720,7 @@ export const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   // Deliberately distinct from COMPLETED. "The client approved" and "the clock
   // ran out" are different facts and Phase 6 reports the split.
   COMPLETED_NO_RESPONSE: "Completed (no response)",
+  CANCELLED: "Cancelled",
 };
 
 // ---------------------------------------------------------------------------

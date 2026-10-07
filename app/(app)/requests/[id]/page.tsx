@@ -27,6 +27,7 @@ import {
 } from "./request-progress";
 import { CancelRequestButton } from "./cancel-request";
 import { ReviewPanel } from "./review-panel";
+import { isTerminal } from "@/lib/schemas/tasks";
 
 export const metadata: Metadata = { title: "Request" };
 
@@ -291,7 +292,9 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
         </div>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h1 className="text-xl font-semibold tracking-tight">{request.title}</h1>
-          {(request.status === "PENDING_REVIEW" || request.status === "RETURNED") &&
+          {(request.status === "PENDING_REVIEW" ||
+            request.status === "RETURNED" ||
+            (request.status === "APPROVED" && linkedTask && !isTerminal(linkedTask.status))) &&
           canApproveClientRequest(context, form?.department_id ?? null) ? (
             <CancelRequestButton requestId={request.id} />
           ) : null}

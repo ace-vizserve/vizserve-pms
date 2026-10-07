@@ -177,7 +177,9 @@ export type VizservePmsTaskStatus =
   | "QA_IN_PROGRESS"
   | "FOR_CLIENT_APPROVAL"
   | "COMPLETED"
-  | "COMPLETED_NO_RESPONSE";
+  | "COMPLETED_NO_RESPONSE"
+  /** P16-03 — stopped with a reason; out of every open count and metric. */
+  | "CANCELLED";
 
 /**
  * P7-11. Declared low → high in SQL, so Postgres compares and sorts them in
@@ -1337,6 +1339,12 @@ export type Database = {
           series_id: string | null;
           /** P15-10. First day of the period this copy covers. Unique per series. */
           series_period_start: string | null;
+          /** P16-03. Written only by vizserve_pms_cancel_task; NOT in `Update`. */
+          cancel_reason: string | null;
+          /** P16-03. Archive (client tasks, finished or cancelled). NOT in `Update`. */
+          archived_at: string | null;
+          archived_by: string | null;
+          archive_reason: string | null;
           /**
            * P15-10 — NOT A REAL COLUMN. PostgREST computed column backed by
            * `repeats(vizserve_pms_tasks)`: the ACTIVE schedule's frequency, or
@@ -3266,6 +3274,14 @@ export type Database = {
         Args: { p_task_id: string };
         Returns: Json;
       };
+      /** P16-03. Client tasks: TL of the department or the Manager. */
+      vizserve_pms_cancel_task: { Args: { p_task_id: string; p_reason: string }; Returns: undefined };
+      vizserve_pms_reopen_task: { Args: { p_task_id: string }; Returns: undefined };
+      vizserve_pms_archive_task: { Args: { p_task_id: string; p_reason: string }; Returns: undefined };
+      vizserve_pms_restore_task: { Args: { p_task_id: string }; Returns: undefined };
+      /** P16-03. Manager or Admin. */
+      vizserve_pms_client_task_delete_impact: { Args: { p_task_id: string }; Returns: Json };
+      vizserve_pms_delete_client_task: { Args: { p_task_id: string; p_reason: string }; Returns: Json };
       vizserve_pms_delete_task: {
         /** Hard-deletes an internal task and its subtree. Refuses request-backed work. */
         Args: { p_task_id: string };

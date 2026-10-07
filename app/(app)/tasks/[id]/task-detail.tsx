@@ -17,6 +17,7 @@ import { useAuth } from "@/lib/auth/client-auth";
 import {
   canAccessDepartment,
   canAdminDepartment,
+  canApproveClientRequest,
   isCollaborationSpace,
   realtimeDepartmentFilter,
   seesEveryDepartment,
@@ -362,7 +363,29 @@ export function TaskDetail({ taskId }: { taskId: string }) {
           canEdit={canWork}
           dueDate={task.due_date}
           late={late}
+          lifecycle={{
+            archived: task.archived_at !== null,
+            canSteer: canApproveClientRequest(auth, task.department_id),
+            canDelete: auth.role === "manager" || auth.role === "admin",
+          }}
         />
+
+        {/* P16-03 — why it stopped, or why it is out of the lists. */}
+        {task.status === "CANCELLED" || task.archived_at ? (
+          <div className="rounded-lg border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+            {task.status === "CANCELLED" ? (
+              <p>
+                <span className="font-medium text-foreground">Cancelled.</span> {task.cancel_reason ?? ""}
+              </p>
+            ) : null}
+            {task.archived_at ? (
+              <p>
+                <span className="font-medium text-foreground">Archived {formatDate(task.archived_at)}.</span>{" "}
+                {task.archive_reason ?? ""} It is out of the lists and the board.
+              </p>
+            ) : null}
+          </div>
+        ) : null}
 
         {/*
           WHERE THE TASK IS — across the top, above both columns, and NOT in the

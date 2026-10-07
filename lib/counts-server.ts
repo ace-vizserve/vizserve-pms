@@ -38,7 +38,7 @@ import { createClient } from "@/utils/supabase/server";
  */
 
 /** The two statuses that mean the work is finished, as PostgREST wants them. */
-const TERMINAL_FILTER = "(COMPLETED,COMPLETED_NO_RESPONSE)";
+const TERMINAL_FILTER = "(COMPLETED,COMPLETED_NO_RESPONSE,CANCELLED)";
 
 /** The QA queue's two stages. */
 const QA_STAGES = ["FOR_QA", "QA_IN_PROGRESS"] as const;

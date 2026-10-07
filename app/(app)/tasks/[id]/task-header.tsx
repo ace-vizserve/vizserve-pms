@@ -12,7 +12,9 @@ import { cn } from "@/lib/utils";
 import { TaskStatusSelect } from "../status-select";
 import { EditableTitle } from "./editable-title";
 import { TaskActions } from "./task-actions";
+import { ClientTaskMenu } from "./client-task-menu";
 import { useTaskGate } from "./task-gate";
+
 
 /**
  * P7-57 / P7-60 — THE TITLE ROW, AND THE ONE CONTROL THAT MOVES THE TASK.
@@ -55,6 +57,7 @@ export function TaskHeader({
   canEdit,
   dueDate,
   late,
+  lifecycle,
 }: {
   taskId: string;
   title: string;
@@ -67,6 +70,8 @@ export function TaskHeader({
   canEdit: boolean;
   dueDate: string | null;
   late: boolean;
+  /** P16-03 — client tasks only: what the lifecycle menu may offer. */
+  lifecycle?: { archived: boolean; canSteer: boolean; canDelete: boolean };
 }) {
   const gate = useTaskGate();
 
@@ -121,6 +126,16 @@ export function TaskHeader({
             <Link2 />
             <span className="hidden sm:inline">Copy link</span>
           </Button>
+          {category === "request" && lifecycle ? (
+            <ClientTaskMenu
+              taskId={taskId}
+              title={title}
+              status={status}
+              archived={lifecycle.archived}
+              canSteer={lifecycle.canSteer}
+              canDelete={lifecycle.canDelete}
+            />
+          ) : null}
           {/*
             ⚠️ P7-61 — TWO SHAPES, AND THE SPLIT IS THE LENGTH OF THE LIST.
 
