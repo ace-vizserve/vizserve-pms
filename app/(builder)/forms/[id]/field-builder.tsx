@@ -28,7 +28,9 @@ import {
 import { FieldDndProvider, type FieldDrag } from "@/lib/form-builder/dnd";
 import { planSchemaSave, type SchemaSaveAttempt } from "@/lib/form-builder/save-outcome";
 import { planEntityReorder } from "@/lib/form-builder/schema";
-import type { FieldType, FormPurpose, RequestFieldLabels } from "@/lib/schemas/forms";
+import type { FieldType, FormPurpose, RequestFieldLabels, RequestFieldsShown } from "@/lib/schemas/forms";
+
+import { DefaultFields } from "./default-fields";
 
 import { QuestionEditor } from "./question-editor";
 import { QuestionList } from "./question-list";
@@ -108,6 +110,7 @@ export function FieldBuilder({
   formName,
   description,
   requestLabels,
+  requestFields,
   submissionCount,
   isQuiz,
   grading,
@@ -129,6 +132,8 @@ export function FieldBuilder({
   description: string;
   /** P15-04 — a client form's own names for its three request fields. */
   requestLabels: RequestFieldLabels;
+  /** P16-04 — which of the three the form still asks. */
+  requestFields: RequestFieldsShown;
   /**
    * ⚠️ HOW MANY ANSWERS THE FORM HAS — AND WHETHER IT HAS ANY IS THE
    * GRANULARITY THE DATABASE WORKS AT. `vizserve_pms_form_field_protect`
@@ -706,7 +711,11 @@ export function FieldBuilder({
                 </p>
               ) : null}
 
-              <FixedFieldsNote purpose={purpose} isAnonymous={isAnonymous} />
+              {purpose === "CLIENT_REQUEST" ? (
+                <DefaultFields formId={formId} labels={requestLabels} shown={requestFields} />
+              ) : (
+                <FixedFieldsNote purpose={purpose} isAnonymous={isAnonymous} />
+              )}
 
               {active.length === 0 && archived.length === 0 ? (
                 <EmptyCanvas purpose={purpose} />
@@ -806,8 +815,8 @@ export function FieldBuilder({
 
           <div className="min-h-0 max-[1180px]:col-span-full max-[1180px]:border-t">
             <RespondentPreview
-              formId={formId}
               requestLabels={requestLabels}
+              requestFields={requestFields}
               builderStore={builderStore}
               purpose={purpose}
               isAnonymous={isAnonymous}
@@ -874,7 +883,7 @@ function EmptyCanvas({ purpose }: { purpose: FormPurpose }) {
       <p className="text-sm font-medium">No questions yet</p>
       <p className="mx-auto mt-1 max-w-[40ch] text-xs text-balance text-muted-foreground">
         {purpose === "CLIENT_REQUEST"
-          ? "The five above are collected on every client form. Pick a type on the left to ask for anything else."
+          ? "The default fields above start on every client form. Pick a type on the left to ask for anything else."
           : "Pick a type on the left to ask your first question."}
       </p>
     </div>

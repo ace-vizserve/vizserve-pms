@@ -117,7 +117,8 @@ export type RequestFieldKey = (typeof REQUEST_FIELD_KEYS)[number];
 export const REQUEST_FIELD_DEFAULT_LABELS: Record<RequestFieldKey, string> = {
   title: "Title",
   description: "Description",
-  target_date: "Target date",
+  // P16-04 — the client's ideal date, never the due date.
+  target_date: "Ideal finish date",
 };
 
 export const requestFieldLabelsSchema = z.object({
@@ -127,6 +128,25 @@ export const requestFieldLabelsSchema = z.object({
 });
 
 export type RequestFieldLabels = z.infer<typeof requestFieldLabelsSchema>;
+
+/**
+ * P16-04 — which of the three a form asks at all. Name and email are always
+ * asked; these are the form's to remove.
+ */
+export const requestFieldsShownSchema = z.object({
+  title: z.boolean().default(true),
+  description: z.boolean().default(true),
+  target_date: z.boolean().default(true),
+});
+
+export type RequestFieldsShown = z.infer<typeof requestFieldsShownSchema>;
+
+export const ALL_REQUEST_FIELDS_SHOWN: RequestFieldsShown = { title: true, description: true, target_date: true };
+
+export const requestFieldShownInputSchema = z.object({
+  key: z.enum(REQUEST_FIELD_KEYS),
+  shown: z.boolean(),
+});
 
 /** What a client reads: the form's own label, or the default. */
 export function requestFieldLabel(labels: Partial<RequestFieldLabels> | null | undefined, key: RequestFieldKey): string {
@@ -152,6 +172,8 @@ export const publicFormSchema = z.object({
   attachment_rules: attachmentRulesSchema.nullish(),
   // P15-04. Defaulted so a form read before the migration still parses.
   request_labels: requestFieldLabelsSchema.default({ title: null, description: null, target_date: null }),
+  // P16-04. Defaulted so a form read before the migration still parses.
+  request_fields: requestFieldsShownSchema.default(ALL_REQUEST_FIELDS_SHOWN),
   fields: z.array(publicFormFieldSchema),
 });
 
@@ -169,8 +191,17 @@ export const requestCoreSchema = z.object({
   requester_org: z.string().trim().default("HFSE"),
   title: z.string().trim().min(1, "A short title is required."),
   description: z.string().trim().min(1, "A description is required."),
-  target_date: z.string().min(1, "A target date is required."),
+  // P16-04 — the ideal finish date. Optional.
+  target_date: z.string().default(""),
 });
+
+/** P16-04 — the same, for a form that may not ask for a title or description. */
+export function requestCoreSchemaFor(shown: RequestFieldsShown) {
+  return requestCoreSchema.extend({
+    title: shown.title ? requestCoreSchema.shape.title : z.string().default(""),
+    description: shown.description ? requestCoreSchema.shape.description : z.string().default(""),
+  });
+}
 
 /**
  * A file the server has already accepted (P1-09).
@@ -294,7 +325,7 @@ export function buildSubmissionSchema(form: PublicForm) {
     shape[field.field_key] = buildFieldSchema(field);
   }
 
-  return requestCoreSchema.extend({
+  return requestCoreSchemaFor(form.request_fields).extend({
     field_values: z.object(shape),
   });
 }

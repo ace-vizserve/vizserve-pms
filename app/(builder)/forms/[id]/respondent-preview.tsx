@@ -1,7 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useMemo, useState } from "react";
 import { Info, Monitor, Smartphone, TriangleAlert, User } from "lucide-react";
 
 import { cn } from "@/lib/utils";
@@ -12,14 +11,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { paginateFields, type CanvasField } from "@/lib/form-builder/canvas";
 import { FieldPreview, type FormBuilderStore } from "@/lib/form-builder/components";
 import {
-  REQUEST_FIELD_DEFAULT_LABELS,
+  requestFieldLabel,
   type FormPurpose,
-  type RequestFieldKey,
   type RequestFieldLabels,
+  type RequestFieldsShown,
 } from "@/lib/schemas/forms";
-import { setRequestFieldLabel } from "@/app/(app)/forms/actions";
-
-import { useSaveStatus } from "./save-status";
 
 /**
  * P7-66 — THE RIGHT PANE: THE FORM ITSELF.
@@ -54,8 +50,8 @@ import { useSaveStatus } from "./save-status";
  */
 
 export function RespondentPreview({
-  formId,
   requestLabels,
+  requestFields,
   builderStore,
   purpose,
   isAnonymous,
@@ -63,8 +59,9 @@ export function RespondentPreview({
   description,
   active,
 }: {
-  formId: string;
   requestLabels: RequestFieldLabels;
+  /** P16-04 — which of the three the form still asks. */
+  requestFields: RequestFieldsShown;
   builderStore: FormBuilderStore;
   purpose: FormPurpose;
   /** Only meaningful on a staff form — see the notice below. */
@@ -198,8 +195,8 @@ export function RespondentPreview({
           {onFirstPage ? (
             isClient ? (
               <ClientFixedFields
-                formId={formId}
                 labels={requestLabels}
+                shown={requestFields}
                 stacked={width === "mobile"}
               />
             ) : (
@@ -359,12 +356,12 @@ function Legend({ children }: { children: React.ReactNode }) {
  * times.
  */
 function ClientFixedFields({
-  formId,
   labels,
+  shown,
   stacked,
 }: {
-  formId: string;
   labels: RequestFieldLabels;
+  shown: RequestFieldsShown;
   stacked: boolean;
 }) {
   return (
@@ -377,136 +374,23 @@ function ClientFixedFields({
         </div>
       </PreviewCard>
 
-      <PreviewCard className="px-5.5 py-4.5">
-        <Legend>Your request</Legend>
-        {/* P15-04 — the fields are fixed, their labels are the form's. */}
-        <div className="grid gap-3.5">
-          <EditableRequestField formId={formId} fieldKey="title" saved={labels.title} />
-          <EditableRequestField formId={formId} fieldKey="description" saved={labels.description} multiline />
-          <EditableRequestField formId={formId} fieldKey="target_date" saved={labels.target_date} type="date" />
-        </div>
-      </PreviewCard>
+      {/* P16-04 — only the ones the form keeps; renamed and removed in the
+          left pane's Default fields. */}
+      {shown.title || shown.description || shown.target_date ? (
+        <PreviewCard className="px-5.5 py-4.5">
+          <Legend>Your request</Legend>
+          <div className="grid gap-3.5">
+            {shown.title ? <PreviewField id="preview-title" label={requestFieldLabel(labels, "title")} required /> : null}
+            {shown.description ? (
+              <PreviewField id="preview-description" label={requestFieldLabel(labels, "description")} required multiline />
+            ) : null}
+            {shown.target_date ? (
+              <PreviewField id="preview-target_date" label={requestFieldLabel(labels, "target_date")} type="date" />
+            ) : null}
+          </div>
+        </PreviewCard>
+      ) : null}
     </>
-  );
-}
-
-const LABEL_DEBOUNCE_MS = 700;
-
-/**
- * P15-04 — one fixed request field whose LABEL can be retyped in place.
- *
- * Same save rhythm as `BuilderTitle`: debounced while typing, flushed on blur,
- * Escape abandons. Clearing the label resets it to the default.
- */
-function EditableRequestField({
-  formId,
-  fieldKey,
-  saved,
-  multiline = false,
-  type = "text",
-}: {
-  formId: string;
-  fieldKey: RequestFieldKey;
-  saved: string | null;
-  multiline?: boolean;
-  type?: string;
-}) {
-  const router = useRouter();
-  const { track } = useSaveStatus();
-  const fallback = REQUEST_FIELD_DEFAULT_LABELS[fieldKey];
-
-  const [value, setValue] = useState(saved ?? fallback);
-  const savedRef = useRef(saved ?? fallback);
-  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abandonRef = useRef(false);
-
-  useEffect(() => {
-    const next = saved ?? fallback;
-    if (next === savedRef.current) return;
-    savedRef.current = next;
-    setValue(next);
-  }, [saved, fallback]);
-
-  useEffect(() => () => {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-  }, []);
-
-  function save(next: string) {
-    const trimmed = next.trim() || fallback;
-    if (trimmed === savedRef.current) return;
-
-    void track(async () => {
-      // The default is stored as null, so a form left on it follows the default.
-      const result = await setRequestFieldLabel(formId, {
-        key: fieldKey,
-        label: trimmed === fallback ? "" : trimmed,
-      });
-
-      if (!result.ok) {
-        return { outcome: { kind: "failed" as const, message: result.error }, value: undefined };
-      }
-
-      savedRef.current = trimmed;
-      router.refresh();
-      return { outcome: { kind: "saved" as const }, value: undefined };
-    }).catch((cause: unknown) => {
-      console.error("[P15-04] saving a request field label threw —", cause);
-    });
-  }
-
-  function onChange(next: string) {
-    setValue(next);
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-    timerRef.current = setTimeout(() => save(next), LABEL_DEBOUNCE_MS);
-  }
-
-  function onBlur() {
-    if (timerRef.current !== null) clearTimeout(timerRef.current);
-
-    if (abandonRef.current) {
-      abandonRef.current = false;
-      setValue(savedRef.current);
-      return;
-    }
-
-    if (value.trim() === "") setValue(fallback);
-    save(value);
-  }
-
-  const inputId = `preview-${fieldKey}`;
-
-  return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-0.5">
-        <input
-          value={value}
-          maxLength={120}
-          onChange={(event) => onChange(event.target.value)}
-          onBlur={onBlur}
-          onKeyDown={(event) => {
-            if (event.key === "Enter") event.currentTarget.blur();
-            if (event.key === "Escape") {
-              abandonRef.current = true;
-              if (timerRef.current !== null) clearTimeout(timerRef.current);
-              setValue(savedRef.current);
-              event.currentTarget.blur();
-            }
-          }}
-          aria-label={`Label for the ${REQUEST_FIELD_DEFAULT_LABELS[fieldKey].toLowerCase()} field`}
-          placeholder={fallback}
-          className="-ml-1.5 min-w-0 flex-1 rounded-md bg-transparent px-1.5 py-0.5 text-sm font-medium hover:bg-accent focus-visible:bg-card focus-visible:outline-2 focus-visible:outline-primary"
-        />
-        <span aria-hidden className="text-destructive">
-          *
-        </span>
-        <span className="sr-only">(required)</span>
-      </div>
-      {multiline ? (
-        <Textarea id={inputId} rows={3} disabled aria-label={value || fallback} />
-      ) : (
-        <Input id={inputId} type={type} disabled aria-label={value || fallback} />
-      )}
-    </div>
   );
 }
 

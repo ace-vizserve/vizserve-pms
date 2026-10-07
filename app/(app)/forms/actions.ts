@@ -28,6 +28,7 @@ import {
   prefixFromName,
   requestFieldLabel,
   requestFieldLabelInputSchema,
+  requestFieldShownInputSchema,
   slugFromName,
   type FormAudience,
 } from "@/lib/schemas/forms";
@@ -828,6 +829,31 @@ export async function setRequestFieldLabel(formId: string, input: unknown): Prom
 
   const { error } = await supabase.from("vizserve_pms_forms").update(patch).eq("id", formId);
 
+  if (error) return { ok: false, error: error.message };
+
+  revalidatePath(`/forms/${formId}`);
+  return { ok: true, data: undefined };
+}
+
+/**
+ * P16-04 — keep or remove one of a client form's request fields (title,
+ * description, ideal finish date). Name and email cannot be removed.
+ */
+export async function setRequestFieldShown(formId: string, input: unknown): Promise<ActionResult> {
+  const { supabase, form } = await assertCanEditForm(formId);
+
+  if (form.purpose !== "CLIENT_REQUEST") {
+    return { ok: false, error: "Only a client form has request fields." };
+  }
+
+  const parsed = requestFieldShownInputSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That change could not be saved." };
+
+  const { key, shown } = parsed.data;
+  const patch =
+    key === "title" ? { asks_title: shown } : key === "description" ? { asks_description: shown } : { asks_target_date: shown };
+
+  const { error } = await supabase.from("vizserve_pms_forms").update(patch).eq("id", formId);
   if (error) return { ok: false, error: error.message };
 
   revalidatePath(`/forms/${formId}`);

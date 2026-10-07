@@ -39,6 +39,7 @@ function form(fields: PublicFormField[]): PublicForm {
     description: "",
     requires_attachment: false,
     requires_approval: true,
+    request_fields: { title: true, description: true, target_date: true },
     request_labels: { title: null, description: null, target_date: null },
     fields,
   };
@@ -80,9 +81,18 @@ describe("core fields every request carries", () => {
     expect(schema.safeParse({ ...core, title: "   ", field_values: {} }).success).toBe(false);
   });
 
-  it("rejects a missing target date", () => {
+  // P16-04 — the date is the client's ideal finish date, and optional.
+  it("accepts a missing ideal finish date", () => {
     const schema = buildSubmissionSchema(form([]));
-    expect(schema.safeParse({ ...core, target_date: "", field_values: {} }).success).toBe(false);
+    expect(schema.safeParse({ ...core, target_date: "", field_values: {} }).success).toBe(true);
+  });
+
+  it("does not ask for a title the form removed", () => {
+    const schema = buildSubmissionSchema({
+      ...form([]),
+      request_fields: { title: false, description: true, target_date: true },
+    });
+    expect(schema.safeParse({ ...core, title: "", field_values: {} }).success).toBe(true);
   });
 });
 

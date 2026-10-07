@@ -815,6 +815,10 @@ export type Database = {
           requires_attachment: boolean;
           /** P16-01 — false: submissions are recorded, never reviewed. */
           requires_approval: boolean;
+          /** P16-04 — which request fields the public form asks. */
+          asks_title: boolean;
+          asks_description: boolean;
+          asks_target_date: boolean;
           sla_minutes: number;
           /** P15-04 — client-form label overrides; null shows the default. */
           title_label: string | null;
@@ -861,6 +865,9 @@ export type Database = {
           audience_is_all_departments?: boolean;
           requires_attachment?: boolean;
           requires_approval?: boolean;
+          asks_title?: boolean;
+          asks_description?: boolean;
+          asks_target_date?: boolean;
           sla_minutes?: number;
           title_label?: string | null;
           description_label?: string | null;
@@ -898,6 +905,10 @@ export type Database = {
           requires_attachment: boolean;
           /** P16-01 — false: submissions are recorded, never reviewed. */
           requires_approval: boolean;
+          /** P16-04 — which request fields the public form asks. */
+          asks_title: boolean;
+          asks_description: boolean;
+          asks_target_date: boolean;
           sla_minutes: number;
           title_label: string | null;
           description_label: string | null;

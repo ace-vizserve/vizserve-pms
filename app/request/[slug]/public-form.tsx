@@ -25,7 +25,7 @@ import {
   routeFieldErrors,
   type FieldValues,
 } from "@/lib/form-builder/values";
-import { requestCoreSchema, requestFieldLabel, type AttachmentRef, type PublicForm } from "@/lib/schemas/forms";
+import { requestCoreSchemaFor, requestFieldLabel, type AttachmentRef, type PublicForm } from "@/lib/schemas/forms";
 
 import { submitPublicRequest, uploadPublicAttachment } from "./actions";
 
@@ -192,7 +192,7 @@ export function PublicFormRenderer({
     // The five fixed fields only. The per-form fields are validated by their own
     // entity `validate`, which is a verbatim port of the `buildFieldSchema`
     // branch that used to be extended onto this schema.
-    resolver: zodResolver(requestCoreSchema) as unknown as Resolver<SubmissionFormValues>,
+    resolver: zodResolver(requestCoreSchemaFor(form.request_fields)) as unknown as Resolver<SubmissionFormValues>,
     defaultValues: {
       requester_name: "",
       requester_email: "",
@@ -438,9 +438,11 @@ export function PublicFormRenderer({
           </div>
         </fieldset>
 
+        {form.request_fields.title || form.request_fields.description || form.request_fields.target_date ? (
         <fieldset className="space-y-4">
           <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Your request</legend>
 
+          {form.request_fields.title ? (
           <div className="space-y-2">
             <Label htmlFor="title">
               {requestFieldLabel(form.request_labels, "title")}
@@ -453,7 +455,9 @@ export function PublicFormRenderer({
               <p className="text-sm text-destructive">{String(errors.title.message)}</p>
             ) : null}
           </div>
+          ) : null}
 
+          {form.request_fields.description ? (
           <div className="space-y-2">
             <Label htmlFor="description">
               {requestFieldLabel(form.request_labels, "description")}
@@ -466,14 +470,12 @@ export function PublicFormRenderer({
               <p className="text-sm text-destructive">{String(errors.description.message)}</p>
             ) : null}
           </div>
+          ) : null}
 
+          {form.request_fields.target_date ? (
           <div className="space-y-2">
-            <Label htmlFor="target_date">
-              {requestFieldLabel(form.request_labels, "target_date")}
-              <span className="ml-0.5 text-destructive" aria-label="required">
-                *
-              </span>
-            </Label>
+            {/* P16-04 — the ideal finish date: optional, and not the due date. */}
+            <Label htmlFor="target_date">{requestFieldLabel(form.request_labels, "target_date")}</Label>
             {/*
               Through a Controller rather than `register`, because DatePicker is
               controlled and has no DOM event to hook a ref onto.
@@ -499,14 +501,16 @@ export function PublicFormRenderer({
               )}
             />
             <p className="text-xs text-muted-foreground">
-              When you need this by. A team leader may propose a different date.
+              Optional. When you would ideally like this finished — the team confirms the actual date.
             </p>
             {errors.target_date ? (
               <p className="text-sm text-destructive">{String(errors.target_date.message)}</p>
             ) : null}
           </div>
+          ) : null}
 
           </fieldset>
+        ) : null}
         </div>
 
         {/*
