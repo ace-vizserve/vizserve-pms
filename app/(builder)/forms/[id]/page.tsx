@@ -147,7 +147,7 @@ export default async function EditFormPage({
   const { data: form, error: formError } = await supabase
     .from("vizserve_pms_forms")
     .select(
-      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_quiz, is_public, is_active, archived_at, first_published_at, audience_is_all_departments, requires_attachment, requires_approval, sla_minutes, default_list_id, client_approval_days, title_label, description_label, target_date_label, asks_title, asks_description, asks_target_date, schema",
+      "id, name, slug, description, department_id, created_by, reference_prefix, purpose, is_anonymous, is_quiz, is_public, is_active, archived_at, first_published_at, audience_is_all_departments, requires_attachment, requires_approval, urgent_days, normal_days, sla_minutes, default_list_id, client_approval_days, title_label, description_label, target_date_label, asks_title, asks_description, asks_target_date, schema",
     )
     .eq("id", id)
     .maybeSingle();
@@ -625,6 +625,8 @@ export default async function EditFormPage({
                   reference_prefix: form.reference_prefix,
                   requires_attachment: form.requires_attachment,
                   requires_approval: form.requires_approval,
+                  urgent_days: form.urgent_days,
+                  normal_days: form.normal_days,
                   sla_minutes: form.sla_minutes,
                   default_list_id: form.default_list_id,
                   client_approval_days: form.client_approval_days,
@@ -645,6 +647,8 @@ export default async function EditFormPage({
                   is_active: form.is_active,
                   requires_attachment: form.requires_attachment,
                   requires_approval: form.requires_approval,
+                  urgent_days: form.urgent_days,
+                  normal_days: form.normal_days,
                   sla_minutes: form.sla_minutes,
                   default_list_id: form.default_list_id,
                   client_approval_days: form.client_approval_days,

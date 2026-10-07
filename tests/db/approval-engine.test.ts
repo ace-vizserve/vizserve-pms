@@ -209,11 +209,10 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
   // =========================================================================
   describe("approving", () => {
     it.skipIf(!migrationApplied)(
-      "stores BOTH dates and makes the task due on the adjusted one",
+      "keeps the ideal date and makes the task due on the SLA date",
       async () => {
-        // The delta between the two is the only measurable evidence that this
-        // gate negotiates rather than rubber-stamps. Overwrite target_date and
-        // the feature becomes unprovable.
+        // P16-05 — the urgency decides the due date; the client's ideal date
+        // is kept beside it and never used.
         const requestId = await submitRequest("2026-12-01");
         const { client } = await signIn("tlVizBytes");
 
@@ -221,7 +220,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
           p_request_id: requestId,
           p_assignee_id: picId,
           p_qa_assignee_id: qaId,
-          p_approved_target_date: "2026-12-08",
+          p_urgency: "NON_URGENT",
           p_title: null,
           p_description: null,
         });
@@ -231,13 +230,14 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
 
         const { data: request } = await adminClient()
           .from("vizserve_pms_requests")
-          .select("status, target_date, approved_target_date, reviewed_by, reviewed_at")
+          .select("status, target_date, approved_target_date, urgency, reviewed_by, reviewed_at")
           .eq("id", requestId)
           .single();
 
         expect(request!.status).toBe("APPROVED");
         expect(request!.target_date).toBe("2026-12-01");
-        expect(request!.approved_target_date).toBe("2026-12-08");
+        expect(request!.urgency).toBe("NON_URGENT");
+        expect(request!.approved_target_date).not.toBeNull();
         expect(request!.reviewed_at).not.toBeNull();
 
         const { data: task } = await adminClient()
@@ -248,7 +248,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
 
         expect(task).toMatchObject({
           status: "OPEN",
-          due_date: "2026-12-08",
+          due_date: request!.approved_target_date,
           assignee_id: picId,
           qa_assignee_id: qaId,
           department_id: DEPARTMENTS.VizBytes,
@@ -264,7 +264,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: picId,
         p_qa_assignee_id: qaId,
-        p_approved_target_date: null,
+        p_urgency: "NON_URGENT",
         p_title: null,
         p_description: null,
       });
@@ -292,7 +292,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: picId,
         p_qa_assignee_id: null,
-        p_approved_target_date: null,
+        p_urgency: "NON_URGENT",
         p_title: null,
         p_description: null,
       });
@@ -315,7 +315,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: picId,
         p_qa_assignee_id: null,
-        p_approved_target_date: "2026-12-15",
+        p_urgency: "NON_URGENT",
         p_title: "Poster for the open day (A3)",
         p_description: null,
       });
@@ -350,7 +350,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
           p_request_id: requestId,
           p_assignee_id: picId,
           p_qa_assignee_id: null,
-          p_approved_target_date: null,
+          p_urgency: "NON_URGENT",
           p_title: null,
           p_description: null,
         });
@@ -390,7 +390,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
           p_request_id: requestId,
           p_assignee_id: outsider!.id,
           p_qa_assignee_id: null,
-          p_approved_target_date: null,
+          p_urgency: "NON_URGENT",
           p_title: null,
           p_description: null,
         });
@@ -440,7 +440,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: picId,
         p_qa_assignee_id: null,
-        p_approved_target_date: null,
+        p_urgency: "NON_URGENT",
         p_title: null,
         p_description: null,
       });
@@ -449,7 +449,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: qaId,
         p_qa_assignee_id: null,
-        p_approved_target_date: null,
+        p_urgency: "NON_URGENT",
         p_title: null,
         p_description: null,
       });
@@ -554,7 +554,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: picId,
         p_qa_assignee_id: null,
-        p_approved_target_date: null,
+        p_urgency: "NON_URGENT",
         p_title: null,
         p_description: null,
       });
@@ -577,7 +577,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
           p_request_id: requestId,
           p_assignee_id: picId,
           p_qa_assignee_id: null,
-          p_approved_target_date: null,
+          p_urgency: "NON_URGENT",
           p_title: null,
           p_description: null,
         });
@@ -601,7 +601,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: picId,
         p_qa_assignee_id: null,
-        p_approved_target_date: null,
+        p_urgency: "NON_URGENT",
         p_title: null,
         p_description: null,
       });
@@ -673,7 +673,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
         p_request_id: requestId,
         p_assignee_id: picId,
         p_qa_assignee_id: null,
-        p_approved_target_date: null,
+        p_urgency: "NON_URGENT",
         p_title: null,
         p_description: null,
       });
@@ -781,7 +781,7 @@ describe.skipIf(!dbTestsEnabled)("P2 approval engine", () => {
           p_request_id: requestId,
           p_assignee_id: picId,
           p_qa_assignee_id: qaId,
-          p_approved_target_date: null,
+          p_urgency: "NON_URGENT",
           p_title: null,
           p_description: null,
         });

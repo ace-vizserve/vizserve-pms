@@ -49,6 +49,8 @@ const CLIENT_SETTINGS = {
   is_active: true,
   requires_attachment: false,
   requires_approval: true,
+  urgent_days: 3,
+  normal_days: 5,
   sla_minutes: DEFAULT_SLA_MINUTES,
   default_list_id: null,
   client_approval_days: 3,
@@ -97,6 +99,8 @@ const FORMERLY_DEFAULTED = {
   is_active: true,
   requires_attachment: true,
   requires_approval: true,
+  urgent_days: 3,
+  normal_days: 5,
   default_list_id: "3f1d2c4e-5a6b-4c7d-8e9f-0a1b2c3d4e5f",
   client_approval_days: 7,
 } as const;

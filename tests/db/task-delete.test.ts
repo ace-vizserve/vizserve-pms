@@ -94,7 +94,7 @@ async function makeClientTask() {
     p_request_id: submission.request_id!,
     p_assignee_id: picId,
     p_qa_assignee_id: qaId,
-    p_approved_target_date: null,
+    p_urgency: "NON_URGENT",
     p_title: null,
     p_description: null,
     p_list_id: null,

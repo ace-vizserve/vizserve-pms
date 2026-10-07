@@ -17,6 +17,7 @@ import {
   approveResultSchema,
   cancelRequestSchema,
   cancelResultSchema,
+  urgencyInputSchema,
   decideResultSchema,
   decisionPayloadSchema,
 } from "@/lib/schemas/approvals";
@@ -80,7 +81,7 @@ export async function decideOnRequest(
       p_request_id: requestId,
       p_assignee_id: payload.assignee_id,
       p_qa_assignee_id: payload.qa_assignee_id,
-      p_approved_target_date: payload.approved_target_date,
+      p_urgency: payload.urgency,
       p_title: payload.title,
       // P7-56. Sanitised on write; `<RichText>` sanitises again on render,
       // which is the pass that actually guards.
@@ -257,6 +258,24 @@ export async function cancelRequest(requestId: string, input: unknown): Promise<
   revalidatePath("/");
   revalidatePath("/dashboard");
 
+  return { ok: true, data: undefined };
+}
+
+/** P16-05 — change the urgency of approved work; the SLA date follows. */
+export async function setRequestUrgency(requestId: string, input: unknown): Promise<ActionResult> {
+  await requireRole("team_leader");
+  const parsed = urgencyInputSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "Choose Urgent or Non-urgent." };
+
+  const supabase = await createClient();
+  const { error } = await supabase.rpc("vizserve_pms_set_request_urgency", {
+    p_request_id: requestId,
+    p_urgency: parsed.data.urgency,
+  });
+  if (error) return { ok: false, error: readableError(error) };
+
+  revalidatePath(`/requests/${requestId}`);
+  revalidatePath("/tasks");
   return { ok: true, data: undefined };
 }
 

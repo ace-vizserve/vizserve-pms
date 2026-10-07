@@ -85,17 +85,10 @@ export const approveDecisionSchema = z.object({
    */
   qa_assignee_id: z.uuid().nullable().default(null),
   /**
-   * The NEGOTIATED date. Null means "as requested".
-   *
-   * The request's own `target_date` is never overwritten. Both survive, and the
-   * delta between them is the only measurable evidence that this gate does
-   * anything (P2-03).
+   * P16-05 — the Team Leader's call. With the form's working-day figures it
+   * decides the due date; there is no date to type any more.
    */
-  approved_target_date: z
-    .string()
-    .regex(/^\d{4}-\d{2}-\d{2}$/, "Use a valid date.")
-    .nullable()
-    .default(null),
+  urgency: z.enum(["URGENT", "NON_URGENT"], { message: "Choose Urgent or Non-urgent." }),
   /** Typo corrections made while approving. Null means unchanged. */
   title: z.string().trim().min(1).max(300).nullable().default(null),
   description: z.string().trim().min(1).nullable().default(null),
@@ -165,6 +158,9 @@ export const cancelResultSchema = z.object({
   requester_name: z.string(),
   title: z.string(),
 });
+
+/** P16-05 — changing the urgency of approved work. */
+export const urgencyInputSchema = z.object({ urgency: z.enum(["URGENT", "NON_URGENT"]) });
 
 export const decideResultSchema = z.object({
   ok: z.literal(true),

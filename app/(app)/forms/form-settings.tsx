@@ -26,18 +26,6 @@ import { useUnpublishConfirm } from "./form-lifecycle";
 type Department = { id: string; name: string };
 
 /**
- * A client form's SLA is picked by urgency, not typed. Each tier is a whole
- * number of working days, stored as `sla_minutes` like any other duration
- * (1d = 8 working hours). A new form starts on Normal.
- */
-const SLA_URGENCIES = [
-  { value: "3d", label: "Urgent", days: 3 },
-  { value: "5d", label: "High", days: 5 },
-  { value: "8d", label: "Normal", days: 8 },
-  { value: "12d", label: "Low", days: 12 },
-] as const;
-
-/**
  * P7-66 Phase 4 — SETTINGS FOR A CLIENT REQUEST FORM.
  *
  * ⚠️ CLIENT FORMS ONLY. This card used to serve both purposes and hide half of
@@ -132,7 +120,9 @@ export function ClientFormSettings({
       is_active: initial?.is_active ?? false,
       requires_attachment: initial?.requires_attachment ?? false,
       requires_approval: initial?.requires_approval ?? true,
-      sla_minutes: initial?.sla_minutes !== undefined ? formatSlaDuration(initial.sla_minutes) : "8d",
+      urgent_days: initial?.urgent_days ?? 3,
+      normal_days: initial?.normal_days ?? 5,
+      sla_minutes: initial?.sla_minutes !== undefined ? formatSlaDuration(initial.sla_minutes) : "5d",
       default_list_id: initial?.default_list_id ?? null,
       client_approval_days: initial?.client_approval_days ?? 3,
     },
@@ -189,15 +179,6 @@ export function ClientFormSettings({
   // Select.Value falls back to rendering the raw value, and these two are the
   // worst case of that: a bare UUID and the literal string "__none__".
   const departmentItems = Object.fromEntries(departments.map((d) => [d.id, d.name]));
-  /*
-   * A form saved before urgency tiers existed may hold a duration that is none
-   * of them. It is offered as-is so a save does not silently move it.
-   */
-  const slaValue = watch("sla_minutes") as unknown as string;
-  const slaItems: Record<string, string> = Object.fromEntries(
-    SLA_URGENCIES.map((tier) => [tier.value, `${tier.label} — ${tier.days} working days`]),
-  );
-  if (slaValue && !(slaValue in slaItems)) slaItems[slaValue] = `Custom — ${slaValue}`;
 
 
   const onSubmit = handleSubmit((values) => {
@@ -311,30 +292,43 @@ export function ClientFormSettings({
             the name, and an edit leaves it alone — a reference already quoted
             to a client is rebuilt from it. It rides along in the form state. */}
 
+        {/* P16-05 — the Team Leader picks Urgent or Non-urgent at Gate 1;
+            these are the working days each one gives. */}
         {requiresApproval ? (
         <div className="space-y-2">
-          <Label htmlFor="sla_minutes">Urgency</Label>
-          <Select
-            items={slaItems}
-            value={slaValue}
-            onValueChange={(value) =>
-              setValue("sla_minutes", value as unknown as FormSettingsValues["sla_minutes"], { shouldValidate: true })
-            }>
-            <SelectTrigger id="sla_minutes" aria-invalid={Boolean(errors.sla_minutes)}>
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {Object.entries(slaItems).map(([value, label]) => (
-                <SelectItem key={value} value={value}>
-                  {label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <Label htmlFor="urgent_days">SLA in working days</Label>
+          <div className="flex items-center gap-2">
+            <div className="flex-1 space-y-1">
+              <Input
+                id="urgent_days"
+                type="number"
+                min={1}
+                max={60}
+                aria-label="Urgent — working days"
+                aria-invalid={Boolean(errors.urgent_days)}
+                {...register("urgent_days")}
+              />
+              <p className="text-2xs text-muted-foreground">Urgent</p>
+            </div>
+            <div className="flex-1 space-y-1">
+              <Input
+                id="normal_days"
+                type="number"
+                min={1}
+                max={60}
+                aria-label="Non-urgent — working days"
+                aria-invalid={Boolean(errors.normal_days)}
+                {...register("normal_days")}
+              />
+              <p className="text-2xs text-muted-foreground">Non-urgent</p>
+            </div>
+          </div>
           <p className="text-xs text-muted-foreground">
-            Sets the turnaround (SLA) for this form&rsquo;s work. Internal &mdash; the client never sees it.
+            The Team Leader marks each request Urgent or Non-urgent; its due date is this many working days after approval.
           </p>
-          {errors.sla_minutes ? <p className="text-xs text-destructive">{errors.sla_minutes.message}</p> : null}
+          {errors.urgent_days || errors.normal_days ? (
+            <p className="text-xs text-destructive">{(errors.urgent_days ?? errors.normal_days)?.message}</p>
+          ) : null}
         </div>
         ) : null}
       </div>

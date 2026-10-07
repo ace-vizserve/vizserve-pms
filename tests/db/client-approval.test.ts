@@ -80,7 +80,7 @@ async function taskAwaitingApproval(): Promise<{ taskId: string; token: string }
     p_request_id: requestId,
     p_assignee_id: picId,
     p_qa_assignee_id: qaId,
-    p_approved_target_date: null,
+    p_urgency: "NON_URGENT",
     p_title: null,
     p_description: null,
   });

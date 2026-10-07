@@ -39,6 +39,8 @@ describe("formSettingsSchema · is_quiz", () => {
     is_active: false,
     requires_attachment: false,
     requires_approval: true,
+    urgent_days: 3,
+    normal_days: 5,
     sla_minutes: 480,
     default_list_id: null,
     client_approval_days: 3,

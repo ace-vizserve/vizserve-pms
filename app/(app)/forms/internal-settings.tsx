@@ -129,6 +129,8 @@ export function InternalSettings({
       reference_prefix: initial.reference_prefix ?? "",
       requires_attachment: initial.requires_attachment ?? false,
       requires_approval: initial.requires_approval ?? true,
+      urgent_days: initial.urgent_days ?? 3,
+      normal_days: initial.normal_days ?? 5,
       sla_minutes: initial.sla_minutes ?? DEFAULT_SLA_MINUTES,
       default_list_id: initial.default_list_id ?? null,
       client_approval_days: initial.client_approval_days ?? 3,

@@ -67,8 +67,8 @@ const DETAIL_LABELS: Record<DetailField, string> = {
   formName: "Service",
   requesterOrg: "Organisation",
   submittedAt: "Submitted",
-  targetDate: "Date you asked for",
-  approvedTargetDate: "Agreed delivery",
+  targetDate: "Your ideal finish date",
+  approvedTargetDate: "Due date",
   handledBy: "Looked after by",
 };
 

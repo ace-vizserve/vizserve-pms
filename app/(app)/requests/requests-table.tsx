@@ -10,7 +10,7 @@ import {
 import { EmptyState } from "@/components/empty-state";
 import { QueryError } from "@/components/query-error";
 import { RequestStatusBadge } from "@/components/status-badge";
-import { formatDate, formatDuration, isOverdue } from "@/lib/dates";
+import { formatDate, formatDuration } from "@/lib/dates";
 
 /**
  * P7-64 — the columns, in a client component, because the table is one now.
@@ -127,21 +127,11 @@ export function RequestsTable({
     },
     {
       key: "target",
-      header: "Target date",
+      header: "Ideal date",
       className: "hidden sm:table-cell whitespace-nowrap",
       sortKey: "target",
-      cell: (request) => (
-        <>
-          {formatDate(request.target_date)}
-          {/* Overdue is said in words as well as colour — a red date alone is
-              invisible to a meaningful share of people, and to anyone reading
-              a printed or screenshotted queue. */}
-          {isOverdue(request.target_date) &&
-          request.status === "PENDING_REVIEW" ? (
-            <p className="text-xs font-medium text-destructive">Overdue</p>
-          ) : null}
-        </>
-      ),
+      // P16-04 — the client's ideal finish date: context, never a deadline.
+      cell: (request) => (request.target_date ? formatDate(request.target_date) : "—"),
     },
     {
       /*

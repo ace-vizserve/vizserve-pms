@@ -26,6 +26,7 @@ import {
   type ProgressHistoryRow,
 } from "./request-progress";
 import { CancelRequestButton } from "./cancel-request";
+import { UrgencyControl } from "./urgency-control";
 import { ReviewPanel } from "./review-panel";
 import { isTerminal } from "@/lib/schemas/tasks";
 
@@ -58,7 +59,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
   const { data: request } = await supabase
     .from("vizserve_pms_requests")
     .select(
-      "id, reference_no, title, description, requester_name, requester_email, requester_org, target_date, approved_target_date, field_values, status, decision_reason, submitted_at, sla_started_at, form_id",
+      "id, reference_no, title, description, requester_name, requester_email, requester_org, target_date, approved_target_date, urgency, field_values, status, decision_reason, submitted_at, sla_started_at, form_id",
     )
     .eq("id", id)
     .maybeSingle();
@@ -85,7 +86,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     await Promise.all([
       supabase
         .from("vizserve_pms_forms")
-        .select("id, name, sla_minutes, department_id")
+        .select("id, name, sla_minutes, department_id, urgent_days, normal_days")
         .eq("id", request.form_id)
         .maybeSingle(),
 
@@ -160,7 +161,8 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
           .order("full_name"),
         supabase.rpc("vizserve_pms_department_capacity", {
           p_department_id: form?.department_id ?? "",
-          p_target_date: request.target_date,
+          // P16-05 — no date to compare against until the urgency is chosen.
+          p_target_date: null,
         }),
         // P16-02. The only list an approval can file into: the form's own.
         supabase.from("vizserve_pms_lists").select("name").eq("form_id", request.form_id).maybeSingle(),
@@ -246,14 +248,15 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     return String(raw);
   }
 
-  const negotiated = request.approved_target_date && request.approved_target_date !== request.target_date;
 
   const { data: department } = form?.department_id
     ? await supabase.from("vizserve_pms_departments").select("name").eq("id", form.department_id).maybeSingle()
     : { data: null };
 
   const gateDecision = decisions?.data?.[0] ?? null;
-  const late = isOverdue(request.target_date) && request.status === "PENDING_REVIEW";
+  // P16-05 — late against the SLA date, and only while the work is open.
+  const late =
+    request.status === "APPROVED" && Boolean(linkedTask) && !isTerminal(linkedTask!.status) && isOverdue(request.approved_target_date);
   const lastClientDecision = clientRows.length > 0 ? clientRows[clientRows.length - 1]! : null;
 
   return (
@@ -284,11 +287,13 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
               <TaskStatusBadge status={linkedTask.status} />
             </span>
           ) : null}
-          <span className={late ? "font-medium text-destructive tabular-nums" : "tabular-nums"}>
-            wanted by {formatDate(request.target_date)}
-            {/* Never colour alone. */}
-            {late ? " · overdue" : null}
-          </span>
+          {request.approved_target_date ? (
+            <span className={late ? "font-medium text-destructive tabular-nums" : "tabular-nums"}>
+              due {formatDate(request.approved_target_date)}
+              {/* Never colour alone. */}
+              {late ? " · overdue" : null}
+            </span>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-start justify-between gap-2">
           <h1 className="text-xl font-semibold tracking-tight">{request.title}</h1>
@@ -373,13 +378,30 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
                 <Prop label="Submitted">{formatDateTime(request.submitted_at)}</Prop>
                 <Prop label="Form">{form?.name ?? "—"}</Prop>
                 <Prop label="Department">{department?.name ?? "—"}</Prop>
-                <Prop label="Wanted by">{formatDate(request.target_date)}</Prop>
-                {/* Both dates are kept on purpose: the gap between what the
-                    client asked for and what was agreed is the metric that proves
-                    Gate 1 is negotiating rather than rubber-stamping. */}
-                <Prop label="Agreed date">
+                {/* P16-04 — what the client would like. Never the due date. */}
+                <Prop label="Ideal finish date">{request.target_date ? formatDate(request.target_date) : "—"}</Prop>
+                {/* P16-05 — the SLA date, from the urgency set at Gate 1. */}
+                <Prop label="Due (SLA)">
                   {request.approved_target_date ? formatDate(request.approved_target_date) : "—"}
-                  {negotiated ? <span className="text-xs text-muted-foreground">negotiated</span> : null}
+                </Prop>
+                <Prop label="Urgency">
+                  {request.status === "APPROVED" &&
+                  linkedTask &&
+                  !isTerminal(linkedTask.status) &&
+                  canApproveClientRequest(context, form?.department_id ?? null) ? (
+                    <UrgencyControl
+                      requestId={request.id}
+                      urgency={request.urgency as "URGENT" | "NON_URGENT" | null}
+                      urgentDays={form?.urgent_days ?? 3}
+                      normalDays={form?.normal_days ?? 5}
+                    />
+                  ) : request.urgency === "URGENT" ? (
+                    "Urgent"
+                  ) : request.urgency === "NON_URGENT" ? (
+                    "Non-urgent"
+                  ) : (
+                    "—"
+                  )}
                 </Prop>
               </dl>
 
@@ -429,6 +451,8 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
               requestTitle={request.title}
               requestDescription={request.description}
               targetDate={request.target_date}
+              urgentDays={form?.urgent_days ?? 3}
+              normalDays={form?.normal_days ?? 5}
               candidates={candidates.data ?? []}
               capacity={capacity.data ?? []}
               currentUserId={context.userId}

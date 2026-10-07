@@ -819,6 +819,9 @@ export type Database = {
           asks_title: boolean;
           asks_description: boolean;
           asks_target_date: boolean;
+          /** P16-05 — working days to the SLA date, by urgency. */
+          urgent_days: number;
+          normal_days: number;
           sla_minutes: number;
           /** P15-04 — client-form label overrides; null shows the default. */
           title_label: string | null;
@@ -868,6 +871,8 @@ export type Database = {
           asks_title?: boolean;
           asks_description?: boolean;
           asks_target_date?: boolean;
+          urgent_days?: number;
+          normal_days?: number;
           sla_minutes?: number;
           title_label?: string | null;
           description_label?: string | null;
@@ -909,6 +914,8 @@ export type Database = {
           asks_title: boolean;
           asks_description: boolean;
           asks_target_date: boolean;
+          urgent_days: number;
+          normal_days: number;
           sla_minutes: number;
           title_label: string | null;
           description_label: string | null;
@@ -1119,8 +1126,12 @@ export type Database = {
           requester_org: string;
           title: string;
           description: string;
+          /** P16-04 — the client's IDEAL finish date. Never the due date. */
           target_date: string | null;
+          /** P16-05 — the SLA due date, from the urgency set at Gate 1. */
           approved_target_date: string | null;
+          /** P16-05 — set at Gate 1. */
+          urgency: "URGENT" | "NON_URGENT" | null;
           field_values: Json;
           status: VizservePmsRequestStatus;
           decision_reason: string | null;
@@ -3201,22 +3212,20 @@ export type Database = {
         }[];
       };
       vizserve_pms_approve_request: {
+        /** P16-05 — the urgency decides the due date; the list is the form's own. */
         Args: {
           p_request_id: string;
           p_assignee_id: string;
           p_qa_assignee_id: string | null;
-          p_approved_target_date?: string | null;
+          p_urgency: "URGENT" | "NON_URGENT";
           p_title?: string | null;
           p_description?: string | null;
-          p_list_id?: string | null;
-          /**
-           * P7-11. THE ONLY MOMENT a client task can be given a priority: this
-           * function is the statement that creates the task row, so there is no
-           * earlier point at which anyone — least of all the client — could
-           * have set one.
-           */
-          p_priority?: VizservePmsTaskPriority | null;
         };
+        Returns: Json;
+      };
+      /** P16-05. TL or Manager, on approved, open work. */
+      vizserve_pms_set_request_urgency: {
+        Args: { p_request_id: string; p_urgency: "URGENT" | "NON_URGENT" };
         Returns: Json;
       };
       /** P16-02. TL or Manager, while pending or returned; reason required. */

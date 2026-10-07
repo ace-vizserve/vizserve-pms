@@ -533,15 +533,18 @@ export async function loadGateOne(supabase: Supabase, period: Period): Promise<G
 export type TurnaroundStandard = { met: number; of: number };
 
 /**
- * Client work delivered within its form's turnaround standard. The standard is
- * in working time (1d = 8 working hours), so it is read as WORKING DAYS from
- * the day the request was submitted, weekends and holidays skipped.
+ * Client work delivered within its turnaround standard.
+ *
+ * P16-05 — the SLA date set at Gate 1 by the urgency (`approved_target_date`)
+ * where there is one. Older work falls back to the form's standard, read as
+ * WORKING DAYS from submission (1d = 8 working hours). The client's ideal
+ * finish date plays no part.
  */
 export async function loadTurnaroundStandard(supabase: Supabase, period: Period): Promise<TurnaroundStandard> {
   const { data } = await supabase
     .from("vizserve_pms_task_status_history")
     .select(
-      "created_at, vizserve_pms_tasks!inner(department_id, vizserve_pms_requests!inner(sla_started_at, vizserve_pms_forms(sla_minutes)))",
+      "created_at, vizserve_pms_tasks!inner(department_id, vizserve_pms_requests!inner(sla_started_at, urgency, approved_target_date, vizserve_pms_forms(sla_minutes)))",
     )
     .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
     // P15-02 — moves only. Imported tasks were created already finished.
@@ -556,6 +559,8 @@ export async function loadTurnaroundStandard(supabase: Supabase, period: Period)
         department_id: string;
         vizserve_pms_requests: {
           sla_started_at: string | null;
+          urgency: string | null;
+          approved_target_date: string | null;
           vizserve_pms_forms: { sla_minutes: number | null } | null;
         } | null;
       } | null;
@@ -566,6 +571,11 @@ export async function loadTurnaroundStandard(supabase: Supabase, period: Period)
   let of = 0;
   for (const row of rows) {
     const request = row.vizserve_pms_tasks?.vizserve_pms_requests;
+    if (request?.urgency && request.approved_target_date) {
+      of += 1;
+      if (toAppDateString(new Date(row.created_at)) <= request.approved_target_date) met += 1;
+      continue;
+    }
     const minutes = request?.vizserve_pms_forms?.sla_minutes;
     if (!request?.sla_started_at || !minutes) continue;
     const started = toAppDateString(new Date(request.sla_started_at));

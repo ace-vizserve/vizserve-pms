@@ -33,6 +33,8 @@ function accepts(field: "slug" | "reference_prefix", value: string): boolean {
     is_active: false,
     requires_attachment: false,
     requires_approval: true,
+    urgent_days: 3,
+    normal_days: 5,
     sla_minutes: 2400,
     default_list_id: null,
     client_approval_days: 3,

@@ -697,6 +697,12 @@ export const formSettingsSchema = z.object({
    * Gate 1.
    */
   requires_approval: z.boolean(),
+  /**
+   * P16-05 — working days to the SLA date when the Team Leader marks a request
+   * Urgent or Non-urgent at Gate 1. Undefaulted, like everything here.
+   */
+  urgent_days: z.coerce.number().int().min(1, "At least one working day.").max(60, "Up to 60 working days."),
+  normal_days: z.coerce.number().int().min(1, "At least one working day.").max(60, "Up to 60 working days."),
   sla_minutes: slaMinutesField,
   /**
    * Where approved requests from this form land (P2-06 / Q18).
@@ -819,6 +825,8 @@ export const formCreateSchema = formSettingsSchema.extend({
   is_active: formSettingsSchema.shape.is_active.default(false),
   requires_attachment: formSettingsSchema.shape.requires_attachment.default(false),
   requires_approval: formSettingsSchema.shape.requires_approval.default(true),
+  urgent_days: formSettingsSchema.shape.urgent_days.default(3),
+  normal_days: formSettingsSchema.shape.normal_days.default(5),
   default_list_id: formSettingsSchema.shape.default_list_id.default(null),
   client_approval_days: formSettingsSchema.shape.client_approval_days.default(3),
 });

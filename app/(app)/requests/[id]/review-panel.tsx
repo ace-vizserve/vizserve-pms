@@ -13,7 +13,7 @@ import {
 } from "@/components/ui/collapsible";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { DatePicker } from "@/components/ui/date-picker";
+import { Segmented, SegmentedItem } from "@/components/ui/segmented";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
-import { formatDate, isOverdue } from "@/lib/dates";
+import { addBusinessDays, formatDate, todayInAppZone } from "@/lib/dates";
 import { richTextLength } from "@/lib/rich-text";
 import { CharacterCount } from "@/components/ui/character-count";
 import { DECISION_REASON_MAX, DECISION_REASON_MIN } from "@/lib/schemas/approvals";
@@ -56,6 +56,8 @@ export function ReviewPanel({
   requestTitle,
   requestDescription,
   targetDate,
+  urgentDays,
+  normalDays,
   candidates,
   capacity,
   currentUserId,
@@ -65,7 +67,11 @@ export function ReviewPanel({
   requestId: string;
   requestTitle: string;
   requestDescription: string;
+  /** P16-04 — the client's IDEAL finish date. Shown, never scheduled on. */
   targetDate: string | null;
+  /** P16-05 — the form's working days to the SLA date, by urgency. */
+  urgentDays: number;
+  normalDays: number;
   /*
    * P8-10 — the requester's details are NO LONGER PASSED DOWN.
    *
@@ -89,7 +95,12 @@ export function ReviewPanel({
   // department (Amier 41:30). Defaulting to nobody would leave most tasks with
   // no second pair of eyes, which is the failure this gate exists to prevent.
   const [qaAssigneeId, setQaAssigneeId] = useState<string>(currentUserId);
-  const [approvedDate, setApprovedDate] = useState<string>(targetDate ?? "");
+  /*
+   * P16-05 — the urgency, and the SLA date it gives. The date is a PREVIEW:
+   * `vizserve_pms_approve_request` computes the real one with the holiday table.
+   */
+  const [urgency, setUrgency] = useState<"URGENT" | "NON_URGENT" | "">("");
+  const slaDate = urgency ? addBusinessDays(todayInAppZone(), urgency === "URGENT" ? urgentDays : normalDays) : null;
 
   /*
    * value → label maps for the three Selects below.
@@ -124,7 +135,6 @@ export function ReviewPanel({
   const capacityFor = (userId: string) => capacity.find((row) => row.user_id === userId);
   const selected = assigneeId ? capacityFor(assigneeId) : undefined;
 
-  const dateMoved = Boolean(targetDate) && approvedDate !== targetDate;
 
   /*
    * P11-05 — the panel says which way it went, on the click.
@@ -174,7 +184,7 @@ export function ReviewPanel({
       decision: "approved",
       assignee_id: assigneeId || undefined,
       qa_assignee_id: qaAssigneeId === NO_QA ? null : qaAssigneeId,
-      approved_target_date: approvedDate || null,
+      urgency: urgency || undefined,
       // Only send an edit if it is one. Null means unchanged.
       title: title.trim() !== requestTitle ? title.trim() : null,
       description: description.trim() !== requestDescription ? description.trim() : null,
@@ -281,25 +291,27 @@ export function ReviewPanel({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="approved_date">Delivery date you are committing to</Label>
-            <DatePicker
-              id="approved_date"
-              className="w-56"
-              value={approvedDate}
-              onChange={(value) => setApprovedDate(value ?? "")}
-            />
+            <Label>Urgency</Label>
+            <Segmented<"URGENT" | "NON_URGENT">
+              value={urgency || undefined}
+              onValueChange={(value) => setUrgency(value)}
+              aria-label="Urgency">
+              <SegmentedItem className="px-3 py-1" value="URGENT">
+                Urgent · {urgentDays}d
+              </SegmentedItem>
+              <SegmentedItem className="px-3 py-1" value="NON_URGENT">
+                Non-urgent · {normalDays}d
+              </SegmentedItem>
+            </Segmented>
             <p className="text-xs text-muted-foreground">
-              {targetDate ? (
-                dateMoved ? (
-                  <span className="text-info">
-                    Negotiated. The client asked for {formatDate(targetDate)}; both dates are kept.
-                  </span>
-                ) : (
-                  <>The client asked for {formatDate(targetDate)}.</>
-                )
+              {slaDate ? (
+                <>
+                  Due <span className="font-medium text-foreground">{formatDate(slaDate)}</span> — {urgency === "URGENT" ? urgentDays : normalDays} working days from today. Set by the urgency; it cannot be typed.
+                </>
               ) : (
-                "The client gave no date."
+                "Sets the due date in working days. The team is measured against it."
               )}
+              {targetDate ? <> The client would ideally like it by {formatDate(targetDate)}.</> : null}
             </p>
           </div>
 
@@ -359,7 +371,7 @@ export function ReviewPanel({
             <div className="flex flex-wrap items-center gap-2 border-t pt-4">
               {/* Form actions, so React owns the transition and the decision
                    still submits before this route's JS has loaded. */}
-              <Button type="submit" form="gate1-approve" loading={pending} disabled={!assigneeId}>
+              <Button type="submit" form="gate1-approve" loading={pending} disabled={!assigneeId || !urgency}>
                 Approve and create the task
               </Button>
               <Button variant="outline" onClick={() => setMode("returned")} disabled={pending}>
@@ -491,15 +503,6 @@ export function ReviewPanel({
 
                       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-2xs">
                         {/* The number that actually answers the question. */}
-                        {targetDate ? (
-                          <span
-                            className={
-                              row.due_before > 0 ? "font-medium text-warning" : "text-muted-foreground"
-                            }
-                          >
-                            {row.due_before} due before {formatDate(targetDate)}
-                          </span>
-                        ) : null}
                         {row.overdue_count > 0 ? (
                           <span className="font-medium text-destructive">
                             {row.overdue_count} already overdue
@@ -521,13 +524,6 @@ export function ReviewPanel({
             </ul>
           )}
 
-          {selected && targetDate && selected.due_before > 0 ? (
-            <p className="mt-3 rounded-sm bg-warning-subtle px-2.5 py-2 text-2xs text-warning">
-              {selected.full_name.split(" ")[0]} already has {selected.due_before} due on or before{" "}
-              {formatDate(approvedDate || targetDate)}. Worth negotiating the date rather than
-              stacking it.
-            </p>
-          ) : null}
 
           {selected && selected.overdue_count > 0 ? (
             <p className="mt-2 rounded-sm bg-destructive/10 px-2.5 py-2 text-2xs text-destructive">
@@ -535,11 +531,6 @@ export function ReviewPanel({
             </p>
           ) : null}
 
-          {targetDate && isOverdue(targetDate) ? (
-            <p className="mt-3 text-2xs text-destructive">
-              The requested date has already passed. Agree a new one before approving.
-            </p>
-          ) : null}
         </aside>
       </CardContent>
     </Card>
