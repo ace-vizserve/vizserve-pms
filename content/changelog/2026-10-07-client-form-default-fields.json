@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-07",
+  "kind": "changed",
+  "area": "Forms",
+  "title": "A client form's title, description and date can be removed",
+  "description": "These used to be fixed on every client form. They are now default fields in the builder's left pane: rename them, remove them, or add them back. Name and email are still always asked.",
+  "items": [
+    "A form without a title names each request after the form and its reference",
+    "The date is now the client's ideal finish date: optional, and never the due date"
+  ],
+  "refs": [
+    "P16-04"
+  ],
+  "pending": "Needs the P16 database updates applied before it works."
+}

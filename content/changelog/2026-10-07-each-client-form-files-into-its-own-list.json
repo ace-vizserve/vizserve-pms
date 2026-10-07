@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-07",
+  "kind": "changed",
+  "area": "Approvals",
+  "title": "Each client form files into its own list, and a request can be cancelled",
+  "description": "Every request from a client form becomes a task in that form's own list in Client Requests. The list can no longer be changed when approving, in the form's settings, or by moving the task later. A wrong-form submission can now be cancelled instead of rejected.",
+  "items": [
+    "Cancel request asks for a reason, with presets for wrong form, duplicate and withdrawn",
+    "The client is emailed the reason",
+    "Cancelled is not counted as a rejection"
+  ],
+  "refs": [
+    "P16-02"
+  ],
+  "pending": "Needs the P16 database updates applied before it works."
+}

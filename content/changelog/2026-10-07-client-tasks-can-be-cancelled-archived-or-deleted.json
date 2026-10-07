@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-07",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "Client tasks can be cancelled, archived or deleted, each with a reason",
+  "description": "A client task's ••• menu offers Cancel, Archive and Delete. Cancelled work leaves every open count and the performance figures; archived work leaves the lists and the board.",
+  "items": [
+    "Team leaders and the manager can cancel, reopen, archive and restore",
+    "Only finished or cancelled tasks can be archived",
+    "Delete is the manager's or admin's: it lists what goes with the task, including logged hours, and asks you to type DELETE",
+    "Cancelling an approved request cancels its task too",
+    "A form with submissions or tasks can be force-deleted by the manager or admin, by typing DELETE"
+  ],
+  "refs": [
+    "P16-03"
+  ],
+  "pending": "Needs the P16 database updates applied before it works."
+}

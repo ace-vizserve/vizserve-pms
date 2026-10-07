@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-07",
+  "kind": "added",
+  "area": "Forms",
+  "title": "A client form can skip approval",
+  "description": "Turn off Needs approval in a client form's settings and it only collects answers — for a feedback form, say. Nothing goes to a team leader and no task is made.",
+  "items": [
+    "Answers are read on the form's Responses tab",
+    "The client's confirmation says it was received, without promising a review",
+    "Urgency and the client approval window are hidden on such a form"
+  ],
+  "refs": [
+    "P16-01"
+  ],
+  "pending": "Needs the P16 database updates applied before it works."
+}

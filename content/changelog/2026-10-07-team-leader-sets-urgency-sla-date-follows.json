@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-07",
+  "kind": "changed",
+  "area": "Approvals",
+  "title": "The team leader sets the urgency, and the due date follows",
+  "description": "When approving a client request, the team leader picks Urgent or Non-urgent instead of typing a delivery date. The due date is that many working days from approval and cannot be edited. The team is measured against it, not against the client's ideal date.",
+  "items": [
+    "Each form sets its own working days: Urgent 3 and Non-urgent 5 by default",
+    "The urgency can be changed later on the request, and the due date moves with it",
+    "The client's ideal finish date is shown for context"
+  ],
+  "refs": [
+    "P16-05"
+  ],
+  "pending": "Needs the P16 database updates applied before it works."
+}
