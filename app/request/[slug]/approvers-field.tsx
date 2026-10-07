@@ -1,12 +1,32 @@
 "use client";
 
-import { Plus, X } from "lucide-react";
+import {
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import { restrictToVerticalAxis } from "@dnd-kit/modifiers";
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical, Plus, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { cn } from "@/lib/utils";
 
-export type ApproverDraft = { name: string; email: string };
+/** `id` is for the browser only — it keeps a row's identity while it is dragged. */
+export type ApproverDraft = { id: string; name: string; email: string };
 
 export const MAX_APPROVERS = 5;
 
@@ -22,7 +42,7 @@ export function approverProblem(rows: ApproverDraft[]): string | null {
   return null;
 }
 
-export function filledApprovers(rows: ApproverDraft[]): ApproverDraft[] {
+export function filledApprovers(rows: ApproverDraft[]): { name: string; email: string }[] {
   return rows
     .map((row) => ({ name: row.name.trim(), email: row.email.trim() }))
     .filter((row) => row.name || row.email);
@@ -41,8 +61,21 @@ export function ApproversField({
   onChange: (rows: ApproverDraft[]) => void;
   error: string | null;
 }) {
-  function update(index: number, patch: Partial<ApproverDraft>) {
-    onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  );
+
+  function update(id: string, patch: Partial<ApproverDraft>) {
+    onChange(rows.map((row) => (row.id === id ? { ...row, ...patch } : row)));
+  }
+
+  // P16-07 — the order IS the chain: dragging a row changes who signs when.
+  function onDragEnd(event: DragEndEvent) {
+    const from = rows.findIndex((row) => row.id === event.active.id);
+    const to = rows.findIndex((row) => row.id === event.over?.id);
+    if (from < 0 || to < 0 || from === to) return;
+    onChange(arrayMove(rows, from, to));
   }
 
   return (
@@ -50,56 +83,40 @@ export function ApproversField({
       <legend className="mb-3 w-full border-b pb-2 text-sm font-semibold">Who approves the finished work</legend>
       <p className="text-xs text-muted-foreground">
         You approve first. Add anyone else who must sign it off — each gets their own email, in this order, after
-        the one before approves.
+        the one before approves. Drag a row to change the order.
       </p>
 
       <ol className="space-y-2">
         <li className="flex items-center gap-2 text-sm">
-          <span className="w-6 shrink-0 text-xs text-muted-foreground tabular-nums">1.</span>
+          <span className="w-11 shrink-0 text-right text-xs text-muted-foreground tabular-nums">1.</span>
           <span className="text-muted-foreground">You</span>
         </li>
-        {rows.map((row, index) => (
-          <li key={index} className="flex items-start gap-2">
-            <span className="w-6 shrink-0 pt-2 text-xs text-muted-foreground tabular-nums">{index + 2}.</span>
-            <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
-              <div className="space-y-1">
-                <Label htmlFor={`approver-name-${index}`} className="sr-only">
-                  Approver {index + 2} name
-                </Label>
-                <Input
-                  id={`approver-name-${index}`}
-                  placeholder="Name"
-                  value={row.name}
-                  onChange={(event) => update(index, { name: event.target.value })}
-                />
-              </div>
-              <div className="space-y-1">
-                <Label htmlFor={`approver-email-${index}`} className="sr-only">
-                  Approver {index + 2} email
-                </Label>
-                <Input
-                  id={`approver-email-${index}`}
-                  type="email"
-                  placeholder="Email"
-                  value={row.email}
-                  onChange={(event) => update(index, { email: event.target.value })}
-                />
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon-sm"
-              aria-label={`Remove approver ${index + 2}`}
-              onClick={() => onChange(rows.filter((_, i) => i !== index))}>
-              <X />
-            </Button>
-          </li>
-        ))}
+        <DndContext
+          id="public-approvers-dnd"
+          sensors={sensors}
+          collisionDetection={closestCenter}
+          modifiers={[restrictToVerticalAxis]}
+          onDragEnd={onDragEnd}>
+          <SortableContext id="public-approvers" items={rows.map((row) => row.id)} strategy={verticalListSortingStrategy}>
+            {rows.map((row, index) => (
+              <ApproverRow
+                key={row.id}
+                row={row}
+                position={index + 2}
+                onChange={(patch) => update(row.id, patch)}
+                onRemove={() => onChange(rows.filter((other) => other.id !== row.id))}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
       </ol>
 
       {rows.length < MAX_APPROVERS ? (
-        <Button type="button" variant="outline" size="sm" onClick={() => onChange([...rows, { name: "", email: "" }])}>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => onChange([...rows, { id: crypto.randomUUID(), name: "", email: "" }])}>
           <Plus />
           Add approver
         </Button>
@@ -111,5 +128,67 @@ export function ApproversField({
         </p>
       ) : null}
     </fieldset>
+  );
+}
+
+function ApproverRow({
+  row,
+  position,
+  onChange,
+  onRemove,
+}: {
+  row: ApproverDraft;
+  position: number;
+  onChange: (patch: Partial<ApproverDraft>) => void;
+  onRemove: () => void;
+}) {
+  const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
+    id: row.id,
+  });
+
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={cn("flex items-start gap-2 rounded-md bg-card", isDragging && "relative z-10 shadow-raised-lg")}>
+      <button
+        type="button"
+        ref={setActivatorNodeRef}
+        {...attributes}
+        {...listeners}
+        aria-label={`Move approver ${position}`}
+        className="mt-1.5 grid size-7 shrink-0 cursor-grab touch-none place-items-center rounded-md text-muted-foreground hover:bg-accent active:cursor-grabbing">
+        <GripVertical className="size-4" />
+      </button>
+      <span className="w-2 shrink-0 pt-2 text-xs text-muted-foreground tabular-nums">{position}.</span>
+      <div className="grid min-w-0 flex-1 gap-2 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`approver-name-${row.id}`} className="sr-only">
+            Approver {position} name
+          </Label>
+          <Input
+            id={`approver-name-${row.id}`}
+            placeholder="Name"
+            value={row.name}
+            onChange={(event) => onChange({ name: event.target.value })}
+          />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor={`approver-email-${row.id}`} className="sr-only">
+            Approver {position} email
+          </Label>
+          <Input
+            id={`approver-email-${row.id}`}
+            type="email"
+            placeholder="Email"
+            value={row.email}
+            onChange={(event) => onChange({ email: event.target.value })}
+          />
+        </div>
+      </div>
+      <Button type="button" variant="ghost" size="icon-sm" aria-label={`Remove approver ${position}`} onClick={onRemove}>
+        <X />
+      </Button>
+    </li>
   );
 }
