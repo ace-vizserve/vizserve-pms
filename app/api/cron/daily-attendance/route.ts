@@ -31,6 +31,15 @@ export const maxDuration = 60;
 
 const TAG = "daily-attendance";
 
+/**
+ * Left out of the report entirely — the email and the PDF. They still RECEIVE
+ * it if they are oversight. By id, not email: an email can change (Nina's did).
+ */
+const EXEMPT = new Set([
+  "37c09844-65f8-48d6-9dc9-396eb11e0930", // Amier Ordonez
+  "b21b4e11-b148-47f1-a7d8-d4b4c6d1b526", // Joel Castro
+]);
+
 const isWeekend = (date: string) => {
   const weekday = new Date(`${date}T12:00:00Z`).getUTCDay();
   return weekday === 0 || weekday === 6;
@@ -123,7 +132,7 @@ export async function GET(request: Request) {
 
   const report = buildDailyAttendanceReport({
     date,
-    people: roster.people,
+    people: roster.people.filter((person) => !EXEMPT.has(person.id)),
     entries: entries.data ?? [],
     leave: spans,
     pendingLeave: pendingSpans,
