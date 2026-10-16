@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-16",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "A person can also work in another department",
+  "description": "On the Users page, \"Also works in\" adds sub departments beside the team someone belongs to. They can see, edit and be assigned that team's tasks, while their leave, overtime, DTR and timesheet still go to the team they belong to.",
+  "items": [
+    "A sub department's folders and lists appear in the sidebar, and its tasks can be edited, moved and logged against",
+    "Choosing a sub department's list when creating a task offers that team's people and files the task there",
+    "A sub department gives no approval rights and does not make anyone its team leader",
+    "Nobody's personal tasks become visible through a sub department",
+    "The Users table shows sub departments after the main one"
+  ],
+  "refs": [
+    "P17-01"
+  ]
+}

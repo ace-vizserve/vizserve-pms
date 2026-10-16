@@ -1,0 +1,10 @@
+{
+  "date": "2026-10-16",
+  "kind": "fixed",
+  "area": "Tasks",
+  "title": "Large lists load again",
+  "description": "Opening a list with a few hundred tasks, such as Social Media Calendar, showed \"Could not load tasks\" with \"Bad Request\". The list now loads at any size.",
+  "refs": [
+    "P17-01"
+  ]
+}

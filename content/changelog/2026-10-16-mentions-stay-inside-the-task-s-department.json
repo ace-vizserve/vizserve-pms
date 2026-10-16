@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-16",
+  "kind": "changed",
+  "area": "Tasks",
+  "title": "@ mentions stay inside the task's department",
+  "description": "A comment could mention anyone with Admin or higher, or anyone on the commenter's own team, on any task in the company. Now only people in the task's department can be mentioned.",
+  "items": [
+    "Mentionable: people on the task, members of its department (including sub members) and its team leaders",
+    "A name typed by hand for somebody outside that set is not notified",
+    "Collaboration Projects tasks still offer everyone"
+  ],
+  "refs": [
+    "P17-02"
+  ]
+}
