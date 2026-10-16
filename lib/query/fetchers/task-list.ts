@@ -2,6 +2,7 @@ import type { Json, VizservePmsRecurrenceFrequency } from "@/lib/database.types"
 import type { TaskComment } from "@/app/(app)/tasks/comment-thread";
 import type { TaskRow } from "@/app/(app)/tasks/tasks-table";
 import { read } from "@/lib/query/read";
+import { chunked } from "@/lib/read-all";
 import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
 import {
   pendingRequestsApply,
@@ -193,6 +194,18 @@ export type TaskListView = {
   closedOn: Record<string, string>;
 };
 
+/**
+ * Ids per `.in()` request. Fifty uuids is about 1.9 KB of URL — well under
+ * what the gateway refuses, which a list of a few hundred tasks was not.
+ */
+const IN_CHUNK = 50;
+
+/** One `.in()` read per chunk of ids, run together, rows concatenated. */
+async function readInChunks<R>(ids: readonly string[], run: (chunk: string[]) => Promise<R[] | null>): Promise<R[]> {
+  const parts = await Promise.all(chunked(ids, IN_CHUNK).map(run));
+  return parts.flatMap((part) => part ?? []);
+}
+
 /** `qk.taskList(filters)` — one list view's rows and everything drawn beside them. */
 export async function fetchTaskListView(
   client: TaskReadClient,
@@ -280,30 +293,45 @@ export async function fetchTaskListView(
     };
   }
 
+  // ⚠️ IN CHUNKS. Every id rides in the URL, and a big list (Social Media
+  // Calendar) is past what the gateway carries: it answers a bare "Bad Request"
+  // and the whole list fails. A task's rows all land in one chunk, so the
+  // per-task ordering below still holds.
   const [commentRows, childRows, trackedRows, coverageRows, assigneeRows, closedRows] = await Promise.all([
-    read(
-      client
-        .from("vizserve_pms_task_comments")
-        .select("id, task_id, body, author_id, created_at, updated_at")
-        .in("task_id", taskIds)
-        .order("created_at", { ascending: true }),
+    readInChunks(taskIds, (ids) =>
+      read(
+        client
+          .from("vizserve_pms_task_comments")
+          .select("id, task_id, body, author_id, created_at, updated_at")
+          .in("task_id", ids)
+          .order("created_at", { ascending: true }),
+      ),
     ),
-    read(client.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", taskIds)),
+    readInChunks(taskIds, (ids) =>
+      read(client.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", ids)),
+    ),
+    // An RPC: the ids travel in the body, so no chunking.
     read(client.rpc("vizserve_pms_task_time_tracked", { p_task_ids: taskIds })),
-    read(
-      client
-        .from("vizserve_pms_active_task_coverage")
-        .select("task_id, reliever_id, end_date")
-        .in("task_id", taskIds),
+    readInChunks(taskIds, (ids) =>
+      read(
+        client
+          .from("vizserve_pms_active_task_coverage")
+          .select("task_id, reliever_id, end_date")
+          .in("task_id", ids),
+      ),
     ),
-    read(client.from("vizserve_pms_task_assignees").select("task_id, user_id").in("task_id", taskIds)),
-    read(
-      client
-        .from("vizserve_pms_task_status_history")
-        .select("task_id, to_status, created_at")
-        .in("task_id", taskIds)
-        .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
-        .order("created_at", { ascending: true }),
+    readInChunks(taskIds, (ids) =>
+      read(client.from("vizserve_pms_task_assignees").select("task_id, user_id").in("task_id", ids)),
+    ),
+    readInChunks(taskIds, (ids) =>
+      read(
+        client
+          .from("vizserve_pms_task_status_history")
+          .select("task_id, to_status, created_at")
+          .in("task_id", ids)
+          .in("to_status", ["COMPLETED", "COMPLETED_NO_RESPONSE"])
+          .order("created_at", { ascending: true }),
+      ),
     ),
   ]);
 
@@ -439,8 +467,8 @@ export async function fetchBoardView(
   const parentIds = liveTasks.filter((task) => !task.parent_task_id).map((task) => task.id);
 
   const childRows = parentIds.length
-    ? await read(
-        client.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", parentIds),
+    ? await readInChunks(parentIds, (ids) =>
+        read(client.from("vizserve_pms_tasks").select("id, parent_task_id, status").in("parent_task_id", ids)),
       )
     : [];
 
