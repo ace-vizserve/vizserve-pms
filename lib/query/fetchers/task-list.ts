@@ -21,7 +21,8 @@ import { isTerminal, type TaskPriority, type TaskStatus } from "@/lib/schemas/ta
 import { applyExtraFilters, type ExtraTaskFilters } from "@/lib/task-extra-filters";
 import { applyTaskScope, type TaskKind, type TaskView } from "@/lib/task-scope";
 
-import { fetchCollaborators, fetchListFields, type TaskReadClient } from "./task";
+import { withSubDepartments } from "@/lib/sub-departments";
+import { fetchCollaborators, fetchListFields, fetchSubDepartmentRows, type TaskReadClient } from "./task";
 
 /**
  * P12-07 — the reads behind `/tasks` (and the Gate 1 queue both task views
@@ -172,6 +173,8 @@ export type TaskListPerson = {
   full_name: string;
   primary_department_id: string | null;
   is_active: boolean;
+  /** P17-01. See `lib/sub-departments.ts`. */
+  sub_department_ids?: string[];
 };
 
 export type TaskListView = {
@@ -216,12 +219,14 @@ export async function fetchTaskListView(
   query = applyTaskScope(query, { listId: filters.listId, view: filters.view, kind: filters.kind, userId });
   query = applyExtraFilters(query, filters.extra);
 
-  const [tasks, people, customFields, collaborators] = await Promise.all([
+  const [tasks, rawPeople, customFields, collaborators, subs] = await Promise.all([
     read(query),
     read(client.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active")),
     filters.listId ? fetchListFields(client, filters.listId) : Promise.resolve([] as ListField[]),
     fetchCollaborators(client),
+    fetchSubDepartmentRows(client),
   ]);
+  const people = withSubDepartments((rawPeople ?? []) as TaskListPerson[], subs);
 
   const fetchedRows = (tasks ?? []) as unknown as TaskRow[];
 
@@ -422,11 +427,13 @@ export async function fetchBoardView(
   if (filters.priority) live = live.eq("priority", filters.priority);
   live = applyExtraFilters(live, filters.extra);
 
-  const [joined, tasks, people] = await Promise.all([
+  const [joined, tasks, rawPeople, subs] = await Promise.all([
     read(client.from("vizserve_pms_task_assignees").select("task_id").eq("user_id", scope.userId)),
     read(live),
     read(client.from("vizserve_pms_users").select("id, full_name, primary_department_id, is_active")),
+    fetchSubDepartmentRows(client),
   ]);
+  const people = withSubDepartments((rawPeople ?? []) as TaskListPerson[], subs);
 
   const liveTasks = (tasks ?? []) as unknown as BoardTask[];
   const parentIds = liveTasks.filter((task) => !task.parent_task_id).map((task) => task.id);

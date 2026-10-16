@@ -2602,3 +2602,32 @@ ahead would have produced a fillable-but-unsubmittable day every Thursday.
   skips itself on this machine, so the two assertions above are unproven here;
   `npm run verify` is green on the unit suite and `lastEncodableDay` is covered
   in `tests/unit/timesheet.test.ts`.
+
+## P17-01 — Main department and sub departments (16 Oct 2026)
+
+Victoria Montesclaros moved from VizMedia to VizAssists. Changing her
+department hid every VizMedia task she had, because visibility followed one
+department. A person now has a **main** department and any number of **sub**
+departments, set under "Also works in" on `/admin/users`.
+
+- **Main** (`vizserve_pms_users.primary_department_id`, unchanged): approvals
+  (leave, overtime, DTR corrections, reimbursement, timesheet), attendance and
+  leave reports, personal lists, the department-admin tick.
+- **Sub** (`vizserve_pms_user_departments`, new): the task side only — read,
+  edit, move, be PIC / QA / co-assignee, be @-mentioned, log time, manage that
+  department's lists and folders. Nobody leads a team by being a sub member;
+  `vizserve_pms_manages_department` and every approval function are untouched.
+- `20261016090000_p17_01_sub_departments.sql` — **apply by hand**. One helper,
+  `vizserve_pms_is_department_member(department, user)`, replaces
+  `primary_department_id = X` in the 11 task functions that asked it; each is
+  its latest definition verbatim apart from that line. Policies on tasks,
+  lists, folders and users get an added `vizserve_pms_also_works_in` branch
+  rather than a rewrite. The task read branch carries the same personal-list
+  exclusion as the own-department one.
+- The app reads the new table in its own query everywhere and degrades to "no
+  sub departments" until the paste, so deploy and paste can happen in either
+  order. Saving a sub department before the paste says so instead of failing.
+- `lib/sub-departments.ts` and `worksInDepartment` in `lib/auth/rules.ts` are
+  the browser mirrors; `tests/unit/sub-departments.test.ts` covers them.
+- **Not verified against a database.** The SQL has never executed (no scratch
+  project on this machine) and there is no db test for it yet.

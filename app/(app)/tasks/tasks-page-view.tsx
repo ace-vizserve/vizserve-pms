@@ -164,12 +164,14 @@ export function TasksPageView() {
               managedDepartmentIds: auth.managedDepartmentIds,
               deptAdminOf: canAdminDepartment(auth, auth.primaryDepartmentId) ? auth.primaryDepartmentId : null,
               primaryDepartmentId: auth.primaryDepartmentId,
+              subDepartmentIds: auth.subDepartmentIds,
             }}
             seat={{
               sharedDepartmentIds: auth.sharedDepartmentIds,
               role: auth.role,
               managedDepartmentIds: auth.managedDepartmentIds,
               primaryDepartmentId: auth.primaryDepartmentId,
+              subDepartmentIds: auth.subDepartmentIds,
             }}
             today={todayInAppZone()}
             baseFiltered={

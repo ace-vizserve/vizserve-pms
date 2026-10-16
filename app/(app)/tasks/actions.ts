@@ -46,6 +46,7 @@ import {
   transitionPayloadSchema,
 } from "@/lib/schemas/tasks";
 import { createClient } from "@/utils/supabase/server";
+import { isDepartmentMember, subMemberIds } from "@/lib/sub-departments";
 import { flattenIssues, readableError } from "@/lib/action-result";
 
 /**
@@ -775,6 +776,15 @@ export async function quickAddTask(input: unknown): Promise<ActionResult<{ taskI
 
     if (targetList && context.sharedDepartmentIds.includes(targetList.department_id)) {
       departmentId = targetList.department_id;
+    } else if (
+      targetList &&
+      forSomebodyElse &&
+      (await isDepartmentMember(supabase, targetList.department_id, values.assignee_id!))
+    ) {
+      // P17-01 — the list's department, when the assignee works in it (main OR
+      // sub). Without this a sub member's task was filed under their MAIN
+      // department and `vizserve_pms_create_task` refused the list.
+      departmentId = targetList.department_id;
     }
   }
 
@@ -1016,16 +1026,9 @@ export async function reassignTask(
 
   // Same rule as approval and manual creation: work belongs to the department
   // doing it, or somebody holds a task their own TL cannot see.
+  // P17-01: main or sub department.
   if (parsed.data.assignee_id) {
-    const { data: candidate } = await supabase
-      .from("vizserve_pms_users")
-      .select("id")
-      .eq("id", parsed.data.assignee_id)
-      .eq("primary_department_id", task.department_id)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (!candidate) {
+    if (!(await isDepartmentMember(supabase, task.department_id, parsed.data.assignee_id))) {
       return {
         ok: false,
         error: "That person is not an active member of this task's department.",
@@ -1545,10 +1548,16 @@ export async function selectionTargets(taskIds: string[]): Promise<
    * applies — work belongs to the department doing it, so offering anybody else
    * is offering a door the server does not open.
    */
+  // P17-01 — its main members and its sub members.
+  const subs = await subMemberIds(supabase, department);
   const { data: people } = await supabase
     .from("vizserve_pms_users")
     .select("id, full_name")
-    .eq("primary_department_id", department)
+    .or(
+      subs.length > 0
+        ? `primary_department_id.eq.${department},id.in.(${subs.join(",")})`
+        : `primary_department_id.eq.${department}`,
+    )
     .eq("is_active", true)
     .order("full_name");
 

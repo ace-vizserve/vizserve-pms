@@ -241,7 +241,7 @@ export const resolveAuth = cache(
      * alone, returns no rows, and the collaboration space simply is not there
      * yet. Full account above `loadSharedDepartmentIds`.
      */
-    const [attempt, { data: managed }, { data: shared }, { data: held }] = await Promise.all([
+    const [attempt, { data: managed }, { data: shared }, { data: held }, { data: subs }] = await Promise.all([
       supabase
         .from("vizserve_pms_users")
         .select(`${PROFILE_COLUMNS}, is_dept_admin`)
@@ -260,6 +260,9 @@ export const resolveAuth = cache(
       // P14-05. Its own query for the reason P13-01 gives above: before the
       // table exists this fails alone and the person simply holds `role`.
       supabase.from("vizserve_pms_user_roles").select("role").eq("user_id", userId),
+      // P17-01. Its own query for the same reason: before the table exists this
+      // fails alone and the person simply has no sub departments.
+      supabase.from("vizserve_pms_user_departments").select("department_id").eq("user_id", userId),
     ]);
 
     let profile: (typeof attempt)["data"] = attempt.data;
@@ -332,6 +335,7 @@ export const resolveAuth = cache(
         isDeptAdmin: profile.is_dept_admin,
         primaryDepartmentId: profile.primary_department_id,
         managedDepartmentIds: (managed ?? []).map((row) => row.department_id),
+        subDepartmentIds: (subs ?? []).map((row) => row.department_id),
         // P13-01. `?? []` is the degrade AND the pre-migration truth — see the
         // note on the query above and on the field itself.
         sharedDepartmentIds: (shared ?? []).map((row) => row.id),
@@ -648,6 +652,11 @@ export function departmentTreeScope(context: AuthContext): DepartmentPickerScope
 
   const own = context.primaryDepartmentId;
   if (own && !ids.includes(own)) ids.push(own);
+
+  // P17-01. A sub department's lists and folders are its members' to shape.
+  for (const sub of context.subDepartmentIds ?? []) {
+    if (!ids.includes(sub)) ids.push(sub);
+  }
 
   // Still the sentinel rule: "shapes nothing" must stay `none`, never a filter
   // that matches nothing. See `departmentPickerScope`.

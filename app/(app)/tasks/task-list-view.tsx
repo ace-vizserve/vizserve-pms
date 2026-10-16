@@ -25,6 +25,7 @@ import { QA_STAGES } from "@/lib/task-scope";
 
 import { PendingRequestList } from "./pending-requests";
 import { TaskStatusGroups } from "./task-status-groups";
+import { departmentsOf } from "@/lib/sub-departments";
 import type { ListRow, TaskRow, Viewer } from "./tasks-table";
 
 /**
@@ -46,6 +47,8 @@ export type TaskListSeat = {
   role: Viewer["role"];
   managedDepartmentIds: string[];
   primaryDepartmentId: string | null;
+  /** P17-01. */
+  subDepartmentIds?: string[];
 };
 
 export function TaskListView({
@@ -206,13 +209,17 @@ export function TaskListView({
     role: seat.role,
     managedDepartmentIds: seat.managedDepartmentIds,
     primaryDepartmentId: seat.primaryDepartmentId,
+    subDepartmentIds: seat.subDepartmentIds,
     selfId: viewer.userId,
   });
 
   const byDepartment: Record<string, { id: string; full_name: string }[]> = {};
   for (const person of people) {
-    if (!person.is_active || !person.primary_department_id) continue;
-    (byDepartment[person.primary_department_id] ??= []).push({ id: person.id, full_name: person.full_name });
+    if (!person.is_active) continue;
+    // P17-01. Main and every sub department: each team's work can go to them.
+    for (const departmentId of departmentsOf(person)) {
+      (byDepartment[departmentId] ??= []).push({ id: person.id, full_name: person.full_name });
+    }
   }
 
   // P13-01 — the collaboration space hands work to anybody who may collaborate.

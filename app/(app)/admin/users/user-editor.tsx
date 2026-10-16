@@ -54,7 +54,12 @@ const GRANTABLE_ROLES: Role[] = ["owner", "business_manager", "admin", "manager"
  *      links Entra SSO and password login to one profile.
  */
 
-export type Department = { id: string; name: string };
+export type Department = {
+  id: string;
+  name: string;
+  /** P17-01. So "Also works in" can skip Collaboration Projects, which everybody is in. */
+  is_shared?: boolean;
+};
 
 /** P7-33 — the pickable leave types, in the list's own `sort_order`. */
 export type AllocatableLeaveType = {
@@ -103,6 +108,8 @@ export type EditableUser = {
    */
   break_minutes: number | null;
   managed_department_ids: string[];
+  /** P17-01. Where they also do task work. Never `primary_department_id`. */
+  sub_department_ids?: string[];
   /** P7-33. `leave_type_id` → days allocated for `balanceYear`. Sparse. */
   leave_allocations: Record<string, number>;
 };
@@ -241,6 +248,11 @@ function UserForm({
   );
   const [managed, setManaged] = useState<string[]>(
     user?.managed_department_ids ?? [],
+  );
+  // P17-01.
+  const [subDepartments, setSubDepartments] = useState<string[]>(user?.sub_department_ids ?? []);
+  const subDepartmentChoices = departments.filter(
+    (department) => !department.is_shared && department.id !== primaryDepartmentId,
   );
   /**
    * P7-36. Sliced to `HH:MM` because `<input type="time">` silently rejects the
@@ -382,6 +394,12 @@ function UserForm({
     );
   }
 
+  function toggleSubDepartment(id: string, checked: boolean) {
+    setSubDepartments((current) =>
+      checked ? [...new Set([...current, id])] : current.filter((value) => value !== id),
+    );
+  }
+
   function submit() {
     setFormError(null);
     setFieldErrors({});
@@ -393,6 +411,8 @@ function UserForm({
       roles,
       primary_department_id: primaryDepartmentId,
       managed_department_ids: scopeApplies ? managed : [],
+      // P17-01. The main department is never also a sub one.
+      sub_department_ids: subDepartments.filter((id) => id !== primaryDepartmentId),
       // In the SHARED payload, not beside `is_active` below: HR is settable on
       // create as well as on edit, unlike the active switch which only makes
       // sense once an account exists.
@@ -800,6 +820,31 @@ function UserForm({
             </p>
           </div>
         </div>
+
+        {/* P17-01 — sub departments. Task work only; approvals stay with "Belongs to". */}
+        {subDepartmentChoices.length > 0 ? (
+          <div className="space-y-3 rounded-lg border p-4">
+            <div>
+              <Label>Also works in</Label>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                They can see, edit and be assigned that team&apos;s tasks. Their leave, overtime, DTR
+                and timesheet still go to the team they belong to.
+              </p>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              {subDepartmentChoices.map((department) => (
+                <label key={department.id} className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={subDepartments.includes(department.id)}
+                    onCheckedChange={(checked) => toggleSubDepartment(department.id, checked === true)}
+                  />
+                  {department.name}
+                </label>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {/* P14-05. Team Leaders only — every role above sees every department. */}
         {scopeApplies ? (

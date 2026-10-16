@@ -1,4 +1,4 @@
-import { loadAllDepartments } from "@/lib/departments-server";
+import { loadAllDepartments, loadSharedDepartmentIds } from "@/lib/departments-server";
 import type { Metadata } from "next";
 
 import { requireUserManager } from "@/lib/auth/authorization";
@@ -46,6 +46,8 @@ export default async function UsersPage() {
     { data: leaveTypes },
     { data: allocations },
     { data: heldRoles },
+    sharedIds,
+    { data: subRows },
   ] = await Promise.all([
     supabase
       .from("vizserve_pms_users")
@@ -90,7 +92,23 @@ export default async function UsersPage() {
     // P15-03. Held roles are readable by Admin and up under RLS; a Manager on
     // this screen reads them through the service role, after the gate above.
     createAdminClient().from("vizserve_pms_user_roles").select("user_id, role"),
+
+    // P17-01. Sub departments. The service role for the reason held roles use
+    // it; before the migration the table is missing, `data` is null, and
+    // everybody simply has none.
+    loadSharedDepartmentIds(),
+    createAdminClient().from("vizserve_pms_user_departments").select("user_id, department_id"),
   ]);
+
+  const subsByUser = new Map<string, string[]>();
+  for (const row of subRows ?? []) {
+    subsByUser.set(row.user_id, [...(subsByUser.get(row.user_id) ?? []), row.department_id]);
+  }
+
+  const editorDepartments = departments.map((department) => ({
+    ...department,
+    is_shared: sharedIds.includes(department.id),
+  }));
 
   // Grouped in one pass rather than a query per user — this table is the whole
   // staff list and N+1 here is a visible page load.
@@ -119,6 +137,7 @@ export default async function UsersPage() {
     ...user,
     roles: normaliseHeldRoles(user.role, rolesByUser.get(user.id) ?? []),
     managed_department_ids: managedByUser.get(user.id) ?? [],
+    sub_department_ids: subsByUser.get(user.id) ?? [],
     leave_allocations: allocationsByUser.get(user.id) ?? {},
   }));
 
@@ -143,7 +162,7 @@ export default async function UsersPage() {
       ) : (
       <UsersTable
         users={rows}
-        departments={departments}
+        departments={editorDepartments}
         leaveTypes={leaveTypes ?? []}
         balanceYear={balanceYear}
         today={today}

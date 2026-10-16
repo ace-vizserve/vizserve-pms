@@ -51,6 +51,9 @@ export const GENDER_LABELS: Record<Gender, string> = {
  */
 const managedDepartmentsSchema = z.array(z.uuid()).default([]);
 
+/** P17-01. Sub departments — where a person also does task work. */
+const subDepartmentsSchema = z.array(z.uuid()).default([]);
+
 /**
  * P7-36 — the scheduled working day.
  *
@@ -206,6 +209,7 @@ export const createUserSchema = withWorkHourRules(
     is_business_manager: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
+    sub_department_ids: subDepartmentsSchema,
     work_start: workClockSchema,
     work_end: workClockSchema,
     /** P8-05. Blank means inherit the company break — see the schema above. */
@@ -259,6 +263,7 @@ export const updateUserSchema = withWorkHourRules(
     is_business_manager: z.boolean().default(false),
     primary_department_id: z.uuid().nullable().default(null),
     managed_department_ids: managedDepartmentsSchema,
+    sub_department_ids: subDepartmentsSchema,
     is_active: z.boolean().default(true),
     /**
      * Whether this person may enter THIS application.
@@ -296,6 +301,17 @@ export type UpdateUserInput = z.infer<typeof updateUserSchema>;
  * action keeps both tracks agreeing on what gets stored, and stops a stale
  * checkbox from a role switch quietly granting scope.
  */
+/**
+ * P17-01. No duplicates, and never the main department — the database refuses
+ * that row, so dropping it here keeps a stale tick from failing the save.
+ */
+export function normaliseSubDepartments(
+  primaryDepartmentId: string | null,
+  subDepartmentIds: string[],
+): string[] {
+  return [...new Set(subDepartmentIds)].filter((id) => id !== primaryDepartmentId);
+}
+
 export function normaliseManagedDepartments(
   role: z.infer<typeof roleSchema>,
   managedDepartmentIds: string[],

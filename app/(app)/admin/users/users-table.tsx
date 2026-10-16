@@ -195,8 +195,12 @@ export function UsersTable({
       key: "belongs",
       header: "Belongs to",
       className: "hidden md:table-cell text-muted-foreground",
-      cell: (user) =>
-        user.primary_department_id ? departmentName.get(user.primary_department_id) : "—",
+      cell: (user) => {
+        const main = user.primary_department_id ? departmentName.get(user.primary_department_id) : "—";
+        // P17-01. Sub departments, after the main one.
+        const subs = (user.sub_department_ids ?? []).map((id) => departmentName.get(id) ?? "Unknown");
+        return subs.length === 0 ? main : `${main} (also ${subs.join(", ")})`;
+      },
     },
     {
       key: "leads",

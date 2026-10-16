@@ -552,6 +552,41 @@ export type Database = {
         ];
       };
       /** P14-05. Every role a person holds; `vizserve_pms_users.role` is the active one. */
+      /** P17-01 — sub departments: where a person also does task work. Never their main one. */
+      vizserve_pms_user_departments: {
+        Row: {
+          user_id: string;
+          department_id: string;
+          added_by: string | null;
+          added_at: string;
+        };
+        Insert: {
+          user_id: string;
+          department_id: string;
+          added_by?: string | null;
+          added_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          department_id?: string;
+          added_by?: string | null;
+          added_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_user_departments_user_id_fkey";
+            columns: ["user_id"];
+            referencedRelation: "vizserve_pms_users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "vizserve_pms_user_departments_department_id_fkey";
+            columns: ["department_id"];
+            referencedRelation: "vizserve_pms_departments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_user_roles: {
         Row: {
           user_id: string;
@@ -2661,6 +2696,11 @@ export type Database = {
        * Same rule as `is_hr` above: `canAdminDepartment()` in
        * `lib/auth/authorization.ts` is what app code calls.
        */
+      /** P17-01. Main OR sub department, asked about any user. */
+      vizserve_pms_is_department_member: {
+        Args: { p_department_id: string; p_user_id: string };
+        Returns: boolean;
+      };
       vizserve_pms_is_dept_admin: {
         Args: { p_department_id: string };
         Returns: boolean;

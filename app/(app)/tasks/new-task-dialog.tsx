@@ -33,6 +33,7 @@ import { createTask } from "./actions";
 import { EstimateField } from "./estimate-field";
 import { PriorityPicker } from "./priority-picker";
 import { NO_REPEAT, RepeatPicker, saveRepeatAfterCreate, type RepeatChoice } from "./repeat-picker";
+import { belongsToDepartment } from "@/lib/sub-departments";
 import { PeoplePicker } from "./people-picker";
 
 /**
@@ -48,6 +49,8 @@ type Person = {
   id: string;
   full_name: string;
   primary_department_id: string | null;
+  /** P17-01. */
+  sub_department_ids?: string[];
 };
 type List = { id: string; name: string; department_id: string };
 /**
@@ -264,7 +267,7 @@ function TaskForm({
     () =>
       sharedDepartmentIds.includes(departmentId)
         ? collaborators
-        : people.filter((person) => person.primary_department_id === departmentId),
+        : people.filter((person) => belongsToDepartment(person, departmentId)),
     [people, collaborators, departmentId, sharedDepartmentIds],
   );
 
