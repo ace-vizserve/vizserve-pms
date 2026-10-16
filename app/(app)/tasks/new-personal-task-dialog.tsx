@@ -88,6 +88,7 @@ export function NewPersonalTaskDialog({
   lists,
   defaultListId = null,
   colleagues,
+  subDepartmentRosters = {},
   scope = "department",
   departmentId,
   selfId,
@@ -112,6 +113,13 @@ export function NewPersonalTaskDialog({
    * `NewCompanyTaskDialog`. Each gets the one roster that is correct for it.
    */
   colleagues: { id: string; full_name: string }[];
+  /**
+   * P17-01 — a roster per SUB department, decided by the caller like
+   * `colleagues`. Looked up by the chosen list's department only: a list in a
+   * sub department files the task THERE and offers THAT team. Every other list
+   * keeps `colleagues` and `departmentId`.
+   */
+  subDepartmentRosters?: Record<string, { id: string; full_name: string }[]>;
   /**
    * Which form this is, for the WORDING under the picker only.
    *
@@ -196,7 +204,13 @@ export function NewPersonalTaskDialog({
    * ⚠️ NO BRANCH HERE ON PURPOSE. See the note on `colleagues` above: this
    * component choosing its own roster is the bug, three times over.
    */
-  const candidates = colleagues;
+  // P17-01. The one exception: a list in a sub department brings that
+  // department's roster (looked up, not chosen), and files the task there.
+  const chosenListDepartment =
+    listId === NO_LIST ? null : (lists.find((list) => list.id === listId)?.department_id ?? null);
+  const subRoster = chosenListDepartment ? subDepartmentRosters[chosenListDepartment] : undefined;
+  const candidates = subRoster ?? colleagues;
+  const workDepartmentId = subRoster ? chosenListDepartment : departmentId;
 
   /*
    * ⚠️ PRUNED ON EVERY RENDER, NOT ON THE LIST CHANGE. Someone ticks three
@@ -245,7 +259,7 @@ export function NewPersonalTaskDialog({
    * the whole company, and a reader whose own team is just them would otherwise
    * be refused a picker on the one list where everybody is assignable.
    */
-  const canAssign = candidates.length > 0 && departmentId !== null;
+  const canAssign = candidates.length > 0 && workDepartmentId !== null;
   /**
    * Everybody ticked who is not the reader, in the order the list offers them.
    *
@@ -320,7 +334,7 @@ export function NewPersonalTaskDialog({
             // The member's OWN department. It travels as a parameter because the
             // SQL function takes one, and the function is what refuses any
             // department that is neither theirs nor one they lead.
-            department_id: departmentId,
+            department_id: workDepartmentId,
             assignee_id: accountable,
             /*
              * Added one at a time AFTER the row exists — `create_task` takes a
