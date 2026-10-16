@@ -100,12 +100,18 @@ export function NewTaskButton({
         ? listRow.department_id
         : auth.primaryDepartmentId;
 
-    const colleagues = people.data
-      .filter(
-        (person) =>
-          person.is_active && person.id !== auth.userId && belongsToDepartment(person, workDepartment),
-      )
-      .map((person) => ({ id: person.id, full_name: person.full_name }));
+    const rosterOf = (departmentId: string | null) =>
+      people.data
+        .filter(
+          (person) => person.is_active && person.id !== auth.userId && belongsToDepartment(person, departmentId),
+        )
+        .map((person) => ({ id: person.id, full_name: person.full_name }));
+
+    const colleagues = rosterOf(workDepartment);
+    // P17-01. So choosing a sub department's list in the dialog offers that team.
+    const subDepartmentRosters = Object.fromEntries(
+      (auth.subDepartmentIds ?? []).map((id) => [id, rosterOf(id)]),
+    );
 
     return wrap(
       inShared ? (
@@ -129,6 +135,7 @@ export function NewTaskButton({
         <NewPersonalTaskDialog
           lists={allLists}
           colleagues={colleagues}
+          subDepartmentRosters={subDepartmentRosters}
           departmentId={workDepartment}
           selfId={auth.userId}
           trigger={trigger}

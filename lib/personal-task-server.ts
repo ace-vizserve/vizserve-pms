@@ -60,7 +60,53 @@ export type PersonalTaskOptions = {
    * what was wrong three times over.
    */
   colleagues: { id: string; full_name: string }[];
+  /**
+   * P17-01 — one roster per SUB department the reader also works in: its
+   * active people, main or sub, the reader excluded. The dialog swaps to the
+   * matching one when the chosen list is in that department. Empty before the
+   * migration, and for anybody with no sub department.
+   */
+  subDepartmentRosters: Record<string, { id: string; full_name: string }[]>;
 };
+
+/** P17-01. See `subDepartmentRosters` on the type. RLS decides who can be read. */
+async function loadSubDepartmentRosters(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  subIds: string[],
+): Promise<Record<string, { id: string; full_name: string }[]>> {
+  if (subIds.length === 0) return {};
+
+  const [{ data: mains }, { data: subMembers }] = await Promise.all([
+    supabase
+      .from("vizserve_pms_users")
+      .select("id, full_name, primary_department_id")
+      .in("primary_department_id", subIds)
+      .eq("is_active", true)
+      .neq("id", userId),
+    supabase.from("vizserve_pms_user_departments").select("user_id, department_id").in("department_id", subIds),
+  ]);
+
+  const otherIds = [...new Set((subMembers ?? []).map((row) => row.user_id))].filter((id) => id !== userId);
+  const { data: others } = otherIds.length
+    ? await supabase.from("vizserve_pms_users").select("id, full_name").in("id", otherIds).eq("is_active", true)
+    : { data: [] as { id: string; full_name: string }[] };
+  const nameOf = new Map((others ?? []).map((person) => [person.id, person.full_name]));
+
+  const rosters: Record<string, { id: string; full_name: string }[]> = {};
+  for (const id of subIds) rosters[id] = [];
+  for (const person of mains ?? []) {
+    if (person.primary_department_id) rosters[person.primary_department_id]?.push({ id: person.id, full_name: person.full_name });
+  }
+  for (const row of subMembers ?? []) {
+    const name = nameOf.get(row.user_id);
+    if (name && !rosters[row.department_id]?.some((person) => person.id === row.user_id)) {
+      rosters[row.department_id]?.push({ id: row.user_id, full_name: name });
+    }
+  }
+  for (const roster of Object.values(rosters)) roster.sort((a, b) => a.full_name.localeCompare(b.full_name));
+  return rosters;
+}
 
 export const loadPersonalTaskOptions = cache(
   async (userId: string): Promise<PersonalTaskOptions> => {
@@ -73,6 +119,13 @@ export const loadPersonalTaskOptions = cache(
       .maybeSingle();
 
     const myDepartment = me?.primary_department_id ?? null;
+
+    // P17-01. Errors (table not there yet) read as "no sub departments".
+    const { data: subRows } = await supabase
+      .from("vizserve_pms_user_departments")
+      .select("department_id")
+      .eq("user_id", userId);
+    const subIds = (subRows ?? []).map((row) => row.department_id);
 
     const [{ data: lists }, { data: colleagues }] = await Promise.all([
       supabase
@@ -100,6 +153,7 @@ export const loadPersonalTaskOptions = cache(
       departmentId: myDepartment,
       lists: lists ?? [],
       colleagues: colleagues ?? [],
+      subDepartmentRosters: await loadSubDepartmentRosters(supabase, userId, subIds),
     };
   },
 );

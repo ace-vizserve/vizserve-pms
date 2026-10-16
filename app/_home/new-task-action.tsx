@@ -29,7 +29,7 @@ export async function HomeNewTaskAction() {
   // ⚠️ THIS WAS A VERBATIM COPY of the member branch in
   // `app/(app)/tasks/new-task-button.tsx`, comments included. One definition
   // now, in `lib/personal-task-server.ts`.
-  const { departmentId: myDepartment, lists, colleagues } = await loadPersonalTaskOptions(
+  const { departmentId: myDepartment, lists, colleagues, subDepartmentRosters } = await loadPersonalTaskOptions(
     context.userId,
   );
 
@@ -50,6 +50,7 @@ export async function HomeNewTaskAction() {
     <NewPersonalTaskDialog
       lists={lists}
       colleagues={colleagues}
+      subDepartmentRosters={subDepartmentRosters}
       departmentId={myDepartment}
       selfId={context.userId}
       trigger="quick"
