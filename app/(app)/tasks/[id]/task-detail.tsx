@@ -21,7 +21,9 @@ import {
   isCollaborationSpace,
   realtimeDepartmentFilter,
   seesEveryDepartment,
+  worksInDepartment,
 } from "@/lib/auth/rules";
+import { belongsToDepartment } from "@/lib/sub-departments";
 import { formatDate, formatDateTime, todayInAppZone } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
 import {
@@ -280,7 +282,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
     isQa: task.qa_assignee_id === auth.userId,
     leadsDepartment: canAccessDepartment(auth, task.department_id),
     isAdmin: seesEveryDepartment(auth),
-    inDepartment: auth.primaryDepartmentId === task.department_id || collaboration,
+    inDepartment: worksInDepartment(auth, task.department_id) || collaboration,
     administersDepartment: canAdminDepartment(auth, task.department_id),
   };
 
@@ -293,7 +295,7 @@ export function TaskDetail({ taskId }: { taskId: string }) {
   const departmentPeople = collaboration
     ? (collaboratorsQuery.data ?? [])
     : people
-        .filter((person) => person.is_active && person.primary_department_id === task.department_id)
+        .filter((person) => person.is_active && belongsToDepartment(person, task.department_id))
         .map((person) => ({ id: person.id, full_name: person.full_name }));
 
   const customValues = (task.custom_fields ?? {}) as Json;

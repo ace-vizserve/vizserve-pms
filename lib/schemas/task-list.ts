@@ -12,6 +12,8 @@ export const directoryPersonSchema = z.object({
   full_name: z.string(),
   primary_department_id: z.uuid().nullable(),
   is_active: z.boolean(),
+  /** P17-01. Merged in by `fetchDirectory` from a separate read; see `lib/sub-departments.ts`. */
+  sub_department_ids: z.array(z.uuid()).default([]),
 });
 
 export type DirectoryPerson = z.infer<typeof directoryPersonSchema>;

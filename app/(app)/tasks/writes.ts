@@ -5,6 +5,7 @@ import { z } from "zod";
 import { flattenIssues, readableError, type ActionResult } from "@/lib/action-result";
 import type { Json } from "@/lib/database.types";
 import { browserClient } from "@/lib/query/browser-client";
+import { isDepartmentMember } from "@/lib/sub-departments";
 import { sanitizeRichTextInBrowser } from "@/lib/rich-text-dom";
 import { setRecurrenceSchema } from "@/lib/recurrence";
 import { taskFieldValueSchema, toListField } from "@/lib/schemas/list-fields";
@@ -210,16 +211,9 @@ export async function reassignTask(taskId: string, input: unknown): Promise<Acti
   if (!task) return { ok: false, error: "That task is not available." };
 
   // The friendly refusal; P11-03's WITH CHECK refuses the same thing in the database.
+  // P17-01: main or sub department.
   if (parsed.data.assignee_id) {
-    const { data: candidate } = await client
-      .from("vizserve_pms_users")
-      .select("id")
-      .eq("id", parsed.data.assignee_id)
-      .eq("primary_department_id", task.department_id)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (!candidate) {
+    if (!(await isDepartmentMember(client, task.department_id, parsed.data.assignee_id))) {
       return { ok: false, error: "That person is not an active member of this task's department." };
     }
   }

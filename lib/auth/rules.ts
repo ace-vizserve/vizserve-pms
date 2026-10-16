@@ -57,6 +57,13 @@ export type AuthContext = {
   /** The departments they lead or oversee. Empty for a plain member. */
   managedDepartmentIds: string[];
   /**
+   * P17-01 — SUB DEPARTMENTS: where they also do task work. Never the main
+   * one. Read `worksInDepartment()` rather than this field. ⚠️ Task side only:
+   * approvals, DTR, leave and timesheets never consult it. Optional so a
+   * context built before the table exists (or in a test) reads as "none".
+   */
+  subDepartmentIds?: string[];
+  /**
    * P13-01 — THE COLLABORATION SPACES. Departments flagged `is_shared`:
    * "Collaboration Projects (All departments)" and any other one an owner
    * creates later.
@@ -216,6 +223,19 @@ export function departmentScopeFilter(
  *
  * Same reasoning, same rung, as `canDoHr` — see the note there.
  */
+/**
+ * P17-01 — "IS THIS ONE OF MY TEAMS, FOR TASK WORK?" Main or sub. Mirrors
+ * `vizserve_pms_is_department_member`. Not a lead's scope — see
+ * `canAccessDepartment` for that.
+ */
+export function worksInDepartment(
+  context: Pick<AuthContext, "primaryDepartmentId" | "subDepartmentIds">,
+  departmentId: string | null,
+): boolean {
+  if (!departmentId) return false;
+  return context.primaryDepartmentId === departmentId || (context.subDepartmentIds ?? []).includes(departmentId);
+}
+
 export function canAccessDepartment(
   context: { role: Role; managedDepartmentIds: readonly string[] },
   departmentId: string | null,
@@ -400,6 +420,11 @@ export function realtimeDepartmentScope(context: AuthContext): string[] {
     if (!ids.includes(id)) ids.push(id);
   }
 
+  // P17-01. A sub department's board must push like the main one's.
+  for (const id of context.subDepartmentIds ?? []) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+
   /*
    * P13-01 — the collaboration space, for everybody.
    *
@@ -471,6 +496,7 @@ export function canManageAnyDepartmentTree(context: AuthContext): boolean {
   return (
     canShapeAnyDepartment(context) ||
     context.primaryDepartmentId !== null ||
+    (context.subDepartmentIds ?? []).length > 0 ||
     // P13-01. Somebody with no department of their own still has the
     // collaboration space to organise, so the page is worth rendering.
     context.sharedDepartmentIds.length > 0
@@ -505,7 +531,8 @@ export function canManageDepartmentTree(
   if (canShapeDepartment(context, departmentId)) return true;
   if (!departmentId) return false;
   if (isCollaborationSpace(context, departmentId)) return true;
-  return context.primaryDepartmentId === departmentId;
+  // P17-01. Main or sub.
+  return worksInDepartment(context, departmentId);
 }
 
 

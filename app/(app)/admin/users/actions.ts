@@ -15,6 +15,7 @@ import {
   createUserSchema,
   normaliseHeldRoles,
   normaliseManagedDepartments,
+  normaliseSubDepartments,
   updateUserSchema,
 } from "@/lib/schemas/users";
 import type { Role } from "@/lib/auth/roles";
@@ -56,6 +57,8 @@ type AuditableProfile = {
   is_active: boolean;
   app_access: string[];
   managed_department_ids: string[];
+  /** P17-01. */
+  sub_department_ids: string[];
 };
 
 /**
@@ -103,10 +106,49 @@ async function readProfileForAudit(
     .select("department_id")
     .eq("user_id", userId);
 
+  // P17-01. Null before the migration, which reads as "none".
+  const { data: subs } = await admin
+    .from("vizserve_pms_user_departments")
+    .select("department_id")
+    .eq("user_id", userId);
+
   return {
     ...profile,
     managed_department_ids: (managed ?? []).map((row) => row.department_id).sort(),
+    sub_department_ids: (subs ?? []).map((row) => row.department_id).sort(),
   };
+}
+
+/**
+ * P17-01 — sub departments, replaced wholesale for the reason the managed set
+ * is. Written AFTER the profile, so the main department it must not repeat is
+ * already the saved one.
+ *
+ * Before the migration the table does not exist. Saving "none" then is not an
+ * error — nobody has any — but saving some is, and says why.
+ */
+async function replaceSubDepartments(
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string,
+  departmentIds: string[],
+): Promise<string | null> {
+  const { error: deleteError } = await admin
+    .from("vizserve_pms_user_departments")
+    .delete()
+    .eq("user_id", userId);
+
+  if (deleteError) {
+    const missing = deleteError.code === "42P01" || deleteError.code === "PGRST205";
+    if (missing && departmentIds.length === 0) return null;
+    return missing ? "\"Also works in\" is not switched on yet. Ask IT to apply P17-01." : deleteError.message;
+  }
+  if (departmentIds.length === 0) return null;
+
+  const { error: insertError } = await admin
+    .from("vizserve_pms_user_departments")
+    .insert(departmentIds.map((department_id) => ({ user_id: userId, department_id })));
+
+  return insertError?.message ?? null;
 }
 
 /**
@@ -312,6 +354,13 @@ export async function createUser(
   const managedError = await replaceManagedDepartments(admin, userId, managed);
   if (managedError) return { ok: false, error: managedError };
 
+  const subsError = await replaceSubDepartments(
+    admin,
+    userId,
+    normaliseSubDepartments(values.primary_department_id, values.sub_department_ids),
+  );
+  if (subsError) return { ok: false, error: subsError };
+
   // Phase 0 exit criterion: an audit row on user create/edit.
   await admin.rpc("vizserve_pms_write_audit_log", {
     p_entity_type: "user",
@@ -452,6 +501,13 @@ export async function updateUser(userId: string, input: unknown): Promise<Action
 
   const managedError = await replaceManagedDepartments(admin, userId, managed);
   if (managedError) return { ok: false, error: managedError };
+
+  const subsError = await replaceSubDepartments(
+    admin,
+    userId,
+    normaliseSubDepartments(values.primary_department_id, values.sub_department_ids),
+  );
+  if (subsError) return { ok: false, error: subsError };
 
   const after = await readProfileForAudit(admin, userId);
 

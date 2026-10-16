@@ -3,6 +3,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { Database } from "@/lib/database.types";
 import { parse, parseAll } from "@/lib/query/parse";
 import { read, ReadError } from "@/lib/query/read";
+import { withSubDepartments, type SubDepartmentRow } from "@/lib/sub-departments";
 import { toListField, type ListField } from "@/lib/schemas/list-fields";
 import {
   checklistItemSchema,
@@ -266,14 +267,28 @@ export async function fetchCollaborators(client: TaskReadClient) {
  * the inactive are included.
  */
 export async function fetchDirectory(client: TaskReadClient): Promise<DirectoryPerson[]> {
-  const rows = await read<unknown[]>(
-    client
-      .from("vizserve_pms_users")
-      .select("id, full_name, primary_department_id, is_active")
-      .order("full_name"),
-  );
+  const [rows, subs] = await Promise.all([
+    read<{ id: string }[]>(
+      client
+        .from("vizserve_pms_users")
+        .select("id, full_name, primary_department_id, is_active")
+        .order("full_name"),
+    ),
+    fetchSubDepartmentRows(client),
+  ]);
 
-  return parseAll(directoryPersonSchema, rows, "people");
+  return parseAll(directoryPersonSchema, withSubDepartments(rows ?? [], subs), "people");
+}
+
+/**
+ * P17-01 — every sub-department row the reader may see. ITS OWN QUERY, AND IT
+ * NEVER THROWS: before the migration is pasted the table does not exist, and
+ * folding it into the people read would empty every picker in the app. An
+ * error here means "nobody has a sub department", which is the truth until then.
+ */
+export async function fetchSubDepartmentRows(client: TaskReadClient): Promise<SubDepartmentRow[]> {
+  const { data, error } = await client.from("vizserve_pms_user_departments").select("user_id, department_id");
+  return error ? [] : (data ?? []);
 }
 
 /**

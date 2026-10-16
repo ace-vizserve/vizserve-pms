@@ -1,5 +1,6 @@
 import type { Role } from "@/lib/auth/roles";
 import { canAccessDepartment } from "@/lib/auth/rules";
+import { departmentsOf } from "@/lib/sub-departments";
 
 /**
  * P13-02 — WHO A PICKER MAY OFFER, given where the person is standing.
@@ -47,6 +48,8 @@ export type AssignablePerson = {
   id: string;
   full_name: string;
   primary_department_id: string | null;
+  /** P17-01 — sub departments. A person is in a list's department by either. */
+  sub_department_ids?: readonly string[];
   is_active: boolean;
 };
 
@@ -58,6 +61,7 @@ export function assignableInList({
   role,
   managedDepartmentIds,
   primaryDepartmentId,
+  subDepartmentIds = [],
   selfId,
 }: {
   /**
@@ -77,6 +81,8 @@ export function assignableInList({
   role: Role;
   managedDepartmentIds: readonly string[];
   primaryDepartmentId: string | null;
+  /** P17-01. The caller's sub departments widen the no-list scope like the main one. */
+  subDepartmentIds?: readonly string[];
   /** Excluded from the result: "Myself" is the composer's default, not a row. */
   selfId: string;
 }): { id: string; full_name: string }[] {
@@ -85,22 +91,24 @@ export function assignableInList({
   }
 
   const callerScope = new Set(
-    [primaryDepartmentId, ...managedDepartmentIds].filter((id): id is string => Boolean(id)),
+    [primaryDepartmentId, ...subDepartmentIds, ...managedDepartmentIds].filter((id): id is string => Boolean(id)),
   );
 
   return people
     .filter((person) => {
       if (!person.is_active) return false;
       if (person.id === selfId) return false;
-      if (person.primary_department_id === null) return false;
+
+      // P17-01. Main or sub — a sub member is in that department's lists too.
+      const departments = departmentsOf(person);
+      if (departments.length === 0) return false;
 
       // The list decides, whoever is asking.
-      if (listDepartmentId) return person.primary_department_id === listDepartmentId;
+      if (listDepartmentId) return departments.includes(listDepartmentId);
 
       // No list: the caller's own scope, unchanged from before P13-02.
-      return (
-        canAccessDepartment({ role, managedDepartmentIds }, person.primary_department_id) ||
-        callerScope.has(person.primary_department_id)
+      return departments.some(
+        (id) => canAccessDepartment({ role, managedDepartmentIds }, id) || callerScope.has(id),
       );
     })
     .map((person) => ({ id: person.id, full_name: person.full_name }));

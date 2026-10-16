@@ -4,7 +4,8 @@ import { useQuery } from "@tanstack/react-query";
 
 import { useAuth } from "@/lib/auth/client-auth";
 import { roleAtLeast } from "@/lib/auth/roles";
-import { canAccessDepartment, isCollaborationSpace } from "@/lib/auth/rules";
+import { canAccessDepartment, isCollaborationSpace, worksInDepartment } from "@/lib/auth/rules";
+import { belongsToDepartment } from "@/lib/sub-departments";
 import { browserClient } from "@/lib/query/browser-client";
 import {
   fetchActiveDepartments,
@@ -87,20 +88,24 @@ export function NewTaskButton({
 
   // 2. A member.
   if (!roleAtLeast(auth.role, "team_leader")) {
-    const colleagues = people.data
-      .filter(
-        (person) =>
-          person.is_active &&
-          person.id !== auth.userId &&
-          auth.primaryDepartmentId !== null &&
-          person.primary_department_id === auth.primaryDepartmentId,
-      )
-      .map((person) => ({ id: person.id, full_name: person.full_name }));
-
     const listRow = listId ? allLists.find((list) => list.id === listId) : undefined;
     const inShared = listRow
       ? (departments.data.find((department) => department.id === listRow.department_id)?.is_shared ?? false)
       : false;
+
+    // P17-01. Standing in a list of one of their SUB departments, the work is
+    // that team's: filed there, handed to that team. Anywhere else, their own.
+    const workDepartment =
+      listRow && !inShared && worksInDepartment(auth, listRow.department_id)
+        ? listRow.department_id
+        : auth.primaryDepartmentId;
+
+    const colleagues = people.data
+      .filter(
+        (person) =>
+          person.is_active && person.id !== auth.userId && belongsToDepartment(person, workDepartment),
+      )
+      .map((person) => ({ id: person.id, full_name: person.full_name }));
 
     return wrap(
       inShared ? (
@@ -124,7 +129,7 @@ export function NewTaskButton({
         <NewPersonalTaskDialog
           lists={allLists}
           colleagues={colleagues}
-          departmentId={auth.primaryDepartmentId}
+          departmentId={workDepartment}
           selfId={auth.userId}
           trigger={trigger}
           defaultListId={listId}
@@ -137,7 +142,9 @@ export function NewTaskButton({
   const allowed = departments.data
     .filter(
       (department) =>
-        canAccessDepartment(auth, department.id) || isCollaborationSpace(auth, department.id),
+        canAccessDepartment(auth, department.id) ||
+        isCollaborationSpace(auth, department.id) ||
+        worksInDepartment(auth, department.id),
     )
     .map((department) => ({ id: department.id, name: department.name }));
 
@@ -152,6 +159,7 @@ export function NewTaskButton({
           id: person.id,
           full_name: person.full_name,
           primary_department_id: person.primary_department_id,
+          sub_department_ids: person.sub_department_ids,
         }))}
       /* P13-02. Used by the dialog ONLY while the chosen department is a
          collaboration space — see the note on `candidates` there. */

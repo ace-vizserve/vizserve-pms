@@ -278,6 +278,7 @@ export function BoardPageView() {
                     role: auth.role,
                     managedDepartmentIds: auth.managedDepartmentIds,
                     primaryDepartmentId: auth.primaryDepartmentId,
+                    subDepartmentIds: auth.subDepartmentIds,
                     isDeptAdmin: auth.isDeptAdmin,
                   }}
                   listId={listId}

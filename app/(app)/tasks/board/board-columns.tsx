@@ -15,7 +15,8 @@ import {
 import { SearchHighlight } from "@/components/search-highlight";
 import { HoverPrefetchLink } from "@/components/ui/hover-prefetch-link";
 import { roleAtLeast, type Role } from "@/lib/auth/roles";
-import { canAccessDepartment, seesEveryDepartment } from "@/lib/auth/rules";
+import { canAccessDepartment, seesEveryDepartment, worksInDepartment } from "@/lib/auth/rules";
+import { departmentsOf } from "@/lib/sub-departments";
 import type { Json, VizservePmsTaskStatus } from "@/lib/database.types";
 import { formatDate } from "@/lib/dates";
 import { browserClient } from "@/lib/query/browser-client";
@@ -104,6 +105,8 @@ export type BoardViewer = {
   role: Role;
   managedDepartmentIds: string[];
   primaryDepartmentId: string | null;
+  /** P17-01 — sub departments: task work only. */
+  subDepartmentIds?: string[];
   /** The Admin tick (P8-01c) — which only ever applies to the primary department. */
   isDeptAdmin: boolean;
 };
@@ -268,18 +271,21 @@ export function BoardColumns({
    * of it. It only decides which moves are worth offering.
    */
   /** Who the composer may assign to — P7-14's rule, same as the list's. */
-  const assignableScope = new Set(
-    [viewer.primaryDepartmentId, ...viewer.managedDepartmentIds].filter((id): id is string => Boolean(id)),
-  );
+  // P17-01. Main and sub departments on both sides.
+  const assignableScope = new Set([
+    ...departmentsOf({
+      primary_department_id: viewer.primaryDepartmentId,
+      sub_department_ids: viewer.subDepartmentIds,
+    }),
+    ...viewer.managedDepartmentIds,
+  ]);
 
   const assignable = (people ?? [])
     .filter(
       (person) =>
         person.is_active &&
         person.id !== viewer.userId &&
-        person.primary_department_id !== null &&
-        (canAccessDepartment(viewer, person.primary_department_id) ||
-          assignableScope.has(person.primary_department_id)),
+        departmentsOf(person).some((id) => canAccessDepartment(viewer, id) || assignableScope.has(id)),
     )
     .map((person) => ({ id: person.id, full_name: person.full_name }));
 
@@ -297,8 +303,8 @@ export function BoardColumns({
       isAssignee: task.assignee_id === viewer.userId || joinedTaskIdSet.has(task.id),
       isQa: task.qa_assignee_id === viewer.userId,
       leadsDepartment: canAccessDepartment(viewer, task.department_id),
-      // P11-05. Mirrors `v_in_dept` — see `lib/schemas/tasks.ts`.
-      inDepartment: viewer.primaryDepartmentId === task.department_id,
+      // P11-05. Mirrors `v_in_dept` — see `lib/schemas/tasks.ts`. Main or sub (P17-01).
+      inDepartment: worksInDepartment(viewer, task.department_id),
       isAdmin,
     };
   }

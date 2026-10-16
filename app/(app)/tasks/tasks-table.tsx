@@ -12,7 +12,7 @@ import {
   type HideableColumn,
 } from "@/components/data-table-columns";
 import { TaskCategoryBadge, taskCategoryEdge, taskStatusRow } from "@/components/status-badge";
-import { canAccessDepartment, seesEveryDepartment } from "@/lib/auth/rules";
+import { canAccessDepartment, seesEveryDepartment, worksInDepartment } from "@/lib/auth/rules";
 import type {
   VizservePmsTaskStatus,
   VizservePmsUserRole,
@@ -157,6 +157,8 @@ export type Viewer = {
    * `managedDepartmentIds` (which they lead) and `deptAdminOf` (the Admin tick).
    */
   primaryDepartmentId: string | null;
+  /** P17-01 — sub departments: task work only. See `worksInDepartment`. */
+  subDepartmentIds?: string[];
 };
 
 export type TaskLookups = {
@@ -261,10 +263,10 @@ export function viewerSeat(viewer: Viewer, lookups: TaskLookups, task: TaskRow) 
     isQa: task.qa_assignee_id === viewer.userId,
     leadsDepartment:
       canAccessDepartment(viewer, task.department_id),
-    /* P11-05. Mirrors `v_in_dept`: `primary_department_id` is what this
-       schema means by "a member of a department" everywhere else. The
-       server re-checks it — this only decides what is on screen. */
-    inDepartment: viewer.primaryDepartmentId === task.department_id,
+    /* P11-05. Mirrors `v_in_dept` — main or sub department since P17-01
+       (`vizserve_pms_is_department_member`). The server re-checks it — this
+       only decides what is on screen. */
+    inDepartment: worksInDepartment(viewer, task.department_id),
     isAdmin: seesEveryDepartment(viewer),
   };
 }
@@ -359,7 +361,7 @@ export function TaskGroupTable({
     return (
       canAccessDepartment(viewer, task.department_id) ||
       task.department_id === viewer.deptAdminOf ||
-      task.department_id === viewer.primaryDepartmentId ||
+      worksInDepartment(viewer, task.department_id) ||
       task.created_by === viewer.userId ||
       (task.is_personal && task.assignee_id === viewer.userId)
     );
