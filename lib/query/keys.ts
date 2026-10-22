@@ -58,7 +58,9 @@ export type TaskPart =
   | "fields"
   | "request"
   /** P12 Phase A — whether the viewer holds a join-table seat on the task. */
-  | "joined";
+  | "joined"
+  /** P17-03 — every reaction on every comment of the task, one read. */
+  | "reactions";
 
 /**
  * Reference data — admin-managed, changes rarely, read by pickers everywhere.

@@ -1,0 +1,17 @@
+{
+  "date": "2026-10-22",
+  "kind": "added",
+  "area": "Tasks",
+  "title": "React to a comment",
+  "description": "Every comment on a task can take a quick reaction — Like, Love, Celebrate, Haha, Seen or Done — so \"got it, thanks\" no longer needs a comment of its own.",
+  "items": [
+    "The smiley button under a comment opens the picker; pressing a reaction again takes yours back",
+    "Each reaction shows how many people chose it, and yours is highlighted",
+    "Hover a reaction to see who reacted",
+    "Reactions send no notifications"
+  ],
+  "refs": [
+    "P17-03"
+  ],
+  "pending": "The status doc records the reactions migration as written but not yet applied. Until it is, comments show no reaction bar."
+}

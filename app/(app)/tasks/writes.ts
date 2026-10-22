@@ -12,6 +12,7 @@ import { taskFieldValueSchema, toListField } from "@/lib/schemas/list-fields";
 import {
   checklistItemSchema,
   checklistToggleSchema,
+  commentReactionSchema,
   overridePayloadSchema,
   taskCommentSchema,
   taskParentSchema,
@@ -137,6 +138,32 @@ export async function addTaskComment(taskId: string, input: unknown): Promise<Ac
 
   // A mention queues an email (P8-18); send it now rather than at the next sweep.
   drain();
+  return { ok: true, data: undefined };
+}
+
+/**
+ * P17-03 — add or remove the viewer's reaction on a comment.
+ *
+ * Removing deletes the row; the DELETE policy limits it to the viewer's own,
+ * so a forged id removes nothing. Adding a reaction already there is a
+ * primary-key conflict, answered as success — a double click is not an error
+ * worth a toast.
+ */
+export async function setCommentReaction(input: unknown): Promise<ActionResult> {
+  const parsed = commentReactionSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That reaction is not available." };
+
+  const userId = await currentUserId();
+  if (!userId) return { ok: false, error: "Your session has ended. Sign in again." };
+
+  const { comment_id, task_id, reaction, reacted } = parsed.data;
+  const table = browserClient().from("vizserve_pms_task_comment_reactions");
+
+  const { error } = reacted
+    ? await table.insert({ comment_id, task_id, user_id: userId, reaction })
+    : await table.delete().eq("comment_id", comment_id).eq("user_id", userId).eq("reaction", reaction);
+
+  if (error && error.code !== "23505") return { ok: false, error: readableError(error) };
   return { ok: true, data: undefined };
 }
 

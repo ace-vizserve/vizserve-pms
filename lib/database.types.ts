@@ -2072,6 +2072,34 @@ export type Database = {
           },
         ];
       };
+      /** P17-03. One row per comment, person and reaction. No Update: un-reacting deletes. */
+      vizserve_pms_task_comment_reactions: {
+        Row: {
+          comment_id: string;
+          task_id: string;
+          user_id: string;
+          reaction: string;
+          created_at: string;
+        };
+        Insert: {
+          comment_id: string;
+          /** Must match the comment's own task — the INSERT policy says so. */
+          task_id: string;
+          /** Must equal auth.uid(). */
+          user_id: string;
+          reaction: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_task_comment_reactions_comment_id_fkey";
+            columns: ["comment_id"];
+            referencedRelation: "vizserve_pms_task_comments";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       vizserve_pms_task_transitions: {
         Row: {
           from_status: VizservePmsTaskStatus;

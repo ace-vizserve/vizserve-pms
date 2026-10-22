@@ -2631,3 +2631,23 @@ departments, set under "Also works in" on `/admin/users`.
   the browser mirrors; `tests/unit/sub-departments.test.ts` covers them.
 - **Not verified against a database.** The SQL has never executed (no scratch
   project on this machine) and there is no db test for it yet.
+
+## P17-03 — Reactions on a task comment (22 Oct 2026)
+
+Six reactions under every task comment — Like, Love, Celebrate, Haha, Seen,
+Done — drawn by `components/ui/reactions.tsx` (supplied component, ported from
+Radix to Base UI's popover; its stylesheet reads the app's tokens instead of
+redefining `:root`).
+
+- `20261022090000_p17_03_comment_reactions.sql` — **apply by hand**. New table
+  `vizserve_pms_task_comment_reactions`, one row per (comment, person,
+  reaction). Reaction ids are a check constraint, mirrored by
+  `COMMENT_REACTIONS` in `lib/schemas/tasks.ts`; a unit test compares the two.
+  `task_id` is carried on the row (checked against the comment by the INSERT
+  policy) so the thread reads by one `task_id` filter. Read follows the task;
+  add/remove only your own. No UPDATE grant, no audit trigger, no notification.
+- The thread reads reactions in its own query. A failed read — including the
+  table not existing yet — draws **no bar**, never a bar of zeros.
+- `lib/comment-reactions.ts` folds rows into pills; covered by
+  `tests/unit/comment-reactions.test.ts`.
+- **Not verified against a database or in a browser.** No db test yet.

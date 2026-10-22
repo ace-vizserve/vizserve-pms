@@ -1,20 +1,51 @@
 "use client";
 
 import { toast } from "@/components/ui/toast";
-import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  AlertTriangle,
+  ArrowRight,
+  CircleCheck,
+  Eye,
+  Heart,
+  Laugh,
+  PartyPopper,
+  Send,
+  ThumbsUp,
+  Trash2,
+} from "lucide-react";
 import { startTransition, useCallback, useOptimistic, useState, useTransition } from "react";
 
 import { isPlaceholder, placeholderId } from "./optimistic-move";
 
 import { Button } from "@/components/ui/button";
+import { Reactions, type ReactionOption } from "@/components/ui/reactions";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
+import { applyReactionToggle, summariseReactions, type CommentReactionRow } from "@/lib/comment-reactions";
 import { formatDateTime } from "@/lib/dates";
+import { browserClient } from "@/lib/query/browser-client";
+import { fetchCommentReactions, fetchDirectory } from "@/lib/query/fetchers/task";
+import { qk } from "@/lib/query/keys";
 import { isRichTextEmpty } from "@/lib/rich-text";
+import type { CommentReaction } from "@/lib/schemas/tasks";
 import { cn } from "@/lib/utils";
 import { CommentBody } from "./comment-body";
 
 import { deleteTaskComment, editTaskComment, uploadCommentImage } from "./actions";
-import { addTaskComment, mentionableForTask } from "./writes";
+import { addTaskComment, mentionableForTask, setCommentReaction } from "./writes";
+
+/**
+ * P17-03 — the six reactions, in picker order. The ids are `COMMENT_REACTIONS`
+ * and the database's check constraint; the icons and words are only this.
+ */
+const REACTION_OPTIONS: (ReactionOption & { id: CommentReaction })[] = [
+  { id: "like", label: "Like", icon: ThumbsUp },
+  { id: "love", label: "Love", icon: Heart },
+  { id: "celebrate", label: "Celebrate", icon: PartyPopper },
+  { id: "laugh", label: "Haha", icon: Laugh },
+  { id: "seen", label: "Seen", icon: Eye },
+  { id: "done", label: "Done", icon: CircleCheck },
+];
 import { Monogram, initials } from "./assignees";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 
@@ -99,10 +130,10 @@ const NEEDS = {
  * of the same list is how the two end up disagreeing about whether an edited
  * comment says so. The popover passes no `events` and keeps the shape it had.
  *
- * FLAT AND IN TIME ORDER. Threaded replies and reactions are in the reference
- * this came from and neither is built: replies need a `parent_comment_id` and a
- * depth rule, reactions need their own table. Each is a slice; neither is a
- * detail of this one.
+ * FLAT AND IN TIME ORDER. Threaded replies are in the reference this came from
+ * and are not built: they need a `parent_comment_id` and a depth rule.
+ * Reactions were the other half of that sentence and are built (P17-03) — their
+ * own table, read once per task below.
  *
  * `@` MENTIONS WERE THE THIRD ITEM ON THAT LIST AND ARE NOW BUILT (P7-71). What
  * this file contributes is `loadMentions` on both editors; the two things that
@@ -389,6 +420,56 @@ export function CommentThread({
    */
   const loadMentions = useCallback(() => mentionableForTask(taskId), [taskId]);
 
+  /*
+   * P17-03 — REACTIONS. One read for the whole task, keyed under the task so a
+   * task sweep reaches it.
+   *
+   * ⚠️ A FAILED READ DRAWS NO BAR AT ALL, never a bar of zeros. Before the
+   * migration is pasted the table does not exist, and an empty bar would claim
+   * nobody had reacted — the "failure that looks like an empty result" trap
+   * `lib/query/read.ts` exists to stop. No bar claims nothing.
+   *
+   * Names come from the directory, which the task page has usually prefetched.
+   * Until it lands a pill still counts; its hover just says "Someone".
+   */
+  const queryClient = useQueryClient();
+  const reactionKey = qk.taskPart(taskId, "reactions");
+  const reactionsQuery = useQuery({
+    queryKey: reactionKey,
+    queryFn: () => fetchCommentReactions(browserClient(), taskId),
+  });
+  const directory = useQuery({ queryKey: qk.ref("users"), queryFn: () => fetchDirectory(browserClient()) });
+  const reactionsByComment = reactionsQuery.isSuccess
+    ? summariseReactions(reactionsQuery.data, viewerId, (id) => {
+        return directory.data?.find((person) => person.id === id)?.full_name ?? "Someone";
+      })
+    : null;
+
+  async function react(commentId: string, change: { id: string; reacted: boolean }) {
+    // The pill moves now; the server catches up. A refusal re-reads, which puts
+    // the bar back to whatever the database actually holds.
+    await queryClient.cancelQueries({ queryKey: reactionKey });
+    queryClient.setQueryData<CommentReactionRow[]>(reactionKey, (rows = []) =>
+      applyReactionToggle(rows, {
+        commentId,
+        reaction: change.id,
+        reacted: change.reacted,
+        viewerId,
+        at: new Date().toISOString(),
+      }),
+    );
+
+    const result = await setCommentReaction({
+      comment_id: commentId,
+      task_id: taskId,
+      reaction: change.id,
+      reacted: change.reacted,
+    });
+
+    if (!result.ok) toast.error(result.error);
+    void queryClient.invalidateQueries({ queryKey: reactionKey });
+  }
+
   const composer = (
     // `shrink-0` beside the filling list: the box you type into is the one
     // thing in this column that must never give up height, and a flex item
@@ -545,6 +626,18 @@ export function CommentThread({
                       where it came from, not because of anything done below.
                     */}
                     <CommentBody className="mt-1" html={row.comment!.body} compact={compact} />
+
+                    {/* P17-03. Not on a comment still in flight — there is no
+                        row yet for a reaction to point at. */}
+                    {reactionsByComment && !isPlaceholder(row.comment!.id) ? (
+                      <Reactions
+                        className="mt-1.5"
+                        options={REACTION_OPTIONS}
+                        value={reactionsByComment[row.comment!.id] ?? []}
+                        label={`Reactions to ${row.comment!.authorName}'s comment`}
+                        onValueChange={(_, change) => void react(row.comment!.id, change)}
+                      />
+                    ) : null}
 
                     {/* ⚠️ NOT ON A ROW THAT DOES NOT EXIST YET. Its id is a
                         placeholder string, and `deleteTaskComment` is typed

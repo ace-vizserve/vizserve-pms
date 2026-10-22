@@ -4,6 +4,7 @@ import type { Database } from "@/lib/database.types";
 import { parse, parseAll } from "@/lib/query/parse";
 import { read, ReadError } from "@/lib/query/read";
 import { withSubDepartments, type SubDepartmentRow } from "@/lib/sub-departments";
+import type { CommentReactionRow } from "@/lib/comment-reactions";
 import { toListField, type ListField } from "@/lib/schemas/list-fields";
 import {
   checklistItemSchema,
@@ -161,6 +162,25 @@ export async function fetchTaskComments(client: TaskReadClient, taskId: string):
   );
 
   return parseAll(taskCommentRowSchema, rows, "comments");
+}
+
+/**
+ * `qk.taskPart(id, "reactions")` — P17-03. Every reaction on the task's
+ * comments, by `task_id`, so the URL never carries a list of comment ids.
+ *
+ * Throws like every read. Before the migration is pasted the table does not
+ * exist; the thread treats that error as "no reaction bar", never as zero.
+ */
+export async function fetchCommentReactions(
+  client: TaskReadClient,
+  taskId: string,
+): Promise<CommentReactionRow[]> {
+  return read<CommentReactionRow[]>(
+    client
+      .from("vizserve_pms_task_comment_reactions")
+      .select("comment_id, user_id, reaction, created_at")
+      .eq("task_id", taskId),
+  );
 }
 
 /** `qk.taskPart(id, "subtasks")` — P7-28, one level deep. */

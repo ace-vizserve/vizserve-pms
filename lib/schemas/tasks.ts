@@ -966,6 +966,23 @@ export const taskCommentSchema = z.object({
 export type TaskCommentInput = z.infer<typeof taskCommentSchema>;
 
 /**
+ * P17-03 — the reactions a comment can carry, in picker order.
+ *
+ * ⚠️ MIRRORS THE CHECK CONSTRAINT on `vizserve_pms_task_comment_reactions`
+ * (`20261022090000_p17_03_comment_reactions.sql`). Change both or neither — an
+ * id only this list knows is a button the database refuses.
+ */
+export const COMMENT_REACTIONS = ["like", "love", "celebrate", "laugh", "seen", "done"] as const;
+export type CommentReaction = (typeof COMMENT_REACTIONS)[number];
+
+export const commentReactionSchema = z.object({
+  comment_id: z.uuid(),
+  task_id: z.uuid(),
+  reaction: z.enum(COMMENT_REACTIONS),
+  reacted: z.boolean(),
+});
+
+/**
  * P7-09 — moving a task under a parent, or pulling it back out.
  *
  * `null` detaches. One level only, and the same department as the parent —
