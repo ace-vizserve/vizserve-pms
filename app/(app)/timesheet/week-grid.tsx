@@ -693,7 +693,7 @@ export function WeekGrid({
   const weekOverMinutes = days.reduce((total, day) => total + daySummary(dayTotal(day), grantedOn(day)).overMinutes, 0);
 
   return (
-    <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg">
+    <div className="overflow-hidden rounded-lg border bg-card grade-surface shadow-raised-lg" data-tour="week-grid">
       {/* The grid is 8 columns wide before it is readable, so it scrolls inside
           its own box rather than pushing the page sideways. */}
       <div className="overflow-x-auto">

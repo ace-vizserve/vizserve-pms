@@ -73,6 +73,7 @@ export function TaskStatusGroup({
           left dividing heading from body — see `taskStatusRule`. */}
       <div
         ref={headingRef}
+        data-tour="status-group"
         className={cn(
           "flex items-center gap-2 border-b-2 px-2 py-2",
           taskStatusHeading(status),

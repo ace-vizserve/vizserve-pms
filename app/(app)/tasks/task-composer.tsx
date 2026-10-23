@@ -414,6 +414,7 @@ export function ComposerTrigger({
   return (
     <button
       type="button"
+      data-tour="add-task"
       onClick={onOpen}
       className={cn(
         "flex w-full items-center gap-1.5 text-left text-xs text-muted-foreground",

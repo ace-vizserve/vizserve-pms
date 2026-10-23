@@ -206,7 +206,7 @@ export function DataTableColumns({
     <DropdownMenu>
       <DropdownMenuTrigger
         render={
-          <Button variant="outline" size="sm" className={className}>
+          <Button data-tour="columns" variant="outline" size="sm" className={className}>
             <Columns3 />
             Columns
             {/* The count is the only thing that says a table is not showing

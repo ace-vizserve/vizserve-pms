@@ -4,6 +4,8 @@ import { ScrollText, Wallet } from "lucide-react";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { AuthProvider } from "@/lib/auth/client-auth";
+import { canAdminDepartment, canDoHr } from "@/lib/auth/rules";
+import { Assistant } from "@/components/assistant/assistant";
 import { ServerRenderStamp } from "@/lib/query/use-refetch-on-server-render";
 import { AppSidebarSkeleton } from "@/components/app-shell/app-sidebar-skeleton";
 import {
@@ -78,6 +80,14 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           `/`, `/dashboard` and `/dtr`, so on those pages the reminder is free.
         */}
         <ShiftReminder viewerId={context.userId} />
+
+        {/* The "where do I go" assistant. Also mounted on `/`, which is outside
+            this shell — see the store note in the component. */}
+        <Assistant
+          isDeptAdmin={canAdminDepartment(context, context.primaryDepartmentId)}
+          isHr={canDoHr(context)}
+          role={context.role}
+        />
 
         <SidebarProvider>
           {/*

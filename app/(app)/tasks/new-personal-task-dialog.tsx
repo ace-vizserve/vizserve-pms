@@ -377,6 +377,7 @@ export function NewPersonalTaskDialog({
       }}
     >
       <DialogTrigger
+        data-tour={trigger === "toolbar" ? "new-task" : undefined}
         render={
           trigger === "toolbar" ? (
             <Button />

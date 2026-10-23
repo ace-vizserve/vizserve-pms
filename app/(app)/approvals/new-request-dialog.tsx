@@ -3,6 +3,7 @@
 import { toast } from "@/components/ui/toast";
 import { ChevronsUpDown, Plus, X } from "lucide-react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
 
 import { Button } from "@/components/ui/button";
@@ -509,6 +510,7 @@ export function NewRequestDialog({
    */
   isAdmin?: boolean;
 }) {
+  const router = useRouter();
   const [open, setOpen] = useState(Boolean(prefill?.openOnMount));
   const [type, setType] = useState<InternalRequestType>(prefill?.type ?? "LEAVE");
   const [errors, setErrors] = useState<Record<string, string[]>>({});
@@ -547,6 +549,42 @@ export function NewRequestDialog({
    * nobody read.
    */
   const [correctionTime, setCorrectionTime] = useState<string | null>(prefill?.time ?? null);
+
+  /*
+   * A NEW PREFILL WHILE ALREADY MOUNTED. The seeds above are read once, which
+   * was enough while every prefilled link came from another page. The
+   * assistant's tour ends ON /approvals by moving to `?type=LEAVE`, and the same
+   * route keeps this dialog mounted — so the URL changed and nothing opened.
+   *
+   * React's "adjust state when a prop changes" pattern, during render: no
+   * effect, and no `key` remount, which would throw away a half-filled form.
+   */
+  const prefillKey = prefill?.openOnMount
+    ? `${prefill.type ?? ""}|${prefill.date ?? ""}|${prefill.time ?? ""}`
+    : "";
+  const [seenPrefill, setSeenPrefill] = useState(prefillKey);
+  if (prefillKey !== seenPrefill) {
+    setSeenPrefill(prefillKey);
+    if (prefillKey) {
+      setOpen(true);
+      if (prefill?.type) setType(prefill.type);
+      setCorrectionTime(prefill?.time ?? null);
+    }
+  }
+
+  /**
+   * Once the dialog closes, the prefill has been used — drop it from the URL.
+   * Otherwise a refresh reopens a form somebody already dismissed, and asking
+   * the assistant for the same form twice is a navigation to the URL already
+   * open, which changes nothing.
+   */
+  function clearPrefillFromUrl() {
+    const url = new URL(window.location.href);
+    const keys = ["type", "date", "time"].filter((key) => url.searchParams.has(key));
+    if (keys.length === 0) return;
+    for (const key of keys) url.searchParams.delete(key);
+    router.replace(`${url.pathname}${url.search}`, { scroll: false });
+  }
   const [startHalf, setStartHalf] = useState<DayHalf>("MORNING");
   const [endHalf, setEndHalf] = useState<DayHalf>("AFTERNOON");
   // P9-01. One row to begin with — the block only appears when at least one is
@@ -700,6 +738,7 @@ export function NewRequestDialog({
       setErrors({});
       setRelievers([EMPTY_RELIEVER]);
       setTurnoverConfirmed(false);
+      clearPrefillFromUrl();
     });
   }
 
@@ -708,9 +747,12 @@ export function NewRequestDialog({
       open={open}
       onOpenChange={(next) => {
         setOpen(next);
-        if (!next) setErrors({});
+        if (!next) {
+          setErrors({});
+          clearPrefillFromUrl();
+        }
       }}>
-      <DialogTrigger render={<Button />}>
+      <DialogTrigger data-tour="new-request" render={<Button />}>
         <Plus className="size-4" />
         New request
       </DialogTrigger>

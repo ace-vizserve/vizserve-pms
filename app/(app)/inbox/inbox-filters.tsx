@@ -74,7 +74,7 @@ export function InboxFilters({
 
   return (
     <>
-      <div className="space-y-1.5">
+      <div className="space-y-1.5" data-tour="inbox-filters">
         <Label htmlFor="inbox-type" className="text-xs text-muted-foreground">
           Type
         </Label>

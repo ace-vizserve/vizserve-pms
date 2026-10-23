@@ -113,7 +113,7 @@ export function ListFieldsSheet({ listId, fields }: { listId: string; fields: Li
         setOpen(next);
         if (!next) setView({ kind: "list" });
       }}>
-      <SheetTrigger render={<Button variant="outline" size="sm" />}>
+      <SheetTrigger data-tour="custom-fields" render={<Button variant="outline" size="sm" />}>
         <ListPlus />
         Custom fields
       </SheetTrigger>

@@ -198,6 +198,7 @@ export function NavProjects({
     <Collapsible defaultOpen render={<SidebarGroup />}>
       {/* The group class rides the TRIGGER — see the note in app-sidebar.tsx. */}
       <SidebarGroupLabel
+        data-tour="projects"
         render={<CollapsibleTrigger />}
         className="group/nav cursor-pointer hover:text-foreground"
       >

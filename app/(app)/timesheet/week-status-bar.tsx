@@ -265,7 +265,7 @@ export function WeekStatusBar({
   }
 
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg">
+    <div className="flex flex-wrap items-center gap-3 rounded-lg border bg-card grade-surface p-3 shadow-raised-lg" data-tour="week-status">
       {/* Same chip shape as every status in the app — fill, hairline, dot. */}
       <span
         className={cn(

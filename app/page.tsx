@@ -21,6 +21,8 @@ import {
   todayInAppZone,
 } from "@/lib/dates";
 import { isTaskOverdue } from "@/lib/schemas/tasks";
+import { canAdminDepartment, canDoHr } from "@/lib/auth/rules";
+import { Assistant } from "@/components/assistant/assistant";
 import { BrandLockup } from "@/components/brand-lockup";
 import { PageShell } from "@/components/page-shell";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -1035,6 +1037,13 @@ export default async function DashboardPage({
           </Suspense>
         </div>
       </PageShell>
+
+      {/* Outside the (app) shell, so mounted here too — see the component. */}
+      <Assistant
+        isDeptAdmin={canAdminDepartment(context, context.primaryDepartmentId)}
+        isHr={canDoHr(context)}
+        role={context.role}
+      />
     </div>
   );
 }

@@ -325,7 +325,7 @@ function PunchPanelBody({
           server recorded: a DTR that says "timed in" because a button was
           pressed, while the server captured nothing, is worse than a slow one.
           The form is about how the action is invoked, not about predicting it. */}
-      <form action={() => run(timeIn ? "out" : "in")}>
+      <form action={() => run(timeIn ? "out" : "in")} data-tour="punch">
         {!timeIn ? (
           <Button type="submit" className="w-full" loading={pending}>
             Time in

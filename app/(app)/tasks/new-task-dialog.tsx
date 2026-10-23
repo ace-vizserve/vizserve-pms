@@ -147,7 +147,7 @@ export function NewTaskDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger render={shape.button}>
+      <DialogTrigger data-tour={trigger === "toolbar" ? "new-task" : undefined} render={shape.button}>
         <Plus />
         {shape.label}
       </DialogTrigger>
