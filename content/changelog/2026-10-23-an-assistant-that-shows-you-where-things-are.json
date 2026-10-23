@@ -1,0 +1,15 @@
+{
+  "date": "2026-10-23",
+  "kind": "added",
+  "area": "Platform",
+  "title": "An assistant that shows you where things are",
+  "description": "Ask the assistant in the bottom-right corner where something is, in your own words. It flies to the sidebar, opens the page, points at each control with a short explanation, then flies back to its corner.",
+  "items": [
+    "Understands everyday wording and Taglish, like \"file a leave\", \"nakalimutan mag time out\" or \"sahod\", and small typos",
+    "Filing a leave, overtime, a missed punch or a reimbursement ends with that request form already open",
+    "\"Guide me through this page\" walks through the page you are on, field by field, including a new client form",
+    "On Tasks it covers the views, filters, every icon on a task row, then opens New task and explains each field",
+    "Only offers pages your role can open, and says so when something is out of reach",
+    "Skip, Next or Esc stop a tour at any time; with reduced motion turned on it does not animate"
+  ]
+}

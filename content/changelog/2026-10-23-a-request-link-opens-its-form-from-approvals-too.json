@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-23",
+  "kind": "fixed",
+  "area": "Approvals",
+  "title": "A request link opens its form even when you are already on Approvals",
+  "description": "A link that opens a prefilled request — File leave on the home page, Time-in missing on the DTR — only worked when arriving from another page. Followed while already on Approvals, the address changed and the form stayed shut.",
+  "items": [
+    "The form now opens on the right request type wherever the link is followed from",
+    "Closing or sending the form clears it from the address, so refreshing the page no longer reopens a form you already dismissed"
+  ]
+}
