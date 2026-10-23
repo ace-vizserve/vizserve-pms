@@ -53,6 +53,8 @@ export {
   canDoHr,
   canEditUser,
   canManageUsers,
+  canPostAnnouncements,
+  canTakeDownAnnouncement,
   departmentScopeFilter,
   grantableRoles,
   isApprover,

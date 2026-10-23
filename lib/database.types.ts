@@ -2100,6 +2100,34 @@ export type Database = {
           },
         ];
       };
+      /** P17-04. Home-page notices. Posted by Team Leader and above. */
+      vizserve_pms_announcements: {
+        Row: {
+          id: string;
+          title: string;
+          body: string;
+          expires_on: string | null;
+          created_by: string;
+          /** Stamped by a trigger from the poster's row; never client-supplied. */
+          author_name: string;
+          created_at: string;
+          archived_at: string | null;
+          archived_by: string | null;
+        };
+        Insert: {
+          title: string;
+          body: string;
+          expires_on?: string | null;
+          /** Must equal auth.uid(). */
+          created_by: string;
+        };
+        /** Only the archive columns are granted. */
+        Update: {
+          archived_at?: string | null;
+          archived_by?: string | null;
+        };
+        Relationships: [];
+      };
       vizserve_pms_task_transitions: {
         Row: {
           from_status: VizservePmsTaskStatus;

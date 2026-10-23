@@ -1,10 +1,14 @@
 import { Suspense } from "react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { ArrowRight, Bell, ClipboardCheck, ListChecks, ShieldCheck, Users } from "lucide-react";
+import { ArrowRight, Bell, ClipboardCheck, ListChecks, Megaphone, ShieldCheck, Users } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { isApprover as holdsApprovalQueue, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  canPostAnnouncements,
+  isApprover as holdsApprovalQueue,
+  requireAuthContext,
+} from "@/lib/auth/authorization";
 import { countWaitingOnYou, listWaitingOnYou } from "@/lib/approvals-queue-server";
 import { countMyOpenTasks, countMyQaQueue, countUnreadNotifications } from "@/lib/counts-server";
 import {
@@ -32,7 +36,9 @@ import { StatTile } from "@/components/stat-tile";
 import { PunchPanel } from "../dtr/punch-panel";
 import { createClient } from "@/utils/supabase/server";
 import { buttonVariants } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { PostAnnouncementButton } from "@/app/_home/announcement-controls";
+import { AnnouncementItems, loadAnnouncements } from "@/app/_home/announcements";
 
 import { NeedsYou, type NeedsYouRow } from "./needs-you";
 import { TimesheetStrip } from "./timesheet-strip";
@@ -551,6 +557,47 @@ async function DashboardPunch({
   return <PunchPanel initial={await punchState} viewerId={viewerId} compact />;
 }
 
+/**
+ * P17-04 — the same announcements `/` shows. Unlike the home page it draws an
+ * empty card for a member too: here it fills a slot beside the punch card that
+ * would otherwise be blank. Nothing at all if the table is not there yet.
+ */
+async function DashboardAnnouncements({
+  supabase,
+  context,
+  today,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  context: Awaited<ReturnType<typeof requireAuthContext>>;
+  today: string;
+}) {
+  const announcements = await loadAnnouncements(supabase, today);
+  if (!announcements) return null;
+
+  return (
+    <Card className="gap-0 pb-0">
+      <CardHeader className="border-b pb-3">
+        <CardTitle className="flex items-center gap-2">
+          <Megaphone className="size-4 text-muted-foreground" aria-hidden />
+          Announcements
+        </CardTitle>
+        {canPostAnnouncements(context) ? (
+          <CardAction>
+            <PostAnnouncementButton today={today} />
+          </CardAction>
+        ) : null}
+      </CardHeader>
+      <CardContent className="px-0">
+        {announcements.length === 0 ? (
+          <p className="px-4 py-4 text-xs text-muted-foreground">No announcements right now.</p>
+        ) : (
+          <AnnouncementItems announcements={announcements} context={context} />
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 /** The greeting's second line, which cannot be written until the queue is counted. */
 async function GreetingSubtitle({ needsYou }: { needsYou: ReturnType<typeof loadNeedsYou> }) {
   const { shown } = await needsYou;
@@ -734,7 +781,10 @@ export default async function DashboardPage() {
         </Card>
       ) : null}
 
-      <Card className="max-w-md">
+      {/* P17-04. The punch card kept its width and the announcements took the
+          space beside it, which was empty. Stacked below `lg`. */}
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
+      <Card>
         <CardHeader>
           <CardTitle>Time in / out</CardTitle>
           <CardDescription className="text-xs">
@@ -759,6 +809,21 @@ export default async function DashboardPage() {
           </Link>
         </CardContent>
       </Card>
+
+      <Suspense
+        fallback={
+          <Streaming
+            label="Loading announcements…"
+            className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+          >
+            <Skeleton className="h-4 w-32" aria-hidden />
+            <Skeleton className="h-4 w-5/6" aria-hidden />
+          </Streaming>
+        }
+      >
+        <DashboardAnnouncements supabase={supabase} context={context} today={today} />
+      </Suspense>
+      </div>
       </Suspense>
     </PageShell>
   );

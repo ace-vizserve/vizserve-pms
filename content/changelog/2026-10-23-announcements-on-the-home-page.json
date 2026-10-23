@@ -1,0 +1,18 @@
+{
+  "date": "2026-10-23",
+  "kind": "added",
+  "area": "Platform",
+  "title": "Announcements on the home page",
+  "description": "Team leaders and above can post a notice that everyone sees at the top of the home page as soon as they sign in.",
+  "items": [
+    "Team leaders, managers, admins, the business manager and the CEO can post; members read",
+    "Each announcement has a title, a message and an optional last day to show",
+    "The person who posted it, or a manager and above, can take it down",
+    "Members see nothing on the home page when no announcement is up",
+    "The dashboard shows the same announcements beside Time in / out"
+  ],
+  "refs": [
+    "P17-04"
+  ],
+  "pending": "The announcements migration is written but not yet applied. Until it is, the home page shows no announcements."
+}

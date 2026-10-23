@@ -264,6 +264,24 @@ export function isApprover(context: Pick<AuthContext, "role">): boolean {
   return context.role === "team_leader" || context.role === "manager";
 }
 
+/**
+ * P17-04 — who posts a home-page announcement: Team Leader and above, by the
+ * LADDER. Posting is not approving, so Admin, Business Manager and CEO may.
+ * Mirrors the INSERT policy on `vizserve_pms_announcements`.
+ */
+export function canPostAnnouncements(context: Pick<AuthContext, "role">): boolean {
+  return roleAtLeast(context.role, "team_leader");
+}
+
+/** Its author while still a lead, or a Manager and above. Mirrors the UPDATE policy. */
+export function canTakeDownAnnouncement(
+  context: Pick<AuthContext, "role" | "userId">,
+  announcement: { created_by: string },
+): boolean {
+  if (roleAtLeast(context.role, "manager")) return true;
+  return announcement.created_by === context.userId && canPostAnnouncements(context);
+}
+
 /** Timesheets go straight to the Manager. */
 export function approvesTimesheets(context: Pick<AuthContext, "role">): boolean {
   return context.role === "manager";

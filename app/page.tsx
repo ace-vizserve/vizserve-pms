@@ -5,7 +5,11 @@ import { ArrowRight, Clock, LayoutDashboard, LogOut, Plus } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { DayHalf } from "@/lib/leave";
-import { isApprover as holdsApprovalQueue, requireAuthContext } from "@/lib/auth/authorization";
+import {
+  canPostAnnouncements,
+  isApprover as holdsApprovalQueue,
+  requireAuthContext,
+} from "@/lib/auth/authorization";
 import { listWaitingOnYou } from "@/lib/approvals-queue-server";
 import { countMyOpenTasks, countMyQaQueue, countUnreadNotifications } from "@/lib/counts-server";
 import { loadPunchState } from "@/lib/dtr-server";
@@ -36,6 +40,8 @@ import {
 import { LeaveTooltip } from "./_home/leave-entry";
 import { Cell, CellBody, CellHead, StatStrip, initials } from "./_home/home-widgets";
 import { HomeNewTaskAction } from "./_home/new-task-action";
+import { PostAnnouncementButton } from "./_home/announcement-controls";
+import { AnnouncementItems, loadAnnouncements } from "./_home/announcements";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const metadata: Metadata = { title: "Home" };
@@ -258,6 +264,50 @@ async function TimedInLine({ punchState }: { punchState: ReturnType<typeof loadP
   const timeIn = (await punchState).today?.time_in ?? null;
 
   return <>{timeIn ? ` · timed in at ${formatAppTime(timeIn)}` : " · not timed in yet"}</>;
+}
+
+/**
+ * Row 0 — P17-04, announcements. Full width, above everything, because it is
+ * the one thing on this page somebody else put there for you to read.
+ *
+ * Renders NOTHING for a member when there is nothing posted — an empty notice
+ * board they cannot pin to is a cell that has not earned its row. A lead sees
+ * it empty, with the Post button. Also nothing if the table is not there yet
+ * (the migration is pasted by hand), so deploy order does not matter.
+ */
+async function AnnouncementsCell({
+  supabase,
+  context,
+  today,
+}: {
+  supabase: Awaited<ReturnType<typeof createClient>>;
+  context: Awaited<ReturnType<typeof requireAuthContext>>;
+  today: string;
+}) {
+  const announcements = await loadAnnouncements(supabase, today);
+  const canPost = canPostAnnouncements(context);
+
+  if (!announcements || (announcements.length === 0 && !canPost)) return null;
+
+  return (
+    <Cell span="sm:col-span-6" label="Announcements">
+      <CellHead
+        title="Announcements"
+        count={announcements.length || undefined}
+        tone="brand"
+        action={canPost ? <PostAnnouncementButton today={today} /> : undefined}
+      />
+      <CellBody>
+        {announcements.length === 0 ? (
+          <p className="px-4 py-3 text-xs text-muted-foreground">
+            Nothing posted. What you post here is the first thing everyone sees when they sign in.
+          </p>
+        ) : (
+          <AnnouncementItems announcements={announcements} context={context} />
+        )}
+      </CellBody>
+    </Cell>
+  );
 }
 
 /** Row 1, right — the approver's queue. */
@@ -828,6 +878,13 @@ export default async function DashboardPage({
             scrolls, so the calendar states its own size instead of being told
             one. */}
         <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-6">
+          {/* ------------------------------------------------------- row 0 · 6 */}
+          {/* No fallback: for most members this row is absent, and a skeleton
+              that then vanishes is worse than a row that appears. */}
+          <Suspense fallback={null}>
+            <AnnouncementsCell supabase={supabase} context={context} today={today} />
+          </Suspense>
+
           {/* ------------------------------------------------------ row 1 · 3+3 */}
           <Cell span="sm:col-span-3" label="Daily time record">
             <CellHead title="Daily time record">
