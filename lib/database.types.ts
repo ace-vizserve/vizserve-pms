@@ -2128,6 +2128,43 @@ export type Database = {
         };
         Relationships: [];
       };
+      /** P17-05. Written by the service role only; Admin (IT) reads. */
+      vizserve_pms_error_logs: {
+        Row: {
+          id: string;
+          occurred_at: string;
+          /** 'server' | 'client' */
+          source: string;
+          /** 'render' | 'route' | 'action' | 'proxy' | 'client' */
+          kind: string;
+          /** 'production' | 'preview' | 'development' */
+          environment: string;
+          method: string | null;
+          path: string | null;
+          route: string | null;
+          message: string;
+          digest: string | null;
+          stack: string | null;
+          user_id: string | null;
+          user_agent: string | null;
+        };
+        Insert: {
+          occurred_at?: string;
+          source: string;
+          kind: string;
+          environment: string;
+          method?: string | null;
+          path?: string | null;
+          route?: string | null;
+          message: string;
+          digest?: string | null;
+          stack?: string | null;
+          user_id?: string | null;
+          user_agent?: string | null;
+        };
+        Update: never;
+        Relationships: [];
+      };
       vizserve_pms_task_transitions: {
         Row: {
           from_status: VizservePmsTaskStatus;

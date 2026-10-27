@@ -130,7 +130,8 @@ export type NavIconName =
   | "history"
   | "hr"
   | "leave-type"
-  | "attendance";
+  | "attendance"
+  | "bug";
 
 export const NAV_ITEMS: NavItem[] = [
   {
@@ -334,6 +335,17 @@ export const NAV_ITEMS: NavItem[] = [
     // one you open to find out what somebody already changed.
     enabled: true,
     icon: "history",
+  },
+  {
+    // P17-05. What FAILED, where the audit trail is what succeeded — a failed
+    // write rolls its audit row back with it, so the two cannot share a page.
+    // Admin (IT) only, matching `requireAdmin()` and the table's policy.
+    label: "Error log",
+    href: "/admin/errors",
+    minRole: "admin",
+    adminOnly: true,
+    enabled: true,
+    icon: "bug",
   },
 
   // ---------------------------------------------------------------------------
@@ -556,6 +568,7 @@ export const NAV_GROUPS: NavGroup[] = [
     hrefs: [
       "/admin/settings",
       "/admin/audit",
+      "/admin/errors",
     ],
     pinBottom: true,
   },

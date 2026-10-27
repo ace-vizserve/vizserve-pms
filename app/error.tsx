@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 
+import { reportClientError } from "@/lib/report-client-error";
+
 /**
  * P12-05 — the root error boundary. What catches the things the app shell
  * cannot.
@@ -50,6 +52,9 @@ export default function RootError({
     // deliberately does not render. A developer on the machine can read it; the
     // client looking at the page cannot.
     console.error("[root] unhandled error", error);
+    // P17-05. Imports nothing and cannot throw, so it keeps this file's promise to
+    // depend on nothing that can fail. Signed-out visitors are refused by the route.
+    reportClientError(error, "root");
   }, [error]);
 
   return (

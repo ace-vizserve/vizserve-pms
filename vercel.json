@@ -23,6 +23,10 @@
     {
       "path": "/api/cron/recurring-tasks",
       "schedule": "5 16 * * *"
+    },
+    {
+      "path": "/api/cron/prune-error-logs",
+      "schedule": "30 3 * * *"
     }
   ]
 }

@@ -2,6 +2,8 @@
 
 import { useEffect } from "react";
 
+import { reportClientError } from "@/lib/report-client-error";
+
 /**
  * P12-05 — the last resort. What catches a failure in the ROOT LAYOUT itself.
  *
@@ -38,6 +40,7 @@ export default function GlobalError({
 }) {
   useEffect(() => {
     console.error("[global] root layout failed", error);
+    reportClientError(error, "global");
   }, [error]);
 
   return (

@@ -1,0 +1,16 @@
+{
+  "date": "2026-10-27",
+  "kind": "added",
+  "area": "Platform",
+  "title": "An error log for the admin",
+  "description": "Admin now has an Error log beside the audit trail. The audit trail records what succeeded; this records what failed — a page that would not open, a save that was refused, an error in somebody's browser — with where it happened and who hit it.",
+  "items": [
+    "Only the admin (IT) role sees it; business manager and CEO do not",
+    "A chart of errors per day, or per hour for the last 24 hours, and the most frequent errors counted once each",
+    "Details on any row shows the full message, the page, the error code a person was shown, and the stack trace",
+    "Opens on the live site for the last 7 days; staging and local testing are kept apart",
+    "Kept for 30 days"
+  ],
+  "refs": ["P17-05"],
+  "pending": "Needs its database table: paste supabase/migrations/20261027090000_p17_05_error_logs.sql into the Supabase SQL editor. Until then the page says it is not set up, and nothing is recorded."
+}

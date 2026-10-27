@@ -420,6 +420,16 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     steps: [{ text: "Every change, and who made it." }],
   },
   {
+    id: "error-log",
+    title: "Error log",
+    href: "/admin/errors",
+    keywords: ["error", "error log", "bug", "crash", "what failed", "what broke", "sira", "nag error"],
+    steps: [
+      { text: "Everything that failed, per day — and the same bug counted once on the right." },
+      { text: "Open Details on any row for the full message, the page and the stack trace." },
+    ],
+  },
+  {
     id: "my-settings",
     title: "Your settings",
     href: "/settings",

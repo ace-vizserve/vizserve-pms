@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+
+import { reportClientError } from "@/lib/report-client-error";
 import { RotateCw, TriangleAlert } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -59,6 +61,8 @@ export default function AppError({
    */
   useEffect(() => {
     console.error("[app] unhandled error", error);
+    // P17-05. Browser-only errors into the error log; server ones are already there.
+    reportClientError(error, "app");
   }, [error]);
 
   return (
