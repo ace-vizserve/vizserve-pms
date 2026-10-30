@@ -30,6 +30,7 @@ export function StatTile({
   href,
   linkLabel,
   tone = "neutral",
+  compact = false,
   className,
 }: {
   label: string;
@@ -39,6 +40,11 @@ export function StatTile({
   href?: string;
   linkLabel?: string;
   tone?: "neutral" | "info" | "success" | "warning" | "danger";
+  /**
+   * Two rows instead of four, for the dashboard, which should fit one screen:
+   * the link moves up beside the label and the hint sits on the figure's line.
+   */
+  compact?: boolean;
   className?: string;
 }) {
   // Each tone is a fill, its own border and a solid — the same three-part shape
@@ -50,6 +56,53 @@ export function StatTile({
     warning: "border-warning-border bg-warning-subtle text-warning",
     danger: "border-destructive-border bg-destructive-subtle text-destructive",
   }[tone];
+
+  if (compact) {
+    return (
+      <div
+        className={cn(
+          "flex flex-col gap-2 rounded-lg border bg-card grade-surface px-3.5 py-3 shadow-raised-lg",
+          className,
+        )}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          {icon ? (
+            <span
+              className={cn(
+                "flex size-7 shrink-0 items-center justify-center rounded-md border grade-chip shadow-raised [&_svg]:size-4",
+                toneClass,
+              )}
+              aria-hidden
+            >
+              {icon}
+            </span>
+          ) : null}
+          <p className="truncate text-xs font-semibold text-muted-foreground">{label}</p>
+          {href ? (
+            <Link
+              href={href}
+              className="ml-auto inline-flex shrink-0 items-center gap-1 text-xs font-medium text-muted-foreground hover:text-foreground hover:underline"
+            >
+              {linkLabel ?? "Open"}
+              <ArrowRight className="size-3" />
+            </Link>
+          ) : null}
+        </div>
+
+        <div className="flex min-w-0 items-baseline gap-2">
+          <p
+            className={cn(
+              "text-2xl leading-none font-semibold tracking-[-0.032em] tabular-nums",
+              value === null && "text-foreground-faint",
+            )}
+          >
+            {value === null ? "—" : value}
+          </p>
+          {hint ? <p className="truncate text-xs text-muted-foreground">{hint}</p> : null}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

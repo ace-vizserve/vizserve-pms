@@ -1,0 +1,12 @@
+{
+  "date": "2026-10-30",
+  "kind": "added",
+  "area": "DTR",
+  "title": "Your time-in streak",
+  "description": "The home page and the dashboard now show how many working days in a row you have timed in, right beside the Time in / out button.",
+  "items": [
+    "Not timing in yet today does not break it — the count waits for today's time-in",
+    "Weekends and holidays do not count and do not break it; a day you time in on a weekend still counts",
+    "A working day with no time-in starts it again from zero — including a day on leave"
+  ]
+}

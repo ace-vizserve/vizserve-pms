@@ -40,7 +40,19 @@ export function AnnouncementItems({
     <article key={item.id} className="flex gap-2.5 border-b px-4 py-2.5 last:border-b-0">
       <div className="min-w-0 flex-1">
         <h3 className="text-sm font-medium">{item.title}</h3>
-        <p className="mt-0.5 text-xs whitespace-pre-line text-foreground-muted">{item.body}</p>
+        {/* All of it, one column, nothing hidden. A blank line between
+            paragraphs becomes a small gap rather than a whole empty line. */}
+        <div className="mt-0.5 text-xs text-foreground-muted">
+          {item.body
+            .split(/\n\s*\n/)
+            .map((paragraph) => paragraph.trim())
+            .filter(Boolean)
+            .map((paragraph, index) => (
+              <p key={index} className="mb-1.5 whitespace-pre-line last:mb-0">
+                {paragraph}
+              </p>
+            ))}
+        </div>
         <p className="mt-1 text-2xs text-muted-foreground">
           {item.author_name || "Someone"} · {relativeDays(toAppDateString(new Date(item.created_at)))}
           {item.expires_on ? ` · until ${formatDate(item.expires_on)}` : null}

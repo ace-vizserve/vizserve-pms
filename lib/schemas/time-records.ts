@@ -400,3 +400,15 @@ export const loggableTaskSchema = z.object({
 });
 
 export type LoggableTaskRow = z.infer<typeof loggableTaskSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* `qk.dtrYear()` — the DTR page's year heat map.                              */
+/* -------------------------------------------------------------------------- */
+
+/** Approved leave in the year window. Only the span is read. */
+export const dtrYearLeaveRowSchema = z.object({
+  start_date: dateSchema.nullable(),
+  end_date: dateSchema.nullable(),
+});
+
+export type DtrYearLeaveRow = z.infer<typeof dtrYearLeaveRowSchema>;

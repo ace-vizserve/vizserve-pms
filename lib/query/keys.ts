@@ -402,6 +402,11 @@ export const qk = {
   dtrView: (filters: Record<string, string | undefined>) =>
     ["dtr", "view", normalize(filters)] as const,
   /**
+   * One person's last year of punches, for the heat map above the table. Under
+   * the `["dtr"]` prefix, so a punch refreshes it with everything else.
+   */
+  dtrYear: (userId: string) => ["dtr", "year", userId] as const,
+  /**
    * P12-23 — the half of the clock reminder that cannot be read in the browser.
    *
    * ⚠️ ITS OWN KEY BECAUSE IT IS THE ONE READ IN THIS PHASE THAT STAYS ON A

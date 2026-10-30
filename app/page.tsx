@@ -12,7 +12,7 @@ import {
 } from "@/lib/auth/authorization";
 import { listWaitingOnYou } from "@/lib/approvals-queue-server";
 import { countMyOpenTasks, countMyQaQueue, countUnreadNotifications } from "@/lib/counts-server";
-import { loadPunchState } from "@/lib/dtr-server";
+import { loadDtrStreak, loadPunchState } from "@/lib/dtr-server";
 import {
   addMonths,
   formatAppTime,
@@ -45,6 +45,7 @@ import { HomeNewTaskAction } from "./_home/new-task-action";
 import { PostAnnouncementButton } from "./_home/announcement-controls";
 import { AnnouncementItems, loadAnnouncements } from "./_home/announcements";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StreakBadge } from "@/components/ui/streak-badge";
 
 export const metadata: Metadata = { title: "Home" };
 
@@ -259,6 +260,13 @@ async function HomePunch({
   viewerId: string;
 }) {
   return <PunchPanel initial={await punchState} viewerId={viewerId} compact />;
+}
+
+/** Consecutive working days timed in, under the punch panel. */
+async function HomeStreak({ streak }: { streak: ReturnType<typeof loadDtrStreak> }) {
+  return (
+    <StreakBadge size="inline" length={await streak} subtitle="timed-in streak" />
+  );
 }
 
 /** The greeting's second half. `formatDate(today)` beside it needs no read at all. */
@@ -742,6 +750,7 @@ export default async function DashboardPage({
      is the same parallelism the one `Promise.all` had; what it no longer does is
      make the punch panel wait for the calendar. */
   const punchState = loadPunchState(context.userId);
+  const streakPromise = loadDtrStreak(context.userId);
 
   // "Not finished" rather than a list of active statuses, so a status added
   // later is counted without anyone remembering to come back here.
@@ -911,13 +920,25 @@ export default async function DashboardPage({
               >
                 <HomePunch punchState={punchState} viewerId={context.userId} />
               </Suspense>
-              <Link
-                href="/dtr"
-                className={cn(buttonVariants({ variant: "outline", size: "sm" }), "mt-auto w-fit")}
-              >
-                <Clock />
-                My DTR
-              </Link>
+              {/* One row, the same as the dashboard: the link left, the streak right. */}
+              <div className="mt-auto flex flex-wrap items-center justify-between gap-2">
+                <Link
+                  href="/dtr"
+                  className={cn(buttonVariants({ variant: "outline", size: "sm" }), "w-fit")}
+                >
+                  <Clock />
+                  My DTR
+                </Link>
+                <Suspense
+                  fallback={
+                    <Streaming label="Loading your streak…">
+                      <Skeleton className="h-7 w-44 rounded-full" aria-hidden />
+                    </Streaming>
+                  }
+                >
+                  <HomeStreak streak={streakPromise} />
+                </Suspense>
+              </div>
             </CellBody>
           </Cell>
 

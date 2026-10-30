@@ -1,0 +1,11 @@
+{
+  "date": "2026-10-30",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The dashboard fits on one screen",
+  "description": "The dashboard used to run past the bottom of the window, mostly because one long announcement stretched the page. It is now tighter, so everything is visible without scrolling.",
+  "items": [
+    "The count tiles (My tasks, Inbox, Waiting on you) are half the height, with the link beside the label",
+    "Announcements show in full with tighter paragraph spacing — here and on the home page"
+  ]
+}

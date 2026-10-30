@@ -1,0 +1,13 @@
+{
+  "date": "2026-10-30",
+  "kind": "added",
+  "area": "DTR",
+  "title": "A year of your DTR at a glance",
+  "description": "The DTR page opens with a heat map of the last year: one square per day, darker the more hours you worked, so gaps and long stretches show up without reading the table.",
+  "items": [
+    "Hover a day for its hours, or use the arrow keys to move between days",
+    "Days on approved leave are amber, with their own swatch in the legend, so you can tell leave from a day you missed. Leave still ends a streak",
+    "Underneath: total hours for the year, your busiest day, and your longest and current streaks",
+    "A team leader who picks a person in the filter sees that person's year"
+  ]
+}

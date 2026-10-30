@@ -1,4 +1,11 @@
-import { addDays, todayInAppZone, workedMinutes, yesterdayInAppZone } from "@/lib/dates";
+import {
+  MAX_SHIFT_HOURS,
+  addDays,
+  isBusinessDay,
+  todayInAppZone,
+  workedMinutes,
+  yesterdayInAppZone,
+} from "@/lib/dates";
 import {
   deviation as computeDeviation,
   effectiveEnd,
@@ -14,6 +21,7 @@ import {
   dtrLeaveSpanRowSchema,
   dtrPersonRowSchema,
   dtrPunchRowSchema,
+  dtrYearLeaveRowSchema,
   ownOvertimeRowSchema,
   ownPunchRowSchema,
   ownScheduleRowSchema,
@@ -623,4 +631,84 @@ export async function fetchDtrView(
  */
 export function defaultDtrRange(today: string): { from: string; to: string } {
   return { from: addDays(today, -29)!, to: today };
+}
+
+/* -------------------------------------------------------------------------- */
+/* `qk.dtrYear(userId)` — the year heat map above the table.                   */
+/* -------------------------------------------------------------------------- */
+
+/** 53 weeks plus a partial one — what the heat map draws. */
+const DTR_YEAR_DAYS = 371;
+
+export type DtrYear = {
+  today: string;
+  /** Hours worked per punched day, to one decimal. */
+  days: { date: string; count: number }[];
+  /** Days covered by approved leave — drawn in their own colour. */
+  leaveDays: string[];
+  /** Weekends and seeded holidays — an empty one does not break a streak. Leave does. */
+  restDays: string[];
+};
+
+/**
+ * One row per punched day, so a year is ~260 rows and stays under PostgREST's
+ * 1,000-row cap without paging. RLS scopes it: your own, or a lead's team.
+ *
+ * Hours are `time_out - time_in`. Today's open shift counts the hours so far;
+ * an older day left open (a forgotten time-out) counts as zero, because its
+ * length is unknown and guessing one would draw a day nobody worked. Capped at
+ * `MAX_SHIFT_HOURS`, the ceiling the punch function enforces.
+ *
+ * Rest days are weekends and SEEDED holidays (`isBusinessDay`) — NOT leave. A
+ * leave day breaks a streak here exactly as it does on the streak badge, so the
+ * two agree. Leave is still drawn, in its own colour, through `leaveDays`.
+ */
+export async function fetchDtrYear(client: TimesheetReadClient, userId: string): Promise<DtrYear> {
+  const today = todayInAppZone();
+  const from = addDays(today, -DTR_YEAR_DAYS) ?? today;
+
+  const [punchRows, leaveRows] = await Promise.all([
+    read<unknown[]>(
+      client
+        .from("vizserve_pms_dtr_entries")
+        .select("work_date, time_in, time_out")
+        .eq("user_id", userId)
+        .not("time_in", "is", null)
+        .gte("work_date", from)
+        .lte("work_date", today),
+    ),
+    read<unknown[]>(
+      client
+        .from("vizserve_pms_internal_requests")
+        .select("start_date, end_date")
+        .eq("requester_id", userId)
+        .eq("request_type", "LEAVE")
+        .eq("status", "APPROVED")
+        .lte("start_date", today)
+        .gte("end_date", from),
+    ),
+  ]);
+
+  const now = new Date().toISOString();
+  const days = parseAll(ownPunchRowSchema, punchRows, "your punches").flatMap((row) => {
+    const minutes = workedMinutes(row.time_in, row.time_out ?? (row.work_date === today ? now : null));
+    if (!minutes) return [];
+    const hours = Math.min(minutes, MAX_SHIFT_HOURS * 60) / 60;
+    return [{ date: row.work_date, count: Math.round(hours * 10) / 10 }];
+  });
+
+  const leaveDates = new Set<string>();
+  for (const row of parseAll(dtrYearLeaveRowSchema, leaveRows, "approved leave")) {
+    if (!row.start_date || !row.end_date) continue;
+    for (let day: string | null = row.start_date; day && day <= row.end_date; day = addDays(day, 1)) {
+      leaveDates.add(day);
+    }
+  }
+
+  const restDays: string[] = [];
+  for (let day: string | null = from; day && day <= today; day = addDays(day, 1)) {
+    if (!isBusinessDay(day)) restDays.push(day);
+  }
+
+  return { today, days, restDays, leaveDays: [...leaveDates].filter((day) => day >= from && day <= today).sort() };
 }

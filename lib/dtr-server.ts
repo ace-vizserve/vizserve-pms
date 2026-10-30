@@ -2,8 +2,13 @@ import "server-only";
 
 import { cache } from "react";
 
-import { todayInAppZone, yesterdayInAppZone } from "@/lib/dates";
+import {
+  addDays,
+  todayInAppZone,
+  yesterdayInAppZone,
+} from "@/lib/dates";
 import { scheduleFor } from "@/lib/dtr-schedule";
+import { STREAK_WINDOW_DAYS, computeDtrStreak } from "@/lib/dtr-streak";
 import { loadAppSettings } from "@/lib/settings-server";
 import type { PunchState } from "@/app/(app)/dtr/punch-panel";
 import { createClient } from "@/utils/supabase/server";
@@ -157,4 +162,30 @@ export const loadWorkingDay = cache(async (userId: string): Promise<boolean> => 
   // `data === true` rather than a truthiness test: the RPC returns `null` on
   // error, and `null` is not "yes".
   return workingDay.data === true && (leaveToday.count ?? 0) === 0;
+});
+
+/**
+ * The DTR streak on `/` and `/dashboard` — see `computeDtrStreak` for what
+ * counts. One read: the punched days in the window. Zero on any error — a
+ * missing number is better than a wrong one.
+ */
+export const loadDtrStreak = cache(async (userId: string): Promise<number> => {
+  const today = todayInAppZone();
+  const from = addDays(today, -STREAK_WINDOW_DAYS) ?? today;
+  const supabase = await createClient();
+
+  const entries = await supabase
+    .from("vizserve_pms_dtr_entries")
+    .select("work_date")
+    .eq("user_id", userId)
+    .not("time_in", "is", null)
+    .gte("work_date", from)
+    .lte("work_date", today);
+
+  if (entries.error) return 0;
+
+  return computeDtrStreak({
+    today,
+    punchedDates: new Set((entries.data ?? []).map((row) => row.work_date)),
+  });
 });

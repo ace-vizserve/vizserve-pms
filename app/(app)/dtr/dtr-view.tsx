@@ -19,6 +19,7 @@ import { qk } from "@/lib/query/keys";
 
 import { DtrTable } from "./dtr-table";
 import { DtrToolbar } from "./dtr-toolbar";
+import { DtrYear } from "./dtr-year";
 
 /**
  * P5-04 / P12-23 — the daily time record, reading from the cache.
@@ -224,15 +225,29 @@ export function DtrView({
           the app; the DTR is the one screen people read thirty rows of at a
           time, so it gets tighter rows without dragging Requests and Tasks along
           with it. */}
-      <DtrTableSection
-        view={view}
-        viewerId={viewerId}
-        showPerson={showPerson}
-        from={from}
-        to={to}
-        selectedUser={selectedUser}
-        rangeInverted={rangeInverted}
-      />
+      {/* The year heat map above the table. The table keeps whatever height is
+          left and still scrolls inside its own card from `lg` up. */}
+      <div className="flex min-w-0 flex-col gap-3 lg:min-h-0">
+        <DtrYear
+          userId={selectedUser ?? viewerId}
+          name={
+            selectedUser && selectedUser !== viewerId
+              ? (people.find((person) => person.id === selectedUser)?.full_name ?? null)
+              : null
+          }
+        />
+        <div className="lg:min-h-0 lg:flex-1">
+          <DtrTableSection
+            view={view}
+            viewerId={viewerId}
+            showPerson={showPerson}
+            from={from}
+            to={to}
+            selectedUser={selectedUser}
+            rangeInverted={rangeInverted}
+          />
+        </div>
+      </div>
     </div>
   );
 }

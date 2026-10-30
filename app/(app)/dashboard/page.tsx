@@ -18,7 +18,7 @@ import {
   needsYouRank,
   type NeedsYouKind,
 } from "@/lib/dashboard";
-import { loadPunchState } from "@/lib/dtr-server";
+import { loadDtrStreak, loadPunchState } from "@/lib/dtr-server";
 import {
   addDays,
   formatDate,
@@ -45,6 +45,7 @@ import { TimesheetStrip } from "./timesheet-strip";
 
 import { StatRowSkeleton } from "@/components/skeletons";
 import { Skeleton } from "@/components/ui/skeleton";
+import { StreakBadge } from "@/components/ui/streak-badge";
 export const metadata: Metadata = { title: "Dashboard" };
 
 /**
@@ -454,6 +455,7 @@ async function StatTiles({
           tone="warning"
           href="#needs-you"
           linkLabel="See the queue"
+          compact
         />
       ) : null}
 
@@ -465,6 +467,7 @@ async function StatTiles({
         tone="info"
         href="/tasks?view=mine"
         linkLabel="Open my tasks"
+        compact
       />
 
       {/* Only shown when there is actually something to review. A permanent
@@ -478,6 +481,7 @@ async function StatTiles({
           tone="info"
           href="/tasks?view=qa"
           linkLabel="Open QA queue"
+          compact
         />
       ) : null}
 
@@ -488,6 +492,7 @@ async function StatTiles({
         icon={<Bell />}
         href="/inbox"
         linkLabel="Open inbox"
+        compact
       />
     </div>
   );
@@ -555,6 +560,13 @@ async function DashboardPunch({
   viewerId: string;
 }) {
   return <PunchPanel initial={await punchState} viewerId={viewerId} compact />;
+}
+
+/** Consecutive working days timed in — the same badge and rule as the home page. */
+async function DashboardStreak({ streak }: { streak: ReturnType<typeof loadDtrStreak> }) {
+  return (
+    <StreakBadge size="inline" length={await streak} subtitle="timed-in streak" />
+  );
 }
 
 /**
@@ -630,6 +642,7 @@ export default async function DashboardPage() {
   /* EVERY READ STARTED HERE, BEFORE THE FIRST AWAIT. Below this point the page
      renders; the sections resolve as their own groups come back. */
   const punchState = loadPunchState(context.userId);
+  const streakPromise = loadDtrStreak(context.userId);
 
   // P3-14 — the member's own live work. "Not finished" rather than a list of
   // active statuses, so a status added later is counted without anyone
@@ -801,12 +814,24 @@ export default async function DashboardPage() {
           >
             <DashboardPunch punchState={punchState} viewerId={context.userId} />
           </Suspense>
-          <Link
-            href="/dtr"
-            className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-2")}
-          >
-            Open my DTR <ArrowRight className="size-3.5" />
-          </Link>
+          {/* One row: the link on the left where it always was, the streak on the right. */}
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <Link
+              href="/dtr"
+              className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-2")}
+            >
+              Open my DTR <ArrowRight className="size-3.5" />
+            </Link>
+            <Suspense
+              fallback={
+                <Streaming label="Loading your streak…">
+                  <Skeleton className="h-7 w-44 rounded-full" aria-hidden />
+                </Streaming>
+              }
+            >
+              <DashboardStreak streak={streakPromise} />
+            </Suspense>
+          </div>
         </CardContent>
       </Card>
 
