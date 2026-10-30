@@ -5,10 +5,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 
 import dynamic from "next/dynamic";
 import Link from "next/link";
-import { Building2, Table2 } from "lucide-react";
+import { Building2, Maximize2, Table2 } from "lucide-react";
 
 import { QueryError } from "@/components/query-error";
 import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth/client-auth";
 import { departmentScopeFilter } from "@/lib/auth/rules";
@@ -41,13 +42,27 @@ const Office3D = dynamic(() => import("./office-3d").then((mod) => mod.Office3D)
  * The punches refresh every minute, so somebody timing in appears without a
  * reload. A punch on this page refreshes it at once (it sits under ["dtr"]).
  */
-export function OfficeView() {
+export function OfficeView({ variant = "dtr" }: { variant?: "dtr" | "dashboard" }) {
+  const onDashboard = variant === "dashboard";
   return (
-    <section className="relative space-y-3 rounded-xl border bg-card grade-surface p-4 shadow-raised-lg lg:h-full lg:min-h-0 lg:overflow-y-auto">
+    <section
+      className={cn(
+        "relative space-y-3 rounded-xl border bg-card grade-surface p-4 shadow-raised-lg",
+        !onDashboard && "lg:h-full lg:min-h-0 lg:overflow-y-auto",
+      )}
+    >
       <div className="absolute top-3 right-3">
-        <OfficeToggle open />
+        {/* On /dtr it swaps back to the table; on the dashboard it opens the full view there. */}
+        {onDashboard ? (
+          <Link href="/dtr?view=office" className={buttonVariants({ variant: "outline", size: "sm" })}>
+            <Maximize2 />
+            Open full view
+          </Link>
+        ) : (
+          <OfficeToggle open />
+        )}
       </div>
-      <Office />
+      <Office sceneClass={onDashboard ? "h-[46svh] min-h-90" : undefined} />
     </section>
   );
 }
@@ -76,7 +91,7 @@ export function OfficeToggle({ open }: { open: boolean }) {
   );
 }
 
-function Office() {
+function Office({ sceneClass }: { sceneClass?: string }) {
   const auth = useAuth();
   const scope = departmentScopeFilter(auth);
   const router = useRouter();
@@ -206,7 +221,7 @@ function Office() {
         <p className="py-10 text-center text-sm text-muted-foreground">Nobody to show yet.</p>
       ) : (
         <div className="overflow-hidden rounded-lg border">
-          <Office3D layout={layout} activity={activity} onSelect={select} canOpen={canOpen} />
+          <Office3D layout={layout} activity={activity} onSelect={select} canOpen={canOpen} className={sceneClass} />
         </div>
       )}
     </>

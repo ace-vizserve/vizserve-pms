@@ -13,6 +13,7 @@ const TURN = Math.PI / 4;
 import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { AMENITY_W, HALL, ROOM_W, assignSeats, describeOfficePerson, type OfficeActivity, officeTheme, type OfficeDesk, type OfficeLayout, type OfficePerson, type OfficeRoom } from "@/lib/office";
 
 import { Block } from "./office-block";
@@ -830,8 +831,11 @@ export function Office3D({
   activity,
   onSelect,
   canOpen = () => true,
+  className,
 }: {
   layout: OfficeLayout;
+  /** The scene's height — shorter on the dashboard than on /dtr. */
+  className?: string;
   /** Whose DTR a click may open. Everyone's for a lead; a member's own only. */
   canOpen?: (id: string) => boolean;
   /** Desks, lunch, or the Friday all-hands — from `officeActivity`, by the clock in Manila. */
@@ -890,7 +894,10 @@ export function Office3D({
 
   return (
     <div
-      className="relative h-[58svh] min-h-[440px] overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      className={cn(
+        "relative overflow-hidden outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        className ?? "h-[58svh] min-h-110",
+      )}
       style={{ background: BG }}
       tabIndex={0}
       aria-label="The office. Q and E turn the view."

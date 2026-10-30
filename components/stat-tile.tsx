@@ -77,7 +77,8 @@ export function StatTile({
               {icon}
             </span>
           ) : null}
-          <p className="truncate text-xs font-semibold text-muted-foreground">{label}</p>
+          {/* No truncation in the compact tile: the whole label and hint, wrapping if they must. */}
+          <p className="text-xs font-semibold text-muted-foreground">{label}</p>
           {href ? (
             <Link
               href={href}
@@ -98,7 +99,7 @@ export function StatTile({
           >
             {value === null ? "—" : value}
           </p>
-          {hint ? <p className="truncate text-xs text-muted-foreground">{hint}</p> : null}
+          {hint ? <p className="text-xs leading-snug text-muted-foreground">{hint}</p> : null}
         </div>
       </div>
     );

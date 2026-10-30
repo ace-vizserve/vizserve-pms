@@ -38,6 +38,7 @@ import { createClient } from "@/utils/supabase/server";
 import { buttonVariants } from "@/components/ui/button";
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { PostAnnouncementButton } from "@/app/_home/announcement-controls";
+import { OfficeView } from "@/app/(app)/dtr/office-view";
 import { AnnouncementItems, loadAnnouncements } from "@/app/_home/announcements";
 
 import { NeedsYou, type NeedsYouRow } from "./needs-you";
@@ -417,11 +418,14 @@ async function StatTiles({
   context,
   isApprover,
   myTasks: myTasksPromise,
+  narrow = false,
 }: {
   supabase: Awaited<ReturnType<typeof createClient>>;
   context: Awaited<ReturnType<typeof requireAuthContext>>;
   isApprover: boolean;
   myTasks: Promise<number>;
+  /** One per row, for the dashboard's side column — two across cut the words off. */
+  narrow?: boolean;
 }) {
   const [waiting, unread, myQa, myTasks] = await Promise.all([
     // Three queues, not one — see `countWaitingOnYou`. This tile counted client
@@ -439,7 +443,7 @@ async function StatTiles({
   const showQa = myQa > 0;
 
   return (
-    <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+    <div className={cn("grid gap-3", narrow ? "grid-cols-1" : "sm:grid-cols-2 lg:grid-cols-3")}>
       {/* One tile summing three queues, not three tiles. The QA tile below
           already argues why: a permanent zero teaches people to stop looking,
           and two of these three are empty most days. The breakdown is in the
@@ -707,149 +711,151 @@ export default async function DashboardPage() {
         <TimesheetStripSection week={week} monday={monday} />
       </Suspense>
 
-      <Suspense
-        fallback={
-          <Streaming label="Loading your counts…">
-            <StatRowSkeleton tiles={isApprover ? 3 : 2} />
-          </Streaming>
-        }
-      >
-        <StatTiles supabase={supabase} context={context} isApprover={isApprover} myTasks={myTasksPromise} />
-      </Suspense>
-
       {/*
-        ⚠️ EVERYTHING BELOW THIS IS INSIDE THE BOUNDARY, AND THAT IS THE WHOLE
-        POINT. "Needs you" is the one section on this page whose height cannot be
-        guessed — `NEEDS_YOU_LIMIT` is 8 and the fallback draws 3, so when it
-        lands it can grow by five rows and shove the two cards under it down the
-        page. Sibling boundaries resolve independently and push each other
-        around; a nested one waits for the section above to be in place, so the
-        page settles from the top down.
+        TWO COLUMNS FROM `lg` UP, AND THAT IS THE COMPACT LAYOUT.
 
-        The work still runs in parallel — `needsYou` and `punchState` were both
-        started well above this. Nesting changes when things are REVEALED, not
-        when they are fetched.
+        Left, wide: the announcements, then the virtual office under them —
+        the office is attendance at a glance, an extra, and the announcements
+        are what somebody needs everyone to read. Right, a narrow column of the things you act
+        on: your punch, your counts, what is waiting on you. Below `lg` it
+        stacks, the right column first, because the punch is what a phone is
+        opened for.
 
-        Nothing else on this page needs it: the greeting, the timesheet strip and
-        the stat tiles all have fallbacks the same size as their content, which is
-        what `components/skeletons.tsx` exists to enforce. Reserved space and
-        nesting solve the same problem, and reserved space is free.
+        "Needs you" keeps its own boundary at the bottom of the right column.
+        Its height is the one on this page that cannot be guessed (see
+        `NEEDS_YOU_LIMIT`), and at the bottom it can grow without shoving
+        anything else.
       */}
-      <Suspense
-        fallback={
-          <Streaming
-            label="Loading the things that need you…"
-            className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
-          >
-            <Skeleton className="h-4 w-28" aria-hidden />
-            <div className="space-y-2.5" aria-hidden>
-              <Skeleton className="h-4 w-full" />
-              <Skeleton className="h-4 w-5/6" />
-              <Skeleton className="h-4 w-2/3" />
-            </div>
-          </Streaming>
-        }
-      >
-        <div id="needs-you" className="scroll-mt-4">
-          <NeedsYouSection needsYou={needsYou} myTasks={myTasksPromise} />
-        </div>
-
-      {/* I4. Behind the role, and the numbers are read from the same table
-          `/timesheet/team` reads — the band links there rather than growing its
-          own grid. */}
-      {isApprover ? (
-        <Card size="sm">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-sm">
-              <Users className="size-4 text-muted-foreground" aria-hidden />
-              Your department this week
-            </CardTitle>
-            <CardDescription className="text-xs">
-              {formatWeekRange(monday)} —{" "}
-              <Suspense
-                fallback={
-                  <Streaming inline label="Counting the weeks handed in…" className="inline-block">
-                    <InlineBar className="h-3 w-32 align-middle" />
-                  </Streaming>
-                }
-              >
-                <TeamSubmitted supabase={supabase} isApprover={isApprover} monday={monday} />
-              </Suspense>
-              {/* NOT "n of m", because m is unknowable here without a second
-                  query for department headcount — and a denominator that counts
-                  people on leave all week would report a shortfall that is not
-                  one. The team grid is where the gaps are visible, with the leave
-                  overlay that makes them readable. */}
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Link
-              href="/timesheet/team"
-              className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
-            >
-              Open the team week
-              <ArrowRight className="size-3.5" />
-            </Link>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      {/* P17-04. The punch card kept its width and the announcements took the
-          space beside it, which was empty. Stacked below `lg`. */}
-      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,28rem)_minmax(0,1fr)]">
-      <Card>
-        <CardHeader>
-          <CardTitle>Time in / out</CardTitle>
-          <CardDescription className="text-xs">
-            Punch without leaving the dashboard.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
+      <div className="grid items-start gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,24rem)]">
+        <div className="order-2 flex min-w-0 flex-col gap-3 lg:order-1">
+          {/* Announcements first: what somebody put there for everyone to read. */}
           <Suspense
             fallback={
-              <Streaming label="Loading your punch state…">
-                <Skeleton className="h-9 w-32" aria-hidden />
+              <Streaming
+                label="Loading announcements…"
+                className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+              >
+                <Skeleton className="h-4 w-32" aria-hidden />
+                <Skeleton className="h-4 w-5/6" aria-hidden />
               </Streaming>
             }
           >
-            <DashboardPunch punchState={punchState} viewerId={context.userId} />
+            <DashboardAnnouncements supabase={supabase} context={context} today={today} />
           </Suspense>
-          {/* One row: the link on the left where it always was, the streak on the right. */}
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <Link
-              href="/dtr"
-              className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-2")}
-            >
-              Open my DTR <ArrowRight className="size-3.5" />
-            </Link>
-            <Suspense
-              fallback={
-                <Streaming label="Loading your streak…">
-                  <Skeleton className="h-7 w-44 rounded-full" aria-hidden />
-                </Streaming>
-              }
-            >
-              <DashboardStreak streak={streakPromise} />
-            </Suspense>
-          </div>
-        </CardContent>
-      </Card>
 
-      <Suspense
-        fallback={
-          <Streaming
-            label="Loading announcements…"
-            className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+          {/* The virtual office under them — attendance at a glance, the extra. */}
+          <Suspense
+            fallback={
+              <Streaming
+                label="Loading the office…"
+                className="space-y-3 rounded-xl border bg-card grade-surface p-4 shadow-raised-lg"
+              >
+                <Skeleton className="h-4 w-40" aria-hidden />
+                <Skeleton className="h-[46svh] min-h-90 w-full" aria-hidden />
+              </Streaming>
+            }
           >
-            <Skeleton className="h-4 w-32" aria-hidden />
-            <Skeleton className="h-4 w-5/6" aria-hidden />
-          </Streaming>
-        }
-      >
-        <DashboardAnnouncements supabase={supabase} context={context} today={today} />
-      </Suspense>
+            <OfficeView variant="dashboard" />
+          </Suspense>
+        </div>
+
+        <div className="order-1 flex min-w-0 flex-col gap-3 lg:order-2">
+          <Card>
+            <CardHeader>
+              <CardTitle>Time in / out</CardTitle>
+              <CardDescription className="text-xs">Punch without leaving the dashboard.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <Suspense
+                fallback={
+                  <Streaming label="Loading your punch state…">
+                    <Skeleton className="h-9 w-32" aria-hidden />
+                  </Streaming>
+                }
+              >
+                <DashboardPunch punchState={punchState} viewerId={context.userId} />
+              </Suspense>
+              {/* One row: the link on the left where it always was, the streak on the right. */}
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <Link href="/dtr" className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "-ml-2")}>
+                  Open my DTR <ArrowRight className="size-3.5" />
+                </Link>
+                <Suspense
+                  fallback={
+                    <Streaming label="Loading your streak…">
+                      <Skeleton className="h-7 w-44 rounded-full" aria-hidden />
+                    </Streaming>
+                  }
+                >
+                  <DashboardStreak streak={streakPromise} />
+                </Suspense>
+              </div>
+            </CardContent>
+          </Card>
+
+          <Suspense
+            fallback={
+              <Streaming label="Loading your counts…">
+                <StatRowSkeleton tiles={isApprover ? 3 : 2} />
+              </Streaming>
+            }
+          >
+            <StatTiles supabase={supabase} context={context} isApprover={isApprover} myTasks={myTasksPromise} narrow />
+          </Suspense>
+
+          <Suspense
+            fallback={
+              <Streaming
+                label="Loading the things that need you…"
+                className="space-y-3 rounded-lg border bg-card grade-surface p-4 shadow-raised-lg"
+              >
+                <Skeleton className="h-4 w-28" aria-hidden />
+                <div className="space-y-2.5" aria-hidden>
+                  <Skeleton className="h-4 w-full" />
+                  <Skeleton className="h-4 w-5/6" />
+                  <Skeleton className="h-4 w-2/3" />
+                </div>
+              </Streaming>
+            }
+          >
+            <div id="needs-you" className="scroll-mt-4">
+              <NeedsYouSection needsYou={needsYou} myTasks={myTasksPromise} />
+            </div>
+          </Suspense>
+
+          {/* I4. Behind the role, and the numbers are read from the same table
+              `/timesheet/team` reads — the band links there rather than growing its
+              own grid. NOT "n of m": m would count people on leave all week. */}
+          {isApprover ? (
+            <Card size="sm">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-sm">
+                  <Users className="size-4 text-muted-foreground" aria-hidden />
+                  Your department this week
+                </CardTitle>
+                <CardDescription className="text-xs">
+                  {formatWeekRange(monday)} —{" "}
+                  <Suspense
+                    fallback={
+                      <Streaming inline label="Counting the weeks handed in…" className="inline-block">
+                        <InlineBar className="h-3 w-32 align-middle" />
+                      </Streaming>
+                    }
+                  >
+                    <TeamSubmitted supabase={supabase} isApprover={isApprover} monday={monday} />
+                  </Suspense>
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Link href="/timesheet/team" className={cn(buttonVariants({ variant: "outline", size: "sm" }))}>
+                  Open the team week
+                  <ArrowRight className="size-3.5" />
+                </Link>
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       </div>
-      </Suspense>
     </PageShell>
   );
 }
