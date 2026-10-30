@@ -22,6 +22,8 @@ import {
   dtrPersonRowSchema,
   dtrPunchRowSchema,
   dtrYearLeaveRowSchema,
+  officeLeaveRowSchema,
+  officePunchRowSchema,
   ownOvertimeRowSchema,
   ownPunchRowSchema,
   ownScheduleRowSchema,
@@ -407,6 +409,9 @@ export async function fetchDtrView(
             "id, request_type, status, work_date, requester_id, correction_at, overtime_minutes",
           )
           .in("request_type", [...TIME_CORRECTION_TYPES, "OVERTIME"])
+          // A withdrawn request is not paperwork on the day any more — the
+          // requester took it back. Showing it would offer a decision on nothing.
+          .neq("status", "WITHDRAWN")
           .gte("work_date", from)
           .lte("work_date", to)
           .order("created_at", { ascending: false });
@@ -475,13 +480,14 @@ export async function fetchDtrView(
    * Summed rather than taken singly — one day can carry more than one approved
    * overtime request.
    */
-  const requestRows: DayRequestRow[] = parseAll(
-    dayRequestRowSchema,
-    requestRowsRaw,
-    "the requests on these days",
+  // The query already leaves WITHDRAWN out; this is the belt to that brace, and
+  // what narrows the type for the table, which has no state for a withdrawn row.
+  const requestRows = parseAll(dayRequestRowSchema, requestRowsRaw, "the requests on these days").filter(
+    (row): row is DayRequestRow & { status: Exclude<DayRequestRow["status"], "WITHDRAWN"> } =>
+      row.status !== "WITHDRAWN",
   );
 
-  const requestsByDay = new Map<string, DayRequestRow[]>();
+  const requestsByDay = new Map<string, (typeof requestRows)[number][]>();
   const overtimeByDay = new Map<string, number>();
 
   for (const row of requestRows) {
@@ -711,4 +717,52 @@ export async function fetchDtrYear(client: TimesheetReadClient, userId: string):
   }
 
   return { today, days, restDays, leaveDays: [...leaveDates].filter((day) => day >= from && day <= today).sort() };
+}
+
+/* -------------------------------------------------------------------------- */
+/* `qk.dtrOffice()` — the office view.                                          */
+/* -------------------------------------------------------------------------- */
+
+export type OfficeToday = {
+  today: string;
+  yesterday: string;
+  punches: { user_id: string; work_date: string; time_in: string | null; time_out: string | null }[];
+  onLeave: string[];
+};
+
+/**
+ * Everybody's punches for today and yesterday (yesterday for a shift still
+ * open across midnight, or a forgotten time-out), and who is on approved leave
+ * today. RLS scopes both: a lead gets their departments, the manager and above
+ * everyone, a member only themselves — which is why the view is offered to
+ * leads only.
+ */
+export async function fetchOfficeToday(client: TimesheetReadClient): Promise<OfficeToday> {
+  const today = todayInAppZone();
+  const yesterday = yesterdayInAppZone();
+
+  const [punchRows, leaveRows] = await Promise.all([
+    read<unknown[]>(
+      client
+        .from("vizserve_pms_dtr_entries")
+        .select("user_id, work_date, time_in, time_out")
+        .in("work_date", [today, yesterday]),
+    ),
+    read<unknown[]>(
+      client
+        .from("vizserve_pms_internal_requests")
+        .select("requester_id")
+        .eq("request_type", "LEAVE")
+        .eq("status", "APPROVED")
+        .lte("start_date", today)
+        .gte("end_date", today),
+    ),
+  ]);
+
+  return {
+    today,
+    yesterday,
+    punches: parseAll(officePunchRowSchema, punchRows, "today's punches"),
+    onLeave: parseAll(officeLeaveRowSchema, leaveRows, "today's leave").map((row) => row.requester_id),
+  };
 }

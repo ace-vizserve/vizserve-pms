@@ -1,0 +1,24 @@
+{
+  "date": "2026-10-31",
+  "kind": "added",
+  "area": "DTR",
+  "title": "A virtual office on the DTR page",
+  "description": "Team leaders and above can switch the DTR table to a 3D office: one room per department, with everyone who is timed in right now sitting at their desk, typing.",
+  "items": [
+    "Virtual office, beside Columns, swaps the table for the office under the year heat map; Back to table returns",
+    "Move around it like the Sims: drag to move to any corner; turn with right-drag, Shift-drag, the turn buttons or Q and E; scroll or pinch to zoom; and a button to reset",
+    "A lounge beside the rooms: reception with the VizServe logo and the team photo, a wall of our clients, a coffee bar, a canteen, pool, ping-pong, a sofa corner and a meeting table",
+    "Each department has its own walled room, dressed on all four walls for its work: an animated ad screen for media, a code screen, server rack and turning gears for VizBytes, a climbing growth chart and binders for VizBooks, a calendar, to-do board and corkboard for VizAssists. The walls nearest the camera drop down so you can always see in",
+    "Every room also has a meeting corner with a projector showing slides, a printer and a water dispenser",
+    "People move: some get up now and then to walk to the water dispenser or the printer and back",
+    "At lunch, 12 to 1, everyone who is in sits in the canteen",
+    "Every Friday from 4 to 5 PM, everyone gathers in the all-hands room — 30 chairs, a stage and the projector — with one person presenting",
+    "Doors on every room, a main entrance, a fire exit with a lit EXIT sign, and fire extinguishers",
+    "Timed in and not timed out means at the desk — including somebody who forgot to time out, so the office shows what the DTR says",
+    "Still timed in after 10 hours turns their marker amber, which is usually a forgotten time-out",
+    "Gone home, on leave and not in leave an empty desk; hover any desk for who and since when",
+    "Click a desk to open that person's DTR",
+    "Each room's sign counts who is in, and the office refreshes every minute",
+    "A team leader sees their own departments; the manager and above see every room"
+  ]
+}

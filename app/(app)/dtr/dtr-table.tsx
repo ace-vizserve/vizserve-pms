@@ -103,6 +103,7 @@ export function DtrTable({
   empty,
   totalLabel,
   totalMinutes,
+  actions,
   className,
 }: {
   rows: Entry[];
@@ -114,6 +115,8 @@ export function DtrTable({
   /** "Total in range", or the truncated wording when the cap was hit. */
   totalLabel: string;
   totalMinutes: number;
+  /** Beside the columns menu — the virtual office switch, for a lead. */
+  actions?: React.ReactNode;
   className?: string;
 }) {
   const { visibility, onVisibilityChange } = useColumnVisibility("dtr");
@@ -350,6 +353,7 @@ export function DtrTable({
     <DataTable
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
+        actions={actions}
         className={className}
         columns={columns}
         rows={rows}

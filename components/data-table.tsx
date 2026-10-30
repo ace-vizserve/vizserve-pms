@@ -198,6 +198,7 @@ export function DataTable<T>({
   urlSort = false,
   defaultSort,
   toolbar,
+  actions,
   count,
   getSubRows,
   defaultExpanded = true,
@@ -294,6 +295,8 @@ export function DataTable<T>({
    * them. One owner now.
    */
   toolbar?: React.ReactNode;
+  /** Buttons on the right of the strip, beside the columns menu — a view switch, say. */
+  actions?: React.ReactNode;
   /** The result count, beside the filters that produced it. */
   count?: React.ReactNode;
   /**
@@ -787,7 +790,7 @@ export function DataTable<T>({
    */
   if (bare) return body;
 
-  const hasStrip = Boolean(toolbar || count || onColumnVisibilityChange);
+  const hasStrip = Boolean(toolbar || actions || count || onColumnVisibilityChange);
 
   return (
     <DataTableShell
@@ -803,6 +806,8 @@ export function DataTable<T>({
               {count ? (
                 <span className="text-xs text-muted-foreground">{count}</span>
               ) : null}
+
+              {actions}
 
               {onColumnVisibilityChange ? (
                 <DataTableColumns

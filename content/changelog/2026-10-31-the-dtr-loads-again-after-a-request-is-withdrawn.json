@@ -1,0 +1,7 @@
+{
+  "date": "2026-10-31",
+  "kind": "fixed",
+  "area": "DTR",
+  "title": "The DTR loads again after a request is withdrawn",
+  "description": "If anybody in the range had withdrawn a time correction or an overtime request, the whole DTR table refused to load and showed \"Could not load your time record\". It loads now, and withdrawn requests no longer show against the day."
+}

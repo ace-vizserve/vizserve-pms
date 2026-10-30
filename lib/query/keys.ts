@@ -406,6 +406,8 @@ export const qk = {
    * the `["dtr"]` prefix, so a punch refreshes it with everything else.
    */
   dtrYear: (userId: string) => ["dtr", "year", userId] as const,
+  /** The office view — today's punches for everyone in scope. A punch refreshes it. */
+  dtrOffice: () => ["dtr", "office"] as const,
   /**
    * P12-23 — the half of the clock reminder that cannot be read in the browser.
    *

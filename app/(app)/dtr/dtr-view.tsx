@@ -2,6 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Clock } from "lucide-react";
 
 import { EmptyState } from "@/components/empty-state";
@@ -20,6 +21,7 @@ import { qk } from "@/lib/query/keys";
 import { DtrTable } from "./dtr-table";
 import { DtrToolbar } from "./dtr-toolbar";
 import { DtrYear } from "./dtr-year";
+import { OfficeToggle, OfficeView } from "./office-view";
 
 /**
  * P5-04 / P12-23 — the daily time record, reading from the cache.
@@ -73,6 +75,8 @@ export function DtrView({
 }) {
   const auth = useAuth();
   const scope = departmentScopeFilter(auth);
+  // `?view=office` — the virtual office in the table's place. See `OfficeToggle`.
+  const officeOpen = useSearchParams().get("view") === "office";
 
   const view = useQuery({
     /*
@@ -236,16 +240,25 @@ export function DtrView({
               : null
           }
         />
+        {/* The table, or — for a lead, with `?view=office` — the virtual office
+            in its place. The switch sits beside Columns; the office carries its
+            own way back. Members never get it: their DTR policy shows nobody's
+            punches but their own, so the office would be one person. */}
         <div className="lg:min-h-0 lg:flex-1">
-          <DtrTableSection
-            view={view}
-            viewerId={viewerId}
-            showPerson={showPerson}
-            from={from}
-            to={to}
-            selectedUser={selectedUser}
-            rangeInverted={rangeInverted}
-          />
+          {isLead && officeOpen ? (
+            <OfficeView />
+          ) : (
+            <DtrTableSection
+              view={view}
+              viewerId={viewerId}
+              showPerson={showPerson}
+              from={from}
+              to={to}
+              selectedUser={selectedUser}
+              rangeInverted={rangeInverted}
+              actions={isLead ? <OfficeToggle open={false} /> : null}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -402,6 +415,7 @@ function DtrTableSection({
   to,
   selectedUser,
   rangeInverted,
+  actions,
 }: {
   view: ViewQuery;
   viewerId: string;
@@ -410,6 +424,8 @@ function DtrTableSection({
   to: string;
   selectedUser: string | null;
   rangeInverted: boolean;
+  /** Beside the columns menu: the virtual office switch, for a lead. */
+  actions?: React.ReactNode;
 }) {
   if (view.isPending) {
     return (
@@ -426,6 +442,7 @@ function DtrTableSection({
 
   return (
     <DtrTable
+      actions={actions}
       // The card fills the row and the rows scroll inside it, so five hundred
       // days of DTR never make the page itself longer.
       //

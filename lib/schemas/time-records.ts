@@ -324,7 +324,11 @@ export type DtrPunchRow = z.infer<typeof dtrPunchRowSchema>;
 export const dayRequestRowSchema = z.object({
   id: z.uuid(),
   request_type: z.string(),
-  status: z.enum(["PENDING_REVIEW", "APPROVED", "REJECTED"]),
+  // `WITHDRAWN` since P9-02. The DTR query leaves withdrawn requests out, but
+  // the schema must still know the value: an enum missing one the database can
+  // return fails the WHOLE table, not the one row ("came back in a shape this
+  // build does not recognise"), which is what happened on 31 Oct 2026.
+  status: z.enum(["PENDING_REVIEW", "APPROVED", "REJECTED", "WITHDRAWN"]),
   work_date: dateSchema.nullable(),
   requester_id: z.uuid(),
   correction_at: z.string().nullable(),
@@ -412,3 +416,20 @@ export const dtrYearLeaveRowSchema = z.object({
 });
 
 export type DtrYearLeaveRow = z.infer<typeof dtrYearLeaveRowSchema>;
+
+/* -------------------------------------------------------------------------- */
+/* `qk.dtrOffice()` — the office view: who is at their desk.                    */
+/* -------------------------------------------------------------------------- */
+
+/** Today's and yesterday's punches for everybody the viewer may see. */
+export const officePunchRowSchema = z.object({
+  user_id: z.uuid(),
+  work_date: dateSchema,
+  time_in: clockSchema,
+  time_out: clockSchema,
+});
+
+/** Approved leave covering today — only who. */
+export const officeLeaveRowSchema = z.object({
+  requester_id: z.uuid(),
+});
