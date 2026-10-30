@@ -6,13 +6,14 @@ import type { Seat } from "./office-amenities";
 import { Block, Round } from "./office-block";
 import { CutawayWall } from "./office-decor";
 import { Extinguisher, GlassDoors, GlassPane } from "./office-doors";
+import { Cctv } from "./office-cctv";
 import { Picture, useImage, useTextTexture } from "./office-props";
 
 /**
  * The slide on the all-hands screen. Drop the team's slide here — 16:9 — and
  * it replaces the title card, no code change.
  */
-const SLIDE = "/assets/allhands-slide.png";
+const SLIDE = "/assets/allhands-slide.jpg";
 
 /** Window positions along a side wall of length `d`, kept clear of the corners. */
 function windowsAlong(d: number): number[] {
@@ -91,8 +92,12 @@ export function TownHall({ x, z, w, count, live }: { x: number; z: number; w: nu
   const slide = useImage(SLIDE);
   const T = 0.18;
   const H = 2.4;
+  // The doors are in the RIGHT wall, onto the corridor and the main entrance.
+  // The front wall backs onto the building's outer wall, so a door there led nowhere.
   const door = 2.4;
-  const half = (w - door) / 2;
+  const doorZ = d / 2;
+  const before = doorZ - door / 2;
+  const after = d - doorZ - door / 2;
   const wall = { height: H, low: 0.55, accent: BRAND };
 
   return (
@@ -102,6 +107,7 @@ export function TownHall({ x, z, w, count, live }: { x: number; z: number; w: nu
 
       {/* Walls, with double doors in the front. */}
       <CutawayWall center={[x + w / 2, 0, z + T / 2]} size={[w, T]} normal={[0, -1]} {...wall}>
+        <Cctv position={[x + 0.6, H - 0.1, z + T + 0.08]} facing={0.6} />
         {/* The big screen over the stage, 16:9. */}
         <group position={[x + w / 2, 1.4, z + T + 0.03]}>
           <Block position={[0, 0, 0]} size={[3.5, 2, 0.06]} color="#111827" />
@@ -117,16 +123,17 @@ export function TownHall({ x, z, w, count, live }: { x: number; z: number; w: nu
           <GlassPane key={wz} x={x + T / 2} y={1.4} z={z + wz} along="z" />
         ))}
       </CutawayWall>
-      <CutawayWall center={[x + w - T / 2, 0, z + d / 2]} size={[T, d]} normal={[1, 0]} {...wall}>
-        {windowsAlong(d).map((wz) => (
-          <GlassPane key={wz} x={x + w - T / 2} y={1.4} z={z + wz} along="z" />
-        ))}
-      </CutawayWall>
-      <CutawayWall center={[x + half / 2, 0, z + d - T / 2]} size={[half, T]} normal={[0, 1]} {...wall} />
-      <CutawayWall center={[x + w - half / 2, 0, z + d - T / 2]} size={[half, T]} normal={[0, 1]} {...wall} />
-      {/* The way in: glass double doors with the room's name over them. */}
-      <GlassDoors x={x + w / 2} z={z + d - T / 2} width={door} label="ALL-HANDS" />
-      <Extinguisher x={x + w / 2 - door / 2 - 0.5} z={z + d - 0.6} />
+      {/* Right wall, either side of the doors. */}
+      <CutawayWall center={[x + w - T / 2, 0, z + before / 2]} size={[T, before]} normal={[1, 0]} {...wall} />
+      <CutawayWall center={[x + w - T / 2, 0, z + d - after / 2]} size={[T, after]} normal={[1, 0]} {...wall} />
+      {/* Front: solid, against the building's outer wall. */}
+      <CutawayWall center={[x + w / 2, 0, z + d - T / 2]} size={[w, T]} normal={[0, 1]} {...wall} />
+
+      {/* The way in: glass double doors in the right wall, the room's name over them. */}
+      <group position={[x + w - T / 2, 0, z + doorZ]} rotation={[0, Math.PI / 2, 0]}>
+        <GlassDoors x={0} z={0} width={door} label="ALL-HANDS" />
+      </group>
+      <Extinguisher x={x + w - 0.55} z={z + doorZ - door / 2 - 0.5} />
 
       {/* The stage, a podium, and speakers either side. */}
       <Block position={[x + w / 2, 0.12, z + 1.3]} size={[Math.min(w - 2, 8), 0.24, 1.9]} color="#78350f" />

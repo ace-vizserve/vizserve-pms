@@ -13,7 +13,8 @@ import {
 } from "@/lib/dtr-schedule";
 import { expandLeaveDays, leaveKey, type LeaveDay, type LeaveSpan } from "@/lib/leave";
 import { parse, parseAll } from "@/lib/query/parse";
-import { read } from "@/lib/query/read";
+import { ReadError, read } from "@/lib/query/read";
+import { readableError } from "@/lib/action-result";
 import { readAppSettings, type TimesheetReadClient } from "@/lib/query/fetchers/timesheet";
 import { TIME_CORRECTION_TYPES } from "@/lib/schemas/internal-requests";
 import {
@@ -23,6 +24,7 @@ import {
   dtrPunchRowSchema,
   dtrYearLeaveRowSchema,
   officeLeaveRowSchema,
+  officePresenceRowSchema,
   officePunchRowSchema,
   ownOvertimeRowSchema,
   ownPunchRowSchema,
@@ -728,18 +730,65 @@ export type OfficeToday = {
   yesterday: string;
   punches: { user_id: string; work_date: string; time_in: string | null; time_out: string | null }[];
   onLeave: string[];
+  /**
+   * "presence": `vizserve_pms_office_presence()` answered, and `people` and
+   * `departments` are its scope — everyone for TL and above, one's own
+   * department otherwise. "policies": the function is not there yet (P17-07 is
+   * pasted by hand), so the punches are whatever the DTR policies allow and
+   * the caller supplies people and departments itself.
+   */
+  source: "presence" | "policies";
+  /** `hidden`: in a department whose room the viewer sees closed — name withheld. */
+  people: { id: string; full_name: string; primary_department_id: string | null; hidden: boolean }[] | null;
+  departments: { id: string; name: string }[] | null;
 };
 
 /**
- * Everybody's punches for today and yesterday (yesterday for a shift still
- * open across midnight, or a forgotten time-out), and who is on approved leave
- * today. RLS scopes both: a lead gets their departments, the manager and above
- * everyone, a member only themselves — which is why the view is offered to
- * leads only.
+ * Who is in, for the virtual office — through `vizserve_pms_office_presence()`
+ * (P17-07), which decides the scope: everybody for a team leader and above,
+ * their own department for anybody else.
+ *
+ * ⚠️ FALLS BACK, NOT FAILS, WHEN THE FUNCTION IS MISSING. Until the migration
+ * is pasted, PostgREST answers `PGRST202`; the office then reads the DTR and
+ * leave through their ordinary policies, as it did before — a lead sees their
+ * departments, a member only themselves. Any other error is a real failure and
+ * throws, so the office says "could not load" rather than drawing it empty.
  */
 export async function fetchOfficeToday(client: TimesheetReadClient): Promise<OfficeToday> {
   const today = todayInAppZone();
   const yesterday = yesterdayInAppZone();
+
+  const presence = await client.rpc("vizserve_pms_office_presence");
+  const missing = presence.error && (presence.error.code === "PGRST202" || presence.error.code === "42883");
+
+  if (!presence.error) {
+    const rows = parseAll(officePresenceRowSchema, presence.data, "who is in");
+    const departments = new Map<string, string>();
+    for (const row of rows) {
+      if (row.department_id && row.department_name) departments.set(row.department_id, row.department_name);
+    }
+    return {
+      today,
+      yesterday,
+      punches: rows.flatMap((row) => [
+        ...(row.time_in || row.time_out
+          ? [{ user_id: row.user_id, work_date: today, time_in: row.time_in, time_out: row.time_out }]
+          : []),
+        ...(row.open_since ? [{ user_id: row.user_id, work_date: yesterday, time_in: row.open_since, time_out: null }] : []),
+      ]),
+      onLeave: rows.filter((row) => row.on_leave).map((row) => row.user_id),
+      source: "presence",
+      people: rows.map((row) => ({
+        id: row.user_id,
+        full_name: row.full_name ?? "",
+        primary_department_id: row.department_id,
+        hidden: !row.visible,
+      })),
+      departments: [...departments].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
+    };
+  }
+
+  if (!missing) throw new ReadError(readableError(presence.error), presence.error.code);
 
   const [punchRows, leaveRows] = await Promise.all([
     read<unknown[]>(
@@ -764,5 +813,8 @@ export async function fetchOfficeToday(client: TimesheetReadClient): Promise<Off
     yesterday,
     punches: parseAll(officePunchRowSchema, punchRows, "today's punches"),
     onLeave: parseAll(officeLeaveRowSchema, leaveRows, "today's leave").map((row) => row.requester_id),
+    source: "policies",
+    people: null,
+    departments: null,
   };
 }

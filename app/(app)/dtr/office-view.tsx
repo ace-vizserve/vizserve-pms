@@ -12,6 +12,7 @@ import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useAuth } from "@/lib/auth/client-auth";
 import { departmentScopeFilter } from "@/lib/auth/rules";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { formatAppTime } from "@/lib/dates";
 import { layoutOffice, officeActivity, officeStatus, type OfficePerson } from "@/lib/office";
 import { browserClient } from "@/lib/query/browser-client";
@@ -33,9 +34,9 @@ const Office3D = dynamic(() => import("./office-3d").then((mod) => mod.Office3D)
  * in scope: one room per department, a figure at the desk of everyone timed in
  * right now. Always open — it is the view, not a detail behind a button.
  *
- * Leads only, by the caller — the DTR policy shows a member nobody's punches
- * but their own, so their office would be empty desks and one person. Picking
- * one person in the filter swaps this for that person's year heat map.
+ * Everyone gets it (P17-07): team leader and above see every room; anybody
+ * else sees their own department's room, the all-hands room and the shared
+ * spaces. The scope is decided in the database, by `vizserve_pms_office_presence()`.
  *
  * The punches refresh every minute, so somebody timing in appears without a
  * reload. A punch on this page refreshes it at once (it sits under ["dtr"]).
@@ -81,18 +82,33 @@ function Office() {
   const router = useRouter();
   const search = useSearchParams();
 
-  const directory = useQuery({ queryKey: qk.ref("users"), queryFn: () => fetchDirectory(browserClient()) });
-  const departments = useQuery({
-    queryKey: qk.ref("departments"),
-    queryFn: () => fetchActiveDepartments(browserClient()),
-  });
   const office = useQuery({
     queryKey: qk.dtrOffice(),
     queryFn: () => fetchOfficeToday(browserClient()),
     refetchInterval: 60_000,
   });
+  // Only needed when the presence function is not there yet (P17-07 unpasted):
+  // then the office falls back to the directory and the DTR's own policies.
+  const fallback = office.data?.source === "policies";
+  const directory = useQuery({
+    queryKey: qk.ref("users"),
+    queryFn: () => fetchDirectory(browserClient()),
+    enabled: fallback,
+  });
+  const departments = useQuery({
+    queryKey: qk.ref("departments"),
+    queryFn: () => fetchActiveDepartments(browserClient()),
+    enabled: fallback,
+  });
+
+  // P17-07. Team leader and above see the whole office and can open anybody's
+  // DTR from it. Everybody else sees their own department, and can open only
+  // their own — a colleague's DTR is not theirs to read.
+  const seesAll = roleAtLeast(auth.role, "team_leader");
+  const canOpen = (id: string) => seesAll || id === auth.userId;
 
   function select(person: OfficePerson) {
+    if (!canOpen(person.id)) return;
     const params = new URLSearchParams(search.toString());
     params.set("user", person.id);
     router.push(`/dtr?${params.toString()}`);
@@ -101,17 +117,17 @@ function Office() {
   const header = (
     <div>
       <h2 className="text-[15px] leading-snug">
-        <span className="font-semibold">The office</span>
+        <span className="font-semibold">{seesAll ? "The office" : "Your department"}</span>
         <span className="text-muted-foreground"> · right now</span>
       </h2>
       <p className="text-xs text-muted-foreground">
         Everyone timed in is at their desk — including anyone who forgot to time out. Hover a desk for
-        details; click it to open their DTR.
+        details{seesAll ? "; click it to open their DTR" : ""}.
       </p>
     </div>
   );
 
-  const failed = directory.error ?? departments.error ?? office.error;
+  const failed = office.error ?? (fallback ? (directory.error ?? departments.error) : null);
   if (failed) {
     return (
       <>
@@ -121,7 +137,7 @@ function Office() {
     );
   }
 
-  if (!directory.data || !departments.data || !office.data) {
+  if (!office.data || (fallback && (!directory.data || !departments.data))) {
     return (
       <>
         {header}
@@ -139,25 +155,31 @@ function Office() {
   // Re-read every minute with the punches, so lunch and the all-hands start on time.
   const activity = officeActivity(now);
 
-  const people = directory.data
-    .filter(
+  // Who is drawn: the presence function's answer, already scoped by role; or,
+  // before it exists, the directory narrowed the way the DTR page narrows it.
+  const roster =
+    office.data.people ??
+    (directory.data ?? []).filter(
       (person) =>
         person.is_active &&
         (scope === null ||
           person.id === auth.userId ||
           (person.primary_department_id !== null && scope.includes(person.primary_department_id))),
-    )
-    .map((person) =>
-      officeStatus({ person, punches, onLeave: leave.has(person.id), today, yesterday, now }),
     );
+  const people = roster.map((person) => ({
+    ...officeStatus({ person, punches, onLeave: leave.has(person.id), today, yesterday, now }),
+    hidden: "hidden" in person ? person.hidden : false,
+  }));
+  // The counts are of the people the viewer can actually see.
+  const shown = people.filter((person) => !person.hidden);
 
   const layout = layoutOffice(
-    departments.data.filter((dept) => !dept.is_shared),
+    office.data.departments ?? (departments.data ?? []).filter((dept) => !dept.is_shared),
     people,
   );
 
-  const count = (status: OfficePerson["status"]) => people.filter((person) => person.status === status).length;
-  const late = people.filter((person) => person.longShift).length;
+  const count = (status: OfficePerson["status"]) => shown.filter((person) => person.status === status).length;
+  const late = shown.filter((person) => person.longShift).length;
 
   return (
     <>
@@ -172,16 +194,19 @@ function Office() {
         {late > 0 ? <span className="text-warning">{late} still timed in after 10 hours</span> : null}
         {activity === "lunch" ? <span className="font-medium">Lunch time — everyone is in the canteen</span> : null}
         {activity === "allhands" ? <span className="font-medium">Friday all-hands — everyone is in the all-hands room until 5 PM</span> : null}
+        {fallback && !seesAll ? (
+          <span className="text-muted-foreground">Only you are shown until the office update is applied.</span>
+        ) : null}
         <span className="ml-auto text-muted-foreground">
           Updated {formatAppTime(now)} · refreshes every minute
         </span>
       </div>
 
       {layout.rooms.length === 0 ? (
-        <p className="py-10 text-center text-sm text-muted-foreground">Nobody in your departments yet.</p>
+        <p className="py-10 text-center text-sm text-muted-foreground">Nobody to show yet.</p>
       ) : (
         <div className="overflow-hidden rounded-lg border">
-          <Office3D layout={layout} activity={activity} onSelect={select} />
+          <Office3D layout={layout} activity={activity} onSelect={select} canOpen={canOpen} />
         </div>
       )}
     </>

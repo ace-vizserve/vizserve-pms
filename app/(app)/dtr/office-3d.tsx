@@ -21,6 +21,7 @@ import { CutawayWall, RoomWalls, meetingDepth } from "./office-decor";
 import { DESK_ITEMS, DeskItem, Lounge, Window, canteenSpan } from "./office-props";
 import { TownHall, podium, townHallSeats, townHallSize } from "./office-townhall";
 import { Extinguisher, FireExit, GlassDoors } from "./office-doors";
+import { Lobby } from "./office-lobby";
 
 /**
  * The virtual office, in 3D — orbit, pan and zoom around one floor of the
@@ -161,10 +162,13 @@ function Desk({
   desk,
   accent,
   hovered,
+  openable,
   onHover,
   onSelect,
 }: {
   desk: OfficeDesk;
+  /** Whether a click opens their DTR — the viewer may not read everyone's. */
+  openable: boolean;
   /** The department's colour: lanyards, mugs. */
   accent: string;
   hovered: boolean;
@@ -182,15 +186,18 @@ function Desk({
   return (
     <group
       onPointerOver={(event: ThreeEvent<PointerEvent>) => {
+        if (person.hidden) return;
         event.stopPropagation();
         onHover(person.id);
         document.body.style.cursor = "pointer";
       }}
       onPointerOut={() => {
+        if (person.hidden) return;
         onHover(null);
         document.body.style.cursor = "";
       }}
       onClick={(event: ThreeEvent<MouseEvent>) => {
+        if (person.hidden) return;
         event.stopPropagation();
         // A drag that ends on a desk is the camera moving, not a click.
         if (event.delta > 4) return;
@@ -255,13 +262,13 @@ function Desk({
 
       {/* Somebody who is in is drawn by `Occupant` — they move. An empty desk
           carries its owner's name and hover card itself. */}
-      {working ? null : (
+      {working || person.hidden ? null : (
         <>
           <group position={[cx, 0, z + 1.6]}>
             <Html position={[0, 1.25, 0]} center distanceFactor={14} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
               <NameLabel name={person.name} dim />
             </Html>
-            {hovered ? <HoverCard person={person} y={1.9} /> : null}
+            {hovered ? <HoverCard person={person} y={1.9} openable={openable} /> : null}
           </group>
         </>
       )}
@@ -284,7 +291,7 @@ function NameLabel({ name, dim = false }: { name: string; dim?: boolean }) {
   );
 }
 
-function HoverCard({ person, y, note }: { person: OfficePerson; y: number; note?: string }) {
+function HoverCard({ person, y, note, openable }: { person: OfficePerson; y: number; note?: string; openable: boolean }) {
   return (
     <Html position={[0, y, 0]} center distanceFactor={14} zIndexRange={[30, 20]} style={{ pointerEvents: "none" }}>
       <div className="w-max max-w-64 rounded-md border bg-popover px-2.5 py-1.5 text-xs text-popover-foreground shadow-lg">
@@ -292,7 +299,7 @@ function HoverCard({ person, y, note }: { person: OfficePerson; y: number; note?
         <p className="text-muted-foreground">{describeOfficePerson(person)}</p>
         {note ? <p className="text-muted-foreground">{note}</p> : null}
         {person.longShift ? <p className="text-warning">Still timed in — forgot to time out?</p> : null}
-        <p className="mt-0.5 text-2xs text-muted-foreground">Click to open their DTR</p>
+        {openable ? <p className="mt-0.5 text-2xs text-muted-foreground">Click to open their DTR</p> : null}
       </div>
     </Html>
   );
@@ -417,11 +424,13 @@ function Occupant({
   seat,
   presenting,
   hovered,
+  openable,
   onHover,
   onSelect,
 }: {
   person: OfficePerson;
   accent: string;
+  openable: boolean;
   /** The desk chair, where they sit when nothing else is on. */
   chair: Point;
   /** Two routes out from the chair — to the water, to the printer. */
@@ -533,7 +542,7 @@ function Occupant({
         <Html position={[0, 2.45, 0]} center distanceFactor={14} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
           <NameLabel name={person.name} />
         </Html>
-        {hovered ? <HoverCard person={person} y={3.1} note={note} /> : null}
+        {hovered ? <HoverCard person={person} y={3.1} note={note} openable={openable} /> : null}
       </group>
     </group>
   );
@@ -582,19 +591,75 @@ function Shelf({ x, z }: { x: number; z: number }) {
   );
 }
 
+/**
+ * A room the viewer may not look into (P17-07): another department's, seen by
+ * a member. Walls that never cut away, a roof, the doors shut, and the sign —
+ * the floor plan stays whole, and nothing inside is drawn at all.
+ */
+function ClosedRoom({ room, accent }: { room: OfficeRoom; accent: string }) {
+  const { x, y: z, w, d } = room;
+  const H = 1.7;
+  const T = 0.18;
+  const door = 1.8;
+  const half = (w - door) / 2;
+  const wall = "#e7e2d9";
+  return (
+    <group>
+      <Block position={[x + w / 2, H / 2, z + T / 2]} size={[w, H, T]} color={wall} />
+      <Block position={[x + T / 2, H / 2, z + d / 2]} size={[T, H, d]} color={wall} />
+      <Block position={[x + w - T / 2, H / 2, z + d / 2]} size={[T, H, d]} color={wall} />
+      <Block position={[x + half / 2, H / 2, z + d - T / 2]} size={[half, H, T]} color={wall} />
+      <Block position={[x + w - half / 2, H / 2, z + d - T / 2]} size={[half, H, T]} color={wall} />
+      {/* The doors, shut. */}
+      <Block position={[x + w / 2, 0.76, z + d - T / 2]} size={[door, 1.52, 0.1]} color="#a16207" />
+      <Block position={[x + w / 2, 0.76, z + d - T / 2]} size={[0.03, 1.52, 0.12]} color="#78350f" />
+      <Block position={[x + w / 2 - 0.15, 0.78, z + d - T / 2 + 0.07]} size={[0.04, 0.16, 0.04]} color="#d1d5db" />
+      <Block position={[x + w / 2 + 0.15, 0.78, z + d - T / 2 + 0.07]} size={[0.04, 0.16, 0.04]} color="#d1d5db" />
+      <Block position={[x + w / 2, 1.6, z + d - T / 2]} size={[door + 0.2, 0.18, 0.2]} color="#78350f" />
+      {/* The roof, its edge in the department's colour. */}
+      <Block position={[x + w / 2, H + 0.04, z + d / 2]} size={[w, 0.08, d]} color="#d6d3d1" />
+      <Block position={[x + w / 2, H + 0.09, z + d / 2]} size={[w - 0.4, 0.02, d - 0.4]} color="#e7e5e4" shadow={false} />
+      <Block position={[x + w / 2, H + 0.1, z + 0.12]} size={[w, 0.04, 0.24]} color={accent} shadow={false} />
+      <Block position={[x + w / 2, H + 0.1, z + d - 0.12]} size={[w, 0.04, 0.24]} color={accent} shadow={false} />
+      <Block position={[x + 0.12, H + 0.1, z + d / 2]} size={[0.24, 0.04, d]} color={accent} shadow={false} />
+      <Block position={[x + w - 0.12, H + 0.1, z + d / 2]} size={[0.24, 0.04, d]} color={accent} shadow={false} />
+
+      {/* The sign, on a post at the back-left corner — the same as an open
+          room's, with PRIVATE where the count would be. */}
+      <Block position={[x + 0.6, H + 0.35, z + 0.6]} size={[0.1, 0.7, 0.1]} color="#6b6b6b" />
+      <Html position={[x + 0.6, H + 0.75, z + 0.6]} zIndexRange={[15, 5]} style={{ pointerEvents: "none" }}>
+        <div
+          className="whitespace-nowrap rounded border border-black/20 px-2 py-1 leading-none text-white shadow-md"
+          style={{ background: accent }}
+        >
+          <p className="text-[11px] font-bold tracking-wider">{room.name.toUpperCase()}</p>
+          <p className="mt-0.5 text-[9px] opacity-85">PRIVATE</p>
+        </div>
+      </Html>
+    </group>
+  );
+}
+
 function Room({
   room,
   hoveredId,
+  canOpen,
   onHover,
   onSelect,
 }: {
   room: OfficeRoom;
   hoveredId: string | null;
+  canOpen: (id: string) => boolean;
   onHover: (id: string | null) => void;
   onSelect: (person: OfficePerson) => void;
 }) {
   const colors = DEPT[room.colorIndex % DEPT.length];
   const { x, y: z, w, d } = room;
+
+  // P17-07. Another department's room, to a member: closed, roof on.
+  if (room.desks.length > 0 && room.desks.every((desk) => desk.person.hidden)) {
+    return <ClosedRoom room={room} accent={colors.sign} />;
+  }
 
   return (
     <group>
@@ -622,6 +687,7 @@ function Room({
           desk={desk}
           accent={colors.sign}
           hovered={hoveredId === desk.person.id}
+          openable={canOpen(desk.person.id)}
           onHover={onHover}
           onSelect={onSelect}
         />
@@ -763,8 +829,11 @@ export function Office3D({
   layout,
   activity,
   onSelect,
+  canOpen = () => true,
 }: {
   layout: OfficeLayout;
+  /** Whose DTR a click may open. Everyone's for a lead; a member's own only. */
+  canOpen?: (id: string) => boolean;
   /** Desks, lunch, or the Friday all-hands — from `officeActivity`, by the clock in Manila. */
   activity: OfficeActivity;
   onSelect: (person: OfficePerson) => void;
@@ -862,7 +931,7 @@ export function Office3D({
         <group position={offset}>
           <Building width={totalW} depth={depth} />
           {layout.rooms.map((room) => (
-            <Room key={room.id} room={room} hoveredId={hoveredId} onHover={setHoveredId} onSelect={onSelect} />
+            <Room key={room.id} room={room} hoveredId={hoveredId} canOpen={canOpen} onHover={setHoveredId} onSelect={onSelect} />
           ))}
           <TownHall x={0} z={hallZ} w={hallW} count={everyone.length} live={activity === "allhands"} />
           <Lounge x={loungeX} width={LOUNGE_W} depth={depth} />
@@ -870,7 +939,10 @@ export function Office3D({
           {/* Ways in and out — doors set deeper than the outer wall so they show
               from inside and out — and the extinguishers by them. */}
           <GlassDoors x={entranceX} z={depth + 0.15} width={2.4} height={2.2} depth={0.36} label="ENTRANCE" />
-          <Block position={[entranceX, 0.04, depth - 0.8]} size={[2.4, 0.02, 1.2]} color="#57534e" shadow={false} />
+          <Block position={[entranceX, 0.075, depth - 0.8]} size={[2.4, 0.02, 1.2]} color="#57534e" shadow={false} />
+
+          {/* The lobby inside the entrance: carpets, security, turnstiles, visitors, CCTV. */}
+          <Lobby x0={hallW + 0.4} x1={roomsW - 0.2} z0={layout.depth + 0.4} z1={depth - 0.1} entranceX={entranceX} />
           <FireExit x={totalW + 0.15} z={8.8} />
           <Extinguisher x={entranceX - 1.7} z={depth - 0.5} />
           <Extinguisher x={totalW - 0.4} z={8.15} />
@@ -888,6 +960,7 @@ export function Office3D({
                 seat={away.get(desk.person.id) ?? null}
                 presenting={desk.person.id === presenter}
                 hovered={hoveredId === desk.person.id}
+                openable={canOpen(desk.person.id)}
                 onHover={setHoveredId}
                 onSelect={onSelect}
               />

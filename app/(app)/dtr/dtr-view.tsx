@@ -240,12 +240,12 @@ export function DtrView({
               : null
           }
         />
-        {/* The table, or — for a lead, with `?view=office` — the virtual office
-            in its place. The switch sits beside Columns; the office carries its
-            own way back. Members never get it: their DTR policy shows nobody's
-            punches but their own, so the office would be one person. */}
+        {/* The table, or — with `?view=office` — the virtual office in its
+            place. The switch sits beside Columns; the office carries its own way
+            back. Everyone gets it (P17-07); what they see in it is scoped in the
+            database: every room for TL and above, one's own department otherwise. */}
         <div className="lg:min-h-0 lg:flex-1">
-          {isLead && officeOpen ? (
+          {officeOpen ? (
             <OfficeView />
           ) : (
             <DtrTableSection
@@ -256,7 +256,7 @@ export function DtrView({
               to={to}
               selectedUser={selectedUser}
               rangeInverted={rangeInverted}
-              actions={isLead ? <OfficeToggle open={false} /> : null}
+              actions={<OfficeToggle open={false} />}
             />
           )}
         </div>

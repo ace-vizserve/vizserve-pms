@@ -433,3 +433,19 @@ export const officePunchRowSchema = z.object({
 export const officeLeaveRowSchema = z.object({
   requester_id: z.uuid(),
 });
+
+/** P17-07 — one row of `vizserve_pms_office_presence()`. */
+export const officePresenceRowSchema = z.object({
+  user_id: z.uuid(),
+  full_name: z.string().nullable(),
+  department_id: z.uuid().nullable(),
+  department_name: z.string().nullable(),
+  time_in: clockSchema,
+  time_out: clockSchema,
+  open_since: clockSchema,
+  // Null is read as "not visible", never as a failure: an unknown is not a yes,
+  // and one odd row must not take the whole office down (it did, once — see
+  // the COALESCE note in the P17-07 migration).
+  on_leave: z.boolean().nullable().transform((value) => value === true),
+  visible: z.boolean().nullable().transform((value) => value === true),
+});

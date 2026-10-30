@@ -3,7 +3,7 @@
   "kind": "added",
   "area": "DTR",
   "title": "A virtual office on the DTR page",
-  "description": "Team leaders and above can switch the DTR table to a 3D office: one room per department, with everyone who is timed in right now sitting at their desk, typing.",
+  "description": "Everyone can switch the DTR table to a 3D office: one room per department, with everyone who is timed in right now sitting at their desk, typing. Team leaders and above can look into every room; everyone else sees the whole floor, but other departments' rooms are closed — only their own room, the all-hands room and the shared spaces are open.",
   "items": [
     "Virtual office, beside Columns, swaps the table for the office under the year heat map; Back to table returns",
     "Move around it like the Sims: drag to move to any corner; turn with right-drag, Shift-drag, the turn buttons or Q and E; scroll or pinch to zoom; and a button to reset",
@@ -14,11 +14,13 @@
     "At lunch, 12 to 1, everyone who is in sits in the canteen",
     "Every Friday from 4 to 5 PM, everyone gathers in the all-hands room — 30 chairs, a stage and the projector — with one person presenting",
     "Doors on every room, a main entrance, a fire exit with a lit EXIT sign, and fire extinguishers",
+    "A lobby inside the entrance: carpets, a security desk with a guard and a wall of CCTV feeds, turnstiles, visitor seating, and CCTV cameras round the office",
     "Timed in and not timed out means at the desk — including somebody who forgot to time out, so the office shows what the DTR says",
     "Still timed in after 10 hours turns their marker amber, which is usually a forgotten time-out",
     "Gone home, on leave and not in leave an empty desk; hover any desk for who and since when",
-    "Click a desk to open that person's DTR",
+    "Team leaders and above can click any desk to open that person's DTR; everyone else can open their own",
     "Each room's sign counts who is in, and the office refreshes every minute",
-    "A team leader sees their own departments; the manager and above see every room"
-  ]
+    "The all-hands screen shows this week's Weekly Team Collaboration slide"
+  ],
+  "pending": "Needs its database function: paste supabase/migrations/20261031090000_p17_07_office_presence.sql into the Supabase SQL editor. Until then, team leaders see only their own departments and everyone else sees only themselves."
 }

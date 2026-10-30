@@ -38,6 +38,11 @@ export type OfficePerson = {
   longShift: boolean;
   /** The open shift started yesterday. */
   fromYesterday: boolean;
+  /**
+   * In a department whose room the viewer sees closed (P17-07): the office
+   * knows only that a desk is theirs, not who they are or whether they are in.
+   */
+  hidden?: boolean;
 };
 
 export function officeStatus({

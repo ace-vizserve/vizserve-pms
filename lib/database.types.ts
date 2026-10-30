@@ -2840,6 +2840,23 @@ export type Database = {
         Args: { p_date: string };
         Returns: boolean;
       };
+      /** P17-07. The virtual office: everyone for TL and above, one's own department otherwise. */
+      vizserve_pms_office_presence: {
+        Args: Record<PropertyKey, never>;
+        Returns: {
+          user_id: string;
+          /** Null for somebody outside the viewer's department, unless the viewer is TL or above. */
+          full_name: string | null;
+          department_id: string | null;
+          department_name: string | null;
+          time_in: string | null;
+          time_out: string | null;
+          open_since: string | null;
+          on_leave: boolean;
+          /** False: the viewer sees this person's room closed, and knows only their department. */
+          visible: boolean;
+        }[];
+      };
       vizserve_pms_has_app_access: {
         Args: Record<PropertyKey, never>;
         Returns: boolean;

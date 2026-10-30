@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { CanvasTexture, SRGBColorSpace, TextureLoader, type Mesh, type Texture } from "three";
 
 import { Canteen } from "./office-amenities";
+import { Cctv } from "./office-cctv";
 import { Block, Round } from "./office-block";
 
 /**
@@ -411,6 +412,8 @@ export function Lounge({ x, width, depth }: { x: number; width: number; depth: n
         <WallLogo src="/assets/vizserve-logo-color.png" caption="VIZSERVE TEAM PORTAL" position={[-1.95, 1.72, 0.115]} w={1.55} h={1.55} panel />
         {/* The team, framed — the photo from vizserve.com's team page. */}
         <FramedPhoto src="/assets/vizserve-team.jpg" position={[1.55, 1.6, 0.115]} w={3.1} h={1.95} />
+        <Cctv position={[-(width - 0.8) / 2 + 0.25, 2.5, 0.14]} facing={0.5} />
+        <Cctv position={[(width - 0.8) / 2 - 0.25, 2.5, 0.14]} facing={-0.5} />
         {/* Spotlights over the logo. */}
         {[-1.95, 1.55].map((px) => (
           <Block key={px} position={[px, 2.45, 0.35]} size={[0.3, 0.06, 0.18]} color="#f8fafc" emissive="#fef9c3" emissiveIntensity={0.9} />

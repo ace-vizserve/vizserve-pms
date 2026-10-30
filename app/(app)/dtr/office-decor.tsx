@@ -8,6 +8,7 @@ import type { OfficeTheme as Theme } from "@/lib/office";
 
 import { Block } from "./office-block";
 import { Extinguisher, GlassPane, RoomDoor } from "./office-doors";
+import { Cctv } from "./office-cctv";
 import { Plaque } from "./office-props";
 
 /**
@@ -153,6 +154,7 @@ export function RoomWalls({ w, d, accent, theme }: { w: number; d: number; accen
       {/* Back: the department's main wall. */}
       <CutawayWall center={[w / 2, 0, TH / 2]} size={[w, TH]} normal={[0, -1]} {...wall}>
         <WallDecor theme={theme} accent={accent} />
+        <Cctv position={[w - 0.45, ROOM_WALL_H - 0.08, FACE + 0.08]} facing={-0.5} />
       </CutawayWall>
 
       {/* Left. */}
