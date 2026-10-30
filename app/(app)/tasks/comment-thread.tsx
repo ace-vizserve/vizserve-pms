@@ -2,22 +2,12 @@
 
 import { toast } from "@/components/ui/toast";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  AlertTriangle,
-  ArrowRight,
-  CircleCheck,
-  Eye,
-  Heart,
-  Laugh,
-  PartyPopper,
-  Send,
-  ThumbsUp,
-  Trash2,
-} from "lucide-react";
+import { AlertTriangle, ArrowRight, Send, Trash2 } from "lucide-react";
 import { startTransition, useCallback, useOptimistic, useState, useTransition } from "react";
 
 import { isPlaceholder, placeholderId } from "./optimistic-move";
 
+import { REACTION_OPTIONS as SHARED_REACTION_OPTIONS } from "@/components/reaction-options";
 import { Button } from "@/components/ui/button";
 import { Reactions, type ReactionOption } from "@/components/ui/reactions";
 import { RichTextEditor } from "@/components/ui/rich-text-editor";
@@ -35,17 +25,12 @@ import { deleteTaskComment, editTaskComment, uploadCommentImage } from "./action
 import { addTaskComment, mentionableForTask, setCommentReaction } from "./writes";
 
 /**
- * P17-03 — the six reactions, in picker order. The ids are `COMMENT_REACTIONS`
- * and the database's check constraint; the icons and words are only this.
+ * P17-03 — the six reactions, in picker order. Shared with announcements
+ * (P17-06) from `components/reaction-options.ts`. Typed against
+ * `COMMENT_REACTIONS` here, so a list that drifts from this table's check
+ * constraint fails to compile.
  */
-const REACTION_OPTIONS: (ReactionOption & { id: CommentReaction })[] = [
-  { id: "like", label: "Like", icon: ThumbsUp },
-  { id: "love", label: "Love", icon: Heart },
-  { id: "celebrate", label: "Celebrate", icon: PartyPopper },
-  { id: "laugh", label: "Haha", icon: Laugh },
-  { id: "seen", label: "Seen", icon: Eye },
-  { id: "done", label: "Done", icon: CircleCheck },
-];
+const REACTION_OPTIONS: readonly (ReactionOption & { id: CommentReaction })[] = SHARED_REACTION_OPTIONS;
 import { Monogram, initials } from "./assignees";
 import { useTaskRefresh } from "@/lib/query/use-task-refresh";
 

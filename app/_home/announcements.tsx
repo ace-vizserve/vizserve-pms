@@ -1,9 +1,19 @@
 import { canTakeDownAnnouncement, type AuthContext } from "@/lib/auth/authorization";
 import { formatDate, relativeDays, toAppDateString } from "@/lib/dates";
-import type { Announcement } from "@/lib/schemas/announcements";
+import type { Announcement, AnnouncementReactionRow } from "@/lib/schemas/announcements";
 import type { createClient } from "@/utils/supabase/server";
 
 import { TakeDownAnnouncementButton } from "./announcement-controls";
+import { AnnouncementReactions } from "./announcement-reactions";
+
+/**
+ * An announcement with its reactions (P17-06). `reactions` is null when that
+ * read failed — the table is not there until its migration is pasted — and the
+ * row then draws no reaction bar rather than an error.
+ */
+export type AnnouncementWithReactions = Announcement & {
+  reactions: AnnouncementReactionRow[] | null;
+};
 
 /**
  * P17-04 — the live announcements, shared by `/` and `/dashboard` so the two
@@ -12,11 +22,14 @@ import { TakeDownAnnouncementButton } from "./announcement-controls";
  *
  * `null` when the read failed — the table is not there until the migration is
  * pasted by hand — so each page can draw nothing rather than an error.
+ *
+ * P17-06 — the reactions come in a second read keyed on the (at most five)
+ * ids, so a missing reactions table costs the bar and nothing else.
  */
 export async function loadAnnouncements(
   supabase: Awaited<ReturnType<typeof createClient>>,
   today: string,
-): Promise<Announcement[] | null> {
+): Promise<AnnouncementWithReactions[] | null> {
   const { data, error } = await supabase
     .from("vizserve_pms_announcements")
     .select("id, title, body, expires_on, created_by, author_name, created_at")
@@ -25,7 +38,24 @@ export async function loadAnnouncements(
     .order("created_at", { ascending: false })
     .limit(5);
 
-  return error ? null : ((data ?? []) as Announcement[]);
+  if (error) return null;
+  const announcements = (data ?? []) as Announcement[];
+  if (announcements.length === 0) return [];
+
+  const reactions = await supabase
+    .from("vizserve_pms_announcement_reactions")
+    .select("announcement_id, user_id, user_name, reaction, created_at")
+    .in(
+      "announcement_id",
+      announcements.map((item) => item.id),
+    );
+
+  const rows = reactions.error ? null : ((reactions.data ?? []) as AnnouncementReactionRow[]);
+
+  return announcements.map((item) => ({
+    ...item,
+    reactions: rows ? rows.filter((row) => row.announcement_id === item.id) : null,
+  }));
 }
 
 /** The rows. Each page supplies its own frame and empty state. */
@@ -33,7 +63,7 @@ export function AnnouncementItems({
   announcements,
   context,
 }: {
-  announcements: Announcement[];
+  announcements: AnnouncementWithReactions[];
   context: AuthContext;
 }) {
   return announcements.map((item) => (
@@ -57,6 +87,15 @@ export function AnnouncementItems({
           {item.author_name || "Someone"} · {relativeDays(toAppDateString(new Date(item.created_at)))}
           {item.expires_on ? ` · until ${formatDate(item.expires_on)}` : null}
         </p>
+        {/* P17-06. "Seen" without a reply; hover a pill for who. */}
+        {item.reactions ? (
+          <AnnouncementReactions
+            announcementId={item.id}
+            title={item.title}
+            viewerId={context.userId}
+            initial={item.reactions}
+          />
+        ) : null}
       </div>
       {canTakeDownAnnouncement(context, item) ? (
         <div className="shrink-0">

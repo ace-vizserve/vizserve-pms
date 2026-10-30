@@ -2100,6 +2100,33 @@ export type Database = {
           },
         ];
       };
+      /** P17-06. Reactions on an announcement. Readable by every active user. */
+      vizserve_pms_announcement_reactions: {
+        Row: {
+          announcement_id: string;
+          user_id: string;
+          /** Stamped by a trigger from the reactor's row; never client-supplied. */
+          user_name: string;
+          reaction: string;
+          created_at: string;
+        };
+        Insert: {
+          announcement_id: string;
+          /** Must equal auth.uid(). */
+          user_id: string;
+          reaction: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "vizserve_pms_announcement_reactions_announcement_id_fkey";
+            columns: ["announcement_id"];
+            referencedRelation: "vizserve_pms_announcements";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
       /** P17-04. Home-page notices. Posted by Team Leader and above. */
       vizserve_pms_announcements: {
         Row: {

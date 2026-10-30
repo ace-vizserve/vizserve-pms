@@ -43,3 +43,28 @@ export type Announcement = {
   author_name: string;
   created_at: string;
 };
+
+/**
+ * P17-06 — the reactions an announcement can carry, in picker order.
+ *
+ * ⚠️ MIRRORS THE CHECK CONSTRAINT on `vizserve_pms_announcement_reactions`
+ * (`20261030090000_p17_06_announcement_reactions.sql`), which is the same six
+ * as a task comment. Change both or neither.
+ */
+export const ANNOUNCEMENT_REACTIONS = ["like", "love", "celebrate", "laugh", "seen", "done"] as const;
+export type AnnouncementReaction = (typeof ANNOUNCEMENT_REACTIONS)[number];
+
+export const announcementReactionSchema = z.object({
+  announcement_id: z.uuid(),
+  reaction: z.enum(ANNOUNCEMENT_REACTIONS),
+  reacted: z.boolean(),
+});
+
+/** One person's one reaction. `user_name` is stamped by the database. */
+export type AnnouncementReactionRow = {
+  announcement_id: string;
+  user_id: string;
+  user_name: string;
+  reaction: string;
+  created_at: string;
+};

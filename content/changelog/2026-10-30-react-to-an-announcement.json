@@ -1,0 +1,14 @@
+{
+  "date": "2026-10-30",
+  "kind": "added",
+  "area": "Platform",
+  "title": "React to an announcement",
+  "description": "Every announcement now has a reaction bar, so you can mark it Seen — or Like, Done and the rest — without replying, and whoever posted it can see who has read it.",
+  "items": [
+    "The same six reactions as a task comment",
+    "Hover a reaction to see everyone who chose it, from any department",
+    "Press it again to take your reaction back",
+    "On the home page and the dashboard"
+  ],
+  "refs": ["P17-06"]
+}

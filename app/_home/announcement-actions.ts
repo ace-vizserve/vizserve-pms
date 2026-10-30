@@ -4,7 +4,11 @@ import { revalidatePath } from "next/cache";
 
 import { canPostAnnouncements, requireAuthContext } from "@/lib/auth/authorization";
 import { flattenIssues, readableError, type ActionResult } from "@/lib/action-result";
-import { archiveAnnouncementSchema, createAnnouncementSchema } from "@/lib/schemas/announcements";
+import {
+  announcementReactionSchema,
+  archiveAnnouncementSchema,
+  createAnnouncementSchema,
+} from "@/lib/schemas/announcements";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
 
@@ -85,5 +89,38 @@ export async function takeDownAnnouncement(input: unknown): Promise<ActionResult
 
   revalidatePath("/");
   revalidatePath("/dashboard");
+  return { ok: true, data: undefined };
+}
+
+/**
+ * P17-06 — add or remove the viewer's reaction on an announcement.
+ *
+ * The user's own client: the policies decide (your own row, a live notice).
+ * No audit row and no revalidation — a reaction changes nobody's work, and
+ * re-rendering the whole home page for a 👍 would cost more than it shows. The
+ * bar is optimistic; the next visit reads the table fresh.
+ *
+ * A duplicate insert (`23505`, a double click) already holds the state that
+ * was asked for, so it is a success.
+ */
+export async function setAnnouncementReaction(input: unknown): Promise<ActionResult> {
+  const context = await requireAuthContext();
+
+  const parsed = announcementReactionSchema.safeParse(input);
+  if (!parsed.success) return { ok: false, error: "That reaction is not available." };
+
+  const { announcement_id, reaction, reacted } = parsed.data;
+  const supabase = await createClient();
+  const table = supabase.from("vizserve_pms_announcement_reactions");
+
+  const { error } = reacted
+    ? await table.insert({ announcement_id, user_id: context.userId, reaction })
+    : await table
+        .delete()
+        .eq("announcement_id", announcement_id)
+        .eq("user_id", context.userId)
+        .eq("reaction", reaction);
+
+  if (error && error.code !== "23505") return { ok: false, error: readableError(error) };
   return { ok: true, data: undefined };
 }

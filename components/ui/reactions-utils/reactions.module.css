@@ -236,3 +236,37 @@
   white-space: nowrap;
   border: 0;
 }
+
+/* ── size="lg" ────────────────────────────────────────────────────────────
+   P17-06. An announcement has ONE bar, not a thread of twenty, so the reason
+   the add button is faint above does not hold there — it has to be found. */
+
+.large .pill,
+.large .add {
+  height: 2rem;
+  font-size: 0.8125rem;
+}
+
+.large .pill {
+  padding: 0 0.625rem 0 0.5rem;
+}
+
+.large .add {
+  width: 2rem;
+  border-style: solid;
+}
+
+.large .add:not(:hover):not(:focus-visible):not([data-popup-open]) {
+  color: var(--foreground-muted);
+}
+
+.large .addIcon {
+  width: 1.125rem;
+  height: 1.125rem;
+}
+
+.large .icon svg,
+.large .addGlyph svg {
+  width: 1.0625rem;
+  height: 1.0625rem;
+}

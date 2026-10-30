@@ -52,7 +52,7 @@ export interface Reaction {
 }
 export interface ReactionsProps {
   /** Every reaction the picker offers, in picker order. */
-  options: ReactionOption[];
+  options: readonly ReactionOption[];
   /** Controlled reactions. Pills keep this order, and a reaction whose count reaches zero leaves the bar. */
   value?: Reaction[];
   defaultValue?: Reaction[];
@@ -61,6 +61,8 @@ export interface ReactionsProps {
     next: Reaction[],
     change: { id: string; reacted: boolean },
   ) => void;
+  /** "lg" for a lone bar that must be noticed (an announcement); "default" for a thread. */
+  size?: "default" | "lg";
   /** Accessible name for the bar. */
   label?: string;
   className?: string;
@@ -304,7 +306,7 @@ function Picker({
   reduced,
   onPick,
 }: {
-  options: ReactionOption[];
+  options: readonly ReactionOption[];
   reacted: Set<string>;
   reduced: boolean;
   onPick: (id: string) => void;
@@ -452,6 +454,7 @@ export function Reactions({
   defaultValue = [],
   onValueChange,
   label = "Reactions",
+  size = "default",
   className,
 }: ReactionsProps) {
   const reduced = useReduced();
@@ -541,7 +544,7 @@ export function Reactions({
 
   return (
     <motion.div
-      className={[styles.root, className].filter(Boolean).join(" ")}
+      className={[styles.root, size === "lg" && styles.large, className].filter(Boolean).join(" ")}
       style={{ height }}
     >
       <div ref={bar} className={styles.bar} role="group" aria-label={label}>
