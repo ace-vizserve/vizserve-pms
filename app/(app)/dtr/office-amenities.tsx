@@ -146,11 +146,8 @@ export function Canteen({ x, width, from, to }: { x: number; width: number; from
 
   return (
     <group>
-      {/* A tiled floor, so the canteen reads as its own place. */}
+      {/* Its own floor colour, so the canteen reads as its own place — plain, no tile lines to shimmer. */}
       <Block position={[x + width / 2, 0.035, from + span / 2]} size={[width - 0.6, 0.04, span - 0.2]} color="#e7e5e4" shadow={false} />
-      {Array.from({ length: Math.floor(span) }, (_, i) => (
-        <Block key={i} position={[x + width / 2, 0.056, from + 0.5 + i]} size={[width - 0.6, 0.004, 0.03]} color="#d6d3d1" shadow={false} />
-      ))}
 
       {/* Kitchen counter along the right wall. */}
       <group position={[right - 0.5, 0, from + 0.9 + counter / 2]}>

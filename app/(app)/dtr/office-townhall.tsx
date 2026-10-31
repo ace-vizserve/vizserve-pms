@@ -1,10 +1,9 @@
 "use client";
 
-import { Html } from "@react-three/drei";
-
 import type { Seat } from "./office-amenities";
 import { Block, Round } from "./office-block";
 import { CutawayWall } from "./office-decor";
+import { Sign } from "./office-sign";
 import { Extinguisher, GlassDoors, GlassPane } from "./office-doors";
 import { Cctv } from "./office-cctv";
 import { Picture, useImage, useTextTexture } from "./office-props";
@@ -163,12 +162,12 @@ export function TownHall({ x, z, w, count, live }: { x: number; z: number; w: nu
         </group>
       ))}
 
-      <Html position={[x + 0.8, 2.6, z + 0.8]} zIndexRange={[15, 5]} style={{ pointerEvents: "none" }}>
-        <div className="whitespace-nowrap rounded border border-black/20 px-2 py-1 leading-none text-white shadow-md" style={{ background: BRAND }}>
-          <p className="text-[11px] font-bold tracking-wider">ALL-HANDS ROOM</p>
-          <p className="mt-0.5 text-[9px] opacity-85">{live ? "IN SESSION · UNTIL 5 PM" : "FRIDAYS · 4–5 PM"}</p>
-        </div>
-      </Html>
+      <Sign
+        position={[x + 1.4, 2.95, z + 0.8]}
+        title="ALL-HANDS ROOM"
+        subtitle={live ? "IN SESSION · UNTIL 5 PM" : "FRIDAYS · 4–5 PM"}
+        color={BRAND}
+      />
     </group>
   );
 }

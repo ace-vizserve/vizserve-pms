@@ -23,6 +23,7 @@ import { DESK_ITEMS, DeskItem, Lounge, Window, canteenSpan } from "./office-prop
 import { TownHall, podium, townHallSeats, townHallSize } from "./office-townhall";
 import { Extinguisher, FireExit, GlassDoors } from "./office-doors";
 import { Lobby } from "./office-lobby";
+import { NameTag, Sign } from "./office-sign";
 
 /**
  * The virtual office, in 3D — orbit, pan and zoom around one floor of the
@@ -30,8 +31,9 @@ import { Lobby } from "./office-lobby";
  *
  * Voxel-styled — everything is flat-shaded boxes — but rendered at full
  * resolution with antialiasing and soft shadows, so it reads as a detailed
- * miniature rather than pixel art. Names, signs and the hover card are DOM
- * (`<Html>`), so the text is crisp at any zoom.
+ * miniature rather than pixel art. People's names and the hover card are DOM
+ * (`<Html>`), so the text is crisp at any zoom; the room signs are drawn in the
+ * scene (`office-sign.tsx`) so none can go missing.
  *
  * The lounge carries the brand: the VizServe and HFSE logos on the reception
  * wall, and every client from vizserve.com on a wall of their own — see
@@ -51,6 +53,8 @@ import { Lobby } from "./office-lobby";
 const LOUNGE_W = 8;
 /** The all-hands room's width: 30 chairs, ten to a row, and the walls round them. */
 const HALL_W = 13.2;
+/** A department sign's height, in world units — big enough to read from the overview. */
+const SIGN_H = 1;
 /** Deep enough for everything the lounge holds, front to back. */
 const MIN_DEPTH = 14;
 const WALL_H = 2.6;
@@ -64,8 +68,8 @@ const CUT_H = 0.5;
 const FLOOR_RUG = 0.03;
 
 const BG = "#eef1f6";
-const WOOD = "#d9b98d";
-const WOOD_LINE = "#c4a072";
+/** Warm sand: solid, so nothing on it can shimmer. */
+const FLOOR = "#cdbfa8";
 const SLAB = "#d6cfc4";
 /** One per department: the carpet and the sign. */
 const DEPT = [
@@ -266,9 +270,7 @@ function Desk({
       {working || person.hidden ? null : (
         <>
           <group position={[cx, 0, z + 1.6]}>
-            <Html position={[0, 1.25, 0]} center distanceFactor={14} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-              <NameLabel name={person.name} dim />
-            </Html>
+            <NameTag position={[0, 1.3, 0]} name={person.name} dim />
             {hovered ? <HoverCard person={person} y={1.9} openable={openable} /> : null}
           </group>
         </>
@@ -280,17 +282,6 @@ function Desk({
 /* -------------------------------------------------------------------------- */
 /* Labels                                                                       */
 /* -------------------------------------------------------------------------- */
-
-function NameLabel({ name, dim = false }: { name: string; dim?: boolean }) {
-  return (
-    <span
-      className="whitespace-nowrap rounded px-1.5 py-0.5 text-[11px] font-medium leading-none shadow-sm"
-      style={{ color: dim ? "#8a7b6a" : "#2b2118", background: "rgba(255,255,255,0.8)" }}
-    >
-      {name.trim().split(/\s+/)[0] ?? name}
-    </span>
-  );
-}
 
 function HoverCard({ person, y, note, openable }: { person: OfficePerson; y: number; note?: string; openable: boolean }) {
   return (
@@ -540,9 +531,7 @@ function Occupant({
       )}
 
       <group ref={tag} position={[spot[0], presenting ? 0.4 : 0, spot[1]]}>
-        <Html position={[0, 2.45, 0]} center distanceFactor={14} zIndexRange={[10, 0]} style={{ pointerEvents: "none" }}>
-          <NameLabel name={person.name} />
-        </Html>
+        <NameTag position={[0, 2.5, 0]} name={person.name} />
         {hovered ? <HoverCard person={person} y={3.1} note={note} openable={openable} /> : null}
       </group>
     </group>
@@ -625,18 +614,9 @@ function ClosedRoom({ room, accent }: { room: OfficeRoom; accent: string }) {
       <Block position={[x + 0.12, H + 0.1, z + d / 2]} size={[0.24, 0.04, d]} color={accent} shadow={false} />
       <Block position={[x + w - 0.12, H + 0.1, z + d / 2]} size={[0.24, 0.04, d]} color={accent} shadow={false} />
 
-      {/* The sign, on a post at the back-left corner — the same as an open
-          room's, with PRIVATE where the count would be. */}
-      <Block position={[x + 0.6, H + 0.35, z + 0.6]} size={[0.1, 0.7, 0.1]} color="#6b6b6b" />
-      <Html position={[x + 0.6, H + 0.75, z + 0.6]} zIndexRange={[15, 5]} style={{ pointerEvents: "none" }}>
-        <div
-          className="whitespace-nowrap rounded border border-black/20 px-2 py-1 leading-none text-white shadow-md"
-          style={{ background: accent }}
-        >
-          <p className="text-[11px] font-bold tracking-wider">{room.name.toUpperCase()}</p>
-          <p className="mt-0.5 text-[9px] opacity-85">PRIVATE</p>
-        </div>
-      </Html>
+      {/* The sign, over the doors at the front — the same as an open room's,
+          with PRIVATE where the count would be. */}
+      <Sign position={[x + w / 2, H + 0.95, z + d]} title={room.name.toUpperCase()} subtitle="PRIVATE" color={accent} height={SIGN_H} />
     </group>
   );
 }
@@ -694,19 +674,15 @@ function Room({
         />
       ))}
 
-      {/* The sign, on a post at the back of the room. */}
-      <Block position={[x + 0.6, 1.1, z + 0.6]} size={[0.1, 2.2, 0.1]} color="#6b6b6b" />
-      <Html position={[x + 0.6, 2.35, z + 0.6]} zIndexRange={[15, 5]} style={{ pointerEvents: "none" }}>
-        <div
-          className="whitespace-nowrap rounded border border-black/20 px-2 py-1 leading-none text-white shadow-md"
-          style={{ background: colors.sign }}
-        >
-          <p className="text-[11px] font-bold tracking-wider">{room.name.toUpperCase()}</p>
-          <p className="mt-0.5 text-[9px] opacity-85">
-            {room.counts.working}/{room.desks.length} IN
-          </p>
-        </div>
-      </Html>
+      {/* The sign, over the doors at the front — the side the camera starts on,
+          and where you would look for a room's name. */}
+      <Sign
+        height={SIGN_H}
+        position={[x + w / 2, 2.65, z + d]}
+        title={room.name.toUpperCase()}
+        subtitle={`${room.counts.working}/${room.desks.length} IN`}
+        color={colors.sign}
+      />
     </group>
   );
 }
@@ -719,10 +695,10 @@ function Building({ width, depth }: { width: number; depth: number }) {
   return (
     <group>
       <Block position={[width / 2, -0.25, depth / 2]} size={[width + 2 * T, 0.5, depth + 2 * T]} color={SLAB} />
-      <Block position={[width / 2, -0.01, depth / 2]} size={[width, 0.02, depth]} color={WOOD} />
-      {Array.from({ length: Math.floor(depth) }, (_, j) => (
-        <Block key={j} position={[width / 2, 0.0075, j + 1]} size={[width, 0.015, 0.07]} color={WOOD_LINE} />
-      ))}
+      {/* One solid colour — no plank lines. Lines thinner than a pixel shimmer
+          ("glitch") as the camera moves, and they were thinner than a pixel
+          from any distance worth looking from. */}
+      <Block position={[width / 2, -0.01, depth / 2]} size={[width, 0.02, depth]} color={FLOOR} />
 
       {/* Four walls, each with windows, each dropping when the camera is outside it. */}
       <CutawayWall center={[width / 2, 0, -T / 2]} size={[width + 2 * T, T]} normal={[0, -1]} height={WALL_H} low={CUT_H}>
