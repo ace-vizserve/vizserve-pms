@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
-import { CanvasTexture, SRGBColorSpace, TextureLoader, type Mesh, type Texture } from "three";
+import { CanvasTexture, RepeatWrapping, SRGBColorSpace, TextureLoader, type Mesh, type Texture } from "three";
 
 import { Canteen } from "./office-amenities";
 import { Cctv } from "./office-cctv";
@@ -491,7 +491,7 @@ export function Lounge({ x, width, depth }: { x: number; width: number; depth: n
 
       {/* ---------------------------------------------------- the sofa corner -- */}
       <group position={[x, 0, Math.max(11.2, depth - 2.4)]}>
-        <Block position={[2, 0.032, 0.2]} size={[3.4, 0.03, 2.6]} color="#c7d2fe" shadow={false} />
+        <Block position={[2, 0.065, 0.2]} size={[3.4, 0.02, 2.6]} color="#c7d2fe" shadow={false} />
         {/* Sofa: seat, back, arms, cushions. */}
         <Block position={[0.85, 0.25, 0.2]} size={[0.9, 0.5, 2.4]} color="#64748b" />
         <Block position={[0.5, 0.65, 0.2]} size={[0.25, 0.6, 2.4]} color="#475569" />
@@ -531,5 +531,95 @@ export function Lounge({ x, width, depth }: { x: number; width: number; depth: n
       </group>
       <Plant x={x + 0.6} z={depth - 0.6} />
     </group>
+  );
+}
+
+/* -------------------------------------------------------------------------- */
+/* The floor                                                                    */
+/* -------------------------------------------------------------------------- */
+
+/** One wood tile's edge, in world units. */
+const TILE = 1.2;
+
+/**
+ * Wood deck tiles — squares of planks, the grain turning a quarter each tile,
+ * like a checkerboard of decking. One 2 × 2-tile texture, repeated.
+ *
+ * ⚠️ A TEXTURE, NOT GEOMETRY, AND THAT IS THE FIX FOR THE FLICKER. Plank lines
+ * drawn as thin boxes were thinner than a pixel from any distance and shimmered
+ * as the camera moved. In a texture the GPU's mipmaps average them down
+ * smoothly instead, and anisotropic filtering keeps the far floor crisp.
+ */
+export function WoodFloor({ width, depth }: { width: number; depth: number }) {
+  const texture = useMemo(() => {
+    const size = 1024;
+    const tile = size / 2;
+    const planks = 4;
+    const canvas = document.createElement("canvas");
+    canvas.width = size;
+    canvas.height = size;
+    const ctx = canvas.getContext("2d");
+    const tones = ["#b9875c", "#a97648", "#c49467", "#9e6b43", "#b07c50"];
+
+    if (ctx) {
+      // The gaps between tiles show through: start dark.
+      // A soft brown, not near-black: high-contrast gaps moiré in the distance.
+      ctx.fillStyle = "#7a5534";
+      ctx.fillRect(0, 0, size, size);
+
+      for (let ty = 0; ty < 2; ty++) {
+        for (let tx = 0; tx < 2; tx++) {
+          const across = (tx + ty) % 2 === 0;
+          const ox = tx * tile;
+          const oy = ty * tile;
+          const gap = 6;
+          const plank = (tile - gap * 2) / planks;
+          for (let p = 0; p < planks; p++) {
+            ctx.fillStyle = tones[(tx * 3 + ty * 5 + p * 2) % tones.length];
+            const x = across ? ox + gap : ox + gap + p * plank;
+            const y = across ? oy + gap + p * plank : oy + gap;
+            const w = across ? tile - gap * 2 : plank - 3;
+            const h = across ? plank - 3 : tile - gap * 2;
+            ctx.fillRect(x, y, w, h);
+
+            // Grain: a few faint streaks along the plank.
+            ctx.strokeStyle = "rgba(70, 40, 20, 0.08)";
+            ctx.lineWidth = 2;
+            for (let g = 1; g < 4; g++) {
+              ctx.beginPath();
+              if (across) {
+                const gy = y + (h * g) / 4 + ((p + g) % 3) - 1;
+                ctx.moveTo(x + 4, gy);
+                ctx.bezierCurveTo(x + w * 0.3, gy - 3, x + w * 0.7, gy + 3, x + w - 4, gy);
+              } else {
+                const gx = x + (w * g) / 4 + ((p + g) % 3) - 1;
+                ctx.moveTo(gx, y + 4);
+                ctx.bezierCurveTo(gx - 3, y + h * 0.3, gx + 3, y + h * 0.7, gx, y + h - 4);
+              }
+              ctx.stroke();
+            }
+            // A soft highlight on one edge of each plank.
+            ctx.fillStyle = "rgba(255, 235, 200, 0.08)";
+            if (across) ctx.fillRect(x, y, w, 4);
+            else ctx.fillRect(x, y, 4, h);
+          }
+        }
+      }
+    }
+
+    const map = new CanvasTexture(canvas);
+    map.colorSpace = SRGBColorSpace;
+    map.wrapS = RepeatWrapping;
+    map.wrapT = RepeatWrapping;
+    map.anisotropy = 8;
+    map.repeat.set(width / (TILE * 2), depth / (TILE * 2));
+    return map;
+  }, [width, depth]);
+
+  return (
+    <mesh position={[width / 2, -0.01, depth / 2]} receiveShadow>
+      <boxGeometry args={[width, 0.02, depth]} />
+      <meshStandardMaterial map={texture} roughness={0.75} />
+    </mesh>
   );
 }

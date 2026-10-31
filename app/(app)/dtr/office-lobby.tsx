@@ -166,7 +166,7 @@ function Turnstiles({ x, z, width }: { x: number; z: number; width: number }) {
 function Waiting({ x, z }: { x: number; z: number }) {
   return (
     <group position={[x, 0, z]}>
-      <Block position={[0.6, 0.032, 0]} size={[3.2, 0.03, 3]} color="#c7d2fe" shadow={false} />
+      <Block position={[0.6, 0.06, 0]} size={[3.2, 0.02, 3]} color="#c7d2fe" shadow={false} />
       {/* Sofa. */}
       <Block position={[-0.6, 0.25, 0]} size={[0.85, 0.5, 2.2]} color="#475569" />
       <Block position={[-0.95, 0.65, 0]} size={[0.22, 0.6, 2.2]} color="#334155" />

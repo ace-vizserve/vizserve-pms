@@ -19,7 +19,7 @@ import { AMENITY_W, HALL, ROOM_W, assignSeats, describeOfficePerson, type Office
 import { Block } from "./office-block";
 import { MeetingCorner, Printer, WaterDispenser, canteenSeats, type Seat } from "./office-amenities";
 import { CutawayWall, RoomWalls, meetingDepth } from "./office-decor";
-import { DESK_ITEMS, DeskItem, Lounge, Window, canteenSpan } from "./office-props";
+import { DESK_ITEMS, DeskItem, Lounge, Window, WoodFloor, canteenSpan } from "./office-props";
 import { TownHall, podium, townHallSeats, townHallSize } from "./office-townhall";
 import { Extinguisher, FireExit, GlassDoors } from "./office-doors";
 import { Lobby } from "./office-lobby";
@@ -68,8 +68,6 @@ const CUT_H = 0.5;
 const FLOOR_RUG = 0.03;
 
 const BG = "#eef1f6";
-/** Warm sand: solid, so nothing on it can shimmer. */
-const FLOOR = "#cdbfa8";
 const SLAB = "#d6cfc4";
 /** One per department: the carpet and the sign. */
 const DEPT = [
@@ -694,11 +692,15 @@ function Building({ width, depth }: { width: number; depth: number }) {
 
   return (
     <group>
-      <Block position={[width / 2, -0.25, depth / 2]} size={[width + 2 * T, 0.5, depth + 2 * T]} color={SLAB} />
-      {/* One solid colour — no plank lines. Lines thinner than a pixel shimmer
-          ("glitch") as the camera moves, and they were thinner than a pixel
-          from any distance worth looking from. */}
-      <Block position={[width / 2, -0.01, depth / 2]} size={[width, 0.02, depth]} color={FLOOR} />
+      {/* ⚠️ THE SLAB'S TOP SITS UNDER THE FLOOR, NOT LEVEL WITH IT. Both tops at
+          y = 0 is what flickered: two coplanar faces z-fight, the GPU flipping
+          between them pixel by pixel as the camera moves — the floor looked
+          like fairy lights whatever colour or pattern it was given. The slab now
+          tops out at −0.01, inside the floor (−0.02 … 0), so only one face is
+          ever at the surface. */}
+      <Block position={[width / 2, -0.26, depth / 2]} size={[width + 2 * T, 0.5, depth + 2 * T]} color={SLAB} />
+      {/* Wood deck tiles, as a texture — see `WoodFloor` for why that stops the flicker. */}
+      <WoodFloor width={width} depth={depth} />
 
       {/* Four walls, each with windows, each dropping when the camera is outside it. */}
       <CutawayWall center={[width / 2, 0, -T / 2]} size={[width + 2 * T, T]} normal={[0, -1]} height={WALL_H} low={CUT_H}>
@@ -901,8 +903,8 @@ export function Office3D({
           intensity={1.6}
           castShadow
           shadow-mapSize={[2048, 2048]}
-          shadow-bias={-0.0004}
-          shadow-normalBias={0.02}
+          shadow-bias={-0.0006}
+          shadow-normalBias={0.05}
           shadow-camera-left={-reach * 0.75}
           shadow-camera-right={reach * 0.75}
           shadow-camera-top={reach * 0.75}
