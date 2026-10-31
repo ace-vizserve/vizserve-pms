@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useFrame } from "@react-three/fiber";
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace, TextureLoader, type Mesh, type Texture } from "three";
 
-import { Canteen } from "./office-amenities";
+import { Canteen, canteenEnd } from "./office-amenities";
+import { Gym } from "./office-gym";
 import { Cctv } from "./office-cctv";
 import { Block, Round } from "./office-block";
 
@@ -390,6 +391,24 @@ export function canteenSpan(depth: number): { from: number; to: number } {
   return { from: 9.6, to: Math.max(11.2, depth - 2.4) - 1.7 };
 }
 
+/** Where the sofa corner sits along Z, at the far end of the lounge. */
+export function sofaCornerZ(depth: number): number {
+  return Math.max(11.2, depth - 2.4);
+}
+
+/**
+ * The gym's stretch of the lounge: after the canteen, before the sofa corner.
+ * Null when there is not room for it — a short floor gets no gym.
+ */
+export function gymZone(depth: number): { from: number; to: number } | null {
+  const span = canteenSpan(depth);
+  const from = canteenEnd(span.from, span.to) + 0.6;
+  const to = sofaCornerZ(depth) - 1.9;
+  // Six metres at most: what the equipment needs. A deep floor would otherwise
+  // stretch the mat into a long empty runway.
+  return to - from >= 4 ? { from, to: Math.min(to, from + 6) } : null;
+}
+
 /**
  * The lounge, `LOUNGE_W` wide, from `x`, the full `depth`:
  * reception and the brand walls at the back; the coffee bar along the right;
@@ -488,6 +507,10 @@ export function Lounge({ x, width, depth }: { x: number; width: number; depth: n
       {/* ---------------------------------------------------- the canteen -- */}
       {/* Everything between the games and the sofa corner. */}
       <Canteen x={x} width={width} {...canteenSpan(depth)} />
+
+      {/* ---------------------------------------------------- the gym -- */}
+      {/* Between the canteen and the sofa corner, when there is room for it. */}
+      {gymZone(depth) ? <Gym x={x} width={width} {...gymZone(depth)!} /> : null}
 
       {/* ---------------------------------------------------- the sofa corner -- */}
       <group position={[x, 0, Math.max(11.2, depth - 2.4)]}>

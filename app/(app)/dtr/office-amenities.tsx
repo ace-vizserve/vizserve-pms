@@ -122,6 +122,17 @@ function canteenTables(x: number, from: number, to: number): { x: number; z: num
   return Array.from({ length: rows }, (_, row) => [x + 1.6, x + 4.1].map((tx) => ({ x: tx, z: from + 1.4 + row * 2.4 }))).flat();
 }
 
+/**
+ * Where the canteen actually ends along Z — past its last table's chairs and
+ * its kitchen counter. The gym starts after it.
+ */
+export function canteenEnd(from: number, to: number): number {
+  const tables = canteenTables(0, from, to);
+  if (tables.length === 0) return from;
+  const counterEnd = from + 0.9 + Math.min(to - from, 5.5);
+  return Math.max(tables[tables.length - 1].z + 1.3, counterEnd);
+}
+
 /** Every canteen chair, for lunch. Four per table, facing it. */
 export function canteenSeats(x: number, from: number, to: number): Seat[] {
   return canteenTables(x, from, to).flatMap((t) => [
@@ -147,7 +158,13 @@ export function Canteen({ x, width, from, to }: { x: number; width: number; from
   return (
     <group>
       {/* Its own floor colour, so the canteen reads as its own place — plain, no tile lines to shimmer. */}
-      <Block position={[x + width / 2, 0.06, from + span / 2]} size={[width - 0.6, 0.02, span - 0.2]} color="#e7e5e4" shadow={false} />
+      {/* Only as deep as the tables and counter — the gym has the floor after it. */}
+      <Block
+        position={[x + width / 2, 0.06, from + (canteenEnd(from, to) - from) / 2]}
+        size={[width - 0.6, 0.02, canteenEnd(from, to) - from]}
+        color="#e7e5e4"
+        shadow={false}
+      />
 
       {/* Kitchen counter along the right wall. */}
       <group position={[right - 0.5, 0, from + 0.9 + counter / 2]}>

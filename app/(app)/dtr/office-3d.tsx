@@ -19,7 +19,8 @@ import { AMENITY_W, HALL, ROOM_W, assignSeats, describeOfficePerson, type Office
 import { Block } from "./office-block";
 import { MeetingCorner, Printer, WaterDispenser, canteenSeats, type Seat } from "./office-amenities";
 import { CutawayWall, RoomWalls, meetingDepth } from "./office-decor";
-import { DESK_ITEMS, DeskItem, Lounge, Window, WoodFloor, canteenSpan } from "./office-props";
+import { Cat, type CatStop } from "./office-cat";
+import { DESK_ITEMS, DeskItem, Lounge, Window, WoodFloor, canteenSpan, gymZone } from "./office-props";
 import { TownHall, podium, townHallSeats, townHallSize } from "./office-townhall";
 import { Extinguisher, FireExit, GlassDoors } from "./office-doors";
 import { Lobby } from "./office-lobby";
@@ -863,6 +864,32 @@ export function Office3D({
   // all-hands room — or mid-lounge if there is no such corridor.
   const entranceX = roomsW - hallW > 4 ? hallW + (roomsW - hallW) / 2 : loungeX + LOUNGE_W / 2;
 
+  // The cat's day: every department room, with the canteen and the gym in
+  // between — the long stays. Routes keep to the corridors: along the main one
+  // between the rooms and the lounge, then along the hall in front of a row of
+  // rooms, through the door, and to the water dispenser inside.
+  const catStops = useMemo<CatStop[]>(() => {
+    const spine = roomsW + HALL / 2;
+    const rooms: CatStop[] = layout.rooms.map((room) => {
+      const hall = room.y + room.d + HALL / 2;
+      const door = room.x + room.w / 2;
+      const inside = room.y + room.d - 0.6;
+      const aisle = room.x + 9.6;
+      return {
+        route: [[spine, hall], [door, hall], [door, inside], [aisle, inside], [aisle, room.y + 1.4]],
+        stay: 12,
+      };
+    });
+    const span = canteenSpan(depth);
+    const canteen: CatStop = { route: [[spine, span.from + 2.6], [loungeX + 2.85, span.from + 2.6]], stay: 35 };
+    const zone = gymZone(depth);
+    const gym: CatStop | null = zone
+      ? { route: [[spine, (zone.from + zone.to) / 2], [loungeX + 3.2, (zone.from + zone.to) / 2]], stay: 30 }
+      : null;
+    const lounge = [canteen, gym ?? canteen];
+    return rooms.flatMap((room, i) => [room, lounge[i % 2]]);
+  }, [layout.rooms, roomsW, loungeX, depth]);
+
   // The scene is built in grid units from the origin; centre it on the world.
   const offset = useMemo<[number, number, number]>(() => [-totalW / 2, 0, -depth / 2], [totalW, depth]);
   // From the front-right, looking at the two back walls — the cutaway angle.
@@ -932,6 +959,8 @@ export function Office3D({
           <Extinguisher x={entranceX - 1.7} z={depth - 0.5} />
           <Extinguisher x={totalW - 0.4} z={8.15} />
           <Extinguisher x={loungeX + 0.5} z={2.6} />
+
+          <Cat stops={catStops} />
 
           {/* Everybody who is in — at their desks, walking, at lunch, or at the all-hands. */}
           {everyone.map(({ room, desk }) =>
