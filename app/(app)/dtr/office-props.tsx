@@ -5,6 +5,7 @@ import { useFrame } from "@react-three/fiber";
 import { CanvasTexture, RepeatWrapping, SRGBColorSpace, TextureLoader, type Mesh, type Texture } from "three";
 
 import { Canteen, canteenEnd } from "./office-amenities";
+import { Breakout } from "./office-breakout";
 import { Gym } from "./office-gym";
 import { Cctv } from "./office-cctv";
 import { Block, Round } from "./office-block";
@@ -511,6 +512,15 @@ export function Lounge({ x, width, depth }: { x: number; width: number; depth: n
       {/* ---------------------------------------------------- the gym -- */}
       {/* Between the canteen and the sofa corner, when there is room for it. */}
       {gymZone(depth) ? <Gym x={x} width={width} {...gymZone(depth)!} /> : null}
+
+      {/* ---------------------------------------------------- breakout -- */}
+      {/* After the gym, before the sofa corner: places to sit, not empty floor. */}
+      <Breakout
+        x={x}
+        width={width}
+        from={(gymZone(depth)?.to ?? canteenEnd(canteenSpan(depth).from, canteenSpan(depth).to)) + 0.8}
+        to={sofaCornerZ(depth) - 1.8}
+      />
 
       {/* ---------------------------------------------------- the sofa corner -- */}
       <group position={[x, 0, Math.max(11.2, depth - 2.4)]}>
