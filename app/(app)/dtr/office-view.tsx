@@ -38,6 +38,8 @@ const Office3D = dynamic(() => import("./office-3d").then((mod) => mod.Office3D)
  * Everyone gets it (P17-07): team leader and above see every room; anybody
  * else sees their own department's room, the all-hands room and the shared
  * spaces. The scope is decided in the database, by `vizserve_pms_office_presence()`.
+ * Lunch and the all-hands are the same for everybody (P17-08): other departments'
+ * rooms stay closed, but whoever is in is there, under their name.
  *
  * The punches refresh every minute, so somebody timing in appears without a
  * reload. A punch on this page refreshes it at once (it sits under ["dtr"]).
@@ -182,7 +184,15 @@ function Office({ sceneClass }: { sceneClass?: string }) {
           (person.primary_department_id !== null && scope.includes(person.primary_department_id))),
     );
   const people = roster.map((person) => ({
-    ...officeStatus({ person, punches, onLeave: leave.has(person.id), today, yesterday, now }),
+    ...officeStatus({
+      person,
+      punches,
+      onLeave: leave.has(person.id),
+      inSharedRoom: "inSharedRoom" in person ? person.inSharedRoom : false,
+      today,
+      yesterday,
+      now,
+    }),
     hidden: "hidden" in person ? person.hidden : false,
   }));
   // The counts are of the people the viewer can actually see.

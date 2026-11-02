@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DESK_COLS, assignSeats, layoutOffice, officeActivity, officeStatus, officeTheme, type OfficePunch } from "@/lib/office";
+import { DESK_COLS, assignSeats, describeOfficePerson, layoutOffice, officeActivity, officeStatus, officeTheme, type OfficePunch } from "@/lib/office";
 
 const today = "2026-10-31";
 const yesterday = "2026-10-30";
@@ -44,6 +44,27 @@ describe("officeStatus", () => {
     expect(status([{ user_id: "p2", work_date: today, time_in: at("2026-10-31T08:00:00"), time_out: null }]).status).toBe(
       "out",
     );
+  });
+
+  it("is in with no times when the database says only that they are in a shared room", () => {
+    const s = officeStatus({ person, punches: [], onLeave: false, inSharedRoom: true, today, yesterday, now });
+    expect(s.status).toBe("working");
+    expect(s.timeIn).toBeNull();
+    expect(describeOfficePerson({ ...s, hidden: true })).toBe("in today");
+  });
+
+  it("keeps the real times for a viewer who was given them", () => {
+    const s = officeStatus({
+      person,
+      punches: [{ user_id: "p1", work_date: today, time_in: at("2026-10-31T08:00:00"), time_out: null }],
+      onLeave: false,
+      inSharedRoom: true,
+      today,
+      yesterday,
+      now,
+    });
+    expect(s.timeIn).toBe(at("2026-10-31T08:00:00"));
+    expect(s.minutesSoFar).toBe(9 * 60);
   });
 });
 

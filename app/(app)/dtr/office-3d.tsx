@@ -963,8 +963,11 @@ export function Office3D({
           <Cat stops={catStops} />
 
           {/* Everybody who is in — at their desks, walking, at lunch, or at the all-hands. */}
+          {/* ⚠️ Somebody hidden is only ever drawn in a seat. With no seat — the
+              room full, or this machine's clock not yet at the hour — they would
+              be at a desk inside a closed room, their name through the roof. */}
           {everyone.map(({ room, desk }) =>
-            desk.person.status === "working" ? (
+            desk.person.status === "working" && (!desk.person.hidden || away.has(desk.person.id)) ? (
               <Occupant
                 key={desk.person.id}
                 person={desk.person}

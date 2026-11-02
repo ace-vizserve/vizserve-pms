@@ -738,8 +738,13 @@ export type OfficeToday = {
    * the caller supplies people and departments itself.
    */
   source: "presence" | "policies";
-  /** `hidden`: in a department whose room the viewer sees closed — name withheld. */
-  people: { id: string; full_name: string; primary_department_id: string | null; hidden: boolean }[] | null;
+  /**
+   * `hidden`: in a department whose room the viewer sees closed — name withheld,
+   * except at lunch and the all-hands. `inSharedRoom`: one of those is on and they are in (P17-08).
+   */
+  people:
+    | { id: string; full_name: string; primary_department_id: string | null; hidden: boolean; inSharedRoom: boolean }[]
+    | null;
   departments: { id: string; name: string }[] | null;
 };
 
@@ -783,6 +788,7 @@ export async function fetchOfficeToday(client: TimesheetReadClient): Promise<Off
         full_name: row.full_name ?? "",
         primary_department_id: row.department_id,
         hidden: !row.visible,
+        inSharedRoom: row.in_shared_room,
       })),
       departments: [...departments].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
     };

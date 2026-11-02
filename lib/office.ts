@@ -40,7 +40,9 @@ export type OfficePerson = {
   fromYesterday: boolean;
   /**
    * In a department whose room the viewer sees closed (P17-07): the office
-   * knows only that a desk is theirs, not who they are or whether they are in.
+   * knows only that a desk is theirs, not who they are or whether they are in —
+   * except at lunch and the all-hands, when anybody who is in is there for all to see
+   * (P17-08). Even then their times stay withheld and their room stays closed.
    */
   hidden?: boolean;
 };
@@ -49,6 +51,7 @@ export function officeStatus({
   person,
   punches,
   onLeave,
+  inSharedRoom = false,
   today,
   yesterday,
   now,
@@ -56,6 +59,8 @@ export function officeStatus({
   person: { id: string; full_name: string; primary_department_id: string | null };
   punches: readonly OfficePunch[];
   onLeave: boolean;
+  /** The database says they are in and in a shared room, for a viewer not given their punches (P17-08). */
+  inSharedRoom?: boolean;
   today: string;
   yesterday: string;
   now: Date;
@@ -90,6 +95,7 @@ export function officeStatus({
     };
   }
 
+  if (inSharedRoom) return { ...base, status: "working" };
   if (todayRow) return { ...base, status: "gone", timeIn: todayRow.time_in, timeOut: todayRow.time_out };
   if (onLeave) return { ...base, status: "leave" };
   return { ...base, status: "out" };
@@ -194,6 +200,8 @@ export function layoutOffice(
 export function describeOfficePerson(person: OfficePerson): string {
   switch (person.status) {
     case "working":
+      // Another department's, seen in a shared room: in, and no more than that.
+      if (person.hidden) return "in today";
       return person.fromYesterday
         ? `still timed in since yesterday ${formatAppTime(person.timeIn)}`
         : `working since ${formatAppTime(person.timeIn)} · ${formatDuration(person.minutesSoFar)}`;

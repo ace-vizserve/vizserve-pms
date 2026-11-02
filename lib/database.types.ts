@@ -2845,7 +2845,7 @@ export type Database = {
         Args: Record<PropertyKey, never>;
         Returns: {
           user_id: string;
-          /** Null for somebody outside the viewer's department, unless the viewer is TL or above. */
+          /** Null for somebody outside the viewer's department, unless the viewer is TL or above, or lunch or the all-hands is on and they are in. */
           full_name: string | null;
           department_id: string | null;
           department_name: string | null;
@@ -2855,6 +2855,8 @@ export type Database = {
           on_leave: boolean;
           /** False: the viewer sees this person's room closed, and knows only their department. */
           visible: boolean;
+          /** P17-08. Lunch or the Friday all-hands is on and this person is in, so everyone sees them there. */
+          in_shared_room: boolean;
         }[];
       };
       vizserve_pms_has_app_access: {

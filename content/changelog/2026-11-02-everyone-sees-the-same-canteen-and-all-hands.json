@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-02",
+  "kind": "changed",
+  "area": "DTR",
+  "title": "Everyone sees the same canteen and all-hands",
+  "description": "In the virtual office, a member used to see only their own department at lunch and at the Friday all-hands, while team leaders and above saw everybody. At lunch, 12 to 1, and at the all-hands, Fridays 4 to 5 PM, everyone now sees the same room, with everybody who is in sitting in the same seats under their names.",
+  "items": [
+    "The all-hands has the same presenter on everyone's screen",
+    "Other departments' rooms stay closed, whatever the hour",
+    "For someone in another department, a member sees their name and that they are in, never their times or leave"
+  ],
+  "refs": ["P17-08"],
+  "pending": "Needs its database update: paste supabase/migrations/20261102090000_p17_08_office_gatherings.sql into the Supabase SQL editor. Until then, a member still sees only their own department in those rooms."
+}

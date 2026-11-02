@@ -448,4 +448,7 @@ export const officePresenceRowSchema = z.object({
   // the COALESCE note in the P17-07 migration).
   on_leave: z.boolean().nullable().transform((value) => value === true),
   visible: z.boolean().nullable().transform((value) => value === true),
+  // P17-08. Optional as well: P17-08 is pasted by hand, and until it is the
+  // function answers without this column — that must not take the office down.
+  in_shared_room: z.boolean().nullish().transform((value) => value === true),
 });
