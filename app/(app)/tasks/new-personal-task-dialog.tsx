@@ -184,10 +184,19 @@ export function NewPersonalTaskDialog({
    * answer was already on screen. Now it is the answer and the control is gone;
    * the hidden input still posts it. The check above is exactly what keeps that
    * safe, which is why the fallback stays.
+   *
+   * ⚠️ DERIVED ON EVERY RENDER, NEVER SEEDED INTO STATE. Moving between lists
+   * only changes `?list=`, so this dialog stays mounted. `listId` was once
+   * `useState(lockedListId ?? NO_LIST)`: the first list opened was right, and
+   * each one after it showed its own name while posting the first one's id.
+   * Somebody working in both departments is allowed that list, so nothing
+   * refused it and the task landed under the other team. The state now holds
+   * only what the picker chose.
    */
   const lockedListId =
     defaultListId && lists.some((list) => list.id === defaultListId) ? defaultListId : null;
-  const [listId, setListId] = useState(lockedListId ?? NO_LIST);
+  const [pickedListId, setListId] = useState(NO_LIST);
+  const listId = lockedListId ?? pickedListId;
   /*
    * P7-56 — the notes are a rich-text editor now, which has no form value of
    * its own, so it joins the controlled-state-plus-hidden-input arrangement
