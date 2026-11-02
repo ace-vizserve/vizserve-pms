@@ -34,6 +34,7 @@ export const AUDIT_ENTITY_TYPES = [
   "holiday",
   "event",
   "app_settings",
+  "announcement",
 ] as const;
 
 export type AuditEntityType = (typeof AUDIT_ENTITY_TYPES)[number];
@@ -54,6 +55,7 @@ export const AUDIT_ENTITY_LABELS: Record<AuditEntityType, string> = {
   holiday: "Holiday",
   event: "Event",
   app_settings: "Settings",
+  announcement: "Announcement",
 };
 
 /**

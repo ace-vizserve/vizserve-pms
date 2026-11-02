@@ -2140,6 +2140,10 @@ export type Database = {
           created_at: string;
           archived_at: string | null;
           archived_by: string | null;
+          /** P17-09. These three are stamped by a trigger; not granted to anyone. */
+          edited_at: string | null;
+          edited_by: string | null;
+          edited_by_name: string | null;
         };
         Insert: {
           title: string;
@@ -2148,8 +2152,11 @@ export type Database = {
           /** Must equal auth.uid(). */
           created_by: string;
         };
-        /** Only the archive columns are granted. */
+        /** The archive columns, and P17-09's three editable ones. */
         Update: {
+          title?: string;
+          body?: string;
+          expires_on?: string | null;
           archived_at?: string | null;
           archived_by?: string | null;
         };

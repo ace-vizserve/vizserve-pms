@@ -282,6 +282,17 @@ export function canTakeDownAnnouncement(
   return announcement.created_by === context.userId && canPostAnnouncements(context);
 }
 
+/**
+ * P17-09 — the same people who take one down. Mirrors the "edited by author or
+ * manager" UPDATE policy.
+ */
+export function canEditAnnouncement(
+  context: Pick<AuthContext, "role" | "userId">,
+  announcement: { created_by: string },
+): boolean {
+  return canTakeDownAnnouncement(context, announcement);
+}
+
 /** Timesheets go straight to the Manager. */
 export function approvesTimesheets(context: Pick<AuthContext, "role">): boolean {
   return context.role === "manager";

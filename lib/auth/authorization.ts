@@ -51,6 +51,7 @@ export {
   canAdminDepartment,
   canApproveClientRequest,
   canDoHr,
+  canEditAnnouncement,
   canEditUser,
   canManageUsers,
   canPostAnnouncements,

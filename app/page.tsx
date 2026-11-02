@@ -313,7 +313,7 @@ async function AnnouncementsCell({
             Nothing posted. What you post here is the first thing everyone sees when they sign in.
           </p>
         ) : (
-          <AnnouncementItems announcements={announcements} context={context} />
+          <AnnouncementItems announcements={announcements} context={context} today={today} />
         )}
       </CellBody>
     </Cell>

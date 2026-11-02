@@ -8,12 +8,13 @@ import {
   announcementReactionSchema,
   archiveAnnouncementSchema,
   createAnnouncementSchema,
+  editAnnouncementSchema,
 } from "@/lib/schemas/announcements";
 import { createAdminClient } from "@/utils/supabase/admin";
 import { createClient } from "@/utils/supabase/server";
 
 /**
- * P17-04 — post and take down home-page announcements.
+ * P17-04 — post, edit (P17-09) and take down home-page announcements.
  *
  * ⚠️ THE USER'S OWN CLIENT, NOT THE SERVICE ROLE. The policies on
  * `vizserve_pms_announcements` are the enforcement — Team Leader and above to
@@ -50,6 +51,56 @@ export async function postAnnouncement(input: unknown): Promise<ActionResult> {
     p_actor_id: context.userId,
     p_before: null,
     p_after: parsed.data,
+  });
+
+  revalidatePath("/");
+  revalidatePath("/dashboard");
+  return { ok: true, data: undefined };
+}
+
+/** P17-09. The trigger stamps `edited_at`, which is what the "edited" line reads. */
+export async function editAnnouncement(input: unknown): Promise<ActionResult> {
+  const context = await requireAuthContext();
+
+  const parsed = editAnnouncementSchema.safeParse(input);
+  if (!parsed.success) {
+    return { ok: false, error: "Check the highlighted fields.", fieldErrors: flattenIssues(parsed.error) };
+  }
+
+  const { id, ...changes } = parsed.data;
+  const supabase = await createClient();
+
+  // Read first: the audit row wants the old text, and UPDATE returns only the new.
+  const { data: before, error: readError } = await supabase
+    .from("vizserve_pms_announcements")
+    .select("id, title, body, expires_on, created_by")
+    .eq("id", id)
+    .is("archived_at", null)
+    .maybeSingle();
+
+  if (readError) return { ok: false, error: readableError(readError) };
+
+  const { data: edited, error } = await supabase
+    .from("vizserve_pms_announcements")
+    .update(changes)
+    .eq("id", id)
+    .is("archived_at", null)
+    .select("id")
+    .maybeSingle();
+
+  if (error) return { ok: false, error: readableError(error) };
+  // An UPDATE the policy filtered out matches zero rows and reports success.
+  if (!edited) {
+    return { ok: false, error: "That announcement is already down, or it is not yours to edit." };
+  }
+
+  await createAdminClient().rpc("vizserve_pms_write_audit_log", {
+    p_entity_type: "announcement",
+    p_entity_id: edited.id,
+    p_action: "edited",
+    p_actor_id: context.userId,
+    p_before: before,
+    p_after: changes,
   });
 
   revalidatePath("/");

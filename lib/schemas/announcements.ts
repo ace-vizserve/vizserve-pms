@@ -32,6 +32,9 @@ export const createAnnouncementSchema = z.object({
 
 export type CreateAnnouncementInput = z.infer<typeof createAnnouncementSchema>;
 
+/** P17-09 — the same three fields, on a notice that already exists. */
+export const editAnnouncementSchema = createAnnouncementSchema.extend({ id: z.uuid() });
+
 export const archiveAnnouncementSchema = z.object({ id: z.uuid() });
 
 export type Announcement = {
@@ -42,6 +45,10 @@ export type Announcement = {
   created_by: string;
   author_name: string;
   created_at: string;
+  /** P17-09. All three set by a trigger. Absent until that migration is pasted. */
+  edited_at?: string | null;
+  edited_by?: string | null;
+  edited_by_name?: string | null;
 };
 
 /**

@@ -607,7 +607,7 @@ async function DashboardAnnouncements({
         {announcements.length === 0 ? (
           <p className="px-4 py-4 text-xs text-muted-foreground">No announcements right now.</p>
         ) : (
-          <AnnouncementItems announcements={announcements} context={context} />
+          <AnnouncementItems announcements={announcements} context={context} today={today} />
         )}
       </CardContent>
     </Card>

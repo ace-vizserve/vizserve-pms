@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-02",
+  "kind": "added",
+  "area": "Platform",
+  "title": "Edit an announcement after posting it",
+  "description": "An announcement's title, message and last day can now be changed without taking it down and posting it again. Once changed, it says \"edited\" beside the date, so everyone can tell the text is not what first went out.",
+  "items": [
+    "The person who posted it can edit it, and so can a manager and above",
+    "When somebody else makes the change, it says who: \"edited by\" and their name",
+    "Reactions stay on the announcement when it is edited"
+  ],
+  "refs": ["P17-09"],
+  "pending": "Needs its database update: paste supabase/migrations/20261102100000_p17_09_announcement_edit.sql into the Supabase SQL editor. Until then, saving an edit is refused."
+}

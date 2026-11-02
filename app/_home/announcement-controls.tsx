@@ -2,7 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useState, useTransition } from "react";
-import { Megaphone, X } from "lucide-react";
+import { Megaphone, Pencil, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
@@ -19,9 +19,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
-import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX } from "@/lib/schemas/announcements";
+import { ANNOUNCEMENT_BODY_MAX, ANNOUNCEMENT_TITLE_MAX, type Announcement } from "@/lib/schemas/announcements";
 
-import { postAnnouncement, takeDownAnnouncement } from "./announcement-actions";
+import { editAnnouncement, postAnnouncement, takeDownAnnouncement } from "./announcement-actions";
 
 /** P17-04 — the "Post" button in the announcements cell, and its dialog. */
 export function PostAnnouncementButton({ today }: { today: string }) {
@@ -43,12 +43,53 @@ export function PostAnnouncementButton({ today }: { today: string }) {
   );
 }
 
-function AnnouncementForm({ today, onDone }: { today: string; onDone: () => void }) {
+type EditableAnnouncement = Pick<Announcement, "id" | "title" | "body" | "expires_on">;
+
+/** P17-09 — the pencil, beside the X for the same people. Same form, seeded with its text. */
+export function EditAnnouncementButton({
+  announcement,
+  today,
+}: {
+  announcement: EditableAnnouncement;
+  today: string;
+}) {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        aria-label={`Edit “${announcement.title}”`}
+        onClick={() => setOpen(true)}
+      >
+        <Pencil />
+      </Button>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-lg">
+          {open ? (
+            <AnnouncementForm editing={announcement} today={today} onDone={() => setOpen(false)} />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function AnnouncementForm({
+  editing,
+  today,
+  onDone,
+}: {
+  editing?: EditableAnnouncement;
+  today: string;
+  onDone: () => void;
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [expiresOn, setExpiresOn] = useState<string | null>(null);
+  const [title, setTitle] = useState(editing?.title ?? "");
+  const [body, setBody] = useState(editing?.body ?? "");
+  const [expiresOn, setExpiresOn] = useState<string | null>(editing?.expires_on ?? null);
   const [formError, setFormError] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
@@ -57,14 +98,17 @@ function AnnouncementForm({ today, onDone }: { today: string; onDone: () => void
     setFieldErrors({});
 
     startTransition(async () => {
-      const result = await postAnnouncement({ title, body, expires_on: expiresOn });
+      const fields = { title, body, expires_on: expiresOn };
+      const result = editing
+        ? await editAnnouncement({ ...fields, id: editing.id })
+        : await postAnnouncement(fields);
       if (!result.ok) {
         setFormError(result.error);
         setFieldErrors(result.fieldErrors ?? {});
         return;
       }
       router.refresh();
-      toast.success("Announcement posted");
+      toast.success(editing ? "Announcement updated" : "Announcement posted");
       onDone();
     });
   }
@@ -72,9 +116,11 @@ function AnnouncementForm({ today, onDone }: { today: string; onDone: () => void
   return (
     <>
       <DialogHeader>
-        <DialogTitle>Post an announcement</DialogTitle>
+        <DialogTitle>{editing ? "Edit this announcement" : "Post an announcement"}</DialogTitle>
         <DialogDescription>
-          Everyone sees it on the home page when they sign in.
+          {editing
+            ? "It will say “edited” beside the date, with your name if somebody else posted it."
+            : "Everyone sees it on the home page when they sign in."}
         </DialogDescription>
       </DialogHeader>
 
@@ -133,7 +179,7 @@ function AnnouncementForm({ today, onDone }: { today: string; onDone: () => void
           Cancel
         </Button>
         <Button loading={pending} onClick={submit}>
-          Post
+          {editing ? "Save" : "Post"}
         </Button>
       </DialogFooter>
     </>
