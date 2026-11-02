@@ -51,14 +51,14 @@ describe("canEditAnnouncement", () => {
     }
   });
 
-  it("lets a Manager and above edit anyone's", () => {
-    for (const role of ["manager", "admin", "business_manager", "owner"] as const) {
-      expect(canEditAnnouncement(viewer(role), { created_by: SOMEONE_ELSE })).toBe(true);
-    }
+  it("lets the Manager edit anyone's", () => {
+    expect(canEditAnnouncement(viewer("manager"), { created_by: SOMEONE_ELSE })).toBe(true);
   });
 
-  it("does not let a lead edit someone else's", () => {
-    expect(canEditAnnouncement(viewer("team_leader"), { created_by: SOMEONE_ELSE })).toBe(false);
+  it("does not let anybody else edit someone else's, the roles above the Manager included", () => {
+    for (const role of ROLE_ORDER.filter((role) => role !== "manager")) {
+      expect(canEditAnnouncement(viewer(role), { created_by: SOMEONE_ELSE })).toBe(false);
+    }
   });
 
   it("never lets a member, even on a row they wrote while they were a lead", () => {
@@ -91,11 +91,12 @@ describe("the P17-09 migration", () => {
     expect(SQL).not.toMatch(/grant update[^;]*edited_/);
   });
 
-  it("keeps the edit policy to the author or a Manager, on a live notice, on both sides", () => {
+  it("keeps the edit policy to the author or the Manager, on a live notice, on both sides", () => {
     const policy = SQL.slice(SQL.indexOf('create policy "announcements edited by author or manager"'));
     expect(policy.match(/created_by = auth\.uid\(\)/g)).toHaveLength(2);
     expect(policy.match(/archived_at is null/g)).toHaveLength(2);
-    expect(policy.match(/has_role\('manager'\)/g)).toHaveLength(2);
+    expect(policy.match(/vizserve_pms_current_role\(\)\) = 'manager'/g)).toHaveLength(2);
+    expect(policy).not.toMatch(/has_role\('manager'\)/);
   });
 
   it("drops the narrower author-only policy if the first version was pasted", () => {

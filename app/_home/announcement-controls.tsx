@@ -45,7 +45,7 @@ export function PostAnnouncementButton({ today }: { today: string }) {
 
 type EditableAnnouncement = Pick<Announcement, "id" | "title" | "body" | "expires_on">;
 
-/** P17-09 — the pencil, beside the X for the same people. Same form, seeded with its text. */
+/** P17-09 — the pencil: its author, or the Manager. Same form, seeded with its text. */
 export function EditAnnouncementButton({
   announcement,
   today,

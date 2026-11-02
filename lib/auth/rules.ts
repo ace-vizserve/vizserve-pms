@@ -283,14 +283,16 @@ export function canTakeDownAnnouncement(
 }
 
 /**
- * P17-09 — the same people who take one down. Mirrors the "edited by author or
- * manager" UPDATE policy.
+ * P17-09 — its author while still a lead, or the Manager. EQUALITY, not the
+ * ladder, so unlike taking down, Admin, Business Manager and CEO edit only their
+ * own. Mirrors the "edited by author or manager" UPDATE policy.
  */
 export function canEditAnnouncement(
   context: Pick<AuthContext, "role" | "userId">,
   announcement: { created_by: string },
 ): boolean {
-  return canTakeDownAnnouncement(context, announcement);
+  if (context.role === "manager") return true;
+  return announcement.created_by === context.userId && canPostAnnouncements(context);
 }
 
 /** Timesheets go straight to the Manager. */

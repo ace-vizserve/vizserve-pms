@@ -5,10 +5,12 @@
 -- an edit button, so that concern is met another way: a changed notice says
 -- "edited", and the trigger sets that, so it cannot be left off or backdated.
 --
--- WHO EDITS: the same people who take one down — its author while still a lead,
--- or a Manager and above. `canEditAnnouncement` in `lib/auth/rules.ts` mirrors
--- this. The notice goes out under its author's name, so when somebody else
--- changes it the line says who: "edited by <name>".
+-- WHO EDITS: its author while still a lead, or the Manager — and nobody else.
+-- The Manager is checked by EQUALITY, not the ladder: the Manager decided this,
+-- so Admin, Business Manager and CEO edit only their own, though they can still
+-- take anyone's down. `canEditAnnouncement` in `lib/auth/rules.ts` mirrors this.
+-- The notice goes out under its author's name, so when the Manager changes it
+-- the line says who: "edited by <name>".
 --
 -- ⚠️ `edited_by_name` IS STAMPED, NOT JOINED, for the reason `author_name` is:
 -- `vizserve_pms_users` is department-scoped for a member, so a join would give
@@ -68,7 +70,7 @@ create trigger vizserve_pms_announcements_stamp_edit
 grant update (title, body, expires_on) on vizserve_pms_announcements to authenticated;
 
 -- Permissive policies OR together, so the take-down policy stays as it was and
--- this one adds the second legal shape: still live, and yours or you are a Manager.
+-- this one adds the second legal shape: still live, and yours or you are the Manager.
 drop policy if exists "announcements edited by author" on vizserve_pms_announcements;
 drop policy if exists "announcements edited by author or manager" on vizserve_pms_announcements;
 create policy "announcements edited by author or manager"
@@ -77,13 +79,13 @@ create policy "announcements edited by author or manager"
     archived_at is null
     and (
       (created_by = auth.uid() and (select vizserve_pms_has_role('team_leader')))
-      or (select vizserve_pms_has_role('manager'))
+      or (select vizserve_pms_current_role()) = 'manager'
     )
   )
   with check (
     archived_at is null
     and (
       (created_by = auth.uid() and (select vizserve_pms_has_role('team_leader')))
-      or (select vizserve_pms_has_role('manager'))
+      or (select vizserve_pms_current_role()) = 'manager'
     )
   );
