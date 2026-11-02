@@ -1,0 +1,7 @@
+{
+  "date": "2026-11-02",
+  "kind": "fixed",
+  "area": "Tasks",
+  "title": "A new task goes in the list you are looking at",
+  "description": "After moving from one list to another without reloading the page, the new task dialog showed the current list's name but saved the task to the first list you had opened. If you work in both departments nothing stopped it, so the task landed under the other team with no error. It now always goes in the list on screen."
+}
