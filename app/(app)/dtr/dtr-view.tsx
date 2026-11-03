@@ -232,14 +232,16 @@ export function DtrView({
       {/* The year heat map above the table. The table keeps whatever height is
           left and still scrolls inside its own card from `lg` up. */}
       <div className="flex min-w-0 flex-col gap-3 lg:min-h-0">
-        <DtrYear
-          userId={selectedUser ?? viewerId}
-          name={
-            selectedUser && selectedUser !== viewerId
-              ? (people.find((person) => person.id === selectedUser)?.full_name ?? null)
-              : null
-          }
-        />
+        <div data-tour="dtr-year">
+          <DtrYear
+            userId={selectedUser ?? viewerId}
+            name={
+              selectedUser && selectedUser !== viewerId
+                ? (people.find((person) => person.id === selectedUser)?.full_name ?? null)
+                : null
+            }
+          />
+        </div>
         {/* The table, or — with `?view=office` — the virtual office in its
             place. The switch sits beside Columns; the office carries its own way
             back. Everyone gets it (P17-07); what they see in it is scoped in the

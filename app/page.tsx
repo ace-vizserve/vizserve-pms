@@ -265,7 +265,7 @@ async function HomePunch({
 /** Consecutive working days timed in, under the punch panel. */
 async function HomeStreak({ streak }: { streak: ReturnType<typeof loadDtrStreak> }) {
   return (
-    <StreakBadge size="inline" length={await streak} subtitle="timed-in streak" />
+    <StreakBadge size="inline" length={await streak} subtitle="timed-in streak" data-tour="streak" />
   );
 }
 

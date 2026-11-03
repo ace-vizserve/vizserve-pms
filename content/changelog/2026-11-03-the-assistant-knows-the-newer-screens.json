@@ -1,0 +1,11 @@
+{
+  "date": "2026-11-03",
+  "kind": "changed",
+  "area": "Platform",
+  "title": "The assistant knows the newer screens",
+  "description": "The assistant's answers had not been updated since October. It can now explain internal form deadlines and the one-answer rule, and show you the virtual office, the DTR heat map, your time-in streak and announcement reactions.",
+  "refs": [
+    "P17-12"
+  ],
+  "pending": "Its answers about form deadlines, reminders and one answer per person describe P17-10 and P17-11, which need their database updates pasted first."
+}

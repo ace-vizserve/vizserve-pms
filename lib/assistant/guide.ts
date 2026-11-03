@@ -57,8 +57,8 @@ export type GuideDestination = {
   external?: boolean;
   /**
    * Where to go once the tour is over — a `?type=` prefill that opens the
-   * request dialog. AFTER, not during: a modal makes everything outside it
-   * inert, the speech bubble included.
+   * request dialog, or `?view=office`. AFTER, not during: a modal makes
+   * everything outside it inert, the speech bubble included.
    */
   then?: string;
   /**
@@ -221,10 +221,30 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     keywords: [
       "time in", "time out", "timein", "timeout", "clock in", "clock out", "punch", "dtr",
       "daily time record", "my attendance", "pasok", "uwi", "mag time in", "mag out",
+      "heat map", "heatmap", "my year",
     ],
     steps: [
       { text: "Punch in and out here. Your earliest in and your latest out are the ones that count.", target: tour("punch") },
+      { text: "This is your last year, one square a day. The darker it is, the more hours you worked.", target: tour("dtr-year"), optional: true },
       { text: "Missed one? Ask me about a forgotten time-in and I'll show you the request." },
+      { text: "Virtual office swaps this table for a 3D office. Ask me about it for a look around.", target: tour("office"), optional: true },
+    ],
+  },
+  {
+    id: "virtual-office",
+    title: "Virtual office",
+    href: "/dtr",
+    then: "/dtr?view=office",
+    keywords: [
+      "virtual office", "3d office", "office", "who is timed in", "sino nasa office",
+      "canteen", "all hands",
+    ],
+    steps: [
+      { text: "Virtual office swaps the DTR table for a 3D office, with one room per department.", target: tour("office"), optional: true },
+      { text: "Everyone timed in right now is sitting at their desk." },
+      { text: "You can go into your own room, the all-hands room and the shared spaces. Team leaders and above can look into every room." },
+      { text: "At lunch, 12 to 1, and at the all-hands, Fridays 4 to 5 PM, everyone sees the same room." },
+      { text: "I'll open it for you now." },
     ],
   },
   {
@@ -297,12 +317,16 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     keywords: [
       "form", "build form", "build a form", "create form", "create a form", "make form",
       "make a form", "new form", "form builder", "client form", "edit form", "publish form",
-      "form link", "gawa form", "gumawa ng form",
+      "form link", "gawa form", "gumawa ng form", "new internal form", "create an internal form",
+      "make an internal form", "form deadline", "survey deadline", "form reminder", "survey reminder",
+      "anonymous form",
     ],
     steps: [
       { text: "These are your department's forms — live ones have a public link for the client." },
       { text: "Start a new one here.", target: 'a[href="/forms/new"]' },
       { text: "Open any form to edit its fields, then publish it to get its link." },
+      { text: "On an internal form, the Settings tab is where you set a deadline and choose anonymous answers." },
+      { text: "Everyone it is for gets an email when it goes live. Those who have not answered get reminders three days and one day before the deadline." },
     ],
   },
   {
@@ -311,9 +335,16 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     href: "/respond",
     keywords: [
       "form", "fill a form", "fill form", "fill up", "fill out", "answer form", "answer a form",
-      "survey", "internal form",
+      "survey", "internal form", "form deadline", "survey deadline", "form reminder", "survey reminder",
+      "forms to answer", "answer again", "answer it again", "change my answer", "edit my answer",
+      "already answered",
     ],
-    steps: [{ text: "These are the internal forms you can answer. Open one to fill it in." }],
+    steps: [
+      { text: "These are the internal forms you can answer. Open one to fill it in." },
+      { text: "The number beside Fill a form in the sidebar counts the ones still waiting on you." },
+      { text: "A form with a deadline closes after its last day. You get an email when a form goes live, and reminders near the deadline until you answer." },
+      { text: "Each person answers a form once, anonymous forms included, and an answer cannot be changed." },
+    ],
   },
   {
     id: "requests",
@@ -466,11 +497,14 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     href: "/",
     keywords: [
       "home", "announcement", "calendar", "holiday", "event", "who is on leave", "sino naka leave",
-      "on leave today",
+      "on leave today", "streak", "time in streak", "timed in streak", "post announcement",
+      "post an announcement", "edit announcement", "edit an announcement", "react to announcement",
     ],
     steps: [
-      { text: "Notices from your leads show up here.", target: labelled("Announcements") },
+      { text: "Notices from your leads show up here. React to one, or mark it Seen, and whoever posted it can see you read it.", target: labelled("Announcements") },
+      { text: "Team leaders and above post a notice from here. Its author or a manager can edit it later, and it then says edited.", target: tour("post-announcement"), optional: true },
       { text: "Time in and out without leaving the home page.", target: labelled("Daily time record") },
+      { text: "This counts the working days in a row you have timed in.", target: tour("streak"), optional: true },
       { text: "The things people file most, one click each.", target: labelled("Quick actions") },
       { text: "Who is on leave, plus holidays and events.", target: 'section[aria-label="Leave and vacation"]' },
     ],
@@ -527,6 +561,7 @@ export const PAGE_TOURS: PageTour[] = [
     steps: [
       { text: "Name the form. Staff will find it under Fill a form.", target: field("name") },
       { text: "Create it, then add the questions on the next page." },
+      { text: "Its Settings tab holds the deadline and the anonymous switch. Each person answers once, either way." },
     ],
   },
   {

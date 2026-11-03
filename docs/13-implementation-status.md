@@ -2698,3 +2698,7 @@ anonymous forms too.
   `lib/form-builder/answered-here.ts` was removed.
 - Run with the P17-10 check against an in-memory Postgres with stub tables. **Not
   verified on the real database or in a browser.** No db test yet.
+
+## P17-12 — The assistant catches up (3 Nov 2026)
+
+The assistant is written answers in `lib/assistant/guide.ts`, not a language model, so nothing updates it but an edit. It had not been touched since 27 Oct. It now covers form deadlines, reminders and one answer per person (P17-10, P17-11), the DTR heat map, the virtual office (opens `?view=office` after its tour), the time-in streak, and announcement reactions and editing. New `data-tour` targets: `office`, `dtr-year`, `streak`, `post-announcement`. Unit-tested for routing and selector shape; the tour itself has not been run in a browser.

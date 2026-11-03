@@ -57,6 +57,12 @@ describe("answerQuestion", () => {
     ["when is the next holiday", "/"],
     ["forms", "/respond"],
     ["where do I fill up a form", "/respond"],
+    ["what is the form deadline", "/respond"],
+    ["can I change my answer", "/respond"],
+    ["virtual office", "/dtr?view=office"],
+    ["heat map", "/dtr"],
+    ["my time in streak", "/"],
+    ["how do I edit an announcement", "/"],
     ["aprovals", "/approvals"],
     ["timeshet", "/timesheet"],
   ])("%s → %s for a member", (question, href) => {
@@ -78,6 +84,8 @@ describe("answerQuestion", () => {
     expect(goesTo("forms", lead)).toBe("/forms");
     expect(goesTo("how do I make a client form", lead)).toBe("/forms");
     expect(goesTo("fill up a form", lead)).toBe("/respond");
+    expect(goesTo("create an internal form", lead)).toBe("/forms");
+    expect(goesTo("set a form deadline", lead)).toBe("/forms");
   });
 
   it("sends a lead to the team week to approve timesheets", () => {

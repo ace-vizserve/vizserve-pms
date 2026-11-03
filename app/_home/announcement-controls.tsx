@@ -29,7 +29,7 @@ export function PostAnnouncementButton({ today }: { today: string }) {
 
   return (
     <>
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)} data-tour="post-announcement">
         <Megaphone />
         Post
       </Button>

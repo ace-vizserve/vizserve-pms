@@ -85,6 +85,7 @@ export function OfficeToggle({ open }: { open: boolean }) {
     <Link
       href={`/dtr${query ? `?${query}` : ""}`}
       scroll={false}
+      data-tour="office"
       className={buttonVariants({ variant: "outline", size: "sm" })}
     >
       {open ? <Table2 /> : <Building2 />}
