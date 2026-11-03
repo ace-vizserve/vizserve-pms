@@ -119,6 +119,9 @@ export function SidebarFromSnapshot({
         "/requests": snapshot
           ? labelledBadge(formatNavBadge(snapshot.awaiting_review), "awaiting review")
           : null,
+        "/respond": snapshot
+          ? labelledBadge(formatNavBadge(snapshot.forms_to_answer.length), "to answer")
+          : null,
       }}
       spaces={spaces}
       canManageLists={canManageLists}

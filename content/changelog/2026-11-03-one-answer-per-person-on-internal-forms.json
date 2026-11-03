@@ -1,0 +1,17 @@
+{
+  "date": "2026-11-03",
+  "kind": "changed",
+  "area": "Forms",
+  "title": "Each person answers an internal form once",
+  "description": "An internal form now takes one answer from each person, including anonymous forms. If you open a form you have already answered, it says so instead of showing the questions.",
+  "items": [
+    "An anonymous answer still carries no name, and nobody can see who wrote what. A separate note of who has answered is what stops a second answer, and the form now says so",
+    "An answer cannot be changed or sent again, so check it before sending",
+    "To run a survey again, build a new form",
+    "Anonymous answers given before this change cannot be matched to anyone, so those people can answer that form one more time"
+  ],
+  "refs": [
+    "P17-11"
+  ],
+  "pending": "Needs its database update: paste supabase/migrations/20261103100000_p17_11_one_answer_per_person.sql into the Supabase SQL editor. Until then people can still answer more than once."
+}

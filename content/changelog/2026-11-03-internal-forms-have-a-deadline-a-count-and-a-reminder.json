@@ -1,0 +1,14 @@
+{
+  "date": "2026-11-03",
+  "kind": "added",
+  "area": "Forms",
+  "title": "Internal forms have a deadline, a count and an email reminder",
+  "description": "Fill a form in the sidebar now shows how many forms are waiting for your answer. Whoever runs an internal form can give it a deadline, and everyone it is for gets an email when it goes live and again as the deadline gets close.",
+  "items": [
+    "Set the deadline on the form's Settings tab. It is optional, and after that day the form stops taking answers",
+    "The first email goes out within about an hour of publishing. Reminders go three days before the deadline and the day before, only to people who have not answered",
+    "Who gets these emails can be changed under Admin settings, in the Internal forms section"
+  ],
+  "refs": ["P17-10"],
+  "pending": "Needs its database update: paste supabase/migrations/20261103090000_p17_10_form_reminder_type.sql into the Supabase SQL editor, then 20261103090100_p17_10_internal_form_deadline.sql. Until then there is no count, no deadline control and no email."
+}

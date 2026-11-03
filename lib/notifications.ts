@@ -29,6 +29,7 @@ export const NOTIFICATION_TYPES = [
   "commented",
   "mentioned",
   "status_changed",
+  "form_reminder",
 ] as const;
 
 /**
@@ -50,6 +51,7 @@ export const NOTIFICATION_TYPE_LABELS: Record<VizservePmsNotificationType, strin
   // list this sits beside is things that happened TO them.
   mentioned: "Mentions",
   status_changed: "Status changes",
+  form_reminder: "Internal forms",
 };
 
 /**
@@ -74,6 +76,7 @@ export const NOTIFICATION_TYPE_HINTS: Record<VizservePmsNotificationType, string
   commented: "Somebody commented on a task you are PIC or QA on.",
   mentioned: "Somebody typed your name with @ in a comment.",
   status_changed: "A record you are on moved from one status to another.",
+  form_reminder: "An internal form is waiting for your answer, or its deadline is close.",
 };
 
 /**
@@ -108,6 +111,7 @@ export const NOTIFICATION_EMAIL_SENDER: Record<VizservePmsNotificationType, Emai
   status_changed: "notifications",
   mentioned: "notifications",
   commented: "notifications",
+  form_reminder: "notifications",
 };
 
 /**

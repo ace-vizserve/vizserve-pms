@@ -5,7 +5,11 @@ import { ArrowRight, FilePenLine } from "lucide-react";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
+import { Badge } from "@/components/ui/badge";
 import { requireAuthContext } from "@/lib/auth/authorization";
+import { formatDate } from "@/lib/dates";
+import { isFormClosed, readFormDeadlines } from "@/lib/form-builder/deadline";
+import { formToAnswerSchema } from "@/lib/schemas/sidebar";
 import { createClient } from "@/utils/supabase/server";
 
 export const metadata: Metadata = { title: "Fill a form" };
@@ -53,7 +57,25 @@ export default async function RespondPage() {
     );
   }
 
-  const rows = forms ?? [];
+  /*
+   * P17-10. Both reads are allowed to fail: the list is still the list without a
+   * deadline or a "To answer" pill, and neither exists until the migration is
+   * pasted. A closed form has nothing left to do, so it leaves the list.
+   */
+  const [deadlines, awaiting] = await Promise.all([
+    readFormDeadlines(supabase, (forms ?? []).map((form) => form.id)),
+    supabase.rpc("vizserve_pms_forms_awaiting_me"),
+  ]);
+
+  const waiting = new Set(
+    (formToAnswerSchema.array().safeParse(awaiting.data).data ?? []).map((form) => form.id),
+  );
+
+  // What is still waiting on you first. The sort is stable, so each half stays by name.
+  const rows = (forms ?? [])
+    .map((form) => ({ ...form, closesOn: deadlines?.get(form.id) ?? null }))
+    .filter((form) => !isFormClosed(form.closesOn))
+    .sort((a, b) => Number(waiting.has(b.id)) - Number(waiting.has(a.id)));
 
   return (
     <PageShell>
@@ -95,6 +117,13 @@ export default async function RespondPage() {
                     className="mt-0.5 size-4 shrink-0 text-foreground-faint group-hover:text-accent-foreground"
                   />
                 </span>
+
+                {waiting.has(form.id) || form.closesOn ? (
+                  <span className="flex flex-wrap items-center gap-2 pl-6 text-xs text-muted-foreground group-hover:text-accent-foreground">
+                    {waiting.has(form.id) ? <Badge variant="secondary">To answer</Badge> : null}
+                    {form.closesOn ? <span>Closes {formatDate(form.closesOn)}</span> : null}
+                  </span>
+                ) : null}
 
                 {form.description ? (
                   <span className="line-clamp-3 pl-6 text-xs leading-relaxed text-muted-foreground group-hover:text-accent-foreground">

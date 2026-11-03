@@ -75,11 +75,21 @@ const personalListSchema = z.object({
   isActive: z.boolean(),
 });
 
+/** P17-10. A form still waiting on the reader. */
+export const formToAnswerSchema = z.object({
+  id: z.uuid(),
+});
+
 export const sidebarSnapshotSchema = z.object({
   /** Unread notifications. Scoped by policy, not by a filter. */
   unread: z.number().int().nonnegative(),
   /** P7-50. Requests sitting at Gate 1. Scoped by policy, not by a filter. */
   awaiting_review: z.number().int().nonnegative(),
+  /**
+   * P17-10. Defaulted because the function is pasted by hand after the deploy:
+   * until then the key is absent, and that must not fail the whole rail.
+   */
+  forms_to_answer: z.array(formToAnswerSchema).default([]),
   spaces: z.array(projectSpaceSchema),
   personal: z.array(personalListSchema),
 });

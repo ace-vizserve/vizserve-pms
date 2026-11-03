@@ -141,6 +141,11 @@ function makeFakeClient(config: FakeConfig) {
           eq() {
             return chain;
           },
+          // P17-10. `readFormDeadlines`: no form here has a deadline.
+          in() {
+            resolved = Promise.resolve({ data: [], error: null });
+            return chain;
+          },
           maybeSingle() {
             return Promise.resolve({ data: config.form, error: null });
           },

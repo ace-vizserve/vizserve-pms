@@ -4,6 +4,8 @@ import { revalidatePath } from "next/cache";
 
 import { requireAuthContext } from "@/lib/auth/authorization";
 import type { Json } from "@/lib/database.types";
+import { formatDate } from "@/lib/dates";
+import { isFormClosed, readFormDeadlines } from "@/lib/form-builder/deadline";
 import { FormSchemaError, parseFormSchema } from "@/lib/form-builder/schema";
 import { validateFieldValues } from "@/lib/form-builder/values";
 import {
@@ -50,10 +52,16 @@ import { createClient } from "@/utils/supabase/server";
  */
 
 /**
- * ⚠️ MAY THE SAME PERSON ANSWER THE SAME FORM TWICE? YES — DECIDED, NOT
- * OVERLOOKED. There is no unique index on `(form_id, submitted_by)`.
+ * ⚠️ P17-11 — ONE ANSWER PER PERSON, ON EVERY INTERNAL FORM. Enforced by the
+ * trigger `vizserve_pms_form_responses_one_per_person`, which also covers anonymous
+ * forms by keeping a note of who answered in `vizserve_pms_form_answered`, apart
+ * from the answers. The user decided this on 3 Nov 2026 knowing what it costs.
  *
- * Three reasons, in the order they mattered:
+ * What it reverses is kept below, because those costs are now real: a kudos or
+ * sign-up form does not work, a new round needs a new form, and somebody who
+ * answered wrongly has no remedy.
+ *
+ * P7-66, NO LONGER TRUE: there was no limit, for three reasons:
  *
  *   1. NOT EVERY INTERNAL FORM IS A SURVEY. A kudos nomination form is
  *      answered once per colleague you want to thank; a sign-up sheet is
@@ -122,6 +130,13 @@ export async function submitFormResponse(input: unknown): Promise<FormResponseRe
 
   if (!form) {
     return { ok: false, error: "This form is no longer accepting answers." };
+  }
+
+  // P17-10. The readable refusal; the INSERT policy is what actually closes it.
+  const closesOn = (await readFormDeadlines(supabase, [form.id]))?.get(form.id);
+
+  if (isFormClosed(closesOn)) {
+    return { ok: false, error: `This form closed on ${formatDate(closesOn)}. Nothing was saved.` };
   }
 
   /*
@@ -217,6 +232,11 @@ export async function submitFormResponse(input: unknown): Promise<FormResponseRe
   });
 
   if (insertError) {
+    // P17-11. The trigger's sentence, already written for the person reading it.
+    if (insertError.message.includes("already answered")) {
+      return { ok: false, error: "You have already answered this form. Nothing was saved." };
+    }
+
     console.error("[P7-66] a form response was refused", {
       formId: form.id,
       code: insertError.code,

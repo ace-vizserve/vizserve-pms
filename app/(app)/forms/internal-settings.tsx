@@ -7,6 +7,7 @@ import { toast } from "@/components/ui/toast";
 
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { DatePicker } from "@/components/ui/date-picker";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -138,6 +139,10 @@ export function InternalSettings({
       // P7-66 Phase 5 — the one key on this payload that is not a column. It
       // gates a separate, atomic write; see `writeFormAudience`.
       audience,
+
+      // P17-10. Undefined until the column exists; the control below is hidden
+      // then, and the save leaves it alone.
+      closes_on: initial.closes_on,
     },
   });
 
@@ -145,6 +150,7 @@ export function InternalSettings({
   const isQuiz = watch("is_quiz");
   const isAnonymous = watch("is_anonymous") ?? false;
   const departmentId = watch("department_id");
+  const closesOn = watch("closes_on");
 
   /*
    * ⚠️ WATCHED AS A WHOLE OBJECT, NOT AS TWO FIELDS. The flag and the list are
@@ -206,6 +212,7 @@ export function InternalSettings({
     "is_quiz",
     "is_active",
     "audience",
+    "closes_on",
   ]);
 
   const onSubmit = handleSubmit((values) => {
@@ -423,6 +430,25 @@ export function InternalSettings({
         ) : null}
       </fieldset>
 
+      {initial.closes_on !== undefined ? (
+        <div className="space-y-2">
+          <Label htmlFor="closes_on">Deadline</Label>
+          <DatePicker
+            id="closes_on"
+            value={closesOn}
+            invalid={Boolean(errors.closes_on)}
+            placeholder="No deadline"
+            className="w-full sm:w-1/2"
+            onChange={(value) => setValue("closes_on", value, { shouldValidate: true, shouldDirty: true })}
+          />
+          <p className="text-xs text-muted-foreground">
+            The last day to answer. After it the form closes. Reminder emails go out three days
+            before and the day before, to whoever has not answered.
+          </p>
+          {errors.closes_on ? <p className="text-xs text-destructive">{errors.closes_on.message}</p> : null}
+        </div>
+      ) : null}
+
       <div className="space-y-3 rounded-lg border p-4">
         {/*
           ⚠️ FIRST IN THIS BOX, ABOVE PUBLISHED. It is the setting that has to be
@@ -439,7 +465,7 @@ export function InternalSettings({
                   name, so there is none to surface later through an export, a
                   new screen or an admin with SQL access. */}
               {isAnonymous
-                ? "Nobody's name is recorded — not hidden, never written. You see the answers and when they came in."
+                ? "No name is written with an answer. You see the answers and when they came in. A separate note of who has answered keeps it to one answer per person."
                 : "Each answer is recorded against the name of whoever wrote it."}
             </p>
             {hasSubmissions ? (

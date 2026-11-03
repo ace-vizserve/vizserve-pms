@@ -2651,3 +2651,50 @@ redefining `:root`).
 - `lib/comment-reactions.ts` folds rows into pills; covered by
   `tests/unit/comment-reactions.test.ts`.
 - **Not verified against a database or in a browser.** No db test yet.
+
+## P17-10 — Deadline, sidebar count and email for internal forms (3 Nov 2026)
+
+`Fill a form` carries a count of the forms waiting on the reader, an internal form
+can have a deadline, and its audience is emailed when it goes live and as the
+deadline nears.
+
+- `20261103090000_p17_10_form_reminder_type.sql`, then
+  `20261103090100_p17_10_internal_form_deadline.sql` — **apply by hand, in that
+  order**. Adds `closes_on`, `announced_at` and `reminders_sent` to the forms table,
+  closes a form in the INSERT policy, and adds `vizserve_pms_forms_awaiting_me` (read
+  by the sidebar snapshot) and `vizserve_pms_send_form_reminders`.
+- `/api/cron/form-reminders` runs hourly and stays quiet outside 08:00–18:59 Manila.
+  New form: once. Reminders: three days before and the day before, to non-answerers.
+  Emails leave through the ordinary outbox. Both stages are on `/admin/settings`.
+- Forms already live when the migration is pasted are stamped as announced, so
+  pasting it emails nobody. Set `announced_at` to null on one to announce it.
+- "Answered" means ever. A form reused for a second round with a new deadline still
+  counts earlier answerers as done, and under P17-11 they cannot answer it again.
+- `lib/form-builder/deadline.ts` and the count are covered by
+  `tests/unit/form-deadline.test.ts`.
+- The migration and the reminder, count and policy behaviour were run once against an
+  in-memory Postgres with stub tables (a throwaway script, not in the repo). The
+  snapshot function body was not, because its tables were not stubbed. **Not verified
+  on the real database or in a browser.** No db test yet.
+
+## P17-11 — One answer per person on every internal form (3 Nov 2026)
+
+Reverses P7-66's "answer as often as you like", by the user's decision. Applies to
+anonymous forms too.
+
+- `20261103100000_p17_11_one_answer_per_person.sql` — **apply by hand, after
+  P17-10**. New table `vizserve_pms_form_answered` (form, person; no timestamp, no
+  link to the answer, no access for anyone signed in) and a BEFORE INSERT trigger on
+  `vizserve_pms_form_responses` that refuses a second answer.
+- **Anonymous now means "not on the answer", not "not recorded anywhere".** Screens
+  and exports cannot link a person to an answer, but the note is written in the same
+  transaction, so direct SQL access could line them up through `xmin`. The fill page
+  and the settings card say a note is kept. Never join the two tables.
+- Earlier answers on an anonymous form cannot be attributed, so those people can
+  answer that form once more. Named forms were backfilled; old duplicates remain.
+- There is no way to correct an answer or reset somebody. A kudos or sign-up form no
+  longer works, and a new round needs a new form.
+- The sidebar count and reminders now leave out answerers on anonymous forms too, so
+  `lib/form-builder/answered-here.ts` was removed.
+- Run with the P17-10 check against an in-memory Postgres with stub tables. **Not
+  verified on the real database or in a browser.** No db test yet.

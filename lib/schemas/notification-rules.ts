@@ -39,6 +39,7 @@ export const RELATIONSHIP_LABELS: Record<string, string> = {
   assignee: "The person assigned",
   mentioned: "The person mentioned",
   pic_and_qa: "PIC and QA",
+  form_audience: "Everyone the form is for who has not answered",
 };
 
 /**

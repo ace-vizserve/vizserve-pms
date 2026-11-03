@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { CheckCircle2, Info } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -15,6 +16,7 @@ import {
   useFormInterpreterStore,
 } from "@/lib/form-builder/components";
 import type { ParsedFormSchema } from "@/lib/form-builder/schema";
+import { qk } from "@/lib/query/keys";
 import { routeFieldErrors, toFieldValues } from "@/lib/form-builder/values";
 
 import { submitFormResponse } from "../actions";
@@ -115,6 +117,7 @@ export function RespondForm({
   const [submitted, setSubmitted] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const queryClient = useQueryClient();
 
   /*
    * ⚠️ BOTH MEMOISED ON `[schema]`, AND IT MATTERS. `useInterpreterStore`
@@ -238,6 +241,8 @@ export function RespondForm({
 
       if (result.ok) {
         setSubmitted(true);
+        // P17-10. The sidebar count, without waiting for a navigation.
+        void queryClient.invalidateQueries({ queryKey: qk.snapshot() });
         return;
       }
 
@@ -291,7 +296,7 @@ export function RespondForm({
       console.error("[P7-66] submitting a form response threw —", cause);
       setFormError(
         "Your answer may not have been sent — the connection dropped before we heard back. " +
-          "Sending it again is safe, but if both arrive the team will see two answers.",
+          "Try sending it again. If the first one did arrive, you will be told it is already in.",
       );
     } finally {
       setPending(false);
@@ -317,8 +322,7 @@ export function RespondForm({
             : `Thank you — your answer to ${formName} has been saved against your name.`}
         </p>
         <p className="mt-4 text-xs text-muted-foreground">
-          It cannot be edited or withdrawn. If you need to change something, fill the form in
-          again and both answers will be visible.
+          It cannot be edited or withdrawn, and each person answers a form once.
         </p>
       </div>
     );

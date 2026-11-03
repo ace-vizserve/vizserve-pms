@@ -8,6 +8,8 @@ import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
 import { buttonVariants } from "@/components/ui/button";
 import { requireAuthContext } from "@/lib/auth/authorization";
+import { formatDate } from "@/lib/dates";
+import { isFormClosed, readFormDeadlines } from "@/lib/form-builder/deadline";
 import { splitCanvasFields } from "@/lib/form-builder/canvas";
 import { FormSchemaError, parseFormSchema } from "@/lib/form-builder/schema";
 import { createClient } from "@/utils/supabase/server";
@@ -106,6 +108,15 @@ export default async function RespondToFormPage({
    */
   const activeQuestionCount = splitCanvasFields(schema).active.length;
 
+  const closesOn = (await readFormDeadlines(supabase, [form.id]))?.get(form.id) ?? null;
+  const closed = isFormClosed(closesOn);
+
+  // P17-11. A failed read, or the function not being pasted yet, draws the form;
+  // the trigger is what refuses a second answer either way.
+  const { data: alreadyAnswered } = await supabase.rpc("vizserve_pms_i_answered_form", {
+    p_form_id: form.id,
+  });
+
   return (
     // A reading measure, unlike the list pages: this is a form to fill in top
     // to bottom, and a question that runs the width of an ultrawide monitor is
@@ -123,6 +134,9 @@ export default async function RespondToFormPage({
         <h1 className="text-xl font-semibold tracking-[-0.022em]">{form.name}</h1>
         {form.description ? (
           <p className="text-sm leading-relaxed text-foreground-muted">{form.description}</p>
+        ) : null}
+        {closesOn && !closed ? (
+          <p className="text-sm font-medium">Please answer by {formatDate(closesOn)}.</p>
         ) : null}
         {/*
           ⚠️ SAID BEFORE THEY ANSWER, NOT AFTER — AND SAID BOTH WAYS.
@@ -154,11 +168,12 @@ export default async function RespondToFormPage({
                 later by an export, a new screen or an admin with SQL. */}
             Your name is <strong className="font-medium">not recorded</strong> with this answer. The
             team that owns this form sees what you wrote and when, and nothing that identifies you.
+            We keep a separate note that you have answered, so that each person answers once.
           </p>
         ) : (
           <p className="text-xs text-muted-foreground">
             Your answer is saved against your name and can be read by the team that owns this form.
-            This form is not anonymous.
+            This form is not anonymous. Each person answers once.
           </p>
         )}
       </div>
@@ -176,7 +191,19 @@ export default async function RespondToFormPage({
         `vizserve_pms_form_responses` row with `field_values: {}` that nobody
         can delete, because the table is append-only by design.
       */}
-      {activeQuestionCount === 0 ? (
+      {alreadyAnswered ? (
+        <EmptyState
+          icon={<FilePenLine />}
+          title="You have already answered this form"
+          description="Each person answers a form once, and an answer cannot be changed."
+        />
+      ) : closed ? (
+        <EmptyState
+          icon={<FilePenLine />}
+          title="This form has closed"
+          description={`It stopped taking answers after ${formatDate(closesOn)}.`}
+        />
+      ) : activeQuestionCount === 0 ? (
         <EmptyState
           icon={<FilePenLine />}
           title="This form has no questions yet"

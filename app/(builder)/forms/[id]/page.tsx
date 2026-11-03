@@ -10,6 +10,7 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { requireDepartmentShape } from "@/lib/auth/authorization";
+import { readFormDeadlines } from "@/lib/form-builder/deadline";
 import { optionsFromRow, reconcileFormSchema, type FormFieldRow } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
 import { createClient } from "@/utils/supabase/server";
@@ -259,6 +260,9 @@ export default async function EditFormPage({
   const { data: audienceRows, error: audienceError } = isInternal
     ? await supabase.from("vizserve_pms_form_audience_departments").select("department_id").eq("form_id", id)
     : { data: [], error: null };
+
+  // P17-10. Null when the column is not there yet, which hides the control.
+  const deadlines = isInternal ? await readFormDeadlines(supabase, [form.id]) : null;
 
   const countError = counted.ok ? null : { message: counted.message };
   const submissionCount = counted.ok ? counted.total : 0;
@@ -615,6 +619,7 @@ export default async function EditFormPage({
                      on every quiz and turned marking off on the first save. */
                   is_quiz: form.is_quiz,
                   is_active: form.is_active,
+                  closes_on: deadlines ? (deadlines.get(form.id) ?? null) : undefined,
                   /*
                     The five the card never draws, loaded so its save resends
                     what is stored rather than a value `formSettingsSchema` —

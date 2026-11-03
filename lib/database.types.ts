@@ -36,7 +36,9 @@ export type VizservePmsNotificationType =
   // P7-77, hand-added for the same reason.
   | "request_approved"
   // P7-78, hand-added for the same reason.
-  | "qa_returned";
+  | "qa_returned"
+  // P17-10, hand-added for the same reason.
+  | "form_reminder";
 
 export type VizservePmsFieldType =
   | "text"
@@ -881,11 +883,17 @@ export type Database = {
           archived_at: string | null;
           /** P7-72. Stamped by the database on first publish. Null = still a draft. */
           first_published_at: string | null;
+          /** P17-10. Last day an answer is accepted. Internal forms only. */
+          closes_on: string | null;
+          /** P17-10. Written by `vizserve_pms_send_form_reminders`, so absent from Insert and Update. */
+          announced_at: string | null;
+          reminders_sent: number;
           created_by: string | null;
           created_at: string;
           updated_at: string;
         };
         Insert: {
+          closes_on?: string | null;
           id?: string;
           name: string;
           slug: string;
@@ -919,6 +927,7 @@ export type Database = {
           updated_at?: string;
         };
         Update: Partial<{
+          closes_on: string | null;
           name: string;
           slug: string;
           description: string;
@@ -3056,6 +3065,18 @@ export type Database = {
         }[];
       };
       vizserve_pms_sidebar_snapshot: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
+      vizserve_pms_forms_awaiting_me: {
+        Args: Record<PropertyKey, never>;
+        Returns: Json;
+      };
+      vizserve_pms_i_answered_form: {
+        Args: { p_form_id: string };
+        Returns: boolean;
+      };
+      vizserve_pms_send_form_reminders: {
         Args: Record<PropertyKey, never>;
         Returns: Json;
       };

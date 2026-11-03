@@ -137,6 +137,13 @@ const PRESENTATION: Record<
     subject: (title) => title,
     action: "Open the task",
   },
+  // P17-10. The title is already the whole subject: "New internal survey: …" or
+  // "Reminder: … closes tomorrow".
+  form_reminder: {
+    subject: (title) => title,
+    action: "Answer the form",
+    status: { label: "Internal survey", tone: "brand" },
+  },
 };
 
 export type DispatchSummary = {

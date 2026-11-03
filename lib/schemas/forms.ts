@@ -637,6 +637,16 @@ export const formSettingsSchema = z.object({
    * staff form on the public internet.
    */
   /**
+   * P17-10 — an internal form's last day, or null for none. OPTIONAL, unlike the
+   * rest of this schema, for the reason `audience` is: a client form has no such
+   * thing and never sends it, and absent means leave it alone.
+   */
+  closes_on: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid date.")
+    .nullable()
+    .optional(),
+  /**
    * P7-66 — WHETHER AN ANSWER IS RECORDED AGAINST A NAME.
    *
    * UNDEFAULTED, like every other key on this schema, and here the omitted
