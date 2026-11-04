@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Canvas, useFrame, useThree, type ThreeEvent } from "@react-three/fiber";
 import { Html, OrbitControls } from "@react-three/drei";
 import { Maximize2, Minus, Plus, RotateCcw, RotateCw } from "lucide-react";
@@ -14,12 +14,14 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AMENITY_W, HALL, ROOM_W, assignSeats, describeOfficePerson, type OfficeActivity, officeTheme, type OfficeDesk, type OfficeLayout, type OfficePerson, type OfficeRoom } from "@/lib/office";
+import { AMENITY_W, BATHROOM_SLOT, BATHROOM_STAY, HALL, ROOM_W, assignSeats, bathroomPeriod, describeOfficePerson, isSmoker, wearsPink, type OfficeActivity, officeTheme, type OfficeDesk, type OfficeLayout, type OfficePerson, type OfficeRoom } from "@/lib/office";
 
 import { Block } from "./office-block";
 import { MeetingCorner, Printer, WaterDispenser, canteenSeats, type Seat } from "./office-amenities";
 import { CutawayWall, RoomWalls, meetingDepth } from "./office-decor";
-import { Cat, type CatStop } from "./office-cat";
+import { Cat, timeline, type CatStop, type Leg, type Point as FloorPoint } from "./office-cat";
+import { ComfortRoom } from "./office-comfort-room";
+import { SmokingArea } from "./office-smoking";
 import { DESK_ITEMS, DeskItem, Lounge, Window, WoodFloor, canteenSpan, gymZone } from "./office-props";
 import { TownHall, podium, townHallSeats, townHallSize } from "./office-townhall";
 import { Extinguisher, FireExit, GlassDoors } from "./office-doors";
@@ -58,6 +60,8 @@ const HALL_W = 13.2;
 const SIGN_H = 1;
 /** Deep enough for everything the lounge holds, front to back. */
 const MIN_DEPTH = 14;
+/** Where the fire exit is along the lounge's outer wall: clear of the water and the canteen. */
+const FIRE_EXIT_Z = 8.8;
 const WALL_H = 2.6;
 const CUT_H = 0.5;
 /**
@@ -94,11 +98,39 @@ function hash(id: string): number {
 /* People                                                                       */
 /* -------------------------------------------------------------------------- */
 
+function clothesOf(person: OfficePerson): { shirt: string; pants: string } {
+  if (wearsPink(person)) return { shirt: "#ec4899", pants: "#f9a8d4" };
+  const h = hash(person.id);
+  return { shirt: SHIRTS[h % SHIRTS.length], pants: PANTS[(h >>> 3) % PANTS.length] };
+}
+
+/**
+ * On a head at the origin, facing −Z. `longHair` is the staff record's (P17-14): long
+ * past the shoulders, or short with a neat back. Not set keeps the original cut.
+ */
+function Hair({ person, color }: { person: OfficePerson; color: string }) {
+  return (
+    <>
+      <Block position={[0, 0.21, 0.01]} size={[0.4, 0.1, 0.4]} color={color} />
+      {person.longHair === true ? (
+        <>
+          <Block position={[0, -0.14, 0.2]} size={[0.42, 0.66, 0.08]} color={color} />
+          <Block position={[-0.2, -0.06, 0.06]} size={[0.05, 0.5, 0.24]} color={color} />
+          <Block position={[0.2, -0.06, 0.06]} size={[0.05, 0.5, 0.24]} color={color} />
+        </>
+      ) : person.longHair === false ? (
+        <Block position={[0, 0.1, 0.19]} size={[0.38, 0.14, 0.05]} color={color} />
+      ) : (
+        <Block position={[0, 0.04, 0.19]} size={[0.4, 0.3, 0.06]} color={color} />
+      )}
+    </>
+  );
+}
+
 /** A voxel person, seated, facing −Z (the monitor), typing. */
 function Person({ person, x, z, accent }: { person: OfficePerson; x: number; z: number; accent: string }) {
   const h = hash(person.id);
-  const shirt = SHIRTS[h % SHIRTS.length];
-  const pants = PANTS[(h >>> 3) % PANTS.length];
+  const { shirt, pants } = clothesOf(person);
   const skin = SKIN[(h >>> 6) % SKIN.length];
   const hair = HAIR[(h >>> 9) % HAIR.length];
   const gem = person.longShift ? "#f7b733" : "#3ee07a";
@@ -144,8 +176,7 @@ function Person({ person, x, z, accent }: { person: OfficePerson; x: number; z: 
       {/* Head, hair, eyes. */}
       <group ref={head} position={[0, 1.4, 0.02]}>
         <Block position={[0, 0, 0]} size={[0.36, 0.36, 0.36]} color={skin} />
-        <Block position={[0, 0.21, 0.01]} size={[0.4, 0.1, 0.4]} color={hair} />
-        <Block position={[0, 0.04, 0.19]} size={[0.4, 0.3, 0.06]} color={hair} />
+        <Hair person={person} color={hair} />
         <Block position={[-0.08, 0.02, -0.185]} size={[0.06, 0.06, 0.02]} color="#111111" />
         <Block position={[0.08, 0.02, -0.185]} size={[0.06, 0.06, 0.02]} color="#111111" />
       </group>
@@ -266,7 +297,7 @@ function Desk({
 
       {/* Somebody who is in is drawn by `Occupant` — they move. An empty desk
           carries its owner's name and hover card itself. */}
-      {working || person.hidden ? null : (
+      {working || person.hidden || person.roams ? null : (
         <>
           <group position={[cx, 0, z + 1.6]}>
             <NameTag position={[0, 1.3, 0]} name={person.name} dim />
@@ -309,15 +340,17 @@ function StandingPerson({
   accent,
   legs,
   arms,
+  cigarette,
 }: {
   person: OfficePerson;
   accent: string;
   legs: React.RefObject<(Group | null)[]>;
   arms: React.RefObject<(Group | null)[]>;
+  /** Held in the right hand, shown by whoever owns the ref. */
+  cigarette?: React.RefObject<Group | null>;
 }) {
   const h = hash(person.id);
-  const shirt = SHIRTS[h % SHIRTS.length];
-  const pants = PANTS[(h >>> 3) % PANTS.length];
+  const { shirt, pants } = clothesOf(person);
   const skin = SKIN[(h >>> 6) % SKIN.length];
   const hair = HAIR[(h >>> 9) % HAIR.length];
   const gem = person.longShift ? "#f7b733" : "#3ee07a";
@@ -352,12 +385,17 @@ function StandingPerson({
         >
           <Block position={[0, -0.25, 0]} size={[0.14, 0.5, 0.14]} color={shirt} />
           <Block position={[0, -0.55, 0]} size={[0.14, 0.12, 0.14]} color={skin} />
+          {i === 1 && cigarette ? (
+            <group ref={cigarette} visible={false}>
+              <Block position={[0, -0.62, -0.09]} size={[0.025, 0.025, 0.16]} color="#f8fafc" shadow={false} />
+              <Block position={[0, -0.62, -0.175]} size={[0.03, 0.03, 0.02]} color="#f97316" emissive="#f97316" emissiveIntensity={1.2} shadow={false} />
+            </group>
+          ) : null}
         </group>
       ))}
       <group position={[0, 1.55, 0]}>
         <Block position={[0, 0, 0]} size={[0.36, 0.36, 0.36]} color={skin} />
-        <Block position={[0, 0.21, 0.01]} size={[0.4, 0.1, 0.4]} color={hair} />
-        <Block position={[0, 0.04, 0.19]} size={[0.4, 0.3, 0.06]} color={hair} />
+        <Hair person={person} color={hair} />
         <Block position={[-0.08, 0.02, -0.185]} size={[0.06, 0.06, 0.02]} color="#111111" />
         <Block position={[0.08, 0.02, -0.185]} size={[0.06, 0.06, 0.02]} color="#111111" />
       </group>
@@ -371,120 +409,79 @@ function StandingPerson({
 
 type Point = [number, number];
 
-/** A point `u` (0–1) of the way along a polyline, and the direction it is heading. */
-function along(points: Point[], u: number): { x: number; z: number; dx: number; dz: number } {
-  const lengths = points.slice(1).map((p, i) => Math.hypot(p[0] - points[i][0], p[1] - points[i][1]));
-  const total = lengths.reduce((a, b) => a + b, 0) || 1;
-  let left = Math.max(0, Math.min(1, u)) * total;
-  for (let i = 0; i < lengths.length; i++) {
-    const [ax, az] = points[i];
-    const [bx, bz] = points[i + 1];
-    if (left <= lengths[i] || i === lengths.length - 1) {
-      const k = lengths[i] ? Math.min(1, left / lengths[i]) : 1;
-      return { x: ax + (bx - ax) * k, z: az + (bz - az) * k, dx: bx - ax, dz: bz - az };
-    }
-    left -= lengths[i];
-  }
-  const [x, z] = points[points.length - 1];
-  return { x, z, dx: 0, dz: -1 };
+/** The treadmills and bikes, as drawn by `Gym`: x from the lounge's left, z from the gym's start. */
+const GYM_MACHINES: { x: number; z: number; does: "run" | "bike" }[] = [
+  { x: 1.2, z: 1.4, does: "run" },
+  { x: 3.7, z: 1.62, does: "bike" },
+  { x: 2.3, z: 1.4, does: "run" },
+  { x: 4.6, z: 1.62, does: "bike" },
+];
+
+/** How fast people walk, units a second. A little quicker than the cat. */
+const WALK_SPEED = 1.4;
+/** One draw and one breath out, in seconds. */
+const DRAG = 9;
+
+type Trip = ReturnType<typeof timeline>;
+
+/** Where a leg of a trip puts somebody at `t`, and which way they face. */
+function onLeg(leg: Leg, t: number): { x: number; z: number; facing: number; walking: boolean } {
+  if ("at" in leg) return { x: leg.at[0], z: leg.at[1], facing: leg.facing, walking: false };
+  const k = (t - leg.start) / (leg.end - leg.start);
+  return {
+    x: leg.from[0] + (leg.to[0] - leg.from[0]) * k,
+    z: leg.from[1] + (leg.to[1] - leg.from[1]) * k,
+    facing: Math.atan2(-(leg.to[0] - leg.from[0]), -(leg.to[1] - leg.from[1])),
+    walking: true,
+  };
 }
 
-/** Seconds to walk one way, and to stand at the water or the printer. */
-const WALK = 6;
-const STAY = 4;
+function legAt(trip: Trip, t: number): Leg | undefined {
+  return trip.legs.find((candidate) => t >= candidate.start && t < candidate.end) ?? trip.legs[trip.legs.length - 1];
+}
+
+type Parts = React.RefObject<(Group | null)[]>;
+
+function swingLimbs(legs: Parts, arms: Parts, swing: number) {
+  legs.current.forEach((part, i) => {
+    if (part) part.rotation.x = i ? -swing : swing;
+  });
+  arms.current.forEach((part, i) => {
+    if (part) part.rotation.x = i ? swing * 0.7 : -swing * 0.7;
+  });
+}
+
+/** Hand up to the mouth for a third of the time, then a slow breath out. */
+function smokeBeat(t: number, arms: Parts, puff: Mesh | null) {
+  const beat = t % DRAG;
+  if (arms.current[1]) arms.current[1].rotation.x = beat < DRAG / 3 ? 2.2 : 0.3;
+  if (puff && beat >= DRAG / 3 && beat < (DRAG * 2) / 3) {
+    const k = (beat - DRAG / 3) / (DRAG / 3);
+    puff.visible = true;
+    puff.position.set(0, 1.55 + k * 0.8, -0.3 - k * 0.15);
+    puff.scale.setScalar(1 + k * 2.5);
+  }
+}
+
+function Puff({ meshRef }: { meshRef: React.RefObject<Mesh | null> }) {
+  return (
+    <mesh ref={meshRef} visible={false}>
+      <boxGeometry args={[0.14, 0.14, 0.14]} />
+      <meshStandardMaterial color="#e5e7eb" transparent opacity={0.55} depthWrite={false} />
+    </mesh>
+  );
+}
 
 /** A seat somebody is in away from their desk, and why. */
 type AwaySeat = Seat & { where: "lunch" | "allhands" };
 
-/**
- * Somebody who is in, wherever they are right now:
- * - lunch, with a seat  → at the canteen;
- * - the all-hands       → in a chair, or at the podium if `presenting`;
- * - otherwise           → at their desk, and about one person in three gets up
- *   every minute or two to walk to the water dispenser or the printer and back.
- *
- * The walk is decided per frame from the clock and the person's id, so it costs
- * no re-render: the sitting and the walking figure are both mounted and swap
- * visibility, and the name tag follows whichever is showing.
- */
-function Occupant({
-  person,
-  accent,
-  chair,
-  trips,
-  seat,
-  presenting,
-  hovered,
-  openable,
-  onHover,
-  onSelect,
-}: {
-  person: OfficePerson;
-  accent: string;
-  openable: boolean;
-  /** The desk chair, where they sit when nothing else is on. */
-  chair: Point;
-  /** Two routes out from the chair — to the water, to the printer. */
-  trips: [Point[], Point[]];
-  /** A seat elsewhere — the canteen at lunch, the all-hands on Friday. */
-  seat: AwaySeat | null;
-  presenting: boolean;
-  hovered: boolean;
-  onHover: (id: string | null) => void;
-  onSelect: (person: OfficePerson) => void;
-}) {
-  const h = hash(person.id);
-  const walks = !seat && !presenting && h % 3 === 0;
-  const period = 70 + (h % 50);
-  const offset = h % period;
-
-  const sitting = useRef<Group>(null);
-  const walking = useRef<Group>(null);
-  const tag = useRef<Group>(null);
-  const legs = useRef<(Group | null)[]>([]);
-  const arms = useRef<(Group | null)[]>([]);
-
-  useFrame(({ clock }) => {
-    const time = clock.elapsedTime;
-
-    if (presenting) {
-      // A hand up now and then, making a point.
-      const raise = Math.floor(time * 0.8) % 3 === 0;
-      if (arms.current[1]) arms.current[1].rotation.x = raise ? -1.9 + Math.sin(time * 4) * 0.2 : -0.2;
-      return;
-    }
-    if (!walks || !sitting.current || !walking.current || !tag.current) return;
-
-    const t = (time + offset) % period;
-    const away = t < WALK * 2 + STAY;
-    sitting.current.visible = !away;
-    walking.current.visible = away;
-    if (!away) {
-      tag.current.position.set(chair[0], 0, chair[1]);
-      return;
-    }
-
-    const route = trips[Math.floor((time + offset) / period) % 2];
-    const outbound = t < WALK;
-    const standing = t >= WALK && t < WALK + STAY;
-    const u = outbound ? t / WALK : standing ? 1 : 1 - (t - WALK - STAY) / WALK;
-    const at = along(route, u);
-    const dx = standing ? 0 : outbound ? at.dx : -at.dx;
-    const dz = standing ? -1 : outbound ? at.dz : -at.dz;
-    walking.current.position.set(at.x, 0, at.z);
-    walking.current.rotation.y = Math.atan2(-dx, -dz);
-    tag.current.position.set(at.x, 0.15, at.z);
-
-    const swing = standing ? 0 : Math.sin(time * 9) * 0.55;
-    legs.current.forEach((leg, i) => {
-      if (leg) leg.rotation.x = i ? -swing : swing;
-    });
-    arms.current.forEach((arm, i) => {
-      if (arm) arm.rotation.x = i ? swing * 0.7 : -swing * 0.7;
-    });
-  });
-
-  const events = {
+/** Hover and click on a figure that moves. */
+function personEvents(
+  person: OfficePerson,
+  onHover: (id: string | null) => void,
+  onSelect: (person: OfficePerson) => void,
+) {
+  return {
     onPointerOver: (event: ThreeEvent<PointerEvent>) => {
       event.stopPropagation();
       onHover(person.id);
@@ -500,6 +497,169 @@ function Occupant({
       onSelect(person);
     },
   };
+}
+
+/**
+ * Somebody's working day away from the desk: their turn at the comfort room, and
+ * between turns one other trip — the water, the printer, the canteen, the gym, a
+ * smoke. `bathroomArrive` is when, in each `period`, they reach the door.
+ */
+type Routine = { period: number; bathroomArrive: number; bathroom: Trip; others: Trip[] };
+
+/**
+ * Somebody who is in, wherever they are right now:
+ * - lunch, with a seat  → at the canteen;
+ * - the all-hands       → in a chair, or at the podium if `presenting`;
+ * - otherwise           → at their desk, getting up for their `routine`.
+ *
+ * Where they are is decided per frame from the clock and their turn, so it costs
+ * no re-render: the sitting and the walking figure are both mounted and swap
+ * visibility, and the name tag follows whichever is showing.
+ */
+function Occupant({
+  person,
+  accent,
+  chair,
+  routine,
+  smoker,
+  seat,
+  presenting,
+  hovered,
+  openable,
+  onHover,
+  onSelect,
+}: {
+  person: OfficePerson;
+  accent: string;
+  openable: boolean;
+  /** The desk chair, where they sit when nothing else is on. */
+  chair: Point;
+  routine: Routine | null;
+  smoker: boolean;
+  /** A seat elsewhere — the canteen at lunch, the all-hands on Friday. */
+  seat: AwaySeat | null;
+  presenting: boolean;
+  hovered: boolean;
+  onHover: (id: string | null) => void;
+  onSelect: (person: OfficePerson) => void;
+}) {
+  const h = hash(person.id);
+  const moves = !seat && !presenting && routine !== null;
+  // How long they stay at their desk after the comfort room, before the other trip.
+  const pause = 20 + (h % 60);
+
+  const sitting = useRef<Group>(null);
+  const walking = useRef<Group>(null);
+  const tag = useRef<Group>(null);
+  const legs = useRef<(Group | null)[]>([]);
+  const arms = useRef<(Group | null)[]>([]);
+  const cigarette = useRef<Group>(null);
+  const puff = useRef<Mesh>(null);
+
+  useFrame(({ clock }) => {
+    const time = clock.elapsedTime;
+
+    if (presenting) {
+      // A hand up now and then, making a point.
+      const raise = Math.floor(time * 0.8) % 3 === 0;
+      if (arms.current[1]) arms.current[1].rotation.x = raise ? -1.9 + Math.sin(time * 4) * 0.2 : -0.2;
+      return;
+    }
+    if (!moves || !routine || !sitting.current || !walking.current || !tag.current) return;
+
+    // Each period starts as they leave for the comfort room, so they reach the
+    // door exactly on their turn.
+    const walkThere = routine.bathroom.legs.find((leg) => "at" in leg)?.start ?? 0;
+    const since = time - (routine.bathroomArrive - walkThere);
+    const cycle = Math.floor(since / routine.period);
+    const into = since - cycle * routine.period;
+
+    let trip: Trip | null = null;
+    let t = 0;
+    if (into < routine.bathroom.total) {
+      trip = routine.bathroom;
+      t = into;
+    } else {
+      const other = routine.others[(cycle + h) % routine.others.length];
+      const later = into - routine.bathroom.total - pause;
+      if (other && later >= 0 && later < other.total) {
+        trip = other;
+        t = later;
+      }
+    }
+
+    if (cigarette.current) cigarette.current.visible = false;
+    if (puff.current) puff.current.visible = false;
+    tag.current.visible = true;
+
+    const leg = trip ? legAt(trip, t) : undefined;
+    if (!leg) {
+      sitting.current.visible = true;
+      walking.current.visible = false;
+      sitting.current.position.set(chair[0], 0, chair[1]);
+      sitting.current.rotation.y = 0;
+      tag.current.position.set(chair[0], 0, chair[1]);
+      return;
+    }
+
+    const at = onLeg(leg, t);
+    const does = "at" in leg ? leg.does : undefined;
+    const seated = does === "sit";
+    sitting.current.visible = seated;
+    walking.current.visible = !seated && does !== "inside";
+    tag.current.visible = does !== "inside";
+    tag.current.position.set(at.x, seated ? 0 : 0.15, at.z);
+
+    if (seated) {
+      sitting.current.position.set(at.x, 0, at.z);
+      sitting.current.rotation.y = at.facing;
+      return;
+    }
+
+    walking.current.position.set(at.x, 0, at.z);
+    walking.current.rotation.y = at.facing;
+    swingLimbs(legs, arms, at.walking ? Math.sin(time * 9) * 0.55 : 0);
+
+    if (does === "smoke") {
+      if (cigarette.current) cigarette.current.visible = true;
+      smokeBeat(t - leg.start, arms, puff.current);
+    }
+    if (does === "curl") {
+      // Dumbbell curls, both arms together.
+      const curl = 1.3 + Math.sin(time * 3) * 1;
+      arms.current.forEach((arm) => {
+        if (arm) arm.rotation.x = curl;
+      });
+    }
+    if (does === "squat") {
+      // Down and up: the hips drop and move back, knees forward, arms out for balance.
+      const k = (Math.sin(time * 2.5) + 1) / 2;
+      const back = 0.3 * k;
+      walking.current.position.set(at.x + Math.sin(at.facing) * back, -0.35 * k, at.z + Math.cos(at.facing) * back);
+      legs.current.forEach((leg) => {
+        if (leg) leg.rotation.x = k;
+      });
+      arms.current.forEach((arm) => {
+        if (arm) arm.rotation.x = 1.5 * k;
+      });
+    }
+    if (does === "run") {
+      // On the treadmill's belt.
+      walking.current.position.y = 0.22;
+      swingLimbs(legs, arms, Math.sin(time * 14) * 0.8);
+    }
+    if (does === "bike") {
+      // On the saddle, pedalling, hands on the bars.
+      walking.current.position.y = 0.28;
+      const pedal = Math.sin(time * 6) * 0.45;
+      legs.current.forEach((leg, i) => {
+        if (leg) leg.rotation.x = 1 + (i ? -pedal : pedal);
+      });
+      arms.current.forEach((arm) => {
+        if (arm) arm.rotation.x = 1.2;
+      });
+    }
+  });
 
   const note = presenting
     ? "Presenting at the all-hands"
@@ -511,7 +671,7 @@ function Occupant({
   const spot: Point = seat ? [seat.x, seat.z] : chair;
 
   return (
-    <group {...events}>
+    <group {...personEvents(person, onHover, onSelect)}>
       {presenting && seat ? (
         <group position={[seat.x, 0.24, seat.z]} rotation={[0, seat.facing, 0]}>
           <StandingPerson person={person} accent={accent} legs={legs} arms={arms} />
@@ -521,9 +681,10 @@ function Occupant({
           <group ref={sitting} position={[spot[0], 0, spot[1]]} rotation={[0, seat ? seat.facing : 0, 0]}>
             <Person person={person} x={0} z={0} accent={accent} />
           </group>
-          {walks ? (
+          {moves ? (
             <group ref={walking} visible={false}>
-              <StandingPerson person={person} accent={accent} legs={legs} arms={arms} />
+              <StandingPerson person={person} accent={accent} legs={legs} arms={arms} cigarette={smoker ? cigarette : undefined} />
+              {smoker ? <Puff meshRef={puff} /> : null}
             </group>
           ) : null}
         </>
@@ -550,6 +711,84 @@ function routes(room: OfficeRoom, desk: OfficeDesk): [Point[], Point[]] {
     [chair, [chair[0], aisle], [corridor, aisle], [corridor, room.y + 1.3]],
     [chair, [chair[0], aisle], [corridor, aisle], [corridor, room.y + 1.75], [room.x + room.w - 2.6, room.y + 1.75]],
   ];
+}
+
+/**
+ * Somebody who does not need to time in, walking the floor (P17-13): the corridors,
+ * the rooms this viewer can see into, the canteen and the gym. A smoker's loop also
+ * goes out of the fire exit to the smoking area.
+ *
+ * Where they are comes from the clock and their id, like the cat and `Occupant`,
+ * so it costs no re-render. Starting partway round by id keeps two roamers from
+ * walking in step.
+ */
+function Roamer({
+  person,
+  accent,
+  stops,
+  smoker,
+  hovered,
+  openable,
+  onHover,
+  onSelect,
+}: {
+  person: OfficePerson;
+  accent: string;
+  stops: CatStop[];
+  smoker: boolean;
+  hovered: boolean;
+  openable: boolean;
+  onHover: (id: string | null) => void;
+  onSelect: (person: OfficePerson) => void;
+}) {
+  const trip = useMemo(() => timeline(stops, WALK_SPEED), [stops]);
+  const offset = hash(person.id);
+
+  const root = useRef<Group>(null);
+  const tag = useRef<Group>(null);
+  const legs = useRef<(Group | null)[]>([]);
+  const arms = useRef<(Group | null)[]>([]);
+  const cigarette = useRef<Group>(null);
+  const puff = useRef<Mesh>(null);
+
+  useFrame(({ clock }) => {
+    if (!root.current || !tag.current || trip.total <= 0) return;
+    const time = clock.elapsedTime;
+    const t = (time + offset) % trip.total;
+    const leg = legAt(trip, t);
+    if (!leg) return;
+
+    const at = onLeg(leg, t);
+    root.current.position.set(at.x, 0, at.z);
+    root.current.rotation.y = at.facing;
+    tag.current.position.set(at.x, 0.15, at.z);
+    swingLimbs(legs, arms, at.walking ? Math.sin(time * 9) * 0.55 : 0);
+
+    const smoking = "at" in leg && leg.does === "smoke";
+    if (cigarette.current) cigarette.current.visible = smoking;
+    if (puff.current) puff.current.visible = false;
+    if (smoking) smokeBeat(t - leg.start, arms, puff.current);
+  });
+
+  return (
+    <group {...personEvents(person, onHover, onSelect)}>
+      <group ref={root}>
+        <StandingPerson person={person} accent={accent} legs={legs} arms={arms} cigarette={smoker ? cigarette : undefined} />
+        {smoker ? <Puff meshRef={puff} /> : null}
+      </group>
+      <group ref={tag}>
+        <NameTag position={[0, 2.5, 0]} name={person.name} />
+        {hovered ? (
+          <HoverCard
+            person={person}
+            y={3.1}
+            note={smoker ? "Walking the floor, or out at the smoking area. No time-in needed." : "Walking the floor. No time-in needed."}
+            openable={openable}
+          />
+        ) : null}
+      </group>
+    </group>
+  );
 }
 
 /* -------------------------------------------------------------------------- */
@@ -868,9 +1107,9 @@ export function Office3D({
   // between — the long stays. Routes keep to the corridors: along the main one
   // between the rooms and the lounge, then along the hall in front of a row of
   // rooms, through the door, and to the water dispenser inside.
-  const catStops = useMemo<CatStop[]>(() => {
-    const spine = roomsW + HALL / 2;
-    const rooms: CatStop[] = layout.rooms.map((room) => {
+  const spine = roomsW + HALL / 2;
+  const floorTour = useCallback((visit: OfficeRoom[]): CatStop[] => {
+    const rooms: CatStop[] = visit.map((room) => {
       const hall = room.y + room.d + HALL / 2;
       const door = room.x + room.w / 2;
       const inside = room.y + room.d - 0.6;
@@ -887,8 +1126,102 @@ export function Office3D({
       ? { route: [[spine, (zone.from + zone.to) / 2], [loungeX + 3.2, (zone.from + zone.to) / 2]], stay: 30 }
       : null;
     const lounge = [canteen, gym ?? canteen];
-    return rooms.flatMap((room, i) => [room, lounge[i % 2]]);
-  }, [layout.rooms, roomsW, loungeX, depth]);
+    // Every room shut to this viewer: the lounge still makes a walk.
+    return rooms.length > 0 ? rooms.flatMap((room, i) => [room, lounge[i % 2]]) : lounge;
+  }, [spine, loungeX, depth]);
+  const catStops = useMemo(() => floorTour(layout.rooms), [floorTour, layout.rooms]);
+
+  // The same walk for whoever roams, minus the rooms this viewer sees closed: a
+  // figure inside one would be its name through the roof. A smoker's loop ends
+  // out of the fire exit, on the far side of the door `FireExit` draws.
+  const roamStops = useMemo(
+    () => floorTour(layout.rooms.filter((room) => !room.desks.every((desk) => desk.person.hidden))),
+    [floorTour, layout.rooms],
+  );
+  // Out of the fire exit onto the pad; `spot` keeps two smokers from standing in one place.
+  const smokeStop = useCallback(
+    (spot: number): CatStop => ({
+      route: [[spine, FIRE_EXIT_Z], [totalW + 1, FIRE_EXIT_Z], [totalW + 1, FIRE_EXIT_Z + (spot % 3) * 0.6 - 0.3]],
+      stay: 45,
+      does: "smoke",
+      facing: -Math.PI / 2,
+    }),
+    [spine, totalW],
+  );
+  const smokerStops = useMemo<CatStop[]>(() => [...roamStops, smokeStop(0)], [roamStops, smokeStop]);
+
+  // Everybody at a desk who can be seen gets a routine; a hidden person is only
+  // ever drawn in a seat, and a roamer has their own walk. Turns at the comfort
+  // room go by id, so they do not reshuffle as the list is re-read.
+  const routineUsers = everyone
+    .filter(({ desk }) => desk.person.status === "working" && !desk.person.hidden && !desk.person.roams)
+    .sort((a, b) => a.desk.person.id.localeCompare(b.desk.person.id));
+  const routineKey = routineUsers.map(({ desk }) => desk.person.id).join(",");
+  const routines = useMemo(() => {
+    const span = canteenSpan(depth);
+    const seats = canteenSeats(loungeX, span.from, span.to);
+    const zone = gymZone(depth);
+    const count = routineUsers.length;
+    const out = new Map<string, Routine>();
+
+    routineUsers.forEach(({ room, desk }, index) => {
+      // Out of the desks, through the room's door, along its hall to the main corridor.
+      const [water, printer] = routes(room, desk);
+      const chair = water[0];
+      const inside = room.y + room.d - 0.6;
+      const door = room.x + room.w / 2;
+      const hall = room.y + room.d + HALL / 2;
+      const toCorridor: FloorPoint[] = [
+        chair,
+        [chair[0], desk.y + 2.55],
+        [room.x + 9.6, desk.y + 2.55],
+        [room.x + 9.6, inside],
+        [door, inside],
+        [door, hall],
+        [spine, hall],
+      ];
+      const trip = (stop: CatStop) => timeline([{ ...stop, route: [...toCorridor, ...stop.route] }], WALK_SPEED);
+
+      const others: Trip[] = [
+        timeline([{ route: water, stay: 6 }], WALK_SPEED),
+        timeline([{ route: printer, stay: 6 }], WALK_SPEED),
+      ];
+      if (seats.length > 0) {
+        const seat = seats[index % seats.length];
+        others.push(trip({ route: [[spine, seat.z], [seat.x, seat.z]], stay: 40, does: "sit", facing: seat.facing }));
+      }
+      if (zone) {
+        // The open row of the mat for squats and curls, then one of the machines,
+        // walked up to from behind so they end up facing its console.
+        const z = zone.from + 2.8;
+        const mat: FloorPoint[] = [[spine, z], [loungeX + 1.2 + (index % 5) * 1.2, z]];
+        others.push(trip({ route: mat, stay: 40, does: "squat" }), trip({ route: mat, stay: 40, does: "curl" }));
+        const machine = GYM_MACHINES[index % GYM_MACHINES.length];
+        const mx = loungeX + machine.x;
+        const mz = zone.from + machine.z;
+        others.push(trip({ route: [[spine, z], [mx, z], [mx, mz]], stay: 45, does: machine.does }));
+      }
+      if (isSmoker(desk.person)) {
+        // Twice in the rotation: a smoker goes out more than they go to the gym.
+        others.push(trip(smokeStop(index)), trip(smokeStop(index)));
+      }
+
+      out.set(desk.person.id, {
+        period: bathroomPeriod(count),
+        bathroomArrive: index * BATHROOM_SLOT,
+        bathroom: trip({
+          // To the end of the main corridor, and in through the door in the back wall.
+          route: [[spine, 0.6], [spine, -1.6]],
+          stay: BATHROOM_STAY,
+          does: "inside",
+        }),
+        others,
+      });
+    });
+    return out;
+    // `routineUsers` is rebuilt every render; `routineKey` and the layout are what change it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [routineKey, layout.rooms, depth, loungeX, spine, totalW, smokeStop]);
 
   // The scene is built in grid units from the origin; centre it on the world.
   const offset = useMemo<[number, number, number]>(() => [-totalW / 2, 0, -depth / 2], [totalW, depth]);
@@ -955,7 +1288,9 @@ export function Office3D({
 
           {/* The lobby inside the entrance: carpets, security, turnstiles, visitors, CCTV. */}
           <Lobby x0={hallW + 0.4} x1={roomsW - 0.2} z0={layout.depth + 0.4} z1={depth - 0.1} entranceX={entranceX} />
-          <FireExit x={totalW + 0.15} z={8.8} />
+          <FireExit x={totalW + 0.15} z={FIRE_EXIT_Z} />
+          <SmokingArea x={totalW + 0.3} z={FIRE_EXIT_Z} />
+          <ComfortRoom x={spine} count={routineUsers.length} />
           <Extinguisher x={entranceX - 1.7} z={depth - 0.5} />
           <Extinguisher x={totalW - 0.4} z={8.15} />
           <Extinguisher x={loungeX + 0.5} z={2.6} />
@@ -967,13 +1302,27 @@ export function Office3D({
               room full, or this machine's clock not yet at the hour — they would
               be at a desk inside a closed room, their name through the roof. */}
           {everyone.map(({ room, desk }) =>
-            desk.person.status === "working" && (!desk.person.hidden || away.has(desk.person.id)) ? (
+            // A seat beats the walk: a roamer who is timed in still goes to lunch and the all-hands.
+            desk.person.roams && !away.has(desk.person.id) ? (
+              <Roamer
+                key={desk.person.id}
+                person={desk.person}
+                accent={DEPT[room.colorIndex % DEPT.length].sign}
+                stops={isSmoker(desk.person) ? smokerStops : roamStops}
+                smoker={isSmoker(desk.person)}
+                hovered={hoveredId === desk.person.id}
+                openable={canOpen(desk.person.id)}
+                onHover={setHoveredId}
+                onSelect={onSelect}
+              />
+            ) : desk.person.status === "working" && (!desk.person.hidden || away.has(desk.person.id)) ? (
               <Occupant
                 key={desk.person.id}
                 person={desk.person}
                 accent={DEPT[room.colorIndex % DEPT.length].sign}
                 chair={[desk.x + 1.1, desk.y + 1.6]}
-                trips={routes(room, desk)}
+                routine={routines.get(desk.person.id) ?? null}
+                smoker={isSmoker(desk.person)}
                 seat={away.get(desk.person.id) ?? null}
                 presenting={desk.person.id === presenter}
                 hovered={hoveredId === desk.person.id}

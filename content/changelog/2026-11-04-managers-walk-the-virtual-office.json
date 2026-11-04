@@ -1,0 +1,21 @@
+{
+  "date": "2026-11-04",
+  "kind": "added",
+  "area": "DTR",
+  "title": "People move around the virtual office",
+  "description": "Everyone timed in now gets up during the day: to the comfort room, one at a time, to the canteen, and to the gym for squats, curls, the treadmill and the bikes. Managers and business managers do not need to time in, so during office hours they walk the floor instead of sitting at an empty desk.",
+  "items": [
+    "A new comfort room at the end of the main corridor, with a lamp over the door that shows when it is taken",
+    "A new smoking area outside the fire exit, where Amier, Kier and Ace step out now and then",
+    "Hair now follows the gender on your staff record: short for men, long for women. If yours is not set, your hair stays as it was",
+    "Raiza dresses in pink",
+    "Everyone sees managers and business managers walk past, by name. Their times stay private as before",
+    "They walk on weekdays from 8 AM to 6 PM, and not while on approved leave",
+    "None of this touches the DTR, so somebody who has not timed in still reads as not timed in on their record"
+  ],
+  "refs": [
+    "P17-13",
+    "P17-14"
+  ],
+  "pending": "Two database updates: paste supabase/migrations/20261104090000_p17_13_office_roamers.sql into the Supabase SQL editor, then 20261104100000_p17_14_office_hair.sql. Until then managers do not walk and hair stays as it was. The rest works without them."
+}

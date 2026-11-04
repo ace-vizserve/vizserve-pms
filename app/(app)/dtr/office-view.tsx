@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth/client-auth";
 import { departmentScopeFilter } from "@/lib/auth/rules";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { formatAppTime } from "@/lib/dates";
-import { layoutOffice, officeActivity, officeStatus, type OfficePerson } from "@/lib/office";
+import { isOfficeHours, layoutOffice, officeActivity, officeStatus, type OfficePerson } from "@/lib/office";
 import { browserClient } from "@/lib/query/browser-client";
 import { fetchOfficeToday } from "@/lib/query/fetchers/dtr";
 import { fetchActiveDepartments, fetchDirectory } from "@/lib/query/fetchers/task";
@@ -139,7 +139,7 @@ function Office({ sceneClass }: { sceneClass?: string }) {
         <span className="text-muted-foreground"> · right now</span>
       </h2>
       <p className="text-xs text-muted-foreground">
-        Everyone timed in is at their desk — including anyone who forgot to time out. Hover a desk for
+        Everyone timed in is at their desk or on a break — including anyone who forgot to time out. Hover a desk for
         details{seesAll ? "; click it to open their DTR" : ""}.
       </p>
     </div>
@@ -195,6 +195,8 @@ function Office({ sceneClass }: { sceneClass?: string }) {
       now,
     }),
     hidden: "hidden" in person ? person.hidden : false,
+    roams: "roams" in person && person.roams && isOfficeHours(now),
+    longHair: "longHair" in person ? person.longHair : null,
   }));
   // The counts are of the people the viewer can actually see.
   const shown = people.filter((person) => !person.hidden);
@@ -206,6 +208,9 @@ function Office({ sceneClass }: { sceneClass?: string }) {
 
   const count = (status: OfficePerson["status"]) => shown.filter((person) => person.status === status).length;
   const late = shown.filter((person) => person.longShift).length;
+  const roaming = people.filter((person) => person.roams).length;
+  // Somebody walking past is not "not in", whatever their DTR says.
+  const notIn = shown.filter((person) => person.status === "out" && !person.roams).length;
 
   return (
     <>
@@ -216,7 +221,8 @@ function Office({ sceneClass }: { sceneClass?: string }) {
         <Legend color="bg-success" label={`${count("working")} working`} />
         <Legend color="bg-muted-foreground" label={`${count("gone")} gone home`} />
         <Legend color="bg-warning" label={`${count("leave")} on leave`} />
-        <Legend color="bg-border" label={`${count("out")} not in`} />
+        <Legend color="bg-border" label={`${notIn} not in`} />
+        {roaming > 0 ? <Legend color="bg-primary" label={`${roaming} walking the floor`} /> : null}
         {late > 0 ? <span className="text-warning">{late} still timed in after 10 hours</span> : null}
         {activity === "lunch" ? <span className="font-medium">Lunch time — everyone is in the canteen</span> : null}
         {activity === "allhands" ? <span className="font-medium">Friday all-hands — everyone is in the all-hands room until 5 PM</span> : null}

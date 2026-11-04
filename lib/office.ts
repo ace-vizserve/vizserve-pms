@@ -45,6 +45,14 @@ export type OfficePerson = {
    * (P17-08). Even then their times stay withheld and their room stays closed.
    */
   hidden?: boolean;
+  /**
+   * Walks the floor rather than sitting at a desk, timed in or not (P17-13):
+   * a Manager or Business Manager, during `isOfficeHours`. It changes where they
+   * are drawn and nothing else — `status` still says what the DTR says.
+   */
+  roams?: boolean;
+  /** From the staff record (P17-14). Null or absent: not set, and they keep the default hair. */
+  longHair?: boolean | null;
 };
 
 export function officeStatus({
@@ -198,6 +206,8 @@ export function layoutOffice(
 
 /** One line for a desk's hover card and its accessible name. */
 export function describeOfficePerson(person: OfficePerson): string {
+  // Their DTR is withheld from this viewer, and "not timed in" would be a claim about it.
+  if (person.roams && person.hidden) return "on the floor today";
   switch (person.status) {
     case "working":
       // Another department's, seen in a shared room: in, and no more than that.
@@ -241,7 +251,7 @@ export function officeTheme(name: string): OfficeTheme {
  */
 export type OfficeActivity = "desk" | "lunch" | "allhands";
 
-export function officeActivity(now: Date): OfficeActivity {
+function manilaClock(now: Date): { weekday: string; minutes: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
     weekday: "short",
@@ -250,11 +260,57 @@ export function officeActivity(now: Date): OfficeActivity {
     hourCycle: "h23",
   }).formatToParts(now);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  const minutes = Number(get("hour")) * 60 + Number(get("minute"));
+  return { weekday: get("weekday"), minutes: Number(get("hour")) * 60 + Number(get("minute")) };
+}
 
-  if (get("weekday") === "Fri" && minutes >= 16 * 60 && minutes < 17 * 60) return "allhands";
+export function officeActivity(now: Date): OfficeActivity {
+  const { weekday, minutes } = manilaClock(now);
+
+  if (weekday === "Fri" && minutes >= 16 * 60 && minutes < 17 * 60) return "allhands";
   if (minutes >= 12 * 60 && minutes < 13 * 60) return "lunch";
   return "desk";
+}
+
+/** Weekdays, 8 AM to 6 PM in Manila: when somebody who does not time in is taken to be about. */
+export function isOfficeHours(now: Date): boolean {
+  const { weekday, minutes } = manilaClock(now);
+  return weekday !== "Sat" && weekday !== "Sun" && minutes >= 8 * 60 && minutes < 18 * 60;
+}
+
+/**
+ * Who takes smoke breaks in the office: Amier, Kier and Ace, at the user's request
+ * (P17-13). Read off the first name because this is a joke about three people, not
+ * a rule, and a column for it would be absurd.
+ */
+export function isSmoker(person: Pick<OfficePerson, "name">): boolean {
+  return /^(amier|kier|ace)\b/i.test(person.name);
+}
+
+/** Raiza dresses in pink, at the user's request. A joke about one person, like `isSmoker`. */
+export function wearsPink(person: Pick<OfficePerson, "name">): boolean {
+  return /^raiza\b/i.test(person.name);
+}
+
+/** Seconds of the comfort room each person gets, out of each slot of `BATHROOM_SLOT`. */
+export const BATHROOM_STAY = 20;
+export const BATHROOM_SLOT = 60;
+/** Fewer people than this still wait as long, so a small team is not always in there. */
+const BATHROOM_MIN_SLOTS = 8;
+
+/** How often, in seconds, each of `count` people gets a turn. */
+export function bathroomPeriod(count: number): number {
+  return BATHROOM_SLOT * Math.max(count, BATHROOM_MIN_SLOTS);
+}
+
+/**
+ * Whether somebody is inside at `time` seconds. One at a time holds by construction:
+ * person `i` of `count` is inside only from `i * BATHROOM_SLOT` for `BATHROOM_STAY`
+ * in each period, and those windows never touch.
+ */
+export function bathroomIsTaken(time: number, count: number): boolean {
+  if (count <= 0) return false;
+  const inPeriod = ((time % bathroomPeriod(count)) + bathroomPeriod(count)) % bathroomPeriod(count);
+  return inPeriod < count * BATHROOM_SLOT && inPeriod % BATHROOM_SLOT < BATHROOM_STAY;
 }
 
 /**

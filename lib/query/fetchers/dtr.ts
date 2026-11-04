@@ -741,9 +741,11 @@ export type OfficeToday = {
   /**
    * `hidden`: in a department whose room the viewer sees closed — name withheld,
    * except at lunch and the all-hands. `inSharedRoom`: one of those is on and they are in (P17-08).
+   * `roams`: walks the floor without needing to time in (P17-13).
+   * `longHair`: from the staff record, null when not set or not sent (P17-14).
    */
   people:
-    | { id: string; full_name: string; primary_department_id: string | null; hidden: boolean; inSharedRoom: boolean }[]
+    | { id: string; full_name: string; primary_department_id: string | null; hidden: boolean; inSharedRoom: boolean; roams: boolean; longHair: boolean | null }[]
     | null;
   departments: { id: string; name: string }[] | null;
 };
@@ -789,6 +791,8 @@ export async function fetchOfficeToday(client: TimesheetReadClient): Promise<Off
         primary_department_id: row.department_id,
         hidden: !row.visible,
         inSharedRoom: row.in_shared_room,
+        roams: row.roams,
+        longHair: row.long_hair,
       })),
       departments: [...departments].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name)),
     };

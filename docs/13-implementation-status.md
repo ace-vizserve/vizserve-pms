@@ -2702,3 +2702,15 @@ anonymous forms too.
 ## P17-12 — The assistant catches up (3 Nov 2026)
 
 The assistant is written answers in `lib/assistant/guide.ts`, not a language model, so nothing updates it but an edit. It had not been touched since 27 Oct. It now covers form deadlines, reminders and one answer per person (P17-10, P17-11), the DTR heat map, the virtual office (opens `?view=office` after its tour), the time-in streak, and announcement reactions and editing. New `data-tour` targets: `office`, `dtr-year`, `streak`, `post-announcement`. Unit-tested for routing and selector shape; the tour itself has not been run in a browser.
+
+## P17-13 — Managers walk the virtual office (4 Nov 2026)
+
+`vizserve_pms_office_presence()` gains `roams`: holds Manager or Business Manager (role or tick) and is not on approved leave. A roamer's name goes to every viewer; times, leave and `visible` do not change. The office draws them walking (`Roamer` in `office-3d.tsx`) on weekdays 8 AM to 6 PM Manila (`isOfficeHours`, checked in the app, not the database), and a timed-in roamer still takes a seat at lunch and the all-hands. They are left out of the "not in" count. The DTR is not touched.
+
+`isSmoker` in `lib/office.ts` matches the first names Amier, Kier and Ace, at the user's request. The smoking area sits outside the fire exit (`office-smoking.tsx`); the comfort room is behind a door at the back end of the main corridor (`office-comfort-room.tsx`). Everyone timed in, visible and not roaming now has a routine (`Occupant` in `office-3d.tsx`): a turn at the comfort room, strictly one at a time (`bathroomIsTaken`), plus one other trip per cycle (water, printer, canteen, squats, curls, treadmill or bike, smoke). This needs no migration. Every such person now mounts a standing figure, where only one in three did before, so the scene carries more meshes.
+
+**Migration written, not confirmed pasted.** `20261104090000_p17_13_office_roamers.sql`. Not checked on the real database or in a browser; who actually holds these roles was not read, because the lookup against the live project was refused.
+
+## P17-14 — Hair from the staff record (4 Nov 2026)
+
+`vizserve_pms_office_presence()` gains `long_hair`: true for FEMALE, false for MALE, null when `gender` is not set or the name is not being sent. This is the first time gender reaches other staff, as a drawing. Nothing guesses from a name (see P7-32); not set keeps the original hair. `wearsPink` in `lib/office.ts` dresses Raiza in pink. **Migration written, not confirmed pasted:** `20261104100000_p17_14_office_hair.sql`, after P17-13. Not checked on the real database or in a browser.

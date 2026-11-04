@@ -46,6 +46,49 @@ describe("vizserve_pms_office_presence", () => {
 // file's: lunch and the all-hands open the name of whoever is in, and nothing else.
 const SHARED = readFileSync(join(process.cwd(), "supabase/migrations/20261102090000_p17_08_office_gatherings.sql"), "utf8");
 
+// P17-13 replaces it again: a Manager or Business Manager's name goes to everyone,
+// and still nothing else about them.
+const ROAMERS = readFileSync(join(process.cwd(), "supabase/migrations/20261104090000_p17_13_office_roamers.sql"), "utf8");
+
+describe("vizserve_pms_office_presence with roamers", () => {
+  it("keeps the grants the drop took away", () => {
+    expect(ROAMERS).toMatch(/revoke all on function vizserve_pms_office_presence\(\) from public, anon;/);
+    expect(ROAMERS).toMatch(/grant execute on function vizserve_pms_office_presence\(\) to authenticated;/);
+  });
+
+  it("opens only the name for a roamer, not the times, the leave or `visible`", () => {
+    expect(ROAMERS).toMatch(/case when v\.visible or s\.in_shared_room or r\.roams then p\.full_name end/);
+    expect(ROAMERS).toMatch(/case when v\.visible then t\.time_in end/);
+    expect(ROAMERS).toMatch(/case when v\.visible then t\.time_out end/);
+    expect(ROAMERS).toMatch(/case when v\.visible then y\.time_in end/);
+    expect(ROAMERS).toMatch(/v\.visible and l\.on_leave/);
+    expect(ROAMERS).toMatch(/coalesce\(\s+me\.sees_all\s+or p\.id = me\.id\s+or \(me\.primary_department_id is not null and p\.primary_department_id = me\.primary_department_id\),\s+false\s+\) as visible/);
+  });
+
+  it("is keyed on the roles held, and stops for approved leave", () => {
+    expect(ROAMERS).toMatch(/ur\.role in \('manager', 'business_manager'\)/);
+    expect(ROAMERS).toMatch(/p\.is_business_manager/);
+    expect(ROAMERS).toMatch(/not l\.on_leave/);
+  });
+});
+
+// P17-14 replaces it once more: hair follows the staff record, and only where the name goes.
+const HAIR = readFileSync(join(process.cwd(), "supabase/migrations/20261104100000_p17_14_office_hair.sql"), "utf8");
+
+describe("vizserve_pms_office_presence with hair", () => {
+  it("keeps the grants and the roamer rule", () => {
+    expect(HAIR).toMatch(/grant execute on function vizserve_pms_office_presence\(\) to authenticated;/);
+    expect(HAIR).toMatch(/case when v\.visible or s\.in_shared_room or r\.roams then p\.full_name end/);
+    expect(HAIR).toMatch(/case when v\.visible then t\.time_in end/);
+  });
+
+  it("sends hair only where the name goes, and a boolean rather than the gender", () => {
+    expect(HAIR).toMatch(/when v\.visible or s\.in_shared_room or r\.roams then\s+case p\.gender when 'FEMALE' then true when 'MALE' then false end/);
+    const returns = HAIR.slice(HAIR.indexOf("returns table"), HAIR.indexOf("language sql"));
+    expect(returns).not.toMatch(/gender/);
+  });
+});
+
 describe("vizserve_pms_office_presence in the shared rooms", () => {
   it("keeps the grants the drop took away", () => {
     expect(SHARED).toMatch(/revoke all on function vizserve_pms_office_presence\(\) from public, anon;/);

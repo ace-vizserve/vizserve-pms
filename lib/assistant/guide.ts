@@ -237,13 +237,14 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     then: "/dtr?view=office",
     keywords: [
       "virtual office", "3d office", "office", "who is timed in", "sino nasa office",
-      "canteen", "all hands",
+      "canteen", "all hands", "smoking area", "comfort room", "bathroom",
     ],
     steps: [
       { text: "Virtual office swaps the DTR table for a 3D office, with one room per department.", target: tour("office"), optional: true },
-      { text: "Everyone timed in right now is sitting at their desk." },
+      { text: "Everyone timed in right now is at their desk, or off to the comfort room, the canteen or the gym for a workout." },
       { text: "You can go into your own room, the all-hands room and the shared spaces. Team leaders and above can look into every room." },
       { text: "At lunch, 12 to 1, and at the all-hands, Fridays 4 to 5 PM, everyone sees the same room." },
+      { text: "Managers and business managers do not need to time in, so during office hours they walk the floor instead of sitting at a desk." },
       { text: "I'll open it for you now." },
     ],
   },

@@ -451,4 +451,8 @@ export const officePresenceRowSchema = z.object({
   // P17-08. Optional as well: P17-08 is pasted by hand, and until it is the
   // function answers without this column — that must not take the office down.
   in_shared_room: z.boolean().nullish().transform((value) => value === true),
+  // P17-13. Optional for the same reason.
+  roams: z.boolean().nullish().transform((value) => value === true),
+  // P17-14. Null is a staff record with no gender set, or a name not sent.
+  long_hair: z.boolean().nullish().transform((value) => value ?? null),
 });

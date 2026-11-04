@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DESK_COLS, assignSeats, describeOfficePerson, layoutOffice, officeActivity, officeStatus, officeTheme, type OfficePunch } from "@/lib/office";
+import { BATHROOM_SLOT, BATHROOM_STAY, DESK_COLS, assignSeats, bathroomIsTaken, bathroomPeriod, describeOfficePerson, isOfficeHours, isSmoker, layoutOffice, wearsPink, officeActivity, officeStatus, officeTheme, type OfficePunch } from "@/lib/office";
 
 const today = "2026-10-31";
 const yesterday = "2026-10-30";
@@ -120,6 +120,68 @@ describe("officeTheme", () => {
     ["Operations", "plain"],
   ] as const)("%s → %s", (name, theme) => {
     expect(officeTheme(name)).toBe(theme);
+  });
+});
+
+describe("roaming", () => {
+  const at = (iso: string) => new Date(`${iso}+08:00`);
+
+  it("is office hours on a weekday from 8 to 6, in Manila", () => {
+    expect(isOfficeHours(at("2026-11-04T08:00:00"))).toBe(true); // Wednesday
+    expect(isOfficeHours(at("2026-11-04T17:59:00"))).toBe(true);
+    expect(isOfficeHours(at("2026-11-04T18:00:00"))).toBe(false);
+    expect(isOfficeHours(at("2026-11-04T07:59:00"))).toBe(false);
+    expect(isOfficeHours(at("2026-11-07T10:00:00"))).toBe(false); // Saturday
+    expect(isOfficeHours(at("2026-11-08T10:00:00"))).toBe(false); // Sunday
+  });
+
+  it("makes Amier, Kier and Ace the smokers, by first name only", () => {
+    expect(isSmoker({ name: "Amier Ordonez" })).toBe(true);
+    expect(isSmoker({ name: "Kier Santos" })).toBe(true);
+    expect(isSmoker({ name: "Ace Guevarra" })).toBe(true);
+    expect(isSmoker({ name: "Joel Santos" })).toBe(false);
+    expect(isSmoker({ name: "Grace Ace" })).toBe(false);
+    expect(isSmoker({ name: "Amierah Cruz" })).toBe(false);
+    expect(isSmoker({ name: "" })).toBe(false);
+  });
+
+  it("makes no claim about the DTR of a roamer whose DTR is withheld", () => {
+    const base = officeStatus({ person, punches: [], onLeave: false, today, yesterday, now });
+    expect(describeOfficePerson({ ...base, roams: true, hidden: true })).toBe("on the floor today");
+    expect(describeOfficePerson({ ...base, roams: true, hidden: false })).toBe("not timed in today");
+  });
+});
+
+describe("wearsPink", () => {
+  it("dresses Raiza in pink, by first name only", () => {
+    expect(wearsPink({ name: "Raiza Cruz" })).toBe(true);
+    expect(wearsPink({ name: "Maria Raiza" })).toBe(false);
+    expect(wearsPink({ name: "" })).toBe(false);
+  });
+});
+
+describe("the comfort room", () => {
+  it("gives each person a turn that never overlaps the next", () => {
+    expect(BATHROOM_STAY).toBeLessThan(BATHROOM_SLOT);
+    const count = 12;
+    const period = bathroomPeriod(count);
+    expect(period).toBe(count * BATHROOM_SLOT);
+    for (let i = 0; i < count; i++) {
+      const next = (i * BATHROOM_SLOT + BATHROOM_STAY) % period;
+      expect(next).toBeLessThanOrEqual(((i + 1) * BATHROOM_SLOT) % period || period);
+    }
+  });
+
+  it("is taken during a turn and free between turns", () => {
+    expect(bathroomIsTaken(5, 3)).toBe(true);
+    expect(bathroomIsTaken(BATHROOM_STAY + 1, 3)).toBe(false);
+    expect(bathroomIsTaken(BATHROOM_SLOT + 5, 3)).toBe(true);
+    // Three people on eight slots: the fourth slot has nobody in it.
+    expect(bathroomIsTaken(BATHROOM_SLOT * 3 + 5, 3)).toBe(false);
+  });
+
+  it("is never taken with nobody in", () => {
+    expect(bathroomIsTaken(5, 0)).toBe(false);
   });
 });
 
