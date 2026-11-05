@@ -7,11 +7,11 @@ import { DataTable, type Column } from "@/components/data-table";
 import { useColumnVisibility } from "@/components/data-table-columns";
 import { EmptyState } from "@/components/empty-state";
 import { Chip } from "@/components/status-badge";
-import { buttonVariants } from "@/components/ui/button";
 import { formatDate, formatDuration } from "@/lib/dates";
 import { FORM_PURPOSE_LABELS, type FormPurpose } from "@/lib/schemas/forms";
 
 import { FormRowActions } from "./form-lifecycle";
+import { NewFormButton } from "./new-form-button";
 
 /**
  * P7-64 — the columns, in a client component, because the table is one now.
@@ -280,9 +280,7 @@ export function FormsTable({
           title="No forms yet"
           description="A form defines what a client must tell you before the team will accept the work. Every required field is a question you will never have to chase."
           action={
-            <Link href={purpose === "INTERNAL" ? "/forms" : "/requests/forms/new"} className={buttonVariants({ size: "sm", variant: "outline" })}>
-              Create the first form
-            </Link>
+            <NewFormButton purpose={purpose} label="Create the first form" variant="outline" />
           }
         />
       }

@@ -1,20 +1,26 @@
 import { PageShell } from "@/components/page-shell";
 import { Skeleton } from "@/components/ui/skeleton";
 
-/**
- * The card grid, before it arrives. Same shape as the real list so the page
- * does not reflow when the forms land.
- */
+/** The panel of rows, before it arrives. Same shape, so the page does not reflow. */
 export default function Loading() {
   return (
     <PageShell>
-      <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" aria-hidden>
-        {Array.from({ length: 6 }).map((_, index) => (
-          <li key={index}>
-            <Skeleton className="h-24 w-full" />
-          </li>
-        ))}
-      </ul>
+      <div aria-hidden className="overflow-hidden rounded-lg border bg-card">
+        <div className="border-b px-4 py-3">
+          <Skeleton className="h-5 w-32" />
+        </div>
+        <div className="divide-y">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="flex items-center gap-3 px-4 py-3.5">
+              <Skeleton className="size-8 shrink-0" />
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <Skeleton className="h-4 w-48 max-w-full" />
+                <Skeleton className="h-3 w-32 max-w-full" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </PageShell>
   );
 }

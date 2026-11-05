@@ -237,7 +237,8 @@ describe("departmentShapeScope — the picker on the structure screens", () => {
 });
 
 describe("nav gating — `alsoDeptAdmin` is an OR, where `requiresDeptAdmin` is an AND", () => {
-  const formsRow = NAV_ITEMS.find((item) => item.href === "/forms");
+  // A child since P17-17, under Surveys & Quizzes. The floor on it is unchanged.
+  const formsRow = NAV_ITEMS.flatMap((item) => item.children ?? []).find((child) => child.href === "/forms");
 
   it("marks Forms as reachable through the tick without lowering its floor", () => {
     // ⚠️ IF THIS FAILED BECAUSE SOMEBODY SET `minRole: "member",
@@ -250,7 +251,15 @@ describe("nav gating — `alsoDeptAdmin` is an OR, where `requiresDeptAdmin` is 
   });
 
   function hrefs(role: Role, isDeptAdmin: boolean) {
-    return visibleNavItems(role, { isDeptAdmin }).map((item) => item.href);
+    // Children count: the builder is one now, under Surveys & Quizzes.
+    return [
+      ...new Set(
+        visibleNavItems(role, { isDeptAdmin }).flatMap((item) => [
+          item.href,
+          ...(item.children ?? []).map((child) => child.href),
+        ]),
+      ),
+    ];
   }
 
   it("shows Forms to a MEMBER holding the tick", () => {
@@ -267,10 +276,34 @@ describe("nav gating — `alsoDeptAdmin` is an OR, where `requiresDeptAdmin` is 
 
   it("does not let the tick open anything else in the rail", () => {
     // ⛔ THE BOUNDARY, as the sidebar sees it. A member holding the tick gets
-    // exactly two rows more than a member without it: surveys and request forms.
+    // exactly two links more than a member without it: the builder and requests.
     const withTick = hrefs("member", true);
     const without = hrefs("member", false);
-    expect(withTick.filter((href) => !without.includes(href))).toEqual(["/forms", "/requests/forms/new"]);
+    expect(withTick.filter((href) => !without.includes(href))).toEqual(["/forms", "/requests"]);
+  });
+
+  it("shows the builder under Surveys & Quizzes only to those who can open it", () => {
+    const row = (role: Role, isDeptAdmin: boolean) =>
+      visibleNavItems(role, { isDeptAdmin }).find((item) => item.label === "Surveys & Quizzes");
+
+    const both = ["/respond", "/forms"];
+    expect(row("team_leader", false)?.children?.map((child) => child.href)).toEqual(both);
+    expect(row("member", true)?.children?.map((child) => child.href)).toEqual(both);
+    // One child left, so a plain row that opens what they have to answer.
+    expect(row("member", false)?.children).toBeUndefined();
+    expect(row("member", false)?.href).toBe("/respond");
+  });
+
+  it("shows a lead both Client requests children and the tick only a plain row", () => {
+    const row = (role: Role, isDeptAdmin: boolean) =>
+      visibleNavItems(role, { isDeptAdmin }).find((item) => item.href === "/requests");
+
+    expect(row("team_leader", false)?.children?.map((child) => child.href)).toEqual([
+      "/requests",
+      "/requests/forms",
+    ]);
+    // The tick reads no requests, so the Requests child must not survive for it.
+    expect(row("member", true)?.children).toBeUndefined();
   });
 
   it("keeps every company-wide admin screen out of reach of the tick", () => {

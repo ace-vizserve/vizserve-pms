@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ArrowLeft, FilePenLine } from "lucide-react";
+import { ArrowLeft, EyeOff, FilePenLine, UserRound } from "lucide-react";
 
+import { BreadcrumbTrail } from "@/components/app-shell/dynamic-breadcrumb";
 import { EmptyState } from "@/components/empty-state";
 import { PageShell } from "@/components/page-shell";
 import { QueryError } from "@/components/query-error";
@@ -10,13 +11,13 @@ import { buttonVariants } from "@/components/ui/button";
 import { requireAuthContext } from "@/lib/auth/authorization";
 import { formatDate } from "@/lib/dates";
 import { isFormClosed, readFormDeadlines } from "@/lib/form-builder/deadline";
-import { splitCanvasFields } from "@/lib/form-builder/canvas";
+import { isDisplayOnly, splitCanvasFields } from "@/lib/form-builder/canvas";
 import { FormSchemaError, parseFormSchema } from "@/lib/form-builder/schema";
 import { createClient } from "@/utils/supabase/server";
 
 import { RespondForm } from "./respond-form";
 
-export const metadata: Metadata = { title: "Fill a form" };
+export const metadata: Metadata = { title: "To answer" };
 
 /**
  * P7-66 Phase 4b — ANSWERING ONE INTERNAL FORM.
@@ -68,7 +69,7 @@ export default async function RespondToFormPage({
   // of them is worth reporting to support.
   if (error) {
     return (
-      <PageShell className="max-w-3xl">
+      <PageShell className="mx-auto max-w-5xl">
         <QueryError what="this form" message={error.message} />
       </PageShell>
     );
@@ -92,7 +93,7 @@ export default async function RespondToFormPage({
     });
 
     return (
-      <PageShell className="max-w-3xl">
+      <PageShell className="mx-auto max-w-5xl">
         <QueryError
           what="this form"
           message="Its questions could not be read. Tell whoever set it up."
@@ -106,10 +107,17 @@ export default async function RespondToFormPage({
    * own reader of the same distinction, used here rather than restated so the
    * two cannot disagree about what "archived" means.
    */
-  const activeQuestionCount = splitCanvasFields(schema).active.length;
+  const activeQuestionCount = splitCanvasFields(schema).active.filter(
+    (field) => !isDisplayOnly(field.entity.type),
+  ).length;
 
   const closesOn = (await readFormDeadlines(supabase, [form.id]))?.get(form.id) ?? null;
   const closed = isFormClosed(closesOn);
+  const backToList = (
+    <Link href="/respond" className={buttonVariants({ variant: "outline", size: "sm" })}>
+      Back to To answer
+    </Link>
+  );
 
   // P17-11. A failed read, or the function not being pasted yet, draws the form;
   // the trigger is what refuses a second answer either way.
@@ -117,27 +125,48 @@ export default async function RespondToFormPage({
     p_form_id: form.id,
   });
 
+  // Whether the form itself is on the page. The promise about names, the deadline and
+  // the question count all describe answering it, so they go when that is not on offer.
+  const answerable = !alreadyAnswered && !closed && activeQuestionCount > 0;
+
   return (
     // A reading measure, unlike the list pages: this is a form to fill in top
     // to bottom, and a question that runs the width of an ultrawide monitor is
-    // harder to answer, not easier. `cn` is tailwind-merge, so this replaces
+    // harder to answer, not easier. Centred, so a wide screen does not leave the
+    // whole void on one side. `cn` is tailwind-merge, so this replaces
     // PageShell's own width rather than fighting it.
-    <PageShell className="max-w-3xl">
-      <div className="flex items-start gap-3">
-        <Link href="/respond" className={buttonVariants({ variant: "outline", size: "sm" })}>
-          <ArrowLeft />
-          All forms
-        </Link>
-      </div>
+    <PageShell className="mx-auto max-w-5xl">
+      {/* The form's name, not its slug, which is what the path would give. */}
+      <BreadcrumbTrail items={[{ label: "To answer", href: "/respond" }, { label: form.name }]} />
 
+      <Link
+        href="/respond"
+        className="inline-flex w-fit items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="size-3.5" />
+        To answer
+      </Link>
+
+      {/* The same panel as the form under it, so the two read as one page. */}
+      <div className="space-y-4 rounded-lg border bg-card p-6 grade-surface shadow-raised-lg">
       <div className="space-y-1">
         <h1 className="text-xl font-semibold tracking-[-0.022em]">{form.name}</h1>
         {form.description ? (
           <p className="text-sm leading-relaxed text-foreground-muted">{form.description}</p>
         ) : null}
-        {closesOn && !closed ? (
-          <p className="text-sm font-medium">Please answer by {formatDate(closesOn)}.</p>
+        {answerable ? (
+          <p className="text-sm text-muted-foreground tabular-nums">
+            {activeQuestionCount} {activeQuestionCount === 1 ? "question" : "questions"}
+            {closesOn ? (
+              <>
+                {" · "}
+                <span className="font-medium text-foreground">Please answer by {formatDate(closesOn)}</span>
+              </>
+            ) : null}
+          </p>
         ) : null}
+      </div>
+
         {/*
           ⚠️ SAID BEFORE THEY ANSWER, NOT AFTER — AND SAID BOTH WAYS.
 
@@ -161,21 +190,30 @@ export default async function RespondToFormPage({
           if the form no longer agrees; see `promised_anonymous`. See also the
           ANONYMITY block in 20260902110000_p7_66_form_responses.sql.
         */}
-        {form.is_anonymous ? (
-          <p className="text-xs text-muted-foreground">
-            {/* "Not recorded", not "not shown". The distinction is the whole
-                feature: nothing is written, so there is no name to be revealed
-                later by an export, a new screen or an admin with SQL. */}
-            Your name is <strong className="font-medium">not recorded</strong> with this answer. The
-            team that owns this form sees what you wrote and when, and nothing that identifies you.
-            We keep a separate note that you have answered, so that each person answers once.
+        {answerable ? (
+          <p role="note" className="flex gap-2 rounded-md border bg-muted px-3 py-2 text-xs leading-relaxed text-foreground-muted">
+            {form.is_anonymous ? (
+              <EyeOff aria-hidden className="mt-0.5 size-4 shrink-0" />
+            ) : (
+              <UserRound aria-hidden className="mt-0.5 size-4 shrink-0" />
+            )}
+            {form.is_anonymous ? (
+              <span>
+                {/* "Not recorded", not "not shown". The distinction is the whole
+                    feature: nothing is written, so there is no name to be revealed
+                    later by an export, a new screen or an admin with SQL. */}
+                Your name is <strong className="font-medium">not recorded</strong> with this answer. The
+                team that owns this form sees what you wrote and when, and nothing that identifies you.
+                We keep a separate note that you have answered, so that each person answers once.
+              </span>
+            ) : (
+              <span>
+                Your answer is saved against your name and can be read by the team that owns this form.
+                This form is not anonymous. Each person answers once.
+              </span>
+            )}
           </p>
-        ) : (
-          <p className="text-xs text-muted-foreground">
-            Your answer is saved against your name and can be read by the team that owns this form.
-            This form is not anonymous. Each person answers once.
-          </p>
-        )}
+        ) : null}
       </div>
 
       {/*
@@ -196,18 +234,21 @@ export default async function RespondToFormPage({
           icon={<FilePenLine />}
           title="You have already answered this form"
           description="Each person answers a form once, and an answer cannot be changed."
+          action={backToList}
         />
       ) : closed ? (
         <EmptyState
           icon={<FilePenLine />}
           title="This form has closed"
           description={`It stopped taking answers after ${formatDate(closesOn)}.`}
+          action={backToList}
         />
       ) : activeQuestionCount === 0 ? (
         <EmptyState
           icon={<FilePenLine />}
           title="This form has no questions yet"
           description="It has been published before any questions were added. Tell whoever set it up — there is nothing to answer until they do."
+          action={backToList}
         />
       ) : (
         <RespondForm
@@ -216,6 +257,7 @@ export default async function RespondToFormPage({
           formName={form.name}
           isAnonymous={form.is_anonymous}
           schema={schema}
+          doneAction={backToList}
         />
       )}
     </PageShell>

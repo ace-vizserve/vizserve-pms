@@ -1,0 +1,15 @@
+{
+  "date": "2026-11-05",
+  "kind": "changed",
+  "area": "Forms",
+  "title": "Requests and request forms are together under Client requests",
+  "description": "The sidebar had a Request form row that opened a new form, next to a Requests row with your existing forms behind a button. There is now one Client requests row, with Requests and Forms under it.",
+  "items": [
+    "New form is on the Forms page, so opening a page no longer starts a form",
+    "A red dot on Client requests means something is awaiting review, and the number is on Requests under it",
+    "Department admins who are not team leaders can now reach their form list. Client requests opens straight on it for them"
+  ],
+  "refs": [
+    "P17-16"
+  ]
+}

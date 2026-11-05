@@ -1,0 +1,16 @@
+{
+  "date": "2026-11-05",
+  "kind": "changed",
+  "area": "Forms",
+  "title": "Fill a form is now part of Surveys & Quizzes",
+  "description": "The sidebar had one row for building surveys and another, Fill a form, for answering them. They are now one Surveys & Quizzes row. If you only answer forms, that row opens the ones waiting on you.",
+  "items": [
+    "Team leaders and department admins get To answer and Manage under it",
+    "Links you already have to a form still work",
+    "To answer now separates what is waiting on you from what you have already answered, and a form you have answered no longer opens a dead end",
+    "A form shows how many questions it has and marks which are required, and sending it gives you a way back to the list"
+  ],
+  "refs": [
+    "P17-17"
+  ]
+}

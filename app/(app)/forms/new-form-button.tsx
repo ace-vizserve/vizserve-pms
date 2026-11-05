@@ -11,13 +11,22 @@ import type { FormPurpose } from "@/lib/schemas/forms";
 import { createDraftForm } from "./actions";
 
 /** P17-15. Straight to the builder. The name, and everything else, is set there. */
-export function NewFormButton({ purpose }: { purpose: FormPurpose }) {
+export function NewFormButton({
+  purpose,
+  label = "New form",
+  variant,
+}: {
+  purpose: FormPurpose;
+  label?: string;
+  variant?: "outline";
+}) {
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
   return (
     <Button
       size="sm"
+      variant={variant}
       loading={pending}
       data-tour="new-form"
       onClick={() =>
@@ -32,7 +41,7 @@ export function NewFormButton({ purpose }: { purpose: FormPurpose }) {
       }
     >
       <Plus />
-      New form
+      {label}
     </Button>
   );
 }

@@ -331,7 +331,7 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
   },
   {
     id: "respond",
-    title: "Fill a form",
+    title: "To answer",
     href: "/respond",
     keywords: [
       "form", "fill a form", "fill form", "fill up", "fill out", "answer form", "answer a form",
@@ -341,7 +341,7 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     ],
     steps: [
       { text: "These are the internal forms you can answer. Open one to fill it in." },
-      { text: "The number beside Fill a form in the sidebar counts the ones still waiting on you." },
+      { text: "They are under Surveys & Quizzes in the sidebar, and the number there counts the ones still waiting on you." },
       { text: "A form with a deadline closes after its last day. You get an email when a form goes live, and reminders near the deadline until you answer." },
       { text: "Each person answers a form once, anonymous forms included, and an answer cannot be changed." },
     ],
@@ -359,14 +359,15 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
   {
     id: "request-forms",
     title: "Request forms",
-    href: "/requests",
+    href: "/requests/forms",
     keywords: [
       "client form", "request form", "make a client form", "make a request form", "new request form", "help desk",
       "helpdesk", "form link", "default pic", "form pic",
     ],
     steps: [
-      { text: "Request form in the sidebar opens a new form straight away, and so does this button.", target: tour("new-form") },
-      { text: "What a form collects lands here in Requests. Your existing forms are under the Request forms button." },
+      { text: "These are your request forms, under Client requests in the sidebar." },
+      { text: "New form opens the builder straight away.", target: tour("new-form") },
+      { text: "What a form collects lands in Requests, just above Forms in the sidebar." },
       { text: "On the Settings tab, choose the default PIC. Every request starts under them, and a form cannot go live without one." },
       { text: "On the form, the requester is the first approver and can add more." },
     ],
@@ -583,6 +584,8 @@ export function reachableHrefs(role: Role, viewer: NavViewer): Set<string> {
   }
   // In the Projects tree rather than NAV_ITEMS; same floor as its page.
   if (roleAtLeast(role, "team_leader")) hrefs.add("/tasks/lists");
+  // Named here too: a department admin's row collapses to a plain link, losing the child.
+  if (hrefs.has("/requests")) hrefs.add("/requests/forms");
   return hrefs;
 }
 

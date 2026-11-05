@@ -1,13 +1,9 @@
-import type { Metadata } from "next";
-
-import { OpenNewForm } from "./open-new-form";
-
-export const metadata: Metadata = { title: "Request form" };
+import { redirect } from "next/navigation";
 
 /**
- * P17-15 — where the sidebar's Request form goes: straight into a new form's builder.
- * The list is at /requests/forms, a button away on Requests, and answers land in Requests.
+ * This used to create a draft on arrival, so just opening it from the sidebar made a form.
+ * New form on the list does that now. This keeps a bookmark or an old link from being a 404.
  */
 export default function NewRequestFormPage() {
-  return <OpenNewForm />;
+  redirect("/requests/forms");
 }

@@ -7,8 +7,8 @@ import { Skeleton } from "@/components/ui/skeleton";
  */
 export default function Loading() {
   return (
-    <PageShell className="max-w-3xl" aria-hidden>
-      <Skeleton className="h-8 w-28" />
+    <PageShell className="mx-auto max-w-5xl" aria-hidden>
+      <Skeleton className="h-4 w-20" />
 
       <div className="space-y-2">
         <Skeleton className="h-6 w-64" />

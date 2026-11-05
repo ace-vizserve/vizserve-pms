@@ -192,6 +192,16 @@ export function AppSidebar({
   );
 }
 
+/** A count that sits in the row's own flex line, for rows that are not a plain link. */
+function InlineNavBadge({ badge }: { badge: { value: string; description: string } }) {
+  return (
+    <SidebarMenuBadge className="static shrink-0 bg-destructive text-white dark:bg-red-700">
+      {badge.value}
+      <span className="sr-only"> {badge.description}</span>
+    </SidebarMenuBadge>
+  );
+}
+
 function NavSection({
   section,
   pathname,
@@ -315,6 +325,23 @@ function NavSection({
                     >
                       <NavIcon name={item.icon} />
                       <span className="flex-1 truncate">{item.label}</span>
+                      {/* A dot, not the number: the child row carries that, and the
+                          parent only has to say something is waiting while folded. */}
+                      {badge ? (
+                        <span className="relative size-2 shrink-0">
+                          <span
+                            aria-hidden
+                            className="absolute inset-0 rounded-full bg-destructive opacity-75 motion-safe:animate-ping dark:bg-red-700"
+                          />
+                          <span
+                            aria-hidden
+                            className="absolute inset-0 rounded-full bg-destructive dark:bg-red-700"
+                          />
+                          <span className="sr-only">
+                            {badge.value} {badge.description}
+                          </span>
+                        </span>
+                      ) : null}
                       <ChevronRight
                         aria-hidden
                         className="size-4 shrink-0 text-muted-foreground transition-transform group-aria-expanded/sub:rotate-90"
@@ -325,16 +352,21 @@ function NavSection({
 
                 <CollapsibleContent>
                   <SidebarMenuSub>
-                    {item.children.map((child) => (
-                      <SidebarMenuSubItem key={child.href}>
-                        <SidebarMenuSubButton
-                          isActive={child.href === activeChild?.href}
-                          render={<Link href={child.href} />}
-                        >
-                          <span className="truncate">{child.label}</span>
-                        </SidebarMenuSubButton>
-                      </SidebarMenuSubItem>
-                    ))}
+                    {item.children.map((child) => {
+                      const childBadge = badges?.[child.href];
+
+                      return (
+                        <SidebarMenuSubItem key={child.href}>
+                          <SidebarMenuSubButton
+                            isActive={child.href === activeChild?.href}
+                            render={<Link href={child.href} />}
+                          >
+                            <span className="flex-1 truncate">{child.label}</span>
+                            {childBadge ? <InlineNavBadge badge={childBadge} /> : null}
+                          </SidebarMenuSubButton>
+                        </SidebarMenuSubItem>
+                      );
+                    })}
                   </SidebarMenuSub>
                 </CollapsibleContent>
               </Collapsible>

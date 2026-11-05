@@ -83,10 +83,13 @@ export function RespondForm({
   schema,
   submit,
   doneNote = "It cannot be edited or withdrawn, and each person answers a form once.",
+  doneAction,
 }: {
   /** P17-15. /survey/<slug> sends through its own action; absent means signed in. */
   submit?: (fieldValues: Record<string, unknown>) => Promise<FormResponseResult>;
   doneNote?: string;
+  /** Where to go once it is sent. /survey/<slug> has no signed-in list to go back to. */
+  doneAction?: React.ReactNode;
   formId: string;
   /**
    * ⚠️ PASSED, NOT READ OFF `window.location`. The action re-reads the form from
@@ -166,6 +169,17 @@ export function RespondForm({
 
   const blockingFileField = fileFields.find((entity) => entity.attributes.required);
   const hasFileField = fileFields.length > 0;
+  const hasRequired = useMemo(
+    () =>
+      schema.root.some((entityId) => {
+        const attributes = Object.hasOwn(schema.entities, entityId)
+          ? (schema.entities[entityId].attributes as { required?: boolean; archived?: boolean })
+          : undefined;
+
+        return attributes?.required === true && attributes.archived !== true;
+      }),
+    [schema],
+  );
 
   /*
    * P7-66 Phase 7 — WHICH PAGE IS SHOWING.
@@ -332,6 +346,7 @@ export function RespondForm({
             : `Thank you — your answer to ${formName} has been saved against your name.`}
         </p>
         <p className="mt-4 text-xs text-muted-foreground">{doneNote}</p>
+        {doneAction ? <div className="mt-5 flex justify-center">{doneAction}</div> : null}
       </div>
     );
   }
@@ -411,7 +426,16 @@ export function RespondForm({
           going Back to a page finds it exactly as it was left. See the note on
           `InterpreterFields`.
         */}
-        <InterpreterFields interpreterStore={interpreterStore} activePage={page} />
+        {hasRequired ? (
+          <p className="text-xs text-muted-foreground">
+            <span aria-hidden className="text-destructive">
+              *
+            </span>{" "}
+            Required
+          </p>
+        ) : null}
+
+        <InterpreterFields interpreterStore={interpreterStore} activePage={page} className="space-y-6" />
 
         {formError ? (
           <p role="alert" className="text-sm text-destructive">

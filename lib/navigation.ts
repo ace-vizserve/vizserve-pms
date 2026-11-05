@@ -145,34 +145,43 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "dashboard",
   },
   {
+    // P17-17. Member-level, because everyone answers these. `href` is /respond so a
+    // member, left with one child, gets a plain row that opens what they have to answer.
     label: "Surveys & Quizzes",
-    href: "/forms",
-    minRole: "team_leader",
-    // P8-01c. The builder is one of the three structure screens the department
-    // admin tick reaches, so a MEMBER holding it gets this row. `/forms` itself
-    // is `requireDepartmentShape()` and the list is narrowed by
-    // `administersForm`, so the row and the gate agree — which is the rule the
-    // Admin group's comment below states for the other direction.
-    alsoDeptAdmin: true,
+    href: "/respond",
+    minRole: "member",
     enabled: true,
     icon: "form",
+    children: [
+      { label: "To answer", href: "/respond" },
+      {
+        // P8-01c. The builder is one of the three structure screens the department
+        // admin tick reaches, so a MEMBER holding it gets this child. `/forms` itself
+        // is `requireDepartmentShape()` and the list is narrowed by
+        // `administersForm`, so the row and the gate agree — which is the rule the
+        // Admin group's comment below states for the other direction.
+        label: "Manage",
+        href: "/forms",
+        minRole: "team_leader",
+        alsoDeptAdmin: true,
+      },
+    ],
   },
   {
-    // P17-15. Opens a new form's builder directly. The list is /requests/forms, from
-    // the Requests page, and what a form collects lands in Requests.
-    label: "Request form",
-    href: "/requests/forms/new",
-    minRole: "team_leader",
-    alsoDeptAdmin: true,
-    enabled: true,
-    icon: "form",
-  },
-  {
-    label: "Requests",
+    // One row for the whole process: the requests, and the forms that collect them.
+    // The tick reaches the forms only. ⚠️ Requests has to name its floor, because a
+    // child with none would pass for a department admin. That leaves them one child,
+    // so the row collapses to a plain link, and /requests sends them to /requests/forms.
+    label: "Client requests",
     href: "/requests",
     minRole: "team_leader",
+    alsoDeptAdmin: true,
     enabled: true,
     icon: "inbox-stack",
+    children: [
+      { label: "Requests", href: "/requests", minRole: "team_leader" },
+      { label: "Forms", href: "/requests/forms", alsoDeptAdmin: true },
+    ],
   },
   {
     // P11-14. Per-person task counts for the departments a lead runs. Floor
@@ -193,29 +202,6 @@ export const NAV_ITEMS: NavItem[] = [
       { label: "Client results", href: "/analytics/client" },
       { label: "People", href: "/analytics/people" },
     ],
-  },
-  {
-    /*
-     * P7-66 Phase 4b — "FILL A FORM", NOT "FORMS", and the longer label is the
-     * point rather than an accident.
-     *
-     * `/forms` above is the BUILDER and it is `team_leader`. This is where a
-     * member goes to ANSWER a published internal form, and it is
-     * `member`. Two rows both called "Forms", one visible to everybody and one
-     * to leads, is the sidebar telling two different people the same word means
-     * two different screens — and the person who has both would have no way to
-     * tell them apart in the rail at all. A slightly long label is cheaper than
-     * that, and it also names the ACTION, which is what somebody arriving here
-     * is trying to do.
-     *
-     * Deliberately NOT a child of Forms: a child inherits the disclosure and
-     * the parent, and a member cannot see the parent.
-     */
-    label: "Fill a form",
-    href: "/respond",
-    minRole: "member",
-    enabled: true,
-    icon: "form-fill",
   },
   /*
    * NO "TASKS" ENTRY, and its absence is the design rather than an omission.
@@ -550,7 +536,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { label: "Work", hrefs: ["/dashboard", "/inbox"] },
   // One process end to end: a form is built, the client submits it, the request
   // waits at Gate 1. `/respond` is the internal side of the same builder.
-  { label: "Forms & requests", hrefs: ["/requests", "/requests/forms/new", "/forms", "/respond"] },
+  { label: "Forms & requests", hrefs: ["/requests", "/respond"] },
   // Where the day went, and the paperwork about it — leave, overtime and time
   // corrections all live under Approvals.
   { label: "Time & leave", hrefs: ["/dtr", "/timesheet", "/approvals"] },

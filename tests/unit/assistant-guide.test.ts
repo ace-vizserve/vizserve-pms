@@ -82,7 +82,7 @@ describe("answerQuestion", () => {
 
   it("sends a lead asking for forms to the builder", () => {
     expect(goesTo("forms", lead)).toBe("/forms");
-    expect(goesTo("how do I make a client form", lead)).toBe("/requests");
+    expect(goesTo("how do I make a client form", lead)).toBe("/requests/forms");
     expect(goesTo("new survey", lead)).toBe("/forms");
     expect(goesTo("fill up a form", lead)).toBe("/respond");
     expect(goesTo("create an internal form", lead)).toBe("/forms");

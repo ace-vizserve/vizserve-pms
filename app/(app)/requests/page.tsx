@@ -1,16 +1,20 @@
 import { loadUserNames } from "@/lib/counts-server";
+import { redirect } from "next/navigation";
 import type { Metadata } from "next";
-import Link from "next/link";
 
-import { NewFormButton } from "@/app/(app)/forms/new-form-button";
-import { buttonVariants } from "@/components/ui/button";
 import { ListSearch } from "@/components/list-search";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
 import { PAGE_SIZES, Pagination, resolvePage, resolvePageSize } from "@/components/pagination";
 import { ilikeAnyOf } from "@/lib/search";
 import { isRequestStatus } from "@/components/status-badge";
-import { realtimeDepartmentFilter, requireRole } from "@/lib/auth/authorization";
+import {
+  canShapeAnyDepartment,
+  realtimeDepartmentFilter,
+  requireAuthContext,
+  requireRole,
+  roleAtLeast,
+} from "@/lib/auth/authorization";
 import { createClient } from "@/utils/supabase/server";
 import { RequestFilters } from "./filters";
 import { RequestsTable, type RequestRow } from "./requests-table";
@@ -52,6 +56,12 @@ export default async function RequestsPage({
   // reason to hold it is legibility, not latency: the scope handed to
   // `RealtimeTasks` at the bottom is provably the scope this page was
   // authorised under, not a second resolution that could drift from it.
+  // The sidebar row reaches a department admin for the forms. The tick gives them no
+  // requests to read, so they go straight there.
+  const viewer = await requireAuthContext();
+  if (!roleAtLeast(viewer.role, "team_leader") && canShapeAnyDepartment(viewer)) {
+    redirect("/requests/forms");
+  }
   const context = await requireRole("team_leader");
   const params = await searchParams;
   const supabase = await createClient();
@@ -221,12 +231,6 @@ export default async function RequestsPage({
 
   return (
     <PageShell>
-      <div className="flex items-center justify-end gap-2">
-        <Link href="/requests/forms" className={buttonVariants({ size: "sm", variant: "outline" })}>
-          Request forms
-        </Link>
-        <NewFormButton purpose="CLIENT_REQUEST" />
-      </div>
 
       {/*
         P8-03 — ⚠️ A TASK SUBSCRIPTION ON THE REQUESTS PAGE. THIS IS NOT A
