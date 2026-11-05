@@ -53,7 +53,7 @@ export function WaterDispenser({ x, z }: { x: number; z: number }) {
 }
 
 /** A chair facing −Z in its own frame; turn it with `rotation`. */
-function Chair({ x, z, rotation = 0, color = "#3e4757" }: { x: number; z: number; rotation?: number; color?: string }) {
+export function Chair({ x, z, rotation = 0, color = "#3e4757" }: { x: number; z: number; rotation?: number; color?: string }) {
   return (
     <group position={[x, 0, z]} rotation={[0, rotation, 0]}>
       <Block position={[0, 0.45, 0]} size={[0.48, 0.07, 0.48]} color={color} />

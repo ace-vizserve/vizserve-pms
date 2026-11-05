@@ -4,6 +4,8 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import type { Group } from "three";
 
+import { timeline, type CatStop, type Leg, type Point, type StopActivity } from "@/lib/office-walk";
+
 import { Block } from "./office-block";
 
 /**
@@ -19,48 +21,8 @@ import { Block } from "./office-block";
  * any moment comes from the clock, so it costs no re-render.
  */
 
-export type Point = [number, number];
-
-/** A place the cat visits: `route[0]` is on the main corridor, the last point is where it sits. */
-export type StopActivity = "smoke" | "squat" | "curl" | "run" | "bike" | "sit" | "inside";
-
-/** `does` and `facing` are for people; the cat only sits. */
-export type CatStop = { route: Point[]; stay: number; does?: StopActivity; facing?: number };
-
-export type Leg =
-  | { from: Point; to: Point; start: number; end: number }
-  | { at: Point; start: number; end: number; facing: number; does?: StopActivity };
-
-/** Walking speed, units a second. */
-const SPEED = 1.1;
-
-/** Also the walk of whoever roams the floor (P17-13), at their own speed. */
-export function timeline(stops: CatStop[], speed = SPEED): { legs: Leg[]; total: number } {
-  const legs: Leg[] = [];
-  let t = 0;
-  const walk = (from: Point, to: Point) => {
-    const length = Math.hypot(to[0] - from[0], to[1] - from[1]);
-    if (length < 0.01) return;
-    legs.push({ from, to, start: t, end: t + length / speed });
-    t += length / speed;
-  };
-
-  let here: Point | null = null;
-  for (const stop of stops) {
-    if (stop.route.length === 0) continue;
-    if (here) walk(here, stop.route[0]);
-    for (let i = 1; i < stop.route.length; i++) walk(stop.route[i - 1], stop.route[i]);
-    const last = stop.route[stop.route.length - 1];
-    const prev = stop.route[stop.route.length - 2] ?? last;
-    legs.push({ at: last, start: t, end: t + stop.stay, facing: stop.facing ?? Math.atan2(-(last[0] - prev[0]), -(last[1] - prev[1])), does: stop.does });
-    t += stop.stay;
-    for (let i = stop.route.length - 1; i > 0; i--) walk(stop.route[i], stop.route[i - 1]);
-    here = stop.route[0];
-  }
-  // Back to the first junction, to close the loop.
-  if (here && stops[0]?.route[0]) walk(here, stops[0].route[0]);
-  return { legs, total: t };
-}
+export { timeline };
+export type { CatStop, Leg, Point, StopActivity };
 
 export function Cat({ stops }: { stops: CatStop[] }) {
   const { legs, total } = useMemo(() => timeline(stops), [stops]);

@@ -15,7 +15,7 @@ import { useAuth } from "@/lib/auth/client-auth";
 import { departmentScopeFilter } from "@/lib/auth/rules";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { formatAppTime } from "@/lib/dates";
-import { isOfficeHours, layoutOffice, officeActivity, officeStatus, type OfficePerson } from "@/lib/office";
+import { EXECUTIVES, EXECUTIVE_ROOM_ID, inExecutiveMeeting, isExecutiveHours, isOfficeHours, teamMeetingsAt, layoutOffice, officeActivity, officeStatus, type OfficePerson } from "@/lib/office";
 import { browserClient } from "@/lib/query/browser-client";
 import { fetchOfficeToday } from "@/lib/query/fetchers/dtr";
 import { fetchActiveDepartments, fetchDirectory } from "@/lib/query/fetchers/task";
@@ -172,6 +172,7 @@ function Office({ sceneClass }: { sceneClass?: string }) {
   const now = new Date(office.dataUpdatedAt);
   // Re-read every minute with the punches, so lunch and the all-hands start on time.
   const activity = officeActivity(now);
+  const meeting = inExecutiveMeeting(now);
 
   // Who is drawn: the presence function's answer, already scoped by role; or,
   // before it exists, the directory narrowed the way the DTR page narrows it.
@@ -184,26 +185,35 @@ function Office({ sceneClass }: { sceneClass?: string }) {
           person.id === auth.userId ||
           (person.primary_department_id !== null && scope.includes(person.primary_department_id))),
     );
-  const people = roster.map((person) => ({
-    ...officeStatus({
-      person,
-      punches,
-      onLeave: leave.has(person.id),
-      inSharedRoom: "inSharedRoom" in person ? person.inSharedRoom : false,
-      today,
-      yesterday,
-      now,
-    }),
-    hidden: "hidden" in person ? person.hidden : false,
-    roams: "roams" in person && person.roams && isOfficeHours(now),
-    longHair: "longHair" in person ? person.longHair : null,
-  }));
+  const people = roster.map((person) => {
+    const executive = EXECUTIVES[person.id];
+    return {
+      ...officeStatus({
+        person: executive ? { ...person, full_name: executive.name } : person,
+        punches,
+        onLeave: leave.has(person.id),
+        inSharedRoom: "inSharedRoom" in person ? person.inSharedRoom : false,
+        today,
+        yesterday,
+        now,
+      }),
+      hidden: "hidden" in person ? person.hidden : false,
+      roams: executive ? isExecutiveHours(now) : "roams" in person && person.roams && isOfficeHours(now),
+      executive: Boolean(executive),
+      longHair: executive ? executive.longHair : "longHair" in person ? person.longHair : null,
+    };
+  });
   // The counts are of the people the viewer can actually see.
   const shown = people.filter((person) => !person.hidden);
 
   const layout = layoutOffice(
     office.data.departments ?? (departments.data ?? []).filter((dept) => !dept.is_shared),
     people,
+  );
+
+  const teamMeetings = teamMeetingsAt(
+    now,
+    layout.rooms.filter((room) => room.id !== EXECUTIVE_ROOM_ID).map((room) => room.id),
   );
 
   const count = (status: OfficePerson["status"]) => shown.filter((person) => person.status === status).length;
@@ -224,6 +234,12 @@ function Office({ sceneClass }: { sceneClass?: string }) {
         <Legend color="bg-border" label={`${notIn} not in`} />
         {roaming > 0 ? <Legend color="bg-primary" label={`${roaming} walking the floor`} /> : null}
         {late > 0 ? <span className="text-warning">{late} still timed in after 10 hours</span> : null}
+        {meeting ? <span className="font-medium">Gary, Nina, Amier and Joel are in a meeting in the Executive Office</span> : null}
+        {teamMeetings.map(({ departmentId, until }) => (
+          <span key={departmentId} className="font-medium">
+            {layout.rooms.find((room) => room.id === departmentId)?.name} is in its team meeting until {clockLabel(until)}
+          </span>
+        ))}
         {activity === "lunch" ? <span className="font-medium">Lunch time — everyone is in the canteen</span> : null}
         {activity === "allhands" ? <span className="font-medium">Friday all-hands — everyone is in the all-hands room until 5 PM</span> : null}
         {fallback && !seesAll ? (
@@ -238,11 +254,17 @@ function Office({ sceneClass }: { sceneClass?: string }) {
         <p className="py-10 text-center text-sm text-muted-foreground">Nobody to show yet.</p>
       ) : (
         <div className="overflow-hidden rounded-lg border">
-          <Office3D layout={layout} activity={activity} onSelect={select} canOpen={canOpen} className={sceneClass} />
+          <Office3D layout={layout} activity={activity} meeting={meeting} teamRoomIds={teamMeetings.map((team) => team.departmentId)} onSelect={select} canOpen={canOpen} className={sceneClass} />
         </div>
       )}
     </>
   );
+}
+
+/** Minutes after midnight, as "2:30 PM". */
+function clockLabel(minutes: number): string {
+  const hour = Math.floor(minutes / 60);
+  return `${hour % 12 || 12}:${String(minutes % 60).padStart(2, "0")} ${hour < 12 ? "AM" : "PM"}`;
 }
 
 function Legend({ color, label }: { color: string; label: string }) {

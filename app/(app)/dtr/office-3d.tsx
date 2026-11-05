@@ -14,18 +14,19 @@ import type { OrbitControls as OrbitControlsImpl } from "three-stdlib";
 
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import { AMENITY_W, BATHROOM_SLOT, BATHROOM_STAY, HALL, ROOM_W, assignSeats, bathroomPeriod, describeOfficePerson, isSmoker, wearsPink, type OfficeActivity, officeTheme, type OfficeDesk, type OfficeLayout, type OfficePerson, type OfficeRoom } from "@/lib/office";
+import { AMENITY_W, BATHROOM_SLOT, BATHROOM_STAY, HALL, ROOM_W, assignSeats, attendsTeamMeeting, bathroomPeriod, describeOfficePerson, isSmoker, meetsExecutives, roomIsClosed, wearsPink, type OfficeActivity, officeTheme, type OfficeDesk, type OfficeLayout, type OfficePerson, type OfficeRoom } from "@/lib/office";
 
 import { Block } from "./office-block";
-import { MeetingCorner, Printer, WaterDispenser, canteenSeats, type Seat } from "./office-amenities";
+import { Chair, MeetingCorner, Printer, WaterDispenser, canteenSeats, type Seat } from "./office-amenities";
 import { CutawayWall, RoomWalls, meetingDepth } from "./office-decor";
+import { fitRounds, isVisited, leaveBuilding, meetingSeats, meetingStop, visitOverlaps, visitRoom, visitsIn, workInOffice, type Trip, type Visit, type WalkPlan } from "@/lib/office-walk";
 import { Cat, timeline, type CatStop, type Leg, type Point as FloorPoint } from "./office-cat";
 import { ComfortRoom } from "./office-comfort-room";
 import { SmokingArea } from "./office-smoking";
 import { DESK_ITEMS, DeskItem, Lounge, Window, WoodFloor, canteenSpan, gymZone } from "./office-props";
 import { TownHall, podium, townHallSeats, townHallSize } from "./office-townhall";
 import { Extinguisher, FireExit, GlassDoors } from "./office-doors";
-import { Lobby } from "./office-lobby";
+import { Lobby, lobbyFits } from "./office-lobby";
 import { NameTag, Sign } from "./office-sign";
 
 /**
@@ -422,8 +423,6 @@ const WALK_SPEED = 1.4;
 /** One draw and one breath out, in seconds. */
 const DRAG = 9;
 
-type Trip = ReturnType<typeof timeline>;
-
 /** Where a leg of a trip puts somebody at `t`, and which way they face. */
 function onLeg(leg: Leg, t: number): { x: number; z: number; facing: number; walking: boolean } {
   if ("at" in leg) return { x: leg.at[0], z: leg.at[1], facing: leg.facing, walking: false };
@@ -473,7 +472,12 @@ function Puff({ meshRef }: { meshRef: React.RefObject<Mesh | null> }) {
 }
 
 /** A seat somebody is in away from their desk, and why. */
-type AwaySeat = Seat & { where: "lunch" | "allhands" };
+type AwaySeat = Seat & { where: "lunch" | "allhands" | "meeting" | "team" };
+
+/** Seats at a room's table for `count` people; see `meetingSeats`. */
+function tableSeats(room: OfficeRoom, count: number) {
+  return meetingSeats(room, room.x + room.w - AMENITY_W + 0.2 + 2.3, room.y + meetingDepth(room.d), count);
+}
 
 /** Hover and click on a figure that moves. */
 function personEvents(
@@ -506,6 +510,8 @@ function personEvents(
  */
 type Routine = { period: number; bathroomArrive: number; bathroom: Trip; others: Trip[] };
 
+const NOBODY_VISITING: Visit[] = [];
+
 /**
  * Somebody who is in, wherever they are right now:
  * - lunch, with a seat  → at the canteen;
@@ -524,6 +530,7 @@ function Occupant({
   smoker,
   seat,
   presenting,
+  visits,
   hovered,
   openable,
   onHover,
@@ -532,6 +539,8 @@ function Occupant({
   person: OfficePerson;
   accent: string;
   openable: boolean;
+  /** When an executive comes to their desk. They stay put for it, and turn to them. */
+  visits: readonly Visit[];
   /** The desk chair, where they sit when nothing else is on. */
   chair: Point;
   routine: Routine | null;
@@ -588,6 +597,9 @@ function Occupant({
       }
     }
 
+    // Decided from the whole trip's window, so it cannot change halfway through a walk.
+    if (trip && visitOverlaps(visits, time - t, time - t + trip.total)) trip = null;
+
     if (cigarette.current) cigarette.current.visible = false;
     if (puff.current) puff.current.visible = false;
     tag.current.visible = true;
@@ -597,7 +609,7 @@ function Occupant({
       sitting.current.visible = true;
       walking.current.visible = false;
       sitting.current.position.set(chair[0], 0, chair[1]);
-      sitting.current.rotation.y = 0;
+      sitting.current.rotation.y = isVisited(visits, time) ? -Math.PI / 2 : 0;
       tag.current.position.set(chair[0], 0, chair[1]);
       return;
     }
@@ -666,7 +678,11 @@ function Occupant({
     : seat
       ? seat.where === "lunch"
         ? "At lunch, in the canteen"
-        : "At the Friday all-hands"
+        : seat.where === "meeting"
+          ? "In a meeting in the Executive Office"
+          : seat.where === "team"
+            ? "In the team meeting"
+              : "At the Friday all-hands"
       : undefined;
   const spot: Point = seat ? [seat.x, seat.z] : chair;
 
@@ -720,13 +736,16 @@ function routes(room: OfficeRoom, desk: OfficeDesk): [Point[], Point[]] {
  *
  * Where they are comes from the clock and their id, like the cat and `Occupant`,
  * so it costs no re-render. Starting partway round by id keeps two roamers from
- * walking in step.
+ * walking in step, except for those given a `walk`, who are in step on purpose
+ * because they keep meeting (`fitRounds`).
  */
 function Roamer({
   person,
   accent,
   stops,
+  walk,
   smoker,
+  note,
   hovered,
   openable,
   onHover,
@@ -735,16 +754,20 @@ function Roamer({
   person: OfficePerson;
   accent: string;
   stops: CatStop[];
+  walk?: Trip;
   smoker: boolean;
+  note?: string;
   hovered: boolean;
   openable: boolean;
   onHover: (id: string | null) => void;
   onSelect: (person: OfficePerson) => void;
 }) {
-  const trip = useMemo(() => timeline(stops, WALK_SPEED), [stops]);
-  const offset = hash(person.id);
+  const trip = useMemo(() => walk ?? timeline(stops, WALK_SPEED), [walk, stops]);
+  const offset = walk ? 0 : hash(person.id);
 
   const root = useRef<Group>(null);
+  const seated = useRef<Group>(null);
+  const bubble = useRef<Group>(null);
   const tag = useRef<Group>(null);
   const legs = useRef<(Group | null)[]>([]);
   const arms = useRef<(Group | null)[]>([]);
@@ -759,10 +782,23 @@ function Roamer({
     if (!leg) return;
 
     const at = onLeg(leg, t);
+    const does = "at" in leg ? leg.does : undefined;
+    root.current.visible = does !== "sit" && does !== "inside";
     root.current.position.set(at.x, 0, at.z);
     root.current.rotation.y = at.facing;
-    tag.current.position.set(at.x, 0.15, at.z);
+    if (seated.current) {
+      seated.current.visible = does === "sit";
+      seated.current.position.set(at.x, 0, at.z);
+    }
+    tag.current.visible = does !== "inside";
+    tag.current.position.set(at.x, does === "sit" ? 0 : 0.15, at.z);
     swingLimbs(legs, arms, at.walking ? Math.sin(time * 9) * 0.55 : 0);
+
+    if (bubble.current) bubble.current.visible = does === "talk";
+    // A hand up now and then, making a point, as at the podium.
+    if (does === "talk" && arms.current[1] && Math.floor(time * 0.8) % 3 === 0) {
+      arms.current[1].rotation.x = -1.9 + Math.sin(time * 4) * 0.2;
+    }
 
     const smoking = "at" in leg && leg.does === "smoke";
     if (cigarette.current) cigarette.current.visible = smoking;
@@ -775,14 +811,27 @@ function Roamer({
       <group ref={root}>
         <StandingPerson person={person} accent={accent} legs={legs} arms={arms} cigarette={smoker ? cigarette : undefined} />
         {smoker ? <Puff meshRef={puff} /> : null}
+        {/* Talking: a speech bubble, three dots through it so they read from either side. */}
+        <group ref={bubble} position={[0.42, 2.05, 0]} visible={false}>
+          <Block position={[0, 0, 0]} size={[0.44, 0.26, 0.05]} color="#ffffff" shadow={false} />
+          {[-0.11, 0, 0.11].map((dot) => (
+            <Block key={dot} position={[dot, 0, 0]} size={[0.06, 0.06, 0.07]} color="#334155" shadow={false} />
+          ))}
+        </group>
       </group>
+      {/* At their own desk. Only the executives ever stop to sit. */}
+      {person.executive ? (
+        <group ref={seated} visible={false}>
+          <Person person={person} x={0} z={0} accent={accent} />
+        </group>
+      ) : null}
       <group ref={tag}>
         <NameTag position={[0, 2.5, 0]} name={person.name} />
         {hovered ? (
           <HoverCard
             person={person}
             y={3.1}
-            note={smoker ? "Walking the floor, or out at the smoking area. No time-in needed." : "Walking the floor. No time-in needed."}
+            note={note ?? (smoker ? "Walking the floor, or out at the smoking area. No time-in needed." : "Walking the floor. No time-in needed.")}
             openable={openable}
           />
         ) : null}
@@ -876,7 +925,7 @@ function Room({
   const { x, y: z, w, d } = room;
 
   // P17-07. Another department's room, to a member: closed, roof on.
-  if (room.desks.length > 0 && room.desks.every((desk) => desk.person.hidden)) {
+  if (roomIsClosed(room)) {
     return <ClosedRoom room={room} accent={colors.sign} />;
   }
 
@@ -899,6 +948,12 @@ function Room({
 
       {/* The meeting corner, right of the desks: projector, table, the screen on the right wall. */}
       <MeetingCorner x={x + w - AMENITY_W + 0.2} z={z + meetingDepth(d)} screenX={x + w - 0.2} />
+      {/* A chair for everybody in the department, always out, past the table's four. */}
+      {tableSeats(room, room.desks.length)
+        .filter((chair) => chair.drawn)
+        .map((chair) => (
+          <Chair key={`${chair.x},${chair.z}`} x={chair.x} z={chair.z} rotation={chair.facing} />
+        ))}
 
       {room.desks.map((desk) => (
         <Desk
@@ -1047,6 +1102,8 @@ function CameraBridge({
 export function Office3D({
   layout,
   activity,
+  meeting = false,
+  teamRoomIds = [],
   onSelect,
   canOpen = () => true,
   className,
@@ -1058,6 +1115,10 @@ export function Office3D({
   canOpen?: (id: string) => boolean;
   /** Desks, lunch, or the Friday all-hands — from `officeActivity`, by the clock in Manila. */
   activity: OfficeActivity;
+  /** The executives' daily half hour, from `inExecutiveMeeting`. */
+  meeting?: boolean;
+  /** The rooms whose departments are in their meeting, from `teamMeetingsAt`. */
+  teamRoomIds?: readonly string[];
   onSelect: (person: OfficePerson) => void;
 }) {
   const [hoveredId, setHoveredId] = useState<string | null>(null);
@@ -1078,8 +1139,12 @@ export function Office3D({
 
   // Who sits where away from their desk: the canteen at lunch, the all-hands on
   // Friday — the first person (by id) presents from the podium.
-  const inIds = everyone.filter(({ desk }) => desk.person.status === "working").map(({ desk }) => desk.person.id);
+  // An executive in the office goes too, timed in or not.
+  const inIds = everyone
+    .filter(({ desk }) => desk.person.status === "working" || (desk.person.executive && desk.person.roams))
+    .map(({ desk }) => desk.person.id);
   const inKey = inIds.join(",");
+  const teamKey = teamRoomIds.join(",");
   const { away, presenter } = useMemo(() => {
     const seats = new Map<string, AwaySeat>();
     let first: string | null = null;
@@ -1096,8 +1161,31 @@ export function Office3D({
         seats.set(id, { ...seat, where: "allhands" }),
       );
     }
+    if (meeting) {
+      // Round the Executive Office's own table: its four chairs, as `MeetingCorner` draws
+      // them. Gary and Nina on the far side, Amier and Joel across from them. Only the
+      // people actually about, and like lunch they are simply there when it starts.
+      const seated = layout.rooms.flatMap((room) => room.desks.map((desk) => desk.person));
+      const office = layout.rooms.find((room) => room.desks.some((desk) => desk.person.executive));
+      if (office) {
+        const table = tableSeats(office, 4);
+        const placeAt = (people: OfficePerson[], from: number) =>
+          people.forEach((person, i) => seats.set(person.id, { ...table[from + i], where: "meeting" }));
+        placeAt(seated.filter((person) => person.executive && person.roams), 0);
+        placeAt(seated.filter((person) => meetsExecutives(person) && (person.roams || (person.status === "working" && !person.hidden))), 2);
+      }
+    }
+    const inMeeting = new Set(teamKey ? teamKey.split(",") : []);
+    for (const room of layout.rooms) {
+      if (!inMeeting.has(room.id)) continue;
+      const attending = room.desks.filter(({ person }) => attendsTeamMeeting(person));
+      const table = tableSeats(room, attending.length);
+      attending.forEach(({ person }, i) => {
+        if (table[i]) seats.set(person.id, { ...table[i], where: "team" });
+      });
+    }
     return { away: seats, presenter: first };
-  }, [activity, depth, everyone.length, hallW, hallZ, inKey, loungeX]);
+  }, [activity, meeting, teamKey, layout.rooms, depth, everyone.length, hallW, hallZ, inKey, loungeX]);
 
   // The main entrance: in the front wall, in the free corridor right of the
   // all-hands room — or mid-lounge if there is no such corridor.
@@ -1135,7 +1223,7 @@ export function Office3D({
   // figure inside one would be its name through the roof. A smoker's loop ends
   // out of the fire exit, on the far side of the door `FireExit` draws.
   const roamStops = useMemo(
-    () => floorTour(layout.rooms.filter((room) => !room.desks.every((desk) => desk.person.hidden))),
+    () => floorTour(layout.rooms.filter((room) => !roomIsClosed(room))),
     [floorTour, layout.rooms],
   );
   // Out of the fire exit onto the pad; `spot` keeps two smokers from standing in one place.
@@ -1149,6 +1237,57 @@ export function Office3D({
     [spine, totalW],
   );
   const smokerStops = useMemo<CatStop[]>(() => [...roamStops, smokeStop(0)], [roamStops, smokeStop]);
+
+  // The executives' day, and everybody who meets them, in step. Each round starts with
+  // all of them together on the main corridor, which is what makes it often: an
+  // executive's round is their office, one department, or the guard and the front
+  // doors. The second starts halfway round so they are not in one room together.
+  const { walks, visits } = useMemo(() => {
+    const walks = new Map<string, Trip>();
+    const visits = new Map<string, Visit[]>();
+    const seated = layout.rooms.flatMap((room) => room.desks.map((desk) => ({ room, desk })));
+    const executives = seated.filter(({ desk }) => desk.person.executive && desk.person.roams);
+    // In the meeting nobody is walking, and nobody at a desk should turn to a visitor who is not there.
+    if (executives.length === 0 || meeting) return { walks, visits };
+
+    // Nobody to talk to at a desk whose owner is at the table: they look round the room instead.
+    const rooms = layout.rooms
+      .filter((room) => !roomIsClosed(room) && !room.desks.some((desk) => desk.person.executive))
+      .map((room) => ({ ...room, desks: room.desks.filter((desk) => !away.has(desk.person.id)) }));
+    const lobbyEnd = depth - 0.1;
+    const leaving = leaveBuilding({
+      spine,
+      entranceX,
+      depth,
+      lobbyEnd: lobbyFits(hallW + 0.4, roomsW - 0.2, layout.depth + 0.4, lobbyEnd) ? lobbyEnd : null,
+    });
+    const meetZ = layout.depth + HALL / 2;
+    const plans: WalkPlan[] = executives.map(({ room, desk }, i) => {
+      const start = i * Math.floor(rooms.length / 2);
+      const order = [...rooms.slice(start), ...rooms.slice(0, start)];
+      return {
+        id: desk.person.id,
+        meet: meetingStop(spine, meetZ, i * 2),
+        rounds: [[workInOffice(room, desk, spine, HALL)], ...order.map((visit) => visitRoom(visit, spine, HALL)), leaving],
+      };
+    });
+    seated
+      .filter(({ desk }) => meetsExecutives(desk.person) && desk.person.roams && !away.has(desk.person.id))
+      .forEach(({ desk }, i) => {
+        const stops = isSmoker(desk.person) ? smokerStops : roamStops;
+        plans.push({
+          id: desk.person.id,
+          meet: meetingStop(spine, meetZ, i * 2 + 1),
+          rounds: Array.from({ length: Math.ceil(stops.length / 2) }, (_, n) => stops.slice(n * 2, n * 2 + 2)),
+        });
+      });
+
+    fitRounds(plans, WALK_SPEED).forEach((trip, id) => {
+      walks.set(id, trip);
+      visitsIn(trip).forEach((times, target) => visits.set(target, [...(visits.get(target) ?? []), ...times]));
+    });
+    return { walks, visits };
+  }, [layout.rooms, layout.depth, meeting, away, depth, spine, entranceX, hallW, roomsW, roamStops, smokerStops]);
 
   // Everybody at a desk who can be seen gets a routine; a hidden person is only
   // ever drawn in a seat, and a roamer has their own walk. Turns at the comfort
@@ -1303,19 +1442,22 @@ export function Office3D({
               be at a desk inside a closed room, their name through the roof. */}
           {everyone.map(({ room, desk }) =>
             // A seat beats the walk: a roamer who is timed in still goes to lunch and the all-hands.
-            desk.person.roams && !away.has(desk.person.id) ? (
+            // Nor do they walk past a viewer who cannot see into the room their meeting is in.
+            desk.person.roams && !away.has(desk.person.id) && !teamRoomIds.includes(room.id) ? (
               <Roamer
                 key={desk.person.id}
                 person={desk.person}
                 accent={DEPT[room.colorIndex % DEPT.length].sign}
                 stops={isSmoker(desk.person) ? smokerStops : roamStops}
+                walk={walks.get(desk.person.id)}
                 smoker={isSmoker(desk.person)}
+                note={desk.person.executive ? "In the office, 8 AM to 5 PM. No time-in needed." : undefined}
                 hovered={hoveredId === desk.person.id}
                 openable={canOpen(desk.person.id)}
                 onHover={setHoveredId}
                 onSelect={onSelect}
               />
-            ) : desk.person.status === "working" && (!desk.person.hidden || away.has(desk.person.id)) ? (
+            ) : (desk.person.status === "working" || desk.person.roams) && (!desk.person.hidden || away.has(desk.person.id)) ? (
               <Occupant
                 key={desk.person.id}
                 person={desk.person}
@@ -1325,6 +1467,7 @@ export function Office3D({
                 smoker={isSmoker(desk.person)}
                 seat={away.get(desk.person.id) ?? null}
                 presenting={desk.person.id === presenter}
+                visits={visits.get(desk.person.id) ?? NOBODY_VISITING}
                 hovered={hoveredId === desk.person.id}
                 openable={canOpen(desk.person.id)}
                 onHover={setHoveredId}

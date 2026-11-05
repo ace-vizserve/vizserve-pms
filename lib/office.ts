@@ -51,6 +51,8 @@ export type OfficePerson = {
    * are drawn and nothing else — `status` still says what the DTR says.
    */
   roams?: boolean;
+  /** Gary or Nina: at a desk in the Executive Office, not a department. See `EXECUTIVES`. */
+  executive?: boolean;
   /** From the staff record (P17-14). Null or absent: not set, and they keep the default hair. */
   longHair?: boolean | null;
 };
@@ -128,6 +130,7 @@ export const HALL = 1.6;
  * small table. Furniture lives here rather than between the desks.
  */
 export const AMENITY_W = 4.2;
+export const EXECUTIVE_ROOM_ID = "executive";
 export const ROOM_W = DESK_COLS * CELL_W + MARGIN_X * 2 + AMENITY_W;
 
 export type OfficeDesk = { x: number; y: number; person: OfficePerson };
@@ -154,24 +157,33 @@ export type OfficeLayout = { rooms: OfficeRoom[]; width: number; depth: number }
  * People are seated alphabetically. Working people are NOT moved to the front:
  * a desk is a place, and a seat that changes with the clock is not one.
  */
+/**
+ * Another department's room, to a member (P17-07): closed, roof on. Never the
+ * Executive Office, which everybody can see into.
+ */
+export function roomIsClosed(room: Pick<OfficeRoom, "desks">): boolean {
+  return room.desks.length > 0 && room.desks.every((desk) => desk.person.hidden && !desk.person.executive);
+}
+
 export function layoutOffice(
   departments: readonly { id: string; name: string }[],
   people: readonly OfficePerson[],
   columns = 2,
 ): OfficeLayout {
   // A department missing from the list — the shared collaboration space, an
-  // inactive one — is no room to sit in; those people go to "No department".
+  // inactive one — is no room to sit in; those people, and anybody with no
+  // department, sit in the Executive Office. There is no "No department" room.
   const known = new Set(departments.map((dept) => dept.id));
   const byDept = new Map<string, OfficePerson[]>();
   for (const person of people) {
-    const key = person.departmentId && known.has(person.departmentId) ? person.departmentId : "none";
+    const key = !person.executive && person.departmentId && known.has(person.departmentId) ? person.departmentId : EXECUTIVE_ROOM_ID;
     byDept.set(key, [...(byDept.get(key) ?? []), person]);
   }
 
   const named = departments
     .filter((dept) => byDept.has(dept.id))
     .map((dept) => ({ id: dept.id, name: dept.name }));
-  if (byDept.has("none")) named.push({ id: "none", name: "No department" });
+  if (byDept.has(EXECUTIVE_ROOM_ID)) named.push({ id: EXECUTIVE_ROOM_ID, name: "Executive Office" });
 
   const sized = named.map((dept, index) => {
     const members = [...(byDept.get(dept.id) ?? [])].sort((a, b) => a.name.localeCompare(b.name));
@@ -188,7 +200,8 @@ export function layoutOffice(
       const x = col * (ROOM_W + HALL);
       const counts: Record<OfficeStatus, number> = { working: 0, gone: 0, leave: 0, out: 0 };
       const desks = room.members.map((person, index) => {
-        counts[person.status] += 1;
+        // In for the room's sign too, whatever the DTR says: the sign counts who is there.
+        counts[person.executive && person.roams ? "working" : person.status] += 1;
         return {
           x: x + MARGIN_X + (index % DESK_COLS) * CELL_W,
           y: y + MARGIN_BACK + Math.floor(index / DESK_COLS) * CELL_D,
@@ -251,16 +264,23 @@ export function officeTheme(name: string): OfficeTheme {
  */
 export type OfficeActivity = "desk" | "lunch" | "allhands";
 
-function manilaClock(now: Date): { weekday: string; minutes: number } {
+function manilaClock(now: Date): { date: string; weekday: string; minutes: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: "Asia/Manila",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
     weekday: "short",
     hour: "numeric",
     minute: "numeric",
     hourCycle: "h23",
   }).formatToParts(now);
   const get = (type: string) => parts.find((part) => part.type === type)?.value ?? "";
-  return { weekday: get("weekday"), minutes: Number(get("hour")) * 60 + Number(get("minute")) };
+  return {
+    date: `${get("year")}-${get("month")}-${get("day")}`,
+    weekday: get("weekday"),
+    minutes: Number(get("hour")) * 60 + Number(get("minute")),
+  };
 }
 
 export function officeActivity(now: Date): OfficeActivity {
@@ -289,6 +309,120 @@ export function isSmoker(person: Pick<OfficePerson, "name">): boolean {
 /** Raiza dresses in pink, at the user's request. A joke about one person, like `isSmoker`. */
 export function wearsPink(person: Pick<OfficePerson, "name">): boolean {
   return /^raiza\b/i.test(person.name);
+}
+
+/**
+ * Gary and Nina, the CEOs, at the user's request: in the office every weekday from 8 to
+ * 5 whether or not they timed in, working in their own room, going round the departments
+ * and out of the front doors. Like `isSmoker` this is about these two people and not a
+ * rule, so nothing else follows from their role.
+ *
+ * BY ID, NOT NAME (an email or a name can change; see the daily attendance cron), and
+ * THE NAME IS HERE because `vizserve_pms_office_presence()` withholds it from a member,
+ * and they hold `owner`, which it does not count as roaming.
+ */
+export const EXECUTIVES: Readonly<Record<string, { name: string; longHair: boolean }>> = {
+  "b8072285-a114-4b63-a065-bfccd8aa2d8b": { name: "Gary Cacananta", longHair: false },
+  "a3ea1241-b507-494a-856b-0497b3c7e495": { name: "Nina Cacananta", longHair: true },
+};
+
+/** Amier and Joel, who the executives stop and talk to all through the day. */
+const EXECUTIVES_MEET = new Set([
+  "37c09844-65f8-48d6-9dc9-396eb11e0930",
+  "b21b4e11-b148-47f1-a7d8-d4b4c6d1b526",
+]);
+
+export function meetsExecutives(person: Pick<OfficePerson, "id">): boolean {
+  return EXECUTIVES_MEET.has(person.id);
+}
+
+export function isExecutiveHours(now: Date): boolean {
+  const { weekday, minutes } = manilaClock(now);
+  return weekday !== "Sat" && weekday !== "Sun" && minutes >= 8 * 60 && minutes < 17 * 60;
+}
+
+type Slot = { from: number; to: number };
+
+const VIZBYTES = "a1000000-0000-4000-8000-000000000001";
+const VIZASSISTS = "a1000000-0000-4000-8000-000000000002";
+
+/** Whole five minutes in 8 to 5 that do not touch `avoid`, one of them picked by a hash of `seed`. */
+function pickStart(seed: string, length: number, avoid: readonly Slot[]): number {
+  const starts: number[] = [];
+  for (let start = 8 * 60; start + length <= 17 * 60; start += 5) {
+    if (avoid.every((slot) => start + length <= slot.from || start >= slot.to)) starts.push(start);
+  }
+  // FNV-1a: seeds differ by a digit or two, and this spreads those.
+  let hashed = 2166136261;
+  for (const char of seed) hashed = Math.imul(hashed ^ char.charCodeAt(0), 16777619);
+  return starts[(hashed >>> 0) % starts.length];
+}
+
+/** When everybody is already seated elsewhere: no meeting is put here. */
+function gatherings(weekday: string): Slot[] {
+  return [{ from: 12 * 60, to: 13 * 60 }, ...(weekday === "Fri" ? [{ from: 16 * 60, to: 17 * 60 }] : [])];
+}
+
+/** How long a department's daily meeting runs, in minutes. */
+export const TEAM_MEETING_MINUTES = 60;
+
+/**
+ * A department's meeting that day. VizBytes' is fixed, at the user's request: Monday to
+ * Wednesday 10 to 11, Thursday and Friday 1:30 to 2:30. Every other department gets an
+ * hour at a different time each weekday, so a new department has one without anybody
+ * adding it. None at the weekend.
+ *
+ * "RANDOM" IS A HASH OF THE DATE AND DEPARTMENT, NOT `Math.random()`: everybody looking
+ * at the office has to see the same meeting, and a reload must not move it.
+ */
+function teamMeetingSlot(departmentId: string, date: string, weekday: string): Slot | null {
+  if (weekday === "Sat" || weekday === "Sun") return null;
+  if (departmentId === VIZBYTES) {
+    return ["Thu", "Fri"].includes(weekday) ? { from: 13 * 60 + 30, to: 14 * 60 + 30 } : { from: 10 * 60, to: 11 * 60 };
+  }
+  const from = pickStart(`${date}:${departmentId}`, TEAM_MEETING_MINUTES, gatherings(weekday));
+  return { from, to: from + TEAM_MEETING_MINUTES };
+}
+
+/**
+ * Who sits down at their department's meeting: members who have timed in, and whoever
+ * does not have to time in (`roams`: Amier and Joel), timed in or not. Not somebody
+ * hidden: their room is closed to this viewer, so the meeting is too.
+ */
+export function attendsTeamMeeting(person: Pick<OfficePerson, "status" | "roams" | "hidden">): boolean {
+  return (person.status === "working" || Boolean(person.roams)) && !person.hidden;
+}
+
+/** Which of these departments are in their meeting now, and until when, in minutes after midnight. */
+export function teamMeetingsAt(now: Date, departmentIds: readonly string[]): { departmentId: string; until: number }[] {
+  const { date, weekday, minutes } = manilaClock(now);
+  return departmentIds.flatMap((departmentId) => {
+    const slot = teamMeetingSlot(departmentId, date, weekday);
+    return slot && minutes >= slot.from && minutes < slot.to ? [{ departmentId, until: slot.to }] : [];
+  });
+}
+
+/** How long the executives' daily meeting runs, in minutes. */
+export const EXECUTIVE_MEETING_MINUTES = 30;
+
+/**
+ * When today's meeting of Gary, Nina, Amier and Joel starts, in minutes after midnight
+ * in Manila: a different time each weekday, somewhere in 8 to 5, null at the weekend.
+ * Never across lunch, the Friday all-hands, or the team meetings of Amier's and Joel's
+ * departments, because neither can be at two tables.
+ */
+export function executiveMeetingStart(now: Date): number | null {
+  const { date, weekday } = manilaClock(now);
+  if (weekday === "Sat" || weekday === "Sun") return null;
+  const teams = [VIZBYTES, VIZASSISTS].flatMap((id) => teamMeetingSlot(id, date, weekday) ?? []);
+  return pickStart(date, EXECUTIVE_MEETING_MINUTES, [...gatherings(weekday), ...teams]);
+}
+
+export function inExecutiveMeeting(now: Date): boolean {
+  const start = executiveMeetingStart(now);
+  if (start === null) return false;
+  const { minutes } = manilaClock(now);
+  return minutes >= start && minutes < start + EXECUTIVE_MEETING_MINUTES;
 }
 
 /** Seconds of the comfort room each person gets, out of each slot of `BATHROOM_SLOT`. */

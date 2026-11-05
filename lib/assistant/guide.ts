@@ -245,6 +245,8 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
       { text: "You can go into your own room, the all-hands room and the shared spaces. Team leaders and above can look into every room." },
       { text: "At lunch, 12 to 1, and at the all-hands, Fridays 4 to 5 PM, everyone sees the same room." },
       { text: "Managers and business managers do not need to time in, so during office hours they walk the floor instead of sitting at a desk." },
+      { text: "Gary and Nina are in the Executive Office from 8 AM to 5 PM on weekdays, timed in or not, going round the departments and stopping to talk. Once a day they meet Amier and Joel there for half an hour, at a different time each day." },
+      { text: "Each department has an hour's team meeting in its own room every weekday, for whoever has timed in, plus Amier and Joel, who do not need to. VizBytes is Monday to Wednesday 10 to 11 AM and Thursday and Friday 1:30 to 2:30 PM. The others change from day to day." },
       { text: "I'll open it for you now." },
     ],
   },

@@ -94,9 +94,9 @@ describe("layoutOffice", () => {
     expect(layout.rooms[1].y).toBe(layout.rooms[0].y);
   });
 
-  it("puts unknown or missing departments in No department", () => {
+  it("puts unknown or missing departments in the Executive Office", () => {
     const layout = layoutOffice(depts, [p("a", null), p("b", "shared-space")]);
-    expect(layout.rooms.map((room) => room.name)).toEqual(["No department"]);
+    expect(layout.rooms.map((room) => room.name)).toEqual(["Executive Office"]);
     expect(layout.rooms[0].desks).toHaveLength(2);
   });
 

@@ -212,6 +212,11 @@ function Plant({ x, z }: { x: number; z: number }) {
   );
 }
 
+/** Whether the free floor has room for a lobby at all, and so for its guard. */
+export function lobbyFits(x0: number, x1: number, z0: number, z1: number): boolean {
+  return x1 - x0 >= 8 && z1 - z0 >= 6;
+}
+
 export function Lobby({
   x0,
   x1,
@@ -228,7 +233,7 @@ export function Lobby({
   const welcome = useTextTexture("WELCOME TO VIZSERVE", "#ffffff", 110, 1800, 200);
   const width = x1 - x0;
   const depth = z1 - z0;
-  if (width < 8 || depth < 6) return null;
+  if (!lobbyFits(x0, x1, z0, z1)) return null;
 
   return (
     <group>
