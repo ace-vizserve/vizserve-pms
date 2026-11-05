@@ -513,14 +513,29 @@ describe("⚠️ the count reads through the service role, never the caller", ()
 // be raised past.
 // ---------------------------------------------------------------------------
 
-describe("⚠️ an internal form is an admin instrument", () => {
-  it("refuses a team leader editing an INTERNAL form", async () => {
+describe("⚠️ an internal form is an admin's, or its author's", () => {
+  const somebodyElses = () => {
+    auth.role = "team_leader";
+    fake = makeFakeClient({ form: stored({ created_by: "somebody-else" }) });
+  };
+
+  it("P17-15: refuses a team leader editing somebody else's INTERNAL form", async () => {
+    somebodyElses();
+
+    await expect(updateFormSettings("form-1", INTERNAL_SETTINGS)).rejects.toThrow(/whoever created it/i);
+  });
+
+  it("P17-15: refuses a team leader opening their own survey to everyone", async () => {
     auth.role = "team_leader";
 
-    const result = await updateFormSettings("form-1", INTERNAL_SETTINGS);
+    const result = await updateFormSettings("form-1", {
+      ...INTERNAL_SETTINGS,
+      audience: { is_all_departments: true, department_ids: [] },
+    });
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toMatch(/only an admin/i);
+    expect(fake.recorder.updates).toEqual([]);
   });
 
   it("⚠️ refuses BEFORE the count, so an unreachable database is not a way past it", async () => {
@@ -533,11 +548,9 @@ describe("⚠️ an internal form is an admin instrument", () => {
      *
      * The assertion is that NO count was taken at all: the refusal came first.
      */
-    auth.role = "team_leader";
+    somebodyElses();
 
-    const result = await updateFormSettings("form-1", INTERNAL_SETTINGS);
-
-    expect(result.ok).toBe(false);
+    await expect(updateFormSettings("form-1", INTERNAL_SETTINGS)).rejects.toThrow();
     expect(fake.recorder.counted).toEqual([]);
     expect(fake.recorder.updates).toEqual([]);
   });

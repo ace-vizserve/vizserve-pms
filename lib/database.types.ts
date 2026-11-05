@@ -885,6 +885,8 @@ export type Database = {
           first_published_at: string | null;
           /** P17-10. Last day an answer is accepted. Internal forms only. */
           closes_on: string | null;
+          accepts_external: boolean;
+          default_pic_id: string | null;
           /** P17-10. Written by `vizserve_pms_send_form_reminders`, so absent from Insert and Update. */
           announced_at: string | null;
           reminders_sent: number;
@@ -894,6 +896,8 @@ export type Database = {
         };
         Insert: {
           closes_on?: string | null;
+          accepts_external?: boolean;
+          default_pic_id?: string | null;
           id?: string;
           name: string;
           slug: string;
@@ -928,6 +932,8 @@ export type Database = {
         };
         Update: Partial<{
           closes_on: string | null;
+          accepts_external: boolean;
+          default_pic_id: string | null;
           name: string;
           slug: string;
           description: string;
@@ -1097,6 +1103,10 @@ export type Database = {
            * === null` on one row, or a single unreadable submitter relabels a
            * named form as anonymous.
            */
+          /** P17-15. Through /survey/<slug>: `submitted_by` is null whatever the form's flag says. */
+          is_external: boolean;
+          respondent_name: string | null;
+          respondent_email: string | null;
           submitted_by: string | null;
           /**
            * The answers, keyed by `field_key` — the same shape as
@@ -1179,6 +1189,8 @@ export type Database = {
           field_values: Json;
           status: VizservePmsRequestStatus;
           decision_reason: string | null;
+          /** P17-15. The form's default on arrival, then the task's assignee. */
+          pic_id: string | null;
           reviewed_by: string | null;
           reviewed_at: string | null;
           sla_started_at: string | null;
@@ -3075,6 +3087,16 @@ export type Database = {
       vizserve_pms_i_answered_form: {
         Args: { p_form_id: string };
         Returns: boolean;
+      };
+      vizserve_pms_submit_external_response: {
+        Args: {
+          p_slug: string;
+          p_field_values: Json;
+          p_name?: string | null;
+          p_email?: string | null;
+          p_ip?: string | null;
+        };
+        Returns: Json;
       };
       vizserve_pms_send_form_reminders: {
         Args: Record<PropertyKey, never>;

@@ -313,20 +313,19 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
   // a lead and falls through to answering one for a member, who cannot open it.
   {
     id: "forms",
-    title: "Forms",
+    title: "Surveys & Quizzes",
     href: "/forms",
     keywords: [
-      "form", "build form", "build a form", "create form", "create a form", "make form",
-      "make a form", "new form", "form builder", "client form", "edit form", "publish form",
-      "form link", "gawa form", "gumawa ng form", "new internal form", "create an internal form",
-      "make an internal form", "form deadline", "survey deadline", "form reminder", "survey reminder",
-      "anonymous form",
+      "form", "forms", "survey", "quiz", "build form", "build a form", "create form", "create a form", "make form",
+      "make a form", "new form", "new survey", "create a survey", "make a survey", "form builder", "edit form",
+      "publish form", "new internal form", "create an internal form", "make an internal form", "form deadline",
+      "survey deadline", "form reminder", "survey reminder", "anonymous form", "public survey", "survey link",
+      "gawa form", "gumawa ng form",
     ],
     steps: [
-      { text: "These are your department's forms — live ones have a public link for the client." },
-      { text: "Start a new one here.", target: 'a[href="/forms/new"]' },
-      { text: "Open any form to edit its fields, then publish it to get its link." },
-      { text: "On an internal form, the Settings tab is where you set a deadline and choose anonymous answers." },
+      { text: "These are your surveys and quizzes." },
+      { text: "New form opens the builder straight away. Give it a name and add your questions.", target: tour("new-form") },
+      { text: "On the Settings tab you set a deadline, choose anonymous answers, and turn on a public link for people outside VizServe." },
       { text: "Everyone it is for gets an email when it goes live. Those who have not answered get reminders three days and one day before the deadline." },
     ],
   },
@@ -355,6 +354,21 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
     steps: [
       { text: "These are the requests clients sent through the public forms." },
       { text: "Open one to approve it, set its urgency, or send it back." },
+    ],
+  },
+  {
+    id: "request-forms",
+    title: "Request forms",
+    href: "/requests",
+    keywords: [
+      "client form", "request form", "make a client form", "make a request form", "new request form", "help desk",
+      "helpdesk", "form link", "default pic", "form pic",
+    ],
+    steps: [
+      { text: "Request form in the sidebar opens a new form straight away, and so does this button.", target: tour("new-form") },
+      { text: "What a form collects lands here in Requests. Your existing forms are under the Request forms button." },
+      { text: "On the Settings tab, choose the default PIC. Every request starts under them, and a form cannot go live without one." },
+      { text: "On the form, the requester is the first approver and can add more." },
     ],
   },
   {
@@ -515,7 +529,7 @@ export const GUIDE_DESTINATIONS: GuideDestination[] = [
 /**
  * TOURS OF A PAGE YOU ARE ALREADY ON — "how do I fill this in?" rather than
  * "where is it?". Matched by route and, where one route draws different
- * screens, by query (`/forms/new?purpose=…` is three). A destination's own
+ * screens, by query. A destination's own
  * steps double as its page's tour, so only pages that are not a destination,
  * or need more than a destination says, are listed here.
  */
@@ -527,54 +541,7 @@ export type PageTour = {
   steps: TourStep[];
 };
 
-const field = (id: string) => `[id="${id}"]`;
-
-export const PAGE_TOURS: PageTour[] = [
-  {
-    path: "/forms/new",
-    query: { purpose: "CLIENT_REQUEST" },
-    title: "New client form",
-    steps: [
-      { text: "Name it the way the client will read it, like Marketing Collateral Request.", target: field("name") },
-      { text: "The slug is the end of the public link — short, lowercase, with dashes.", target: field("slug") },
-      { text: "A line or two the client reads above the fields.", target: field("description") },
-      { text: "Whose Team Leader approves what comes in through this form.", target: field("department") },
-      {
-        text: "Working days to deliver: the first box when the TL marks it Urgent, the second when not.",
-        target: field("urgent_days"),
-      },
-      {
-        text: "How long the client has to sign the work off before it completes on its own.",
-        target: field("client_approval_days"),
-      },
-      {
-        text: "Keep this on for work requests. Turn it off for a form that only collects answers, like feedback.",
-        target: field("requires_approval"),
-      },
-      { text: "It stays a draft until you publish, so you can add the fields first.", target: field("is_active") },
-      { text: "Then press Create form at the bottom, and add your fields on the next page." },
-    ],
-  },
-  {
-    path: "/forms/new",
-    query: { purpose: "INTERNAL" },
-    title: "New internal form",
-    steps: [
-      { text: "Name the form. Staff will find it under Fill a form.", target: field("name") },
-      { text: "Create it, then add the questions on the next page." },
-      { text: "Its Settings tab holds the deadline and the anonymous switch. Each person answers once, either way." },
-    ],
-  },
-  {
-    path: "/forms/new",
-    title: "New form",
-    steps: [
-      { text: "First pick the kind of form." },
-      { text: "A client request form has a public link and turns each submission into work for your team." },
-      { text: "An internal form is answered by staff, behind the login." },
-    ],
-  },
-];
+export const PAGE_TOURS: PageTour[] = [];
 
 /** The tour for the page in front of the viewer, if there is one. */
 export function tourForPage(pathname: string, search: URLSearchParams): { title: string; steps: TourStep[] } | null {

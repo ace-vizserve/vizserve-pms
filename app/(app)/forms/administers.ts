@@ -83,7 +83,11 @@ export function administersForm(context: AuthContext, form: AdministrableForm): 
    */
   // P8-01: `roleAtLeast`, not `=== "admin"` — the top rung is now `owner`.
   // P14 — `vizserve_pms_is_admin()`: Admin, Business Manager and CEO.
-  if (form.purpose === "INTERNAL") return roleAtLeast(context.role, "admin");
+  if (form.purpose === "INTERNAL" && roleAtLeast(context.role, "admin")) return true;
+
+  // P17-15 — a lead's OWN survey falls through to the rules below. Somebody else's
+  // does not: a survey an admin built is not theirs because of its department.
+  if (form.purpose === "INTERNAL" && form.created_by !== context.userId) return false;
 
   /*
    * ⚠️ P8-01c — THE ROLE FLOOR IS NO LONGER THE WHOLE OF THE FLOOR.

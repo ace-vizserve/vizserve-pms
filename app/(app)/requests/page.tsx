@@ -1,6 +1,9 @@
 import { loadUserNames } from "@/lib/counts-server";
 import type { Metadata } from "next";
+import Link from "next/link";
 
+import { NewFormButton } from "@/app/(app)/forms/new-form-button";
+import { buttonVariants } from "@/components/ui/button";
 import { ListSearch } from "@/components/list-search";
 import { PageShell } from "@/components/page-shell";
 import { RealtimeTasks } from "@/components/realtime-refresh";
@@ -178,6 +181,18 @@ export default async function RequestsPage({
   // /approvals and /requests had both written out, verbatim.
   const reviewerNames = await loadUserNames(reviewerIds);
 
+  // P17-15. Its own read, so an unpasted migration costs this column and nothing else.
+  const { data: pics } = await supabase
+    .from("vizserve_pms_requests")
+    .select("id, pic_id")
+    .in("id", rows.map((row) => row.id));
+  const picNames = await loadUserNames([
+    ...new Set((pics ?? []).map((row) => row.pic_id).filter((id): id is string => id !== null)),
+  ]);
+  const picByRequest = Object.fromEntries(
+    (pics ?? []).map((row) => [row.id, row.pic_id ? (picNames[row.pic_id] ?? null) : null]),
+  );
+
   const isFiltered = Boolean(params.status || params.form || params.from || params.to || term);
   const total = count ?? 0;
 
@@ -206,6 +221,13 @@ export default async function RequestsPage({
 
   return (
     <PageShell>
+      <div className="flex items-center justify-end gap-2">
+        <Link href="/requests/forms" className={buttonVariants({ size: "sm", variant: "outline" })}>
+          Request forms
+        </Link>
+        <NewFormButton purpose="CLIENT_REQUEST" />
+      </div>
+
       {/*
         P8-03 — ⚠️ A TASK SUBSCRIPTION ON THE REQUESTS PAGE. THIS IS NOT A
         COPY-PASTE MISTAKE.
@@ -264,6 +286,7 @@ export default async function RequestsPage({
         formNames={formNames}
         formSlaMinutes={formSlaMinutes}
         reviewerNames={reviewerNames}
+        picByRequest={picByRequest}
         isFiltered={isFiltered}
         errorMessage={requestsError?.message}
       />

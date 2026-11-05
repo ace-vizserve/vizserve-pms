@@ -82,7 +82,8 @@ describe("answerQuestion", () => {
 
   it("sends a lead asking for forms to the builder", () => {
     expect(goesTo("forms", lead)).toBe("/forms");
-    expect(goesTo("how do I make a client form", lead)).toBe("/forms");
+    expect(goesTo("how do I make a client form", lead)).toBe("/requests");
+    expect(goesTo("new survey", lead)).toBe("/forms");
     expect(goesTo("fill up a form", lead)).toBe("/respond");
     expect(goesTo("create an internal form", lead)).toBe("/forms");
     expect(goesTo("set a form deadline", lead)).toBe("/forms");
@@ -175,18 +176,11 @@ describe("withinOneEdit", () => {
 });
 
 describe("touring the page already open", () => {
-  const clientForm = new URLSearchParams("purpose=CLIENT_REQUEST");
-  const page = tourForPage("/forms/new", clientForm);
+  const page = tourForPage("/inbox", new URLSearchParams());
 
   function planOnNewForm(question: string) {
-    return planFor(question, lead, "/forms/new", page);
+    return planFor(question, lead, "/inbox", page);
   }
-
-  it("picks the page by its query where one route draws several screens", () => {
-    expect(page?.title).toBe("New client form");
-    expect(tourForPage("/forms/new", new URLSearchParams("purpose=INTERNAL"))?.title).toBe("New internal form");
-    expect(tourForPage("/forms/new", new URLSearchParams())?.title).toBe("New form");
-  });
 
   it("falls back to a destination's own steps for its page", () => {
     expect(tourForPage("/timesheet", new URLSearchParams())?.title).toBe("Timesheet");

@@ -267,10 +267,10 @@ describe("nav gating — `alsoDeptAdmin` is an OR, where `requiresDeptAdmin` is 
 
   it("does not let the tick open anything else in the rail", () => {
     // ⛔ THE BOUNDARY, as the sidebar sees it. A member holding the tick gets
-    // exactly one row more than a member without it, and it is Forms.
+    // exactly two rows more than a member without it: surveys and request forms.
     const withTick = hrefs("member", true);
     const without = hrefs("member", false);
-    expect(withTick.filter((href) => !without.includes(href))).toEqual(["/forms"]);
+    expect(withTick.filter((href) => !without.includes(href))).toEqual(["/forms", "/requests/forms/new"]);
   });
 
   it("keeps every company-wide admin screen out of reach of the tick", () => {

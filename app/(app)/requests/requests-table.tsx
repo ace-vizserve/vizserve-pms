@@ -51,6 +51,7 @@ export function RequestsTable({
   formNames,
   formSlaMinutes,
   reviewerNames,
+  picByRequest,
   isFiltered,
   errorMessage,
   toolbar,
@@ -62,6 +63,8 @@ export function RequestsTable({
   formSlaMinutes: Record<string, number>;
   /** Reviewer id → name. A Map cannot cross the RSC boundary. */
   reviewerNames: Record<string, string>;
+  /** P17-15. Request id → the PIC's name. */
+  picByRequest: Record<string, string | null>;
   isFiltered: boolean;
   errorMessage?: string;
   /** Search and filters, for the table's own header strip. */
@@ -217,6 +220,11 @@ export function RequestsTable({
         ) : (
           <span className="text-foreground-faint">—</span>
         ),
+    },
+    {
+      key: "pic",
+      header: "PIC",
+      cell: (request) => <p className="truncate">{picByRequest[request.id] ?? "—"}</p>,
     },
     {
       key: "status",

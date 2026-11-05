@@ -145,7 +145,7 @@ export const NAV_ITEMS: NavItem[] = [
     icon: "dashboard",
   },
   {
-    label: "Forms",
+    label: "Surveys & Quizzes",
     href: "/forms",
     minRole: "team_leader",
     // P8-01c. The builder is one of the three structure screens the department
@@ -153,6 +153,16 @@ export const NAV_ITEMS: NavItem[] = [
     // is `requireDepartmentShape()` and the list is narrowed by
     // `administersForm`, so the row and the gate agree — which is the rule the
     // Admin group's comment below states for the other direction.
+    alsoDeptAdmin: true,
+    enabled: true,
+    icon: "form",
+  },
+  {
+    // P17-15. Opens a new form's builder directly. The list is /requests/forms, from
+    // the Requests page, and what a form collects lands in Requests.
+    label: "Request form",
+    href: "/requests/forms/new",
+    minRole: "team_leader",
     alsoDeptAdmin: true,
     enabled: true,
     icon: "form",
@@ -540,7 +550,7 @@ export const NAV_GROUPS: NavGroup[] = [
   { label: "Work", hrefs: ["/dashboard", "/inbox"] },
   // One process end to end: a form is built, the client submits it, the request
   // waits at Gate 1. `/respond` is the internal side of the same builder.
-  { label: "Forms & requests", hrefs: ["/requests", "/forms", "/respond"] },
+  { label: "Forms & requests", hrefs: ["/requests", "/requests/forms/new", "/forms", "/respond"] },
   // Where the day went, and the paperwork about it — leave, overtime and time
   // corrections all live under Approvals.
   { label: "Time & leave", hrefs: ["/dtr", "/timesheet", "/approvals"] },

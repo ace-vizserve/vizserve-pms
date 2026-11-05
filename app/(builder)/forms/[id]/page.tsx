@@ -10,7 +10,9 @@ import { ThemeToggle } from "@/components/theme-toggle";
 import { buttonVariants } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { requireDepartmentShape } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
 import { readFormDeadlines } from "@/lib/form-builder/deadline";
+import { readFormExtras } from "@/lib/form-builder/form-extras";
 import { optionsFromRow, reconcileFormSchema, type FormFieldRow } from "@/lib/form-builder/schema";
 import type { FieldType } from "@/lib/schemas/forms";
 import { createClient } from "@/utils/supabase/server";
@@ -51,7 +53,10 @@ export const metadata: Metadata = { title: "Edit form" };
 function BuilderHeader({
   title,
   children,
+  back = { href: "/forms", label: "Surveys & Quizzes" },
 }: {
+  /** P17-15. Which list this form lives in. */
+  back?: { href: string; label: string };
   /**
    * The page's `<h1>`.
    *
@@ -65,9 +70,9 @@ function BuilderHeader({
 }) {
   return (
     <header className="sticky top-0 z-30 flex h-16 shrink-0 items-center gap-3 border-b bg-panel px-5 shadow-chrome backdrop-blur-md backdrop-saturate-150">
-      <Link href="/forms" className={buttonVariants({ variant: "outline", size: "sm" })}>
+      <Link href={back.href} className={buttonVariants({ variant: "outline", size: "sm" })}>
         <ArrowLeft />
-        Forms
+        {back.label}
       </Link>
 
       <Separator orientation="vertical" className="data-vertical:h-4 data-vertical:self-auto" />
@@ -284,6 +289,17 @@ export default async function EditFormPage({
    */
   const { departments, error: departmentsError } = await loadRoutableDepartments(supabase, context);
 
+  // P17-15. Their own query, so an unpasted migration costs the two controls and no more.
+  const extras = (await readFormExtras(supabase, [form.id]))?.get(form.id);
+  const { data: picCandidates } = isInternal
+    ? { data: null }
+    : await supabase
+        .from("vizserve_pms_users")
+        .select("id, full_name, primary_department_id")
+        .in("primary_department_id", departments.map((department) => department.id))
+        .eq("is_active", true)
+        .order("full_name");
+
   /*
    * ⚠️ A FAILED FIELDS READ MUST NOT OPEN THE BUILDER. THIS IS THE DESTRUCTIVE
    * ONE.
@@ -451,6 +467,7 @@ export default async function EditFormPage({
      */
     <SaveStatusProvider>
       <BuilderHeader
+        back={isInternal ? undefined : { href: "/requests/forms", label: "Request forms" }}
         title={
           <div className="flex min-w-0 flex-col justify-center">
             <BuilderTitle formId={form.id} name={form.name} />
@@ -601,6 +618,8 @@ export default async function EditFormPage({
           <div className="mx-auto w-full max-w-3xl p-5">
             {isInternal ? (
               <InternalSettings
+                key={form.slug}
+                canTargetEveryone={roleAtLeast(context.role, "admin")}
                 departments={departments}
                 formId={form.id}
                 hasSubmissions={submissionCount > 0}
@@ -620,6 +639,7 @@ export default async function EditFormPage({
                   is_quiz: form.is_quiz,
                   is_active: form.is_active,
                   closes_on: deadlines ? (deadlines.get(form.id) ?? null) : undefined,
+                  accepts_external: extras?.accepts_external,
                   /*
                     The five the card never draws, loaded so its save resends
                     what is stored rather than a value `formSettingsSchema` —
@@ -639,6 +659,8 @@ export default async function EditFormPage({
               />
             ) : (
               <ClientFormSettings
+                key={form.slug}
+                picCandidates={picCandidates ?? []}
                 departments={departments}
                 formId={form.id}
                 hasSubmissions={submissionCount > 0}
@@ -657,6 +679,7 @@ export default async function EditFormPage({
                   sla_minutes: form.sla_minutes,
                   default_list_id: form.default_list_id,
                   client_approval_days: form.client_approval_days,
+                  default_pic_id: extras?.default_pic_id,
                 }}
               />
             )}

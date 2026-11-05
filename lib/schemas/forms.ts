@@ -413,6 +413,26 @@ export const formResponseSubmissionSchema = z.object({
 
 export type FormResponseSubmission = z.infer<typeof formResponseSubmissionSchema>;
 
+/** P17-15 — an answer through /survey/<slug>. The name and email are for a named form only. */
+export const externalResponseSubmissionSchema = formResponseSubmissionSchema.extend({
+  respondent_name: z.string().trim().max(200).optional(),
+  respondent_email: z.string().trim().max(320).optional(),
+});
+
+/**
+ * P17-15 — what New form names a form before anyone has. While a form still carries
+ * one of these and has never been published, renaming it also re-derives its slug
+ * and prefix, so no client ever sees /request/untitled-request-form-3.
+ */
+export const DRAFT_FORM_NAMES = {
+  CLIENT_REQUEST: "Untitled request form",
+  INTERNAL: "Untitled survey",
+} as const;
+
+export function isDraftFormName(name: string): boolean {
+  return Object.values(DRAFT_FORM_NAMES).includes(name as (typeof DRAFT_FORM_NAMES)[keyof typeof DRAFT_FORM_NAMES]);
+}
+
 /**
  * What `submitFormResponse` answers with.
  *
@@ -646,6 +666,13 @@ export const formSettingsSchema = z.object({
     .regex(/^\d{4}-\d{2}-\d{2}$/, "Choose a valid date.")
     .nullable()
     .optional(),
+  /**
+   * P17-15. Optional like `closes_on`, for the same reason: each card sends only
+   * the one that is its own, and absent means leave it alone. A survey's public
+   * link, and who a client form's new requests are put under.
+   */
+  accepts_external: z.boolean().optional(),
+  default_pic_id: z.uuid().nullable().optional(),
   /**
    * P7-66 — WHETHER AN ANSWER IS RECORDED AGAINST A NAME.
    *

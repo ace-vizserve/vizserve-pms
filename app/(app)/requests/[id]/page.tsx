@@ -9,7 +9,9 @@ import { RequestStatusBadge, TaskStatusBadge } from "@/components/status-badge";
 import { StageTrack } from "@/components/stage-track";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RichText } from "@/components/ui/rich-text";
-import { canApproveClientRequest, requireRole } from "@/lib/auth/authorization";
+import { canApproveClientRequest, requireAuthContext } from "@/lib/auth/authorization";
+import { roleAtLeast } from "@/lib/auth/roles";
+import { loadUserNames } from "@/lib/counts-server";
 import { formatDate, formatDateTime, formatDuration, isOverdue } from "@/lib/dates";
 import { createClient } from "@/utils/supabase/server";
 
@@ -52,7 +54,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 
 export default async function RequestDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const context = await requireRole("team_leader");
+  // P17-15. Was `requireRole("team_leader")`: a PIC may be a member. The check under the
+  // read keeps everyone else below team leader out, and RLS scopes the row either way.
+  const context = await requireAuthContext();
   const supabase = await createClient();
 
   // Out of scope returns no row under RLS, which surfaces as 404 rather than a
@@ -66,6 +70,14 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
     .maybeSingle();
 
   if (!request) notFound();
+
+  // Its own read, so an unpasted migration costs the PIC and nothing else.
+  const { data: picRow } = await supabase.from("vizserve_pms_requests").select("pic_id").eq("id", id).maybeSingle();
+  const picId = picRow?.pic_id ?? null;
+
+  if (!roleAtLeast(context.role, "team_leader") && picId !== context.userId) notFound();
+
+  const picName = picId ? ((await loadUserNames([picId]))[picId] ?? null) : null;
 
   // P16-06 — steps 2+ of the Gate 3 chain. Empty for most requests.
   const { data: extraApprovers } = await supabase
@@ -462,6 +474,7 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
               urgentDays={form?.urgent_days ?? 3}
               normalDays={form?.normal_days ?? 5}
               candidates={candidates.data ?? []}
+              defaultAssigneeId={picId}
               capacity={capacity.data ?? []}
               currentUserId={context.userId}
               currentUserName={context.fullName}
@@ -472,6 +485,11 @@ export default async function RequestDetailPage({ params }: { params: Promise<{ 
 
         {/* --------------------------------------------------------- RIGHT */}
         <div className="flex min-w-0 flex-col gap-3">
+          <p className="text-sm">
+            <span className="text-muted-foreground">PIC: </span>
+            <span className="font-medium">{picName ?? "Chosen at approval"}</span>
+          </p>
+
           {/* P16-06 — who signs the finished work off, in order. */}
           {(extraApprovers ?? []).length > 0 ? (
             <Card size="sm">

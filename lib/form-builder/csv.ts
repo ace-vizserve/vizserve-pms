@@ -44,6 +44,9 @@ export type ExportableResponse = {
   submitted_by: string | null;
   submitted_at: string;
   field_values: unknown;
+  /** P17-15. An answer through the public link, on a named form. */
+  respondent_name?: string | null;
+  respondent_email?: string | null;
 };
 
 /**
@@ -99,7 +102,9 @@ export function responsesToCsv(
       ? []
       : [
           response.submitted_by === null
-            ? ""
+            ? response.respondent_name
+              ? `${response.respondent_name} <${response.respondent_email ?? ""}> (external)`
+              : ""
             : (names[response.submitted_by] ?? "Outside your department"),
         ]),
     ...columns.map((column) => answerFor(response.field_values, column.key) ?? ""),

@@ -248,8 +248,33 @@ export async function FormResponses({
 
   const pending = pendingAnswerers(roster, byPerson.keys());
 
+  // P17-15. Their own read, so an unpasted migration costs this list and nothing else.
+  const { data: external } = await supabase
+    .from("vizserve_pms_form_responses")
+    .select("respondent_name, respondent_email, submitted_at")
+    .eq("form_id", formId)
+    .not("respondent_name", "is", null)
+    .order("submitted_at", { ascending: false })
+    .limit(200);
+
   return (
     <ResponsesSection>
+      {external && external.length > 0 ? (
+        <div className="rounded-lg border bg-card p-5 grade-surface shadow-raised">
+          <p className="text-sm font-semibold">From the public link</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">Names and emails are as they typed them, not verified.</p>
+          <ul className="mt-3 space-y-1.5 text-sm">
+            {external.map((row, index) => (
+              <li key={index} className="flex flex-wrap justify-between gap-x-4">
+                <span>
+                  {row.respondent_name} <span className="text-muted-foreground">{row.respondent_email}</span>
+                </span>
+                <span className="text-xs text-muted-foreground">{formatDateTime(row.submitted_at)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
       <div className="rounded-lg border bg-card p-5 grade-surface shadow-raised">
         <div className="flex flex-wrap items-start gap-4">
           <div className="min-w-0 flex-1">

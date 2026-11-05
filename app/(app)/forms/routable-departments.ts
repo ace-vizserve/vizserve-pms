@@ -66,3 +66,21 @@ export async function loadRoutableDepartments(
 
   return { departments: data ?? [], error };
 }
+
+/**
+ * The department a new form starts in: the creator's primary one if they can route
+ * to it, otherwise the only one they lead, otherwise null. Membership of the routable
+ * list is the test because it is what RLS will accept and what the settings picker
+ * can display. Null is an unrouted draft, which the department tells them to fix
+ * before publishing.
+ */
+export function defaultDepartmentId(
+  primaryDepartmentId: string | null,
+  departments: RoutableDepartment[],
+): string | null {
+  if (primaryDepartmentId && departments.some((d) => d.id === primaryDepartmentId)) {
+    return primaryDepartmentId;
+  }
+
+  return departments.length === 1 ? departments[0].id : null;
+}

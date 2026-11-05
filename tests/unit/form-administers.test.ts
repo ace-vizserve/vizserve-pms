@@ -148,22 +148,15 @@ describe("administersForm — internal forms are owner only", () => {
     expect(administersForm(lead, internalForm(DEPT_A, SOMEBODY_ELSE))).toBe(false);
   });
 
-  it("⚠️ refuses the lead who CREATED it, unrouted", () => {
+  it("P17-15: admits the lead who CREATED it, and only in a department they run", () => {
     /*
-     * THE ORDERING TEST, and the reason the purpose clause is first in the
-     * function.
-     *
-     * The author carve-out below it answers `true` for an unrouted draft its
-     * author started — correct on a client form, and on an internal form it
-     * would hand the builder to a team leader whose every save Postgres now
-     * refuses (`forms updatable in scope`, `form fields follow their form`,
-     * 20260902140000). An editor that cannot save is worse than no editor.
-     *
-     * Reachable, not hypothetical: any internal form created before that
-     * migration has a non-admin in `created_by`.
+     * Reverses the old "refuses the lead who created it". `surveys editable by
+     * their author` now lets them save, so the builder is theirs. A survey routed to
+     * another department stays refused, which is the policy's other half.
      */
-    expect(administersForm(lead, clientForm(null, ME))).toBe(true);
-    expect(administersForm(lead, internalForm(null, ME))).toBe(false);
+    expect(administersForm(lead, internalForm(null, ME))).toBe(true);
+    expect(administersForm(lead, internalForm(DEPT_A, ME))).toBe(true);
+    expect(administersForm(lead, internalForm(DEPT_B, ME))).toBe(false);
   });
 
   it("refuses a member, as it does everywhere else", () => {

@@ -14,6 +14,7 @@ const PUBLIC_PREFIXES = [
   "/login",
   "/auth",
   "/request/", // public client forms (P1-06 / P7-29) — no login, by design
+  "/survey/", // surveys with a public link (P17-15) — no login, by design
   // ⚠️ THE OLD ADDRESS STAYS PUBLIC. `/f/[slug]` is a permanent redirect to
   // `/request/[slug]` now, and a redirect behind the gate is worse than no
   // redirect: an old link in a client's inbox would ask somebody with no

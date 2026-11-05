@@ -2714,3 +2714,11 @@ The assistant is written answers in `lib/assistant/guide.ts`, not a language mod
 ## P17-14 — Hair from the staff record (4 Nov 2026)
 
 `vizserve_pms_office_presence()` gains `long_hair`: true for FEMALE, false for MALE, null when `gender` is not set or the name is not being sent. This is the first time gender reaches other staff, as a drawing. Nothing guesses from a name (see P7-32); not set keeps the original hair. `wearsPink` in `lib/office.ts` dresses Raiza in pink. **Migration written, not confirmed pasted:** `20261104100000_p17_14_office_hair.sql`, after P17-13. Not checked on the real database or in a browser.
+
+## P17-15 — Surveys & Quizzes and Request forms (5 Nov 2026)
+
+`/forms` lists `INTERNAL` only and reads "Surveys & Quizzes"; `/requests/forms` lists `CLIENT_REQUEST`. Both render `FormsList`. New form is `createDraftForm` then the builder, reusing the person's last untouched draft; `/forms/new` only redirects. The sidebar's Request form is `/requests/forms/new`, which does this on arrival, in an effect because the link is prefetched. A form keeps a draft name until first named, when its slug and prefix re-derive (only if never published).
+
+**Reverses P7-66 Phase 5 in part:** a lead or department admin may create and edit their OWN survey, never company-wide and never one somebody else built. Public link: `accepts_external`, `/survey/<slug>`, `vizserve_pms_submit_external_response` (service role only). **P17-11's one answer per person does not hold for external answers;** a per-IP rate limit is the only brake. Default PIC: `forms.default_pic_id`, required to publish a client form, copied to `requests.pic_id` by trigger, then kept to the task's assignee. Live forms with no default are left running, so their requests have no PIC until Gate 1. Approvers were already there (P16-06).
+
+**Migration written, not confirmed pasted:** `20261105090000_p17_15_surveys_and_request_forms.sql`. Not checked on the real database or in a browser.

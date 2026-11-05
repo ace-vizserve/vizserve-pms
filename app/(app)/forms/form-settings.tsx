@@ -63,11 +63,14 @@ type Department = { id: string; name: string };
  */
 export function ClientFormSettings({
   departments,
+  picCandidates = [],
   formId,
   initial,
   isArchived = false,
 }: {
   departments: Department[];
+  /** P17-15. Who can be a form's default PIC, for every department it could route to. */
+  picCandidates?: { id: string; full_name: string; primary_department_id: string | null }[];
   /** Absent while creating. */
   formId?: string;
   initial?: Partial<FormSettingsInput>;
@@ -125,8 +128,12 @@ export function ClientFormSettings({
       sla_minutes: initial?.sla_minutes !== undefined ? formatSlaDuration(initial.sla_minutes) : "5d",
       default_list_id: initial?.default_list_id ?? null,
       client_approval_days: initial?.client_approval_days ?? 3,
+      // P17-15. Undefined until the column exists: the control hides and the save leaves it.
+      default_pic_id: initial?.default_pic_id,
     },
   });
+
+  const defaultPicId = watch("default_pic_id");
 
   const isActive = watch("is_active");
   const requiresApproval = watch("requires_approval");
@@ -265,7 +272,11 @@ export function ClientFormSettings({
           <Select
             items={departmentItems}
             value={departmentId ?? ""}
-            onValueChange={(value) => setValue("department_id", value, { shouldValidate: true })}>
+            onValueChange={(value) => {
+              setValue("department_id", value, { shouldValidate: true });
+              // A PIC is a member of the department, so a move leaves it unchosen.
+              if (initial?.default_pic_id !== undefined) setValue("default_pic_id", null, { shouldValidate: true });
+            }}>
             <SelectTrigger id="department" aria-invalid={Boolean(errors.department_id)}>
               <SelectValue placeholder="Choose" />
             </SelectTrigger>
@@ -287,6 +298,34 @@ export function ClientFormSettings({
           <p className="text-xs text-muted-foreground">Routes submissions to this department&rsquo;s TL.</p>
           {errors.department_id ? <p className="text-xs text-destructive">{errors.department_id.message}</p> : null}
         </div>
+
+        {initial?.default_pic_id !== undefined ? (
+          <div className="space-y-2">
+            <Label htmlFor="default_pic_id">Default PIC</Label>
+            <Select
+              items={Object.fromEntries(picCandidates.map((person) => [person.id, person.full_name]))}
+              value={defaultPicId ?? ""}
+              onValueChange={(value) => setValue("default_pic_id", value || null, { shouldValidate: true })}>
+              <SelectTrigger id="default_pic_id" aria-invalid={Boolean(errors.default_pic_id)}>
+                <SelectValue placeholder="Choose" />
+              </SelectTrigger>
+              <SelectContent>
+                {picCandidates
+                  .filter((person) => person.primary_department_id === departmentId)
+                  .map((person) => (
+                    <SelectItem key={person.id} value={person.id}>
+                      {person.full_name}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
+            <p className="text-xs text-muted-foreground">
+              Every request starts under this person. Required before publishing. A team leader can
+              change it at approval.
+            </p>
+            {errors.default_pic_id ? <p className="text-xs text-destructive">{errors.default_pic_id.message}</p> : null}
+          </div>
+        ) : null}
 
         {/* The reference prefix is not a control: `createForm` derives it from
             the name, and an edit leaves it alone — a reference already quoted

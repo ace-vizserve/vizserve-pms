@@ -41,9 +41,12 @@ export type FormRow = {
   created_at: string;
   sla_minutes: number | null;
   requires_attachment: boolean;
+  /** P17-15. A survey with a public link. */
+  accepts_external?: boolean;
 };
 
 export function FormsTable({
+  purpose,
   rows,
   departmentNames,
   submissionCounts,
@@ -51,6 +54,7 @@ export function FormsTable({
   submissionsReadable,
   isOwner,
 }: {
+  purpose: FormPurpose;
   rows: FormRow[];
   departmentNames: Record<string, string>;
   /** Form id → how many requests it has taken. */
@@ -239,12 +243,12 @@ export function FormsTable({
       header: "Public URL",
       className: "hidden md:table-cell",
       cell: (form) =>
-        form.is_active && form.is_public ? (
+        form.is_active && (form.is_public || form.accepts_external) ? (
           <Link
             target="_blank"
-            href={`/request/${form.slug}`}
+            href={`/${form.is_public ? "request" : "survey"}/${form.slug}`}
             className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-            /request/{form.slug}
+            /{form.is_public ? "request" : "survey"}/{form.slug}
           </Link>
         ) : (
           <span className="text-xs text-muted-foreground">—</span>
@@ -258,13 +262,15 @@ export function FormsTable({
     },
   ];
 
-  const { visibility, onVisibilityChange } = useColumnVisibility("forms", columns);
+  // P17-15. Each list holds one kind now, so a Type column would say the same thing on every row.
+  const shown = columns.filter((column) => column.key !== "type");
+  const { visibility, onVisibilityChange } = useColumnVisibility("forms", shown);
 
   return (
     <DataTable
         columnVisibility={visibility}
         onColumnVisibilityChange={onVisibilityChange}
-      columns={columns}
+      columns={shown}
       rows={rows}
       getRowKey={(form) => form.id}
       /* This list has no filters, so there is only one way to be empty. */
@@ -274,7 +280,7 @@ export function FormsTable({
           title="No forms yet"
           description="A form defines what a client must tell you before the team will accept the work. Every required field is a question you will never have to chase."
           action={
-            <Link href="/forms/new" className={buttonVariants({ size: "sm", variant: "outline" })}>
+            <Link href={purpose === "INTERNAL" ? "/forms" : "/requests/forms/new"} className={buttonVariants({ size: "sm", variant: "outline" })}>
               Create the first form
             </Link>
           }

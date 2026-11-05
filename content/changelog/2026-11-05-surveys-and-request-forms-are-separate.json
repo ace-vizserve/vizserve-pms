@@ -1,0 +1,17 @@
+{
+  "date": "2026-11-05",
+  "kind": "changed",
+  "area": "Forms",
+  "title": "Surveys & Quizzes and Request forms are now separate",
+  "description": "Forms used to be one list with a screen asking what kind you wanted. The sidebar now has Surveys & Quizzes and Request form. Request form opens a new form straight away, and what it collects lands in Requests. New form on Surveys & Quizzes opens the builder straight away too.",
+  "items": [
+    "Team leaders can create surveys for their own department. Only an admin can open one to every department",
+    "A survey can have a public link, so people outside VizServe can answer without logging in. They can answer more than once",
+    "Every request form names a default PIC, and it has to be set before the form goes live. Every request starts under that person, and a team leader can change it at approval",
+    "Requests has a New form button and a Request forms button for your existing forms, and its list now shows each request's PIC"
+  ],
+  "refs": [
+    "P17-15"
+  ],
+  "pending": "Needs its database update: paste supabase/migrations/20261105090000_p17_15_surveys_and_request_forms.sql into the Supabase SQL editor. Until then team leaders cannot create surveys, and there is no public link or default PIC."
+}

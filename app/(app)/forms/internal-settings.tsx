@@ -59,6 +59,7 @@ type Department = { id: string; name: string };
  * choice is made once, at /forms/new, where it is the only question asked.
  */
 export function InternalSettings({
+  canTargetEveryone = true,
   departments,
   formId,
   initial,
@@ -82,6 +83,8 @@ export function InternalSettings({
    * being spread into an `.update()` that has nowhere to put it.
    */
   audience: FormAudience;
+  /** P17-15. A lead's survey is for departments they run; only an admin opens one to all. */
+  canTargetEveryone?: boolean;
   hasSubmissions?: boolean;
   /** P7-72. Its Published switch is locked until the form is restored. */
   isArchived?: boolean;
@@ -143,11 +146,13 @@ export function InternalSettings({
       // P17-10. Undefined until the column exists; the control below is hidden
       // then, and the save leaves it alone.
       closes_on: initial.closes_on,
+      accepts_external: initial.accepts_external,
     },
   });
 
   const isActive = watch("is_active");
   const isQuiz = watch("is_quiz");
+  const acceptsExternal = watch("accepts_external");
   const isAnonymous = watch("is_anonymous") ?? false;
   const departmentId = watch("department_id");
   const closesOn = watch("closes_on");
@@ -213,6 +218,7 @@ export function InternalSettings({
     "is_active",
     "audience",
     "closes_on",
+    "accepts_external",
   ]);
 
   const onSubmit = handleSubmit((values) => {
@@ -345,6 +351,7 @@ export function InternalSettings({
               type="radio"
               name="audience-mode"
               className="mt-0.5 size-4 accent-primary"
+              disabled={!canTargetEveryone}
               checked={targetsEveryone}
               onChange={() =>
                 /*
@@ -422,6 +429,9 @@ export function InternalSettings({
           because a form somebody can no longer SEE is still a form they could
           POST to.
         */}
+        {canTargetEveryone ? null : (
+          <p className="text-xs text-muted-foreground">Only an admin can open a survey to every department.</p>
+        )}
         {errors.audience ? (
           <p className="text-xs text-destructive">
             {errors.audience.message ??
@@ -429,6 +439,36 @@ export function InternalSettings({
           </p>
         ) : null}
       </fieldset>
+
+      {initial.accepts_external !== undefined ? (
+        <div className="flex items-start justify-between gap-4 rounded-lg border p-4">
+          <div className="min-w-0">
+            <Label htmlFor="accepts_external">Public link</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Anyone with the link can answer without logging in, including people outside VizServe.
+              They can answer more than once, because there is no login to hold them to one.
+            </p>
+            {acceptsExternal ? (
+              isActive ? (
+                <a
+                  href={`/survey/${initial.slug}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-1.5 block truncate text-xs font-medium text-primary underline-offset-4 hover:underline">
+                  /survey/{initial.slug}
+                </a>
+              ) : (
+                <p className="mt-1.5 text-xs font-medium">The link works once the form is published.</p>
+              )
+            ) : null}
+          </div>
+          <Switch
+            id="accepts_external"
+            checked={Boolean(acceptsExternal)}
+            onCheckedChange={(checked) => setValue("accepts_external", checked, { shouldDirty: true })}
+          />
+        </div>
+      ) : null}
 
       {initial.closes_on !== undefined ? (
         <div className="space-y-2">

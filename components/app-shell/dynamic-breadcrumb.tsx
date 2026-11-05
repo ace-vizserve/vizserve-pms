@@ -108,7 +108,7 @@ export function BreadcrumbTrail({ items }: { items: BreadcrumbTrailItem[] }) {
 /** Static segments we can name without a lookup. */
 const SEGMENT_LABELS: Record<string, string> = {
   dashboard: "Dashboard",
-  forms: "Forms",
+  forms: "Surveys & Quizzes",
   new: "New",
   requests: "Requests",
   analytics: "Analytics",
@@ -169,7 +169,8 @@ export function DynamicBreadcrumb() {
             if (!detailLabel) return null;
             text = detailLabel;
           } else {
-            text = labelFor(segment);
+            // P17-15. /forms is surveys; the same word under /requests is its own list.
+            text = segment === "forms" && pathname.startsWith("/requests/") ? "Request forms" : labelFor(segment);
           }
 
           return (

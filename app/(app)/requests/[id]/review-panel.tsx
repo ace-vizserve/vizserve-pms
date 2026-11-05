@@ -59,6 +59,7 @@ export function ReviewPanel({
   urgentDays,
   normalDays,
   candidates,
+  defaultAssigneeId,
   capacity,
   currentUserId,
   currentUserName,
@@ -81,6 +82,8 @@ export function ReviewPanel({
    */
   /** Department members who can be PIC. */
   candidates: Person[];
+  /** P17-15. The PIC the form gave this request; starts selected if they still qualify. */
+  defaultAssigneeId?: string | null;
   capacity: CapacityRow[];
   currentUserId: string;
   currentUserName: string;
@@ -90,7 +93,9 @@ export function ReviewPanel({
   const router = useRouter();
   const [pending, startTransition] = useTransition();
 
-  const [assigneeId, setAssigneeId] = useState<string>("");
+  const [assigneeId, setAssigneeId] = useState<string>(
+    candidates.some((person) => person.id === defaultAssigneeId) ? (defaultAssigneeId as string) : "",
+  );
   // P2-05 — defaults to the approving TL, overridable to any member of the
   // department (Amier 41:30). Defaulting to nobody would leave most tasks with
   // no second pair of eyes, which is the failure this gate exists to prevent.

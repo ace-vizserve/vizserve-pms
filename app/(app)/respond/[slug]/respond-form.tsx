@@ -19,6 +19,8 @@ import type { ParsedFormSchema } from "@/lib/form-builder/schema";
 import { qk } from "@/lib/query/keys";
 import { routeFieldErrors, toFieldValues } from "@/lib/form-builder/values";
 
+import type { FormResponseResult } from "@/lib/schemas/forms";
+
 import { submitFormResponse } from "../actions";
 
 /**
@@ -79,7 +81,12 @@ export function RespondForm({
   formName,
   isAnonymous,
   schema,
+  submit,
+  doneNote = "It cannot be edited or withdrawn, and each person answers a form once.",
 }: {
+  /** P17-15. /survey/<slug> sends through its own action; absent means signed in. */
+  submit?: (fieldValues: Record<string, unknown>) => Promise<FormResponseResult>;
+  doneNote?: string;
   formId: string;
   /**
    * ⚠️ PASSED, NOT READ OFF `window.location`. The action re-reads the form from
@@ -231,13 +238,16 @@ export function RespondForm({
 
       // §1: entity ids stay inside lib/form-builder. What leaves this component
       // is keyed by `field_key`, which is what the column stores.
-      const result = await submitFormResponse({
-        slug: formSlug,
-        field_values: toFieldValues(schema, validated.data),
-        // Echoed, not chosen. See the prop's note: the action compares this and
-        // refuses on a mismatch, and never writes from it.
-        promised_anonymous: isAnonymous,
-      });
+      const fieldValues = toFieldValues(schema, validated.data);
+      const result = submit
+        ? await submit(fieldValues)
+        : await submitFormResponse({
+            slug: formSlug,
+            field_values: fieldValues,
+            // Echoed, not chosen. See the prop's note: the action compares this and
+            // refuses on a mismatch, and never writes from it.
+            promised_anonymous: isAnonymous,
+          });
 
       if (result.ok) {
         setSubmitted(true);
@@ -321,9 +331,7 @@ export function RespondForm({
             ? `Thank you — your answer to ${formName} has been saved without your name.`
             : `Thank you — your answer to ${formName} has been saved against your name.`}
         </p>
-        <p className="mt-4 text-xs text-muted-foreground">
-          It cannot be edited or withdrawn, and each person answers a form once.
-        </p>
+        <p className="mt-4 text-xs text-muted-foreground">{doneNote}</p>
       </div>
     );
   }

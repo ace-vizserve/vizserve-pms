@@ -1,10 +1,11 @@
 "use server";
 
+import { DRAFT_FORM_NAMES, formPurposeSchema, isDraftFormName } from "@/lib/schemas/forms";
+import { defaultDepartmentId, loadRoutableDepartments } from "./routable-departments";
 import { revalidatePath } from "next/cache";
 
 import {
   assertDepartmentShape,
-  canAccessDepartment,
   ForbiddenError,
   requireDepartmentShape,
 } from "@/lib/auth/authorization";
@@ -143,10 +144,9 @@ async function assertCanEditForm(formId: string) {
    * P8-01c. So this narrows the new route and takes nothing from anybody who
    * already had it.
    */
-  if (form.purpose === "INTERNAL" && !canAccessDepartment(context, form.department_id)) {
-    throw new ForbiddenError(
-      "Internal forms are managed by admins, because their answers are read across departments.",
-    );
+  // P17-15 — an admin's, or the lead's own. `surveys editable by their author` is the rule.
+  if (form.purpose === "INTERNAL" && !roleAtLeast(context.role, "admin") && form.created_by !== context.userId) {
+    throw new ForbiddenError("This survey belongs to whoever created it. Ask them or an admin to change it.");
   }
 
   return { context, supabase, form };
@@ -346,16 +346,6 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
   );
   if (anonymityRefusal) return anonymityRefusal;
 
-  /*
-   * P7-66 Phase 5 — and only an admin may create the internal kind. Checked on
-   * both write paths for the same reason anonymity is: `forms insertable by
-   * team leaders` refuses the row either way, but as a raw
-   * `new row violates row-level security policy`, which is anchored to no field
-   * and actionable by nobody.
-   */
-  const adminRefusal = internalAdminRefusal(context.role, parsed.data.purpose);
-  if (adminRefusal) return adminRefusal;
-
   const supabase = await createClient();
 
   /*
@@ -366,6 +356,7 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
    * strays into the insert.
    */
   const { audience, ...formRow } = parsed.data;
+  const leadsSurvey = parsed.data.purpose === "INTERNAL" && !roleAtLeast(context.role, "admin");
 
   /*
    * ⚠️ REFUSED ON CREATE RATHER THAN SILENTLY DROPPED, and the difference
@@ -433,12 +424,24 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
          */
         is_public: isPublicForPurpose(parsed.data.purpose),
         created_by: context.userId,
+        // P17-15. A lead's survey starts narrowed: `surveys creatable by leads` requires it.
+        ...(leadsSurvey ? { audience_is_all_departments: false } : {}),
       })
       .select("id")
       .single();
 
     if (!error) {
+      if (leadsSurvey && parsed.data.department_id) {
+        const { error: audienceError } = await supabase.rpc("vizserve_pms_set_form_audience", {
+          p_form_id: data.id,
+          p_all: false,
+          p_department_ids: [parsed.data.department_id],
+        });
+        // Not fatal. The form fails closed, for nobody, until Settings names a department.
+        if (audienceError) console.error("[P17-15] could not set a new survey's audience", audienceError.message);
+      }
       revalidatePath("/forms");
+      revalidatePath("/requests/forms");
       return { ok: true, data: { id: data.id } };
     }
 
@@ -464,6 +467,53 @@ export async function createForm(input: unknown): Promise<ActionResult<{ id: str
     ok: false,
     error: "Could not find a free URL slug or reference prefix for that name. Set them by hand.",
   };
+}
+
+/**
+ * P17-15 — New form goes straight to the builder, with nothing asked first. A button
+ * and an action rather than a link to a page that creates: a GET that writes would
+ * make a draft every time the link was prefetched.
+ */
+export async function createDraftForm(purpose: unknown): Promise<ActionResult<{ id: string }>> {
+  const context = await requireDepartmentShape();
+  const parsed = formPurposeSchema.safeParse(purpose);
+
+  if (!parsed.success) return { ok: false, error: "That is not a kind of form." };
+
+  const supabase = await createClient();
+
+  // Their last draft if they never touched it. Clicking through the sidebar and away
+  // again should not leave a trail of empty "Untitled" forms in the list.
+  const { data: draft } = await supabase
+    .from("vizserve_pms_forms")
+    .select("id")
+    .eq("created_by", context.userId)
+    .eq("purpose", parsed.data)
+    .eq("name", DRAFT_FORM_NAMES[parsed.data])
+    .is("first_published_at", null)
+    .is("archived_at", null)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (draft) {
+    const { count, error } = await supabase
+      .from("vizserve_pms_form_fields")
+      .select("id", { count: "exact", head: true })
+      .eq("form_id", draft.id);
+
+    if (!error && count === 0) return { ok: true, data: { id: draft.id } };
+  }
+
+  const { departments } = await loadRoutableDepartments(supabase, context);
+
+  return createForm({
+    purpose: parsed.data,
+    name: DRAFT_FORM_NAMES[parsed.data],
+    slug: "",
+    reference_prefix: "",
+    department_id: defaultDepartmentId(context.primaryDepartmentId, departments),
+  });
 }
 
 export async function updateFormSettings(formId: string, input: unknown): Promise<ActionResult> {
@@ -574,8 +624,10 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
    * a way past it.
    */
   const adminRefusal =
-    internalAdminRefusal(context.role, form.purpose) ??
-    internalAdminRefusal(context.role, parsed.data.purpose);
+    !purposeChanged
+      ? null
+      : (internalAdminRefusal(context.role, form.purpose) ??
+        internalAdminRefusal(context.role, parsed.data.purpose));
   if (adminRefusal) return adminRefusal;
 
   /*
@@ -586,6 +638,15 @@ export async function updateFormSettings(formId: string, input: unknown): Promis
    * front of that, and it fires before anything is written rather than after the
    * settings have already landed.
    */
+  // P17-15. The policy refuses this too, as a raw row-level security error.
+  if (parsed.data.audience?.is_all_departments && !roleAtLeast(context.role, "admin")) {
+    return {
+      ok: false,
+      error: "Only an admin can open a survey to every department.",
+      fieldErrors: { audience: ["Choose the departments this survey is for."] },
+    };
+  }
+
   if (parsed.data.audience && parsed.data.purpose !== "INTERNAL") {
     return {
       ok: false,
@@ -784,17 +845,40 @@ export async function renameForm(formId: string, name: unknown): Promise<ActionR
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Give the form a name." };
   }
 
-  const { error } = await supabase
+  // P17-15 — a draft from New form takes its address from its first real name. Only
+  // while it still has the draft name and has never been live: after that the slug
+  // is a link somebody may have, and the prefix may be on a reference.
+  const { data: current } = await supabase
     .from("vizserve_pms_forms")
-    .update({ name: parsed.data })
-    .eq("id", formId);
+    .select("name, first_published_at")
+    .eq("id", formId)
+    .maybeSingle();
+  const firstName = current !== null && current.first_published_at === null && isDraftFormName(current.name);
 
-  // `name` carries no unique index — two departments may legitimately both run a
-  // "Feedback" form; the slug is the identifier and it is untouched here. So
-  // there is no `isUniqueViolation` branch: any error is a real one.
-  if (error) return { ok: false, error: error.message };
+  const slugStem = slugFromName(parsed.data);
+  const prefixStem = prefixFromName(parsed.data);
+
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const { error } = await supabase
+      .from("vizserve_pms_forms")
+      .update({
+        name: parsed.data,
+        ...(firstName
+          ? {
+              slug: attempt === 1 ? slugStem : nextCandidate(slugStem, attempt),
+              reference_prefix: attempt === 1 ? prefixStem : nextCandidate(prefixStem, attempt, ""),
+            }
+          : {}),
+      })
+      .eq("id", formId);
+
+    if (!error) break;
+    // `name` carries no unique index, so outside a first naming any error is a real one.
+    if (!firstName || !isUniqueViolation(error) || attempt === 20) return { ok: false, error: error.message };
+  }
 
   revalidatePath("/forms");
+  revalidatePath("/requests/forms");
   revalidatePath(`/forms/${formId}`);
   return { ok: true, data: undefined };
 }
@@ -1143,12 +1227,18 @@ export async function exportFormResponses(
    * because at that scale the honest answer is a streaming export and not a
    * quiet slice.
    */
-  const rows: { submitted_by: string | null; field_values: unknown; submitted_at: string }[] = [];
+  const rows: {
+    submitted_by: string | null;
+    field_values: unknown;
+    submitted_at: string;
+    respondent_name?: string | null;
+    respondent_email?: string | null;
+  }[] = [];
 
   for (let from = 0; from < EXPORT_MAX_ROWS; from += EXPORT_PAGE) {
     const { data: page, error: responsesError } = await supabase
       .from("vizserve_pms_form_responses")
-      .select("submitted_by, field_values, submitted_at")
+      .select("*")
       .eq("form_id", formId)
       .order("submitted_at", { ascending: false })
       .range(from, from + EXPORT_PAGE - 1);
